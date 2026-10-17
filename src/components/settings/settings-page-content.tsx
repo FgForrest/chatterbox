@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AppUploadButton } from "@/components/app-upload-button";
 import { type Provider, SettingsDialog } from "@/components/settings-dialog";
 
 const EMPTY_PROVIDERS: Provider[] = [];
@@ -38,6 +39,7 @@ export function SettingsPageContent({
             isHosted={isHosted}
             mailEnabled={mailEnabled}
             accessManagement={accessManagement}
+            headerAction={<AppUploadButton />}
         />
     );
 }

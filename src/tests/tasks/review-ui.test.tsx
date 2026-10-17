@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { RecordingTasks as RecordingTasksList } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
@@ -160,6 +161,47 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+it("renders pipeline task review inline and reopens a person-started review", async () => {
+    const current = state({
+        canEdit: true,
+        reviewed: false,
+        tasks: [],
+        proposals: [task()],
+        updates: [],
+        matches: [],
+    });
+    const view = render(
+        <TaskReviewLink
+            state={current}
+            speakers={[]}
+            organizationOnly={false}
+            frame="inline"
+            showTrigger={false}
+        />,
+    );
+    expect(screen.getByRole("heading", { name: /Task review/ })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    view.rerender(
+        <TaskReviewLink
+            state={current}
+            speakers={[]}
+            organizationOnly={false}
+            frame="dialog"
+            showTrigger={false}
+        />,
+    );
+    const reviewHost = document.getElementById("task-review-source-item");
+    expect(reviewHost).toBeTruthy();
+    (reviewHost as HTMLElement).scrollIntoView = vi.fn();
+    openWidget("task-review-source-item");
+    await waitFor(() =>
+        expect(
+            screen.getByRole("dialog", { name: /Task review/ }),
+        ).toBeTruthy(),
+    );
+});
+
 it("confirms undo while explaining that applied task changes stay", async () => {
     const current = state({
         canEdit: true,
@@ -196,6 +238,107 @@ it("confirms undo while explaining that applied task changes stay", async () => 
     const buttons = screen.getAllByRole("button", { name: "Undo match" });
     fireEvent.click(buttons[buttons.length - 1] as HTMLElement);
     await waitFor(() => expect(current.undoMatch).toHaveBeenCalledTimes(1));
+});
+
+describe.each([
+    "inline",
+    "dialog",
+] as const)("task review behavior in the %s frame", (frame) => {
+    async function openFrame(current: RecordingTasksState) {
+        render(
+            <TaskReviewLink
+                state={current}
+                speakers={[]}
+                organizationOnly={false}
+                frame={frame}
+                showTrigger={false}
+                widgetId={`task-review-${frame}`}
+            />,
+        );
+        if (frame === "dialog") {
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review" }),
+            );
+        }
+        await screen.findByRole("heading", { name: "Task review" });
+    }
+
+    it("ticks, edits, and applies a proposal", async () => {
+        const proposal = task();
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [proposal],
+            updates: [],
+            matches: [],
+        });
+        await openFrame(current);
+
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Keep this task" }),
+        );
+        expect(current.update).toHaveBeenCalledWith(
+            proposal,
+            { ticked: false },
+            { ticked: false },
+        );
+
+        const text = screen.getByRole("textbox", { name: "Task" });
+        fireEvent.change(text, {
+            target: { value: "Send the final contract" },
+        });
+        fireEvent.blur(text);
+        expect(current.update).toHaveBeenCalledWith(
+            proposal,
+            { text: "Send the final contract" },
+            { text: "Send the final contract" },
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Apply selected changes" }),
+        );
+        expect(current.accept).toHaveBeenCalledTimes(1);
+    });
+
+    it("merges a proposal", async () => {
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [task()],
+            updates: [],
+            matches: [],
+        });
+        await openFrame(current);
+        expect(
+            screen.getByRole("button", {
+                name: "Merge into an earlier task",
+            }),
+        ).toBeTruthy();
+        await current.mergeInto("proposal-1", "target-1");
+        expect(current.mergeInto).toHaveBeenCalledWith(
+            "proposal-1",
+            "target-1",
+        );
+    });
+
+    it("keeps the proposal when a merge fails", async () => {
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [task()],
+            updates: [],
+            matches: [],
+        });
+        current.mergeInto = vi.fn(async () => false);
+        await openFrame(current);
+        expect(await current.mergeInto("proposal-1", "target-1")).toBe(false);
+        expect(
+            screen.getByDisplayValue("Send the revised contract"),
+        ).toBeTruthy();
+    });
 });
 
 describe("task review rows", () => {
@@ -329,7 +472,7 @@ describe("task review rows", () => {
         expect(screen.getByText("Current deadline")).toBeTruthy();
         expect(screen.getByText("Earlier mention")).toBeTruthy();
         expect(screen.queryByText("Heard about earlier tasks")).toBeNull();
-        expect(screen.getByText("0 of 1 will be accepted")).toBeTruthy();
+        expect(screen.getByText("0 of 1 will be applied")).toBeTruthy();
 
         fireEvent.click(
             screen.getByRole("radio", { name: "Use the proposed deadline" }),

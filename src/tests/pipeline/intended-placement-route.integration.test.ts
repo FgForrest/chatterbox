@@ -74,6 +74,7 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 
 import { DELETE } from "@/app/api/recordings/[id]/intended-placements/[folderId]/route";
+import { POST } from "@/app/api/recordings/[id]/intended-placements/confirm/route";
 import { db as appDb } from "@/db";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 
@@ -97,6 +98,17 @@ function context() {
     return {
         params: Promise.resolve({ id: ITEM, folderId: INTENDED_FOLDER }),
     };
+}
+
+function confirmRequest() {
+    return new Request(
+        `https://app.example.test/api/recordings/${ITEM}/intended-placements/confirm`,
+        { method: "POST" },
+    );
+}
+
+function confirmContext() {
+    return { params: Promise.resolve({ id: ITEM }) };
 }
 
 describeWithDatabase("DELETE intended placement route", () => {
@@ -230,5 +242,69 @@ describeWithDatabase("DELETE intended placement route", () => {
         const response = await DELETE(request(), context());
         expect(response.status).toBe(404);
         expect(await intentExists()).toBe(true);
+    });
+
+    it("confirms every current intent of the owner's manual-only item", async () => {
+        await db()
+            .update(itemProcessing)
+            .set({ manualOnly: true })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+
+        const response = await POST(confirmRequest(), confirmContext());
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({ confirmed: 1 });
+        const [intent] = await db()
+            .select({ confirmedAt: mailPendingShares.confirmedAt })
+            .from(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.itemId, ITEM),
+                    eq(mailPendingShares.userId, OWNER),
+                ),
+            );
+        expect(intent?.confirmedAt).toBeInstanceOf(Date);
+        expect(nudge).toHaveBeenCalled();
+    });
+
+    it("returns 404 when another user confirms the owner's item", async () => {
+        await db()
+            .update(itemProcessing)
+            .set({ manualOnly: true })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        authState.userId = MEMBER;
+
+        const response = await POST(confirmRequest(), confirmContext());
+        expect(response.status).toBe(404);
+    });
+
+    it("returns 409 for an automatic item or when nothing remains to confirm", async () => {
+        const automatic = await POST(confirmRequest(), confirmContext());
+        expect(automatic.status).toBe(409);
+
+        await db()
+            .update(itemProcessing)
+            .set({ manualOnly: true })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await DELETE(request(), context());
+        const empty = await POST(confirmRequest(), confirmContext());
+        expect(empty.status).toBe(409);
     });
 });

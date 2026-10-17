@@ -850,6 +850,7 @@ describe("buildAndUploadExportArchive", () => {
                     itemId: "item-1",
                     folderId: "folder-org",
                     requestedAt: requestedAt.toISOString(),
+                    confirmedAt: null,
                 },
             ],
         });

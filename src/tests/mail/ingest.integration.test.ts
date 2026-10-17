@@ -244,6 +244,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: await rootOf(orgUserId),
             name: "Weekly",
+            canCurate: true,
         });
         orgWeeklyFolderId = orgWeekly.id;
         await ensureProfiles("u-jan");
@@ -1032,6 +1033,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             userId: "u-eva",
             parentId: await rootOf(orgUserId),
             name: "Archive",
+            canCurate: true,
         });
         await addRecordingToFolder({
             userId: "u-jan",

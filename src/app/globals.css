@@ -95,6 +95,12 @@
     --text-primary: var(--foreground);
     --text-secondary: var(--muted-foreground);
     --text-muted: var(--muted-foreground);
+
+    --step-done: oklch(0.55 0.13 155);
+    --step-review: oklch(0.66 0.15 65);
+    --step-review-tint: oklch(0.96 0.04 85);
+    --step-working: var(--accent-blue);
+    --step-problem: oklch(0.58 0.2 25);
 }
 
 .dark {
@@ -155,6 +161,12 @@
     --text-primary: var(--foreground);
     --text-secondary: var(--muted-foreground);
     --text-muted: var(--muted-foreground);
+
+    --step-done: oklch(0.72 0.14 155);
+    --step-review: oklch(0.8 0.14 80);
+    --step-review-tint: oklch(0.32 0.05 80);
+    --step-working: var(--accent-blue);
+    --step-problem: oklch(0.7 0.18 25);
 }
 
 @theme inline {

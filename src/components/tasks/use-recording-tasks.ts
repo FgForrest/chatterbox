@@ -327,7 +327,7 @@ export function useRecordingTasks(
             });
             toast.success(
                 i18n(
-                    "{count, plural, one {# task accepted} other {# tasks accepted}}",
+                    "{count, plural, one {# task change applied} other {# task changes applied}}",
                     { count: result.accepted },
                 ),
             );

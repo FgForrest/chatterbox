@@ -62,6 +62,28 @@ const folders: RecordingFolder[] = [
     },
 ];
 
+const organizationFolders: RecordingFolder[] = [
+    ...folders,
+    {
+        id: "org-planning",
+        parentId: "public",
+        name: "Organization planning",
+        kind: "custom",
+        sortOrder: 0,
+        scope: "org",
+        version: 0,
+    },
+    {
+        id: "org-archive",
+        parentId: "public",
+        name: "Organization archive",
+        kind: "custom",
+        sortOrder: 1000,
+        scope: "org",
+        version: 0,
+    },
+];
+
 const recordings: Recording[] = [
     {
         id: "rec-1",
@@ -244,6 +266,161 @@ describe("folder navigation", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Recent" }));
         expect(onRecent).toHaveBeenCalledOnce();
+    });
+
+    it("keeps Organization filing open while hiding tree management from members", () => {
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={organizationFolders}
+                    assignments={[]}
+                    recordings={recordings}
+                    selectedFolderId={null}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onCreateFolder={vi.fn()}
+                    onRenameFolder={vi.fn()}
+                    onMoveFolder={vi.fn()}
+                    onDeleteFolder={vi.fn()}
+                    onAssignRecording={vi.fn()}
+                    canCurate={false}
+                />
+            </ConfirmDialogProvider>,
+        );
+
+        const orgFolder = screen.getByRole("button", {
+            name: "Organization planning, 0 recordings",
+        });
+        expect(orgFolder.getAttribute("draggable")).toBe("false");
+
+        expect(
+            screen
+                .getByRole("button", {
+                    name: "Folder actions for Organization",
+                })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+        expect(screen.queryByText("New subfolder")).toBeNull();
+
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "Folder actions for Organization planning",
+            }),
+            { button: 0, ctrlKey: false },
+        );
+        expect(screen.getByText("New subfolder")).toBeTruthy();
+        expect(screen.queryByText("Rename")).toBeNull();
+        expect(screen.queryByText("Move to…")).toBeNull();
+        expect(screen.queryByText("Delete")).toBeNull();
+    });
+
+    it("shows Organization tree management to curators", () => {
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={organizationFolders}
+                    assignments={[]}
+                    recordings={recordings}
+                    selectedFolderId={null}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onCreateFolder={vi.fn()}
+                    onRenameFolder={vi.fn()}
+                    onMoveFolder={vi.fn()}
+                    onDeleteFolder={vi.fn()}
+                    onAssignRecording={vi.fn()}
+                    canCurate
+                />
+            </ConfirmDialogProvider>,
+        );
+
+        const orgFolder = screen.getByRole("button", {
+            name: "Organization planning, 0 recordings",
+        });
+        expect(orgFolder.getAttribute("draggable")).toBe("true");
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "Folder actions for Organization planning",
+            }),
+            { button: 0, ctrlKey: false },
+        );
+        expect(screen.getByText("Rename")).toBeTruthy();
+        expect(screen.getByText("Move to…")).toBeTruthy();
+        expect(screen.getByText("Delete")).toBeTruthy();
+    });
+
+    it("refuses Organization folder drop targets to members but accepts recordings", () => {
+        const onMoveFolder = vi.fn().mockResolvedValue(undefined);
+        const onAssignRecording = vi.fn().mockResolvedValue(undefined);
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={organizationFolders}
+                    assignments={[]}
+                    recordings={recordings}
+                    selectedFolderId={null}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onCreateFolder={vi.fn()}
+                    onRenameFolder={vi.fn()}
+                    onMoveFolder={onMoveFolder}
+                    onDeleteFolder={vi.fn()}
+                    onAssignRecording={onAssignRecording}
+                    canCurate={false}
+                />
+            </ConfirmDialogProvider>,
+        );
+
+        const personalFolder = screen.getByRole("button", {
+            name: "Meetings, 0 recordings",
+        });
+        const orgPlanning = screen.getByRole("button", {
+            name: "Organization planning, 0 recordings",
+        });
+        const orgArchive = screen.getByRole("button", {
+            name: "Organization archive, 0 recordings",
+        });
+        const folderTransfer = {
+            effectAllowed: "none",
+            dropEffect: "none",
+            types: ["application/x-riffado-folder"],
+            setData: vi.fn(),
+            getData: vi.fn().mockReturnValue("meetings"),
+        };
+
+        fireEvent.dragStart(personalFolder, { dataTransfer: folderTransfer });
+        fireEvent.dragOver(orgPlanning, { dataTransfer: folderTransfer });
+        expect(folderTransfer.dropEffect).toBe("none");
+        expect(orgPlanning.parentElement?.className).not.toContain(
+            "bg-primary/10",
+        );
+        fireEvent.drop(orgPlanning, { dataTransfer: folderTransfer });
+
+        folderTransfer.getData.mockReturnValue("org-planning");
+        fireEvent.dragStart(orgPlanning, { dataTransfer: folderTransfer });
+        fireEvent.dragOver(orgArchive, { dataTransfer: folderTransfer });
+        expect(folderTransfer.dropEffect).toBe("none");
+        expect(orgArchive.parentElement?.className).not.toContain(
+            "bg-primary/10",
+        );
+        fireEvent.drop(orgArchive, { dataTransfer: folderTransfer });
+        expect(onMoveFolder).not.toHaveBeenCalled();
+
+        const recordingTransfer = {
+            effectAllowed: "copy",
+            dropEffect: "none",
+            types: ["application/x-riffado-recording"],
+            setData: vi.fn(),
+            getData: vi
+                .fn()
+                .mockImplementation((type: string) =>
+                    type === "application/x-riffado-recording" ? "rec-1" : "",
+                ),
+        };
+        fireEvent.dragOver(orgPlanning, { dataTransfer: recordingTransfer });
+        expect(recordingTransfer.dropEffect).toBe("copy");
+        fireEvent.drop(orgPlanning, { dataTransfer: recordingTransfer });
+        expect(onAssignRecording).toHaveBeenCalledWith("rec-1", "org-planning");
     });
 
     it("replaces density controls with Organize in the recent toolbar", () => {

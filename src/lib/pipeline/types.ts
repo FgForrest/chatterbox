@@ -122,6 +122,8 @@ export interface PipelineFacts {
     >;
     learnAvailability?: "available" | "hosted" | "no_provider";
     learnRunOpen?: boolean;
+    learnRunInFlight?: boolean;
+    learnRunReadyForReview?: boolean;
     plaudTasks?: {
         fingerprint: string;
     };
@@ -145,6 +147,7 @@ export interface PipelineFacts {
     };
     share?: {
         problems: ShareGateProblem[];
+        confirmationRequired?: boolean;
     };
     phases: PipelinePhases;
     at: string;

@@ -11,7 +11,11 @@ import { autoLearnMail } from "@/lib/mail/auto-process";
 import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
-import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
+import type {
+    PhaseState,
+    PipelineAction,
+    PipelineView,
+} from "@/lib/pipeline/types";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { applyPlaudActionItemProposals } from "@/lib/tasks/plaud-proposals";
@@ -24,6 +28,22 @@ export interface ExecutePipelineActionInput {
     userId: string;
     view: PipelineView;
     generation: number;
+}
+
+function shareMark(
+    outcome: Awaited<ReturnType<typeof executeIntendedSharesWithOutcome>>,
+): { state: PhaseState; reason: string } {
+    if (outcome.confirmationRequired) {
+        return { state: "waiting", reason: "confirmation_required" };
+    }
+    if (outcome.problems.length > 0) {
+        return { state: "waiting", reason: "gate_blocked" };
+    }
+    if (outcome.shared) return { state: "done", reason: "shared" };
+    if (outcome.remaining) {
+        return { state: "waiting", reason: "org_unavailable" };
+    }
+    return { state: "skipped", reason: "cancelled" };
 }
 
 /** Execute one planner action and persist marks in their own transaction. */
@@ -124,22 +144,7 @@ export async function executePipelineAction(
             );
             await db.transaction((tx) =>
                 updatePhaseInTx(tx, itemId, view, userId, "share", {
-                    state:
-                        outcome.problems.length > 0
-                            ? "waiting"
-                            : outcome.shared
-                              ? "done"
-                              : outcome.remaining
-                                ? "waiting"
-                                : "skipped",
-                    reason:
-                        outcome.problems.length > 0
-                            ? "gate_blocked"
-                            : outcome.shared
-                              ? "shared"
-                              : outcome.remaining
-                                ? "org_unavailable"
-                                : "cancelled",
+                    ...shareMark(outcome),
                     generation,
                     at: new Date().toISOString(),
                     ...(outcome.problems.length > 0

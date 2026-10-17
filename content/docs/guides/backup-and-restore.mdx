@@ -88,9 +88,10 @@ means inherit. `itemChoices` records the selected `profileId`, immutable
 archive carries the owner's private-view choices, while the Organization
 archive carries org-view choices for currently shared items. Finally,
 `pendingOrganizationPlacements` records the item, target Organization folder
-and request time while sharing is waiting at the gate. Those pending intents
-belong only to the item's owner and therefore appear only in the personal
-archive until sharing succeeds.
+and request time while sharing is waiting at the gate. Its nullable
+`confirmedAt` records when the owner approved sharing a **Nothing automatic**
+item. Those pending intents belong only to the item's owner and therefore
+appear only in the personal archive until sharing succeeds.
 
 Finished archives stay downloadable for **7 days**, then a cleanup pass
 deletes them.

@@ -16,21 +16,13 @@ Learn is available on self-hosted instances with an AI provider that can write s
 
 ## Running Learn
 
-Click **Learn** above the transcript. The button shows how it is going:
+When Learn is manual, its widget says it is ready and offers **Learn**. Starting it opens a window; you can close that window while **Learn is reading the transcript** and leave the page. When it finishes, the same window holds the review.
 
-| Button | Meaning |
-| --- | --- |
-| **Learning…** | Learn is reading the transcript. You can leave the page. |
-| **Review (5)** | Five proposals wait for you. |
-| **Learned (4)** | You reviewed it; four proposals were applied. Click to see what happened to each. |
-| **Learned: nothing new** | Learn found nothing to propose. |
-| **Learn failed** | Something went wrong; click for the reason and to try again. |
-
-When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. The title, summary and topics wait for your review so they use the corrected transcript. After 72 hours they continue without the review, but the review stays open and still blocks an intended Organization share.
+When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. Its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action jumps to the review. The title, summary and topics wait so they use the corrected transcript. After 72 hours they continue without the review, but the review stays open and still blocks an intended Organization share.
 
 ## Reviewing
 
-Click **Review** to open the review:
+The review has the same contents inline or in the window opened by a run you started yourself. If you close a waiting window, **Review Learn** in the workflow strip reopens it:
 
 ![The Learn review](images/learn-review.png)
 
@@ -47,7 +39,7 @@ You do not have to open the review: the proposals also appear in the transcript 
 
 ![What the review did](images/learn-results.png)
 
-Click **Learned** to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** runs Learn again; tick **also propose again what I rejected** if you changed your mind about something.
+After the review, the widget folds to **Learn complete** with **View results** while the workflow continues. Open the results to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** starts another run in a window; tick **Re-learn: also propose again what I rejected on this recording** if you changed your mind about something.
 
 Accepted corrections are kept beside the original text, never in place of it, so they can always be undone. See [Corrected words](transcripts.md#corrected-words).
 

@@ -91,9 +91,10 @@ profil složky pro audio nebo poštu, včetně volby **Nic automaticky**; chybě
 záloha obsahuje soukromé volby vlastníka, zatímco záloha Organizace obsahuje
 volby pohledu Organizace u aktuálně sdílených položek. Nakonec
 `pendingOrganizationPlacements` zaznamenává položku, cílovou složku Organizace
-a čas požadavku, dokud sdílení čeká na schválení. Tyto čekající záměry patří
-jen vlastníkovi položky, a proto se do úspěšného sdílení objevují pouze v jeho
-osobní záloze.
+a čas požadavku, dokud sdílení čeká na schválení. Jeho hodnota `confirmedAt`,
+která může být `null`, zaznamenává, kdy vlastník schválil sdílení položky s
+volbou **Nic automaticky**. Tyto čekající záměry patří jen vlastníkovi položky,
+a proto se do úspěšného sdílení objevují pouze v jeho osobní záloze.
 
 Hotové archivy zůstávají ke stažení po **7 dní**, poté jsou při úklidu
 odstraněny.

@@ -59,9 +59,13 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // What automatic Learn held back: the hold and its jobs are the
     // owner's, on the private view.
     "recordings/[id]/follow-ups/route.ts": { GET: "owner" },
-    // Cancelling an intended placement is confined to the owner's private view.
+    // Cancelling or confirming an intended placement is confined to the
+    // owner's private view.
     "recordings/[id]/intended-placements/[folderId]/route.ts": {
         DELETE: "view",
+    },
+    "recordings/[id]/intended-placements/confirm/route.ts": {
+        POST: "view",
     },
     // Learn: whoever may change the recording in the view (the owner on
     // the private view, the organization account on the Organization's).

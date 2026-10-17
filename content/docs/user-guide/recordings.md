@@ -20,7 +20,9 @@ The list on the left of **Recordings** shows your newest recordings first, group
 Recordings arrive in two ways:
 
 - **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
-- **By upload.** Click **Upload** and pick an audio or a video file. You can choose a folder before the upload; that recording skips the filing wait and uses the folder's default profile. Without a folder it waits for you to file it. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
+- **By upload.** Click **Upload** on Recordings, Tasks, Almanac, or Settings and pick an audio or a video file. You can choose a folder before the upload; that recording skips the categorization wait and uses the folder's default profile. Without a folder it opens at **Categorize**. The new recording is selected on the right with its workflow at the start. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
+
+An account with no recordings still shows the folder panel on the left. Use **New folder** to organize the library before syncing or uploading anything.
 
 Recording a meeting held in the browser on Linux? Your administrator can give you **meetrec**, a small command-line recorder that captures both your microphone and the other participants into one file, ready to upload. See [For administrators](administrators.md#meeting-recorder-meetrec).
 
@@ -35,10 +37,13 @@ At the top:
 - **The title.** Click the pencil next to it to rename the recording. A title you set yourself is never replaced by a generated one.
 - **When, how long, how large.**
 - **Estimated AI spend** (see below).
-- The [workflow indicator](processing-and-profiles.md#the-workflow-indicator), including **File it** or **Change folders**, its profile, and any intended Organization placement.
+- The [workflow strip](processing-and-profiles.md#the-workflow-indicator). While work remains, it shows the current step, whose turn it is, and one expected action.
+- The inline **Categorize recording** card before the first folder is chosen. After that, the folder row holds the folder chips, **Add to folder**, any intended Organization folders, and the profile chip on the right. Open the profile chip to change the profile.
 - **Erase** on the right (see below).
 
-Below that are the player, the [transcript](transcripts.md) and the [summary](summaries-and-tasks.md).
+![Changing the profile from the folder row](images/profile-chip-menu.png)
+
+Below that are the player and the workflow widgets. The [transcript](transcripts.md), Learn review, [summary](summaries-and-tasks.md), and Task review appear in that order as the workflow reaches them. Finished widgets fold to one line while later work continues.
 
 ### The player
 
@@ -73,11 +78,11 @@ Click **Organize** above the list to see your folders.
 - **Private** holds your own folders. Every recording is in Private, whatever else it is filed in.
 - **Organization** holds the folders you share with colleagues. It appears only when your instance has an Organization. See [The Organization](organization.md).
 
-To file a recording, drag its row onto a folder, or open the recording and click **File it** or **Change folders**:
+For the first folder, use the inline **Categorize recording** card or drag the recording's row onto a folder. Once categorized, use **Add to folder** in the folder row to add another placement:
 
-![The filing panel](images/add-to-folder.png)
+![The folder row with the Add to folder menu](images/add-to-folder.png)
 
-A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder.
+A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder. An intended Organization folder also appears here; a **Nothing automatic** item offers **Share now** beside it until you share or cancel the placement.
 
 To manage folders, use the **⋯** menu next to a folder: **New subfolder**, **Rename**, **Move to…** and **Delete**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
 

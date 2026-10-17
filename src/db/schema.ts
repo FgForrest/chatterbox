@@ -4531,6 +4531,7 @@ export const mailPendingShares = pgTable(
         folderId: text("folder_id")
             .notNull()
             .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        confirmedAt: timestamp("confirmed_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({

@@ -32,7 +32,7 @@ To see the wizard again, open the user menu and choose **Run setup again**. This
 
 The bar at the top has three sections:
 
-- **Recordings**: your library. The list on the left, the selected recording on the right.
+- **Recordings**: your library. The list and folder panel stay on the left, with the selected recording on the right. Before the first recording arrives, use **New folder** to organize the library, or sync or upload right away.
 - **Almanac**: the people and things Chatterbox knows about. A badge counts reviews waiting for you. See [The Almanac](almanac.md).
 - **Tasks**: action items followed across your recordings and mail. A badge counts new tasks and proposals for you. See [Summaries and tasks](summaries-and-tasks.md#the-tasks-page).
 
@@ -40,7 +40,7 @@ On the right of the bar:
 
 - **Search** (or `Ctrl`/`⌘` + `K`) opens the command palette.
 - **Sync device** fetches new recordings from your recorder's cloud now, instead of waiting for the next automatic sync.
-- **Upload** adds an audio or video file from your computer.
+- **Upload** adds an audio or video file from your computer. It remains available on Tasks, Almanac, and Settings too. After an upload, Recordings opens with the new item selected and its workflow at the start.
 - The round button with your initial opens the account menu: **Settings**, **Keyboard shortcuts**, the light/dark theme, and **Log out**.
 
 ## Getting help

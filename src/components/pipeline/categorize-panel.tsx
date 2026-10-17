@@ -1,32 +1,26 @@
 "use client";
 
-import { useExtracted } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { GraduationCap, Loader2 } from "lucide-react";
+import { useExtracted, useLocale } from "next-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-    type CreatedFolder,
-    NewFolderForm,
-} from "@/components/pipeline/new-folder-form";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type {
     CategorizationPanelPresentation,
+    ProcessingFolderSummary,
     ProcessingResolution,
 } from "@/lib/pipeline/categorization-presentation";
 
@@ -38,16 +32,31 @@ export interface CategorizeSubmission {
     manualOnly?: boolean;
 }
 
+export interface ProfileAutomationDetails {
+    description: string | null;
+    automatic: {
+        transcribe: boolean;
+        learn: boolean;
+        summary: boolean;
+        title: boolean;
+        topics: boolean;
+    };
+}
+
 interface CategorizePanelProps {
     data: CategorizePanelData;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
+    kind: "audio" | "mail";
+    mode: "folder" | "profile";
+    reason?: "needs_profile" | "profile_unavailable";
+    profileDetails?: Partial<Record<string, ProfileAutomationDetails>>;
     onFolderCreated?: (folder: CreatedFolder) => void;
     onCategorized?: (folderIds: string[]) => void;
     onOptimisticCategorize?: (submission: CategorizeSubmission) => () => void;
+    onTranscribe?: () => void;
 }
 
 const MANUAL_ONLY = "__manual_only__";
+const NEW_FOLDER = "__new_folder__";
 
 function resolutionChoice(resolution: ProcessingResolution): string {
     if (resolution.status !== "resolved") return "";
@@ -61,117 +70,110 @@ function initialProfileChoice(data: CategorizePanelData): string {
     return resolutionChoice(data.resolution);
 }
 
-function sameFolderSelection(left: string[], right: string[]): boolean {
-    if (left.length !== right.length) return false;
-    const rightIds = new Set(right);
-    return left.every((folderId) => rightIds.has(folderId));
+function automaticFromProfileResponse(
+    value: unknown,
+): ProfileAutomationDetails | null {
+    if (!value || typeof value !== "object") return null;
+    const response = value as {
+        profile?: {
+            description?: unknown;
+            settings?: {
+                steps?: Record<string, { automatic?: unknown } | undefined>;
+            };
+        };
+    };
+    const profile = response.profile;
+    const steps = profile?.settings?.steps;
+    if (!profile || !steps) return null;
+    const automatic = (step: string) => steps[step]?.automatic === true;
+    return {
+        description:
+            typeof profile.description === "string"
+                ? profile.description
+                : null,
+        automatic: {
+            transcribe: automatic("transcribe"),
+            learn: automatic("learn"),
+            summary: automatic("summary"),
+            title: automatic("title"),
+            topics: automatic("topics"),
+        },
+    };
 }
 
+/** Inline folder and profile choice shown at the Categorize workflow step. */
 export function CategorizePanel({
     data,
-    open,
-    onOpenChange,
+    kind,
+    mode,
+    reason,
+    profileDetails,
     onFolderCreated,
     onCategorized,
     onOptimisticCategorize,
+    onTranscribe,
 }: CategorizePanelProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const profileTrigger = useRef<HTMLButtonElement>(null);
     const [folders, setFolders] = useState(data.folders);
-    const [folderIds, setFolderIds] = useState(data.selectedFolderIds);
-    const [preview, setPreview] = useState<ProcessingResolution>(
-        data.resolution,
+    const fileableFolders = folders.filter(
+        (folder) => folder.parentId !== null,
     );
+    const [folderId, setFolderId] = useState(data.selectedFolderIds[0] ?? "");
     const [profileChoice, setProfileChoice] = useState(
         initialProfileChoice(data),
     );
+    const [details, setDetails] = useState(profileDetails ?? {});
     const [previewing, setPreviewing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [creating, setCreating] = useState(false);
     const [newFolderOpen, setNewFolderOpen] = useState(false);
-    const previewError = i18n("The profile preview could not be loaded.");
-
-    useEffect(() => {
-        if (!open) return;
-        setFolders(data.folders);
-        setFolderIds(data.selectedFolderIds);
-        setPreview(data.resolution);
-        setProfileChoice(initialProfileChoice(data));
-        setNewFolderOpen(false);
-    }, [data, open]);
-
-    useEffect(() => {
-        if (!open) return;
-        if (data.currentProfile) {
-            setPreview(data.resolution);
-            setProfileChoice(initialProfileChoice(data));
-            setPreviewing(false);
-            return;
-        }
-        if (sameFolderSelection(folderIds, data.selectedFolderIds)) {
-            setPreview(data.resolution);
-            setProfileChoice(resolutionChoice(data.resolution));
-            setPreviewing(false);
-            return;
-        }
-        if (folderIds.length === 0) {
-            setPreview({ status: "choose", candidates: [] });
-            setProfileChoice("");
-            setPreviewing(false);
-            return;
-        }
-
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => {
-            setPreviewing(true);
-            void fetch(
-                `/api/recordings/${encodeURIComponent(data.itemId)}/categorize/preview`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ folderIds }),
-                    signal: controller.signal,
-                },
-            )
-                .then(async (response) => {
-                    if (!response.ok) throw new Error(String(response.status));
-                    return (await response.json()) as {
-                        resolution: ProcessingResolution;
-                    };
-                })
-                .then(({ resolution }) => {
-                    setPreview(resolution);
-                    setProfileChoice(resolutionChoice(resolution));
-                })
-                .catch((error: unknown) => {
-                    if (controller.signal.aborted) return;
-                    setPreview({ status: "choose", candidates: [] });
-                    setProfileChoice("");
-                    toast.error(previewError);
-                    console.error(error);
-                })
-                .finally(() => {
-                    if (!controller.signal.aborted) setPreviewing(false);
-                });
-        }, 200);
-        return () => {
-            window.clearTimeout(timer);
-            controller.abort();
-        };
-    }, [data, folderIds, open, previewError]);
-
-    const prefilledChoice = data.currentProfile
-        ? initialProfileChoice(data)
-        : resolutionChoice(preview);
-    const selectedOrganization = folders.some(
-        (folder) => folder.scope === "org" && folderIds.includes(folder.id),
-    );
-    const folderParents = folders.filter(
+    const [newFolderName, setNewFolderName] = useState("");
+    const roots = folders.filter(
         (folder) =>
-            (folder.scope === "personal" && folder.parentId === null) ||
-            (folder.scope === "org" && data.canCreateOrganizationFolders),
+            folder.parentId === null &&
+            (folder.scope === "personal" || data.canCreateOrganizationFolders),
     );
-    const hasFileableFolder = folders.some(
-        (folder) => folder.parentId !== null,
+    const [newFolderRootId, setNewFolderRootId] = useState(
+        roots.find((root) => root.scope === "personal")?.id ??
+            roots[0]?.id ??
+            "",
     );
+
+    useEffect(() => {
+        if (mode === "profile") profileTrigger.current?.focus();
+    }, [mode]);
+
+    useEffect(() => {
+        if (
+            profileChoice === MANUAL_ONLY ||
+            !profileChoice ||
+            details[profileChoice]
+        ) {
+            return;
+        }
+        const controller = new AbortController();
+        void fetch(
+            `/api/settings/profiles/${encodeURIComponent(profileChoice)}`,
+            { signal: controller.signal },
+        )
+            .then(async (response) => {
+                if (!response.ok) return null;
+                return automaticFromProfileResponse(await response.json());
+            })
+            .then((detail) => {
+                if (detail) {
+                    setDetails((current) => ({
+                        ...current,
+                        [profileChoice]: detail,
+                    }));
+                }
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [details, profileChoice]);
+
     const profileOptions = useMemo(() => {
         const byId = new Map(
             data.profiles.map((profile) => [profile.id, profile]),
@@ -179,59 +181,123 @@ export function CategorizePanel({
         if (data.currentProfile) {
             byId.set(data.currentProfile.id, data.currentProfile);
         }
-        if (preview.status === "choose") {
-            for (const candidate of preview.candidates) {
+        if (data.resolution.status === "choose") {
+            for (const candidate of data.resolution.candidates) {
                 if (candidate.kind === "profile") {
                     byId.set(candidate.profile.id, candidate.profile);
                 }
             }
-        } else if (preview.status === "resolved") {
-            byId.set(preview.profile.id, preview.profile);
+        } else if (data.resolution.status === "resolved") {
+            byId.set(data.resolution.profile.id, data.resolution.profile);
         }
         return [...byId.values()];
-    }, [data.currentProfile, data.profiles, preview]);
+    }, [data]);
+    const selectedFolder = folders.find((folder) => folder.id === folderId);
+    const selectedProfile = profileOptions.find(
+        (profile) => profile.id === profileChoice,
+    );
+    const selectedDetails =
+        profileChoice === MANUAL_ONLY ? null : details[profileChoice];
+    const prefilledChoice = initialProfileChoice(data);
 
-    const handleFolderCreated = (folder: CreatedFolder) => {
-        const parent = folders.find(
-            (candidate) => candidate.id === folder.parentId,
-        );
-        if (!parent) return;
-        onFolderCreated?.(folder);
-        setFolders((current) => [
-            ...current,
-            { ...folder, path: `${parent.path} › ${folder.name}` },
-        ]);
-        setFolderIds((current) =>
-            current.includes(folder.id) ? current : [...current, folder.id],
-        );
-        if (!data.currentProfile) {
-            setPreviewing(true);
-            setProfileChoice("");
+    const selectFolder = async (nextFolderId: string) => {
+        if (nextFolderId === NEW_FOLDER) {
+            setNewFolderOpen(true);
+            return;
         }
-        setNewFolderOpen(false);
+        setFolderId(nextFolderId);
+        if (mode === "profile") return;
+        setPreviewing(true);
+        try {
+            const response = await fetch(
+                `/api/recordings/${encodeURIComponent(data.itemId)}/categorize/preview`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ folderIds: [nextFolderId] }),
+                },
+            );
+            if (!response.ok) throw new Error(String(response.status));
+            const body = (await response.json()) as {
+                resolution: ProcessingResolution;
+            };
+            setProfileChoice(resolutionChoice(body.resolution));
+        } catch {
+            toast.error(i18n("The profile preview could not be loaded."));
+        } finally {
+            setPreviewing(false);
+        }
+    };
+
+    const createFolder = async () => {
+        const name = newFolderName.trim();
+        if (!name || !newFolderRootId) return;
+        setCreating(true);
+        try {
+            const response = await fetch("/api/folders", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ parentId: newFolderRootId, name }),
+            });
+            if (!response.ok) {
+                toast.error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("The folder could not be created."),
+                    ),
+                );
+                return;
+            }
+            const { folder } = (await response.json()) as {
+                folder: CreatedFolder;
+            };
+            const root = roots.find(
+                (candidate) => candidate.id === folder.parentId,
+            );
+            const presented: ProcessingFolderSummary = {
+                id: folder.id,
+                parentId: folder.parentId,
+                name: folder.name,
+                path: root ? `${root.path} › ${folder.name}` : folder.name,
+                scope: folder.scope === "org" ? "org" : "personal",
+            };
+            setFolders((current) => [...current, presented]);
+            await selectFolder(folder.id);
+            setNewFolderOpen(false);
+            setNewFolderName("");
+            onFolderCreated?.(folder);
+            toast.success(i18n("Folder created."));
+        } catch {
+            toast.error(i18n("The folder could not be created."));
+        } finally {
+            setCreating(false);
+        }
     };
 
     const submit = async () => {
-        if (folderIds.length === 0 || !profileChoice || previewing) return;
-        let rollback: (() => void) | undefined;
+        if (!folderId || !profileChoice || previewing || submitting) return;
+        const folderIds =
+            mode === "profile" && data.selectedFolderIds.length > 0
+                ? data.selectedFolderIds
+                : [folderId];
+        const submission: CategorizeSubmission = { folderIds };
+        if (
+            profileChoice === MANUAL_ONLY &&
+            profileChoice !== prefilledChoice
+        ) {
+            submission.manualOnly = true;
+        } else if (profileChoice !== prefilledChoice) {
+            submission.profileId = profileChoice;
+        }
+        const rollback = onOptimisticCategorize?.(submission);
         setSubmitting(true);
         try {
-            const changed = profileChoice !== prefilledChoice;
-            const body: CategorizeSubmission = {
-                folderIds,
-                ...(changed && profileChoice === MANUAL_ONLY
-                    ? { manualOnly: true }
-                    : changed
-                      ? { profileId: profileChoice }
-                      : {}),
-            };
-            rollback = onOptimisticCategorize?.(body);
             const response = await fetch(
                 `/api/recordings/${encodeURIComponent(data.itemId)}/categorize`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
+                    body: JSON.stringify(submission),
                 },
             );
             if (!response.ok) {
@@ -245,7 +311,6 @@ export function CategorizePanel({
                 return;
             }
             onCategorized?.(folderIds);
-            onOpenChange(false);
             toast.success(i18n("Item filed."));
         } catch {
             rollback?.();
@@ -255,149 +320,305 @@ export function CategorizePanel({
         }
     };
 
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>{i18n("File it")}</DialogTitle>
-                    <DialogDescription>
-                        {i18n(
-                            "Choose where this item belongs. Its folders set the context for processing.",
-                        )}
-                    </DialogDescription>
-                </DialogHeader>
+    const automaticLabels = selectedDetails
+        ? [
+              kind === "audio" && selectedDetails.automatic.transcribe
+                  ? i18n("transcription")
+                  : null,
+              selectedDetails.automatic.learn ? i18n("Learn") : null,
+              selectedDetails.automatic.summary ? i18n("summary") : null,
+              selectedDetails.automatic.title ? i18n("title") : null,
+              selectedDetails.automatic.topics ? i18n("topics") : null,
+          ].filter((label): label is string => label !== null)
+        : [];
+    const automaticList = new Intl.ListFormat(locale, {
+        style: "long",
+        type: "conjunction",
+    }).format(automaticLabels);
+    const nothingAutomatic = i18n(
+        "Nothing runs automatically. You start each step yourself.",
+    );
+    let automationSentence: string;
+    if (profileChoice === MANUAL_ONLY) {
+        automationSentence = nothingAutomatic;
+    } else if (!selectedDetails) {
+        automationSentence = i18n("Loading profile automation…");
+    } else if (automaticLabels.length === 0) {
+        automationSentence = nothingAutomatic;
+    } else {
+        automationSentence = i18n(
+            "After categorizing, these run by themselves: {steps}.",
+            { steps: automaticList },
+        );
+    }
+    let folderHint: string;
+    if (selectedFolder?.scope !== "org") {
+        folderHint = i18n("Learn will use this folder as context.");
+    } else if (profileChoice === MANUAL_ONLY) {
+        folderHint = i18n("The item is shared when you say so.");
+    } else {
+        folderHint = i18n("The item is shared after the review.");
+    }
 
-                <fieldset className="max-h-72 space-y-2 overflow-y-auto rounded-md border p-3">
-                    <legend className="px-1 text-sm font-medium">
-                        {i18n("Folders")}
-                    </legend>
-                    {!hasFileableFolder && (
-                        <p className="px-2 py-1 text-sm text-muted-foreground">
-                            {i18n("Create a folder to file this item")}
-                        </p>
+    return (
+        <section
+            className="overflow-hidden rounded-lg border bg-card"
+            aria-labelledby="categorize-title"
+        >
+            <header className="border-b px-4 py-4 sm:px-5">
+                <h2 id="categorize-title" className="text-base font-medium">
+                    {kind === "mail"
+                        ? i18n("Categorize email")
+                        : i18n("Categorize recording")}
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                    {i18n(
+                        "Choose its folder and an existing profile in one step.",
                     )}
-                    {folders.map((folder) => {
-                        const root = folder.parentId === null;
-                        return (
-                            <Label
-                                key={folder.id}
-                                className="flex items-center gap-2 rounded px-2 py-1.5 font-normal hover:bg-muted/60"
-                            >
-                                <input
-                                    type="checkbox"
-                                    aria-label={folder.path}
-                                    disabled={root}
-                                    checked={folderIds.includes(folder.id)}
-                                    onChange={(event) => {
-                                        if (!data.currentProfile) {
-                                            setPreviewing(true);
-                                            setProfileChoice("");
-                                        }
-                                        setFolderIds((current) =>
-                                            event.target.checked
-                                                ? [...current, folder.id]
-                                                : current.filter(
-                                                      (id) => id !== folder.id,
-                                                  ),
-                                        );
-                                    }}
-                                />
-                                <span>{folder.path}</span>
-                            </Label>
-                        );
-                    })}
-                    <p className="px-2 text-xs text-muted-foreground">
-                        {i18n(
-                            "Top-level folders hold no items; choose or create a folder inside them.",
-                        )}
+                </p>
+                {mode === "profile" && (
+                    <p className="mt-2 text-sm text-[var(--step-review)]">
+                        {reason === "profile_unavailable"
+                            ? i18n(
+                                  "The assigned profile is no longer available. Choose another one.",
+                              )
+                            : i18n(
+                                  "These folders suggest different profiles. Choose one to continue.",
+                              )}
                     </p>
-                    {newFolderOpen ? (
-                        <NewFolderForm
-                            parents={folderParents}
-                            idPrefix="categorize"
-                            onCancel={() => setNewFolderOpen(false)}
-                            onCreated={handleFolderCreated}
-                        />
-                    ) : (
+                )}
+            </header>
+
+            <div className="space-y-4 px-4 py-4 sm:px-5">
+                <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
+                    <div className="space-y-1.5">
+                        <Label>{i18n("Folder")}</Label>
+                        {newFolderOpen ? (
+                            <div className="space-y-2 rounded-md border p-3">
+                                <Input
+                                    aria-label={i18n("Folder name")}
+                                    value={newFolderName}
+                                    onChange={(event) =>
+                                        setNewFolderName(event.target.value)
+                                    }
+                                    autoFocus
+                                />
+                                {roots.length > 1 && (
+                                    <Select
+                                        value={newFolderRootId}
+                                        onValueChange={setNewFolderRootId}
+                                    >
+                                        <SelectTrigger
+                                            className="w-full"
+                                            aria-label={i18n("Folder area")}
+                                        >
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {roots.map((root) => (
+                                                <SelectItem
+                                                    key={root.id}
+                                                    value={root.id}
+                                                >
+                                                    {root.scope === "org"
+                                                        ? i18n("Organization")
+                                                        : i18n("Private")}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                                <div className="flex justify-end gap-2">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        disabled={creating}
+                                        onClick={() => setNewFolderOpen(false)}
+                                    >
+                                        {i18n("Cancel")}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        disabled={
+                                            creating || !newFolderName.trim()
+                                        }
+                                        onClick={() => void createFolder()}
+                                    >
+                                        {creating && (
+                                            <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
+                                        )}
+                                        {i18n("Create")}
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <Select
+                                value={folderId}
+                                onValueChange={(value) =>
+                                    void selectFolder(value)
+                                }
+                                disabled={mode === "profile"}
+                            >
+                                <SelectTrigger
+                                    className="w-full"
+                                    aria-label={i18n("Folder")}
+                                >
+                                    <SelectValue
+                                        placeholder={i18n("Choose a folder")}
+                                    />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>
+                                            {i18n("Private")}
+                                        </SelectLabel>
+                                        {fileableFolders
+                                            .filter(
+                                                (folder) =>
+                                                    folder.scope === "personal",
+                                            )
+                                            .map((folder) => (
+                                                <SelectItem
+                                                    key={folder.id}
+                                                    value={folder.id}
+                                                >
+                                                    {folder.path}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectGroup>
+                                    {fileableFolders.some(
+                                        (folder) => folder.scope === "org",
+                                    ) && (
+                                        <SelectGroup>
+                                            <SelectLabel>
+                                                {i18n("Organization")}
+                                            </SelectLabel>
+                                            {fileableFolders
+                                                .filter(
+                                                    (folder) =>
+                                                        folder.scope === "org",
+                                                )
+                                                .map((folder) => (
+                                                    <SelectItem
+                                                        key={folder.id}
+                                                        value={folder.id}
+                                                    >
+                                                        {folder.path}
+                                                    </SelectItem>
+                                                ))}
+                                        </SelectGroup>
+                                    )}
+                                    <SelectItem value={NEW_FOLDER}>
+                                        {i18n("New folder…")}
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                            {folderHint}
+                        </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <Label>{i18n("Profile")}</Label>
+                        <Select
+                            value={profileChoice}
+                            onValueChange={setProfileChoice}
+                            disabled={previewing}
+                        >
+                            <SelectTrigger
+                                ref={profileTrigger}
+                                className="w-full"
+                                aria-label={i18n("Profile")}
+                                data-filing-profile
+                            >
+                                <SelectValue
+                                    placeholder={i18n("Choose a profile")}
+                                />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {profileOptions.map((profile) => (
+                                    <SelectItem
+                                        key={profile.id}
+                                        value={profile.id}
+                                    >
+                                        {profile.name}
+                                        {profile.scope === "organization"
+                                            ? ` · ${i18n("Organization")}`
+                                            : ""}
+                                    </SelectItem>
+                                ))}
+                                <SelectItem value={MANUAL_ONLY}>
+                                    {i18n("Nothing automatic")}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            <a
+                                href="/settings#profiles"
+                                className="rounded-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                {i18n(
+                                    "Manage profiles in Settings → Profiles.",
+                                )}
+                            </a>
+                        </p>
+                    </div>
+                </div>
+
+                {selectedProfile && selectedDetails?.description?.trim() && (
+                    <div className="rounded-md border bg-muted/35 px-3 py-2.5 text-sm text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                            {selectedProfile.name}:
+                        </span>{" "}
+                        {selectedDetails.description.trim()}
+                    </div>
+                )}
+
+                <div className="flex gap-2.5 rounded-md border border-[color-mix(in_oklch,var(--step-working)_25%,var(--border))] bg-[color-mix(in_oklch,var(--step-working)_8%,transparent)] px-3 py-2.5 text-sm">
+                    <GraduationCap
+                        className="mt-0.5 size-4 shrink-0 text-[var(--step-working)]"
+                        aria-hidden
+                    />
+                    <p>{automationSentence}</p>
+                </div>
+            </div>
+
+            <footer className="flex flex-wrap items-center gap-3 border-t bg-muted/15 px-4 py-3 sm:px-5">
+                <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    {i18n("These choices appear in the header after you save.")}
+                </p>
+                <div className="ml-auto flex items-center gap-2">
+                    {kind === "audio" && (
                         <Button
                             type="button"
                             variant="outline"
-                            className="mt-2 w-full"
-                            disabled={folderParents.length === 0}
-                            onClick={() => setNewFolderOpen(true)}
+                            onClick={onTranscribe}
                         >
-                            {i18n("New folder")}
+                            {i18n("Transcribe now")}
                         </Button>
                     )}
-                </fieldset>
-
-                <div className="space-y-2">
-                    <Label>{i18n("Profile")}</Label>
-                    <Select
-                        value={profileChoice}
-                        onValueChange={setProfileChoice}
-                        disabled={previewing}
-                    >
-                        <SelectTrigger
-                            className="w-full"
-                            aria-label={i18n("Profile")}
-                        >
-                            <SelectValue
-                                placeholder={i18n("Choose a profile")}
-                            />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {profileOptions.map((profile) => (
-                                <SelectItem key={profile.id} value={profile.id}>
-                                    {profile.name}
-                                    {profile.scope === "organization"
-                                        ? ` · ${i18n("Organization")}`
-                                        : ""}
-                                </SelectItem>
-                            ))}
-                            <SelectItem value={MANUAL_ONLY}>
-                                {i18n("Nothing automatic")}
-                            </SelectItem>
-                        </SelectContent>
-                    </Select>
-                    {preview.status === "resolved" &&
-                        profileChoice === prefilledChoice && (
-                            <p className="text-xs text-muted-foreground">
-                                {data.currentProfile
-                                    ? i18n("Current profile")
-                                    : preview.source === "folder"
-                                      ? i18n("From the folder's default")
-                                      : i18n("Your default")}
-                            </p>
-                        )}
-                    {selectedOrganization && (
-                        <p className="text-xs text-muted-foreground">
-                            {i18n("Organization folders share after review.")}
-                        </p>
-                    )}
-                </div>
-
-                <DialogFooter>
                     <Button
-                        variant="outline"
-                        onClick={() => onOpenChange(false)}
-                        disabled={submitting}
-                    >
-                        {i18n("Cancel")}
-                    </Button>
-                    <Button
-                        onClick={() => void submit()}
+                        type="button"
                         disabled={
                             submitting ||
                             previewing ||
-                            folderIds.length === 0 ||
+                            !folderId ||
                             !profileChoice
                         }
+                        onClick={() => void submit()}
                     >
-                        {submitting ? i18n("Filing…") : i18n("File it")}
+                        {submitting && (
+                            <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                        )}
+                        {kind === "mail"
+                            ? i18n("Categorize email")
+                            : i18n("Categorize recording")}
                     </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                </div>
+            </footer>
+        </section>
     );
 }

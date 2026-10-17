@@ -1,5 +1,8 @@
 import { AppError, ErrorCode } from "@/lib/errors";
-import { reachableCustomFolder } from "@/lib/folders/folders";
+import {
+    assertOrganizationTreeManager,
+    reachableCustomFolder,
+} from "@/lib/folders/folders";
 import {
     listFolderAddresses,
     removeFolderSecondaryAddress,
@@ -11,7 +14,11 @@ function folderNotFound(): AppError {
     return new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
 }
 
-async function writableFolder(userId: string, folderId: string) {
+async function writableFolder(
+    userId: string,
+    folderId: string,
+    canCurate: boolean,
+) {
     const folder = await reachableCustomFolder(userId, folderId);
     if (!folder) throw folderNotFound();
     if (!folder.writable) {
@@ -21,6 +28,7 @@ async function writableFolder(userId: string, folderId: string) {
             403,
         );
     }
+    assertOrganizationTreeManager([folder], canCurate);
     return folder;
 }
 
@@ -31,14 +39,21 @@ async function writableFolder(userId: string, folderId: string) {
 export async function loadFolderAddresses(
     userId: string,
     folderId: string,
-    { subtree = false }: { subtree?: boolean } = {},
+    {
+        subtree = false,
+        canCurate = false,
+    }: { subtree?: boolean; canCurate?: boolean } = {},
 ): Promise<{ writable: boolean; addresses: MailAddressView[] } | null> {
     const folder = await reachableCustomFolder(userId, folderId);
     if (!folder) return null;
     const rows = await listFolderAddresses(
         subtree ? folder.subtreeIds : [folder.folderId],
     );
-    return { writable: folder.writable, addresses: rows.map(toAddressView) };
+    return {
+        writable:
+            folder.writable && (folder.scope !== "org" || canCurate === true),
+        addresses: rows.map(toAddressView),
+    };
 }
 
 /**
@@ -49,8 +64,13 @@ export async function setFolderAlias(input: {
     userId: string;
     folderId: string;
     alias: string;
+    canCurate?: boolean;
 }): Promise<MailAddressView> {
-    await writableFolder(input.userId, input.folderId);
+    await writableFolder(
+        input.userId,
+        input.folderId,
+        input.canCurate === true,
+    );
     return toAddressView(
         await setFolderAddress({
             actorUserId: input.userId,
@@ -65,8 +85,13 @@ export async function removeFolderAlias(input: {
     userId: string;
     folderId: string;
     addressId: string;
+    canCurate?: boolean;
 }): Promise<void> {
-    await writableFolder(input.userId, input.folderId);
+    await writableFolder(
+        input.userId,
+        input.folderId,
+        input.canCurate === true,
+    );
     await removeFolderSecondaryAddress({
         folderId: input.folderId,
         addressId: input.addressId,

@@ -383,7 +383,10 @@ export async function gatherFacts(
                 ),
             ),
         db
-            .select({ folderId: mailPendingShares.folderId })
+            .select({
+                folderId: mailPendingShares.folderId,
+                confirmedAt: mailPendingShares.confirmedAt,
+            })
             .from(mailPendingShares)
             .where(
                 and(
@@ -448,7 +451,7 @@ export async function gatherFacts(
                   .limit(1)
             : Promise.resolve([]),
         db
-            .select({ id: learnRuns.id })
+            .select({ status: learnRuns.status })
             .from(learnRuns)
             .where(
                 and(
@@ -744,6 +747,10 @@ export async function gatherFacts(
         stepAvailability,
         learnAvailability,
         learnRunOpen: openLearnRun !== undefined,
+        learnRunInFlight:
+            openLearnRun?.status === "queued" ||
+            openLearnRun?.status === "running",
+        learnRunReadyForReview: openLearnRun?.status === "ready",
         plaudTasks:
             plaudTaskSource && plaudTaskSource.actionItems.length > 0
                 ? {
@@ -788,7 +795,12 @@ export async function gatherFacts(
             proposals: taskDecisions.proposals,
             followUps: taskDecisions.followUps,
         },
-        share: { problems: shareProblems },
+        share: {
+            problems: shareProblems,
+            confirmationRequired:
+                (processing?.manualOnly ?? false) &&
+                intents.some((intent) => intent.confirmedAt === null),
+        },
         phases,
         at: new Date().toISOString(),
     };

@@ -16,6 +16,7 @@ import {
     mailAddresses,
     mailContents,
     mailMessages,
+    mailParticipants,
     processingProfiles,
     recordingFolders,
     recordingTasks,
@@ -52,6 +53,7 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { createPerson } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
+import { peopleByAddress } from "@/lib/mail/known-quotes";
 import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
 import { ensureOrgAccount } from "@/lib/org/account";
 import type { PhaseState, PipelinePhases } from "@/lib/pipeline/types";
@@ -196,6 +198,7 @@ export async function seedUserGuideDemo(
         alex,
         await rootFolderId(orgUserId, "public"),
         DEMO_ORG_FOLDERS,
+        true,
     );
     await db.insert(folderDefaultProfiles).values({
         folderId: folderAt(
@@ -437,6 +440,7 @@ async function createFolderTree(
     actorUserId: string,
     rootId: string,
     paths: readonly string[],
+    canCurate = false,
 ): Promise<Map<string, string>> {
     const ids = new Map<string, string>([["", rootId]]);
     for (const path of paths) {
@@ -449,6 +453,7 @@ async function createFolderTree(
             userId: actorUserId,
             parentId,
             name: path.slice(slash + 1),
+            canCurate,
         });
         ids.set(path, folder.id);
     }
@@ -773,7 +778,7 @@ async function seedMail(
             fixture.text,
         ].join("\r\n"),
     );
-    const segments = segmentMail({
+    const segmented = segmentMail({
         text: fixture.text,
         html: null,
         from: { name: fixture.fromName, address: fixture.fromAddress },
@@ -784,6 +789,12 @@ async function seedMail(
         sentAt: occurredAt,
         fromAuthenticated: true,
     });
+    const participantPeople = await peopleByAddress(
+        scope.userId,
+        segmented.participants.flatMap((participant) =>
+            participant.address ? [participant.address] : [],
+        ),
+    );
     const contentId = nanoid();
     await db.transaction(async (tx) => {
         await tx.insert(chatterItems).values({
@@ -814,11 +825,35 @@ async function seedMail(
             userId: scope.userId,
             revision: 0,
             parserVersion: MAIL_PARSER_VERSION,
-            segments: encryptJsonField(segments),
+            segments: encryptJsonField(segmented.segments),
             language: "en",
             createdAt: occurredAt,
             updatedAt: occurredAt,
         });
+        if (segmented.participants.length > 0) {
+            await tx.insert(mailParticipants).values(
+                segmented.participants.map((participant, position) => ({
+                    itemId,
+                    userId: scope.userId,
+                    ref: participant.ref,
+                    roles: [...participant.roles],
+                    addressHash: null,
+                    address: participant.address
+                        ? encryptText(participant.address)
+                        : null,
+                    name: participant.displayName
+                        ? encryptText(participant.displayName)
+                        : null,
+                    personId: participant.address
+                        ? (participantPeople.get(
+                              participant.address.toLowerCase(),
+                          ) ?? null)
+                        : null,
+                    authenticated: participant.authenticated,
+                    position,
+                })),
+            );
+        }
     });
     for (const path of fixture.privateFolders ?? []) {
         await addRecordingToFolder({
@@ -1191,38 +1226,26 @@ async function seedProcessingStates(
             (fixture.orgFolders?.length ?? 0) === 0;
         const profile = profiles[fixture.owner].audio;
         const taskReview = fixture.key === "product-sync";
-        const phases: PipelinePhases = {
-            categorize: phase(
-                unfiled ? "waiting" : "done",
-                unfiled ? "needs_folders" : "categorized",
-                at,
-            ),
-            transcribe: phase(
-                fixture.transcript ? "done" : "pending",
-                fixture.transcript ? "generated" : "not_started",
-                at,
-            ),
-            learn: phase(
-                fixture.learn ? "waiting" : "done",
-                fixture.learn ? "review_pending_timeout" : "released",
-                at,
-            ),
-            summary: phase(
-                fixture.summary ? "done" : "skipped",
-                fixture.summary ? "completed" : "profile_off",
-                at,
-            ),
-            taskReview: phase(
-                taskReview ? "waiting" : "done",
-                taskReview ? "review_pending" : "reviewed",
-                at,
-            ),
-            share: phase(
-                fixture.orgFolders?.length ? "done" : "skipped",
-                fixture.orgFolders?.length ? "shared" : "no_intent",
-                at,
-            ),
-        };
+        const phases: PipelinePhases = unfiled
+            ? { categorize: phase("waiting", "needs_folder", at) }
+            : {
+                  categorize: phase("done", "categorized", at),
+                  transcribe: phase("done", "content-available", at),
+                  learn: phase(
+                      fixture.learn ? "waiting" : "done",
+                      fixture.learn ? "manual_review_pending" : "released",
+                      at,
+                  ),
+                  summary: phase("done", "completed", at),
+                  taskReview: phase(
+                      taskReview ? "waiting" : "done",
+                      taskReview ? "needs_review" : "reviewed",
+                      at,
+                  ),
+                  ...(fixture.orgFolders?.length
+                      ? { share: phase("done", "shared", at) }
+                      : {}),
+              };
         await db.insert(itemProcessing).values({
             itemId,
             userId: scopes[fixture.owner].userId,

@@ -13,9 +13,29 @@ import {
     shouldExtractVideo,
 } from "@/lib/uploads/media-types";
 
+interface UploadStarted {
+    uploadId: string;
+    filename: string;
+}
+
+/** Identifies an upload after its recording has been saved. */
+export interface UploadCompletion extends UploadStarted {
+    recordingId: string;
+    resumed: boolean;
+}
+
+/** Optional action attached to the queue's upload-success toast. */
+export interface UploadCompletionAction {
+    label: string;
+    onClick: () => void;
+}
+
 interface Options {
-    /** Called after a successful upload so the parent can refresh data. */
-    onUploadComplete: () => void;
+    onUploadStarted?: (upload: UploadStarted) => void;
+    onUploadFailed?: (uploadId: string) => void;
+    onUploadComplete: (
+        upload: UploadCompletion,
+    ) => UploadCompletionAction | undefined;
 }
 
 /**
@@ -27,7 +47,11 @@ interface Options {
  * resets `e.target.value` after pickup so picking the same file twice
  * in a row still fires a `change` event.
  */
-export function useUploadQueue({ onUploadComplete }: Options) {
+export function useUploadQueue({
+    onUploadStarted,
+    onUploadFailed,
+    onUploadComplete,
+}: Options) {
     const [isUploading, setIsUploading] = useState(false);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -48,8 +72,36 @@ export function useUploadQueue({ onUploadComplete }: Options) {
         [],
     );
 
+    const completeUpload = useCallback(
+        (upload: UploadCompletion, message: string) => {
+            const action = onUploadComplete(upload);
+            toast.success(
+                message,
+                action === undefined ? undefined : { action },
+            );
+        },
+        [onUploadComplete],
+    );
+
+    const failUpload = useCallback(
+        (uploadId: string, message: string) => {
+            toast.error(message);
+            onUploadFailed?.(uploadId);
+            setPendingUploads((previous) =>
+                previous.filter((upload) => upload.id !== uploadId),
+            );
+        },
+        [onUploadFailed],
+    );
+
     const watchConversion = useCallback(
-        (jobId: string, placeholderId: string, filename: string) => {
+        (
+            jobId: string,
+            placeholderId: string,
+            filename: string,
+            savedFilename: string,
+            resumed: boolean,
+        ) => {
             if (followers.current.has(jobId)) return;
             const controller = new AbortController();
             followers.current.set(jobId, controller);
@@ -63,25 +115,44 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                 .then((job) => {
                     if (controller.signal.aborted) return;
                     if (job?.status === "completed") {
-                        toast.success(`Audio from "${filename}" is ready`);
-                        onUploadComplete();
+                        completeUpload(
+                            {
+                                recordingId: recordingIdFromResult(job.result),
+                                uploadId: placeholderId,
+                                filename: savedFilename,
+                                resumed,
+                            },
+                            `Audio from "${filename}" is ready`,
+                        );
                     } else {
-                        toast.error(
+                        failUpload(
+                            placeholderId,
                             job?.error ||
                                 `Could not finish converting "${filename}"`,
                         );
                     }
-                    setPendingUploads((previous) =>
-                        previous.filter(
-                            (upload) => upload.id !== placeholderId,
-                        ),
+                    if (job?.status === "completed") {
+                        setPendingUploads((previous) =>
+                            previous.filter(
+                                (upload) => upload.id !== placeholderId,
+                            ),
+                        );
+                    }
+                })
+                .catch((error: unknown) => {
+                    if (controller.signal.aborted) return;
+                    failUpload(
+                        placeholderId,
+                        error instanceof Error
+                            ? error.message
+                            : `Could not finish converting "${filename}"`,
                     );
                 })
                 .finally(() => {
                     followers.current.delete(jobId);
                 });
         },
-        [onUploadComplete, updatePending],
+        [completeUpload, failUpload, updatePending],
     );
 
     useEffect(() => {
@@ -121,10 +192,16 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                                   },
                               ],
                     );
+                    onUploadStarted?.({
+                        uploadId: placeholderId,
+                        filename: uploadBasename(upload.filename),
+                    });
                     watchConversion(
                         upload.jobId,
                         placeholderId,
                         upload.filename,
+                        uploadBasename(upload.filename),
+                        true,
                     );
                 }
             })
@@ -137,7 +214,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             }
             followers.current.clear();
         };
-    }, [watchConversion]);
+    }, [onUploadStarted, watchConversion]);
 
     const handleUpload = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,6 +268,10 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     progress: 0,
                 },
             ]);
+            onUploadStarted?.({
+                uploadId: placeholderId,
+                filename: uploadBasename(file.name),
+            });
 
             setIsUploading(true);
             let conversionStarted = false;
@@ -199,7 +280,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     updatePending(placeholderId, { progress });
                 });
 
-                if (data.conversion && data.jobId) {
+                if (data.conversion) {
                     conversionStarted = true;
                     updatePending(placeholderId, {
                         phase: "queued",
@@ -208,13 +289,27 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     toast.success(
                         `"${file.name}" uploaded. Extracting audio in the background.`,
                     );
-                    watchConversion(data.jobId, placeholderId, file.name);
+                    watchConversion(
+                        data.jobId,
+                        placeholderId,
+                        file.name,
+                        data.filename,
+                        false,
+                    );
                 } else {
-                    toast.success(`"${data.filename}" uploaded`);
-                    onUploadComplete();
+                    completeUpload(
+                        {
+                            recordingId: data.recordingId,
+                            uploadId: placeholderId,
+                            filename: data.filename,
+                            resumed: false,
+                        },
+                        `"${data.filename}" uploaded`,
+                    );
                 }
             } catch (error) {
-                toast.error(
+                failUpload(
+                    placeholderId,
                     error instanceof Error
                         ? error.message
                         : "Failed to upload recording",
@@ -228,7 +323,14 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                 }
             }
         },
-        [onUploadComplete, selectedFile, updatePending, watchConversion],
+        [
+            onUploadStarted,
+            selectedFile,
+            completeUpload,
+            failUpload,
+            updatePending,
+            watchConversion,
+        ],
     );
 
     const cancelUpload = useCallback(() => setSelectedFile(null), []);
@@ -249,11 +351,19 @@ export function useUploadQueue({ onUploadComplete }: Options) {
     };
 }
 
-interface UploadResponse {
+interface DirectUploadResponse {
     filename: string;
-    conversion?: boolean;
-    jobId?: string;
+    recordingId: string;
+    conversion?: false;
 }
+
+interface ConversionUploadResponse {
+    filename: string;
+    conversion: true;
+    jobId: string;
+}
+
+type UploadResponse = DirectUploadResponse | ConversionUploadResponse;
 
 interface ActiveUpload {
     jobId: string;
@@ -305,6 +415,15 @@ function pendingFromProgress(
     return { phase, progress: percent };
 }
 
+function recordingIdFromResult(result: Record<string, unknown> | null): string {
+    if (typeof result?.recordingId === "string") return result.recordingId;
+    throw new Error("Video conversion completed without a recording id");
+}
+
+function uploadBasename(filename: string): string {
+    return filename.replace(/\.[^./]+$/, "");
+}
+
 /**
  * The file goes as the raw request body so the server can stream it to
  * storage; a multipart form would have to be held in memory whole.
@@ -330,7 +449,13 @@ function sendUpload(
             );
         });
         request.addEventListener("load", () => {
-            let body: { error?: string } & Partial<UploadResponse> = {};
+            let body: {
+                error?: string;
+                filename?: string;
+                recordingId?: string;
+                conversion?: boolean;
+                jobId?: string;
+            } = {};
             try {
                 body = JSON.parse(request.responseText) as typeof body;
             } catch {
@@ -341,11 +466,25 @@ function sendUpload(
                 request.status < 300 &&
                 typeof body.filename === "string"
             ) {
-                resolve({
-                    filename: body.filename,
-                    conversion: body.conversion,
-                    jobId: body.jobId,
-                });
+                if (
+                    body.conversion === true &&
+                    typeof body.jobId === "string"
+                ) {
+                    resolve({
+                        filename: body.filename,
+                        conversion: true,
+                        jobId: body.jobId,
+                    });
+                    return;
+                }
+                if (typeof body.recordingId === "string") {
+                    resolve({
+                        filename: body.filename,
+                        recordingId: body.recordingId,
+                    });
+                    return;
+                }
+                reject(new Error("Upload completed without a recording id"));
                 return;
             }
             reject(new Error(body.error || "Upload failed"));

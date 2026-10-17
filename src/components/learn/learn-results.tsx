@@ -4,6 +4,7 @@ import { Check, Minus, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useState } from "react";
+import { LearnOutcomeLine } from "@/components/learn/review-parts";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -122,6 +123,14 @@ export function LearnResults({
     const [forget, setForget] = useState(false);
     const skipReason = useSkipReason();
     const failure = useLearnFailure();
+    let description = failure(errorCode);
+    if (status === "finished" && items.length === 0) {
+        description = i18n("Learn found nothing new in this transcript.");
+    } else if (status === "finished") {
+        description = i18n(
+            "What Learn proposed on this transcript, and what your review did with it.",
+        );
+    }
 
     const sections = [
         { kind: "new_record", title: i18n("New in the Almanac") },
@@ -167,17 +176,7 @@ export function LearnResults({
                             ? i18n("Learn failed")
                             : i18n("Learned")}
                     </DialogTitle>
-                    <DialogDescription>
-                        {status === "failed"
-                            ? failure(errorCode)
-                            : items.length === 0
-                              ? i18n(
-                                    "Learn found nothing new in this transcript.",
-                                )
-                              : i18n(
-                                    "What Learn proposed on this transcript, and what your review did with it.",
-                                )}
-                    </DialogDescription>
+                    <DialogDescription>{description}</DialogDescription>
                 </DialogHeader>
 
                 {status === "finished" && items.length === 0 && known && (
@@ -224,9 +223,9 @@ export function LearnResults({
                                                 </span>
                                                 <span className="min-w-0">
                                                     {describe(item)}{" "}
-                                                    <span className="text-xs text-muted-foreground">
+                                                    <LearnOutcomeLine>
                                                         {text}
-                                                    </span>
+                                                    </LearnOutcomeLine>
                                                 </span>
                                             </li>
                                         );

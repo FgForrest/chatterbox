@@ -1075,6 +1075,7 @@ interface ArchivedProcessingChoices {
         itemId: string;
         folderId: string;
         requestedAt: string;
+        confirmedAt: string | null;
     }[];
 }
 
@@ -1133,6 +1134,7 @@ async function collectProcessingChoices(
                           itemId: mailPendingShares.itemId,
                           folderId: mailPendingShares.folderId,
                           createdAt: mailPendingShares.createdAt,
+                          confirmedAt: mailPendingShares.confirmedAt,
                       })
                       .from(mailPendingShares)
                       .innerJoin(
@@ -1154,9 +1156,10 @@ async function collectProcessingChoices(
         folderDefaults,
         itemChoices,
         pendingOrganizationPlacements: pendingOrganizationPlacements.map(
-            ({ createdAt, ...placement }) => ({
+            ({ createdAt, confirmedAt, ...placement }) => ({
                 ...placement,
                 requestedAt: createdAt.toISOString(),
+                confirmedAt: confirmedAt?.toISOString() ?? null,
             }),
         ),
     };

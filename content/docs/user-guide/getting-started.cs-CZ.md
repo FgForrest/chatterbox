@@ -38,7 +38,7 @@ Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nast
 
 Horní lišta obsahuje tři sekce:
 
-- **Nahrávky**: vaše knihovna. Vlevo je seznam nahrávek, vpravo detail vybrané nahrávky.
+- **Nahrávky**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
 - **Almanach**: osoby a objekty, o kterých Chatterbox ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
 - **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
@@ -46,7 +46,7 @@ Vpravo v liště:
 
 - **Hledat** (nebo `Ctrl`/`⌘` + `K`) otevře příkazovou paletu.
 - **Synchronizovat zařízení** okamžitě stáhne nové nahrávky z cloudu vašeho nahrávače, místo čekání na další automatickou synchronizaci.
-- **Nahrát** přidá zvukový nebo video soubor z vašeho počítače.
+- **Nahrát** přidá zvukový nebo video soubor z vašeho počítače. Tlačítko je dostupné také v Úkolech, Almanachu a Nastavení. Po nahrání se otevřou Nahrávky, nová položka bude vybraná a její pracovní postup bude na začátku.
 - Kulaté tlačítko s vaším iniciálou otevře nabídku účtu: **Nastavení**, **Klávesové zkratky**, režim světlý/tmavý a **Odhlásit se**.
 
 <span id="getting-help" />

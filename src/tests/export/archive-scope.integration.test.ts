@@ -1180,11 +1180,13 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
                 });
         }
         const requestedAt = new Date("2026-09-03T10:00:00Z");
+        const confirmedAt = new Date("2026-09-03T10:05:00Z");
         await db().insert(mailPendingShares).values({
             itemId: PRIVATE_ALICE,
             userId: ALICE,
             folderId: "folder-org-choice",
             createdAt: requestedAt,
+            confirmedAt,
         });
 
         const personal = await archive({ kind: "personal", userId: ALICE });
@@ -1224,6 +1226,7 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
                     itemId: PRIVATE_ALICE,
                     folderId: "folder-org-choice",
                     requestedAt: requestedAt.toISOString(),
+                    confirmedAt: confirmedAt.toISOString(),
                 },
             ],
         });

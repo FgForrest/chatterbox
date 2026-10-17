@@ -261,7 +261,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
 
             if (existing) {
                 await deleteSource(storage, payload.sourceStorageKey);
-                return { converted: true };
+                return { converted: true, recordingId: existing.id };
             }
 
             let temporaryDirectory: string | null = null;
@@ -328,6 +328,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
                 await deleteSource(storage, payload.sourceStorageKey);
                 return {
                     converted: true,
+                    recordingId: saved.recordingId,
                     durationMs: saved.durationMs,
                     filesize: saved.filesize,
                 };

@@ -209,7 +209,7 @@ export const POST = apiHandler(async (request: Request) => {
     const buffer = await readUploadBody(body, upload.size);
 
     const fileId = `uploaded-${nanoid()}`;
-    await saveUploadedAudio({
+    const saved = await saveUploadedAudio({
         userId: session.user.id,
         fileId,
         basename,
@@ -221,5 +221,9 @@ export const POST = apiHandler(async (request: Request) => {
         folderId,
     });
 
-    return NextResponse.json({ success: true, filename: basename });
+    return NextResponse.json({
+        success: true,
+        filename: basename,
+        recordingId: saved.recordingId,
+    });
 });

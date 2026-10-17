@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     loadFolderAddresses,
@@ -18,10 +19,13 @@ const aliasSchema = z.object({ alias: z.string().min(1).max(64) });
  */
 export const GET = apiHandler<IdContext>(async (request, context) => {
     requireMailEnabled();
-    const session = await requireApiSession(request);
+    const { actor, session } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
     const subtree = new URL(request.url).searchParams.get("subtree") === "1";
-    const result = await loadFolderAddresses(session.user.id, id, { subtree });
+    const result = await loadFolderAddresses(session.user.id, id, {
+        subtree,
+        canCurate: await actsForOrganization(actor),
+    });
     if (!result) {
         throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
     }
@@ -33,7 +37,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 /** Gives the folder a new address; the old one stays as secondary. */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     requireMailEnabled();
-    const session = await requireApiSession(request);
+    const { actor, session } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
     const parsed = aliasSchema.safeParse(
         await request.json().catch(() => undefined),
@@ -47,6 +51,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         userId: session.user.id,
         folderId: id,
         alias: parsed.data.alias,
+        canCurate: await actsForOrganization(actor),
     });
     return NextResponse.json({ address });
 });
