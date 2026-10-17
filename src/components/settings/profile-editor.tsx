@@ -845,6 +845,34 @@ function BasicEditor({
 
     return (
         <div className="space-y-5">
+            {"transcribe" in settings.steps && (
+                <div className="space-y-2">
+                    <Label htmlFor="basic-transcription-ai">
+                        {i18n("AI for transcription")}
+                    </Label>
+                    <ProviderPinSelect
+                        id="basic-transcription-ai"
+                        value={settings.steps.transcribe.provider}
+                        options={providers}
+                        purpose="transcription"
+                        defaultLabel={i18n("Default for this role")}
+                        disabled={readOnly}
+                        onChange={(provider) =>
+                            updateSettings((next) => {
+                                if ("transcribe" in next.steps) {
+                                    next.steps.transcribe.provider = provider;
+                                }
+                            })
+                        }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        {i18n(
+                            "Default leaves transcription unpinned, so it uses the account's transcription provider or Mynah when available.",
+                        )}
+                    </p>
+                </div>
+            )}
+
             <div className="space-y-2">
                 <Label htmlFor="basic-ai">{i18n("AI for text steps")}</Label>
                 <ProviderPinSelect
