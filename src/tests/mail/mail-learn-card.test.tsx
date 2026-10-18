@@ -18,6 +18,7 @@ import type {
 import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (message: string, values?: Record<string, unknown>) => {
         const count = Number(values?.count ?? 0);
         if (
@@ -39,7 +40,12 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("sonner", () => ({
-    toast: { error: vi.fn(), success: vi.fn() },
+    toast: {
+        error: vi.fn(),
+        info: vi.fn(),
+        success: vi.fn(),
+        warning: vi.fn(),
+    },
 }));
 
 vi.mock("@/components/help/help-button", () => ({
@@ -133,7 +139,11 @@ function stubFetch() {
             return Response.json({ version: 1 });
         }
         if (url.endsWith("/finish")) {
-            return Response.json({ applied: 2 });
+            return Response.json({
+                status: "finished",
+                applied: 2,
+                skipped: [],
+            });
         }
         return new Response("{}", { status: 404 });
     });
@@ -151,9 +161,7 @@ async function renderReview(frame: WorkflowWidgetFrame) {
             widgetId={`mail-learn-${frame}`}
         />,
     );
-    if (frame === "dialog") {
-        fireEvent.click(await screen.findByRole("button", { name: "Review" }));
-    }
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     await screen.findByRole("heading", { name: /Review what Learn found/ });
 }
 
@@ -192,7 +200,7 @@ describe.each([
         );
 
         fireEvent.click(
-            screen.getByRole("checkbox", { name: "Apply all suggestions" }),
+            screen.getByRole("checkbox", { name: "Tick all: New facts" }),
         );
         await waitFor(() =>
             expect((rows[1] as HTMLInputElement).checked).toBe(true),
@@ -250,7 +258,9 @@ it("keeps a manually started mail Learn run inline", async () => {
     fireEvent.click(await screen.findByRole("button", { name: "Learn" }));
 
     expect(
-        await screen.findByText("Learn is reading the message"),
+        await screen.findByText(
+            "Learn is reading the message with your Almanac.",
+        ),
     ).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
 });
@@ -373,4 +383,139 @@ it.each([
     );
 
     expect(await screen.findByText(line)).toBeTruthy();
+});
+
+it("edits mail new records through the shared new-record controls", async () => {
+    const fetch = stubFetch();
+    await renderReview("inline");
+
+    const name = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "Eva Novak" } });
+    fireEvent.blur(name);
+
+    await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/recordings/mail-1/review/items/record-1",
+            expect.objectContaining({
+                method: "PATCH",
+                body: JSON.stringify({
+                    decision: "accepted",
+                    version: 0,
+                    choice: { name: "Eva Novak", typeKey: null },
+                }),
+            }),
+        ),
+    );
+    expect(
+        screen.getByRole("button", { name: "Never propose it" }),
+    ).toBeTruthy();
+    expect(
+        screen.getByRole("button", { name: "It is someone known…" }),
+    ).toBeTruthy();
+});
+
+it("renders every suggestion kind produced by mail Learn", async () => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json({
+                ...ready,
+                items: [
+                    ready.items[0],
+                    {
+                        ...ready.items[1],
+                        id: "known-1",
+                        kind: "known_fact",
+                        preTicked: true,
+                    },
+                    ready.items[1],
+                    {
+                        id: "phrase-1",
+                        kind: "relation_phrase",
+                        preTicked: false,
+                        decision: null,
+                        choice: null,
+                        version: 0,
+                        dependsOnLabel: null,
+                        payload: {
+                            phrase: "guides",
+                            subject: { personId: "p-jan" },
+                            object: { entityId: "e-orion" },
+                            objectKind: "entity",
+                            count: 1,
+                            text: {
+                                segmentIndex: 0,
+                                charStart: 0,
+                                charEnd: 16,
+                            },
+                            provenance: null,
+                        },
+                    },
+                ],
+            }),
+        ),
+    );
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-kinds"
+        />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+
+    for (const title of [
+        "New in the Almanac",
+        "Known facts mentioned again",
+        "New facts",
+        "New kind of relation",
+    ]) {
+        expect(
+            screen.getByRole("heading", { name: new RegExp(title) }),
+        ).toBeTruthy();
+    }
+});
+
+it("re-learns mail and can forget rejected suggestions", async () => {
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === "DELETE") return Response.json({ forgotten: 1 });
+        if (init?.method === "POST") return Response.json({ jobId: null });
+        return Response.json({
+            ...ready,
+            run: { id: "run-finished", status: "finished" },
+            items: [{ ...ready.items[1], outcome: "rejected" }],
+        });
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-relearn"
+        />,
+    );
+
+    fireEvent.click(
+        await screen.findByRole("button", { name: "View results" }),
+    );
+    fireEvent.click(
+        await screen.findByRole("checkbox", {
+            name: "Re-learn: also propose again what I rejected on this message",
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+
+    await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/recordings/mail-1/review/dismissals",
+            { method: "DELETE" },
+        ),
+    );
+    expect(fetch).toHaveBeenCalledWith("/api/recordings/mail-1/learn", {
+        method: "POST",
+    });
 });

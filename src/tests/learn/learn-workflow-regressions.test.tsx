@@ -204,18 +204,12 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-describe.each([
-    {
-        name: "recording",
-        renderCase: renderRecording,
-        startPath: "/api/recordings/recording-1/learn?source=riffado",
-    },
-    {
-        name: "mail",
-        renderCase: renderMail,
-        startPath: "/api/recordings/mail-1/learn",
-    },
-])("$name Learn workflow line", ({ renderCase, startPath }) => {
+describe.each(["audio", "mail"] as const)("%s Learn workflow line", (kind) => {
+    const renderCase = kind === "audio" ? renderRecording : renderMail;
+    const startPath =
+        kind === "audio"
+            ? "/api/recordings/recording-1/learn?source=riffado"
+            : "/api/recordings/mail-1/learn";
     it("uses the expand affordance for finished results", async () => {
         renderCase("dialog", FINISHED_REVIEW);
 
@@ -293,20 +287,10 @@ describe.each([
     });
 });
 
-describe.each([
-    {
-        name: "recording inline",
-        frame: "inline" as const,
-        renderCase: renderRecording,
-    },
-    {
-        name: "mail inline",
-        frame: "inline" as const,
-        renderCase: renderMail,
-    },
-])("$name Learn failure line", ({ frame, renderCase }) => {
+describe.each(["audio", "mail"] as const)("%s Learn failure line", (kind) => {
+    const renderCase = kind === "audio" ? renderRecording : renderMail;
     it("offers retry and keeps results reachable", async () => {
-        renderCase(frame, FAILED_REVIEW);
+        renderCase("inline", FAILED_REVIEW);
 
         const retry = await screen.findByRole("button", {
             name: "Try again",

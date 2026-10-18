@@ -1119,10 +1119,11 @@ export function TranscriptionPanel({
                         }
                         onFinished={handleReviewFinished}
                         onMarks={setLearnMarks}
-                        frame={widgets?.learn.frame ?? "dialog"}
+                        frame={widgets?.learn.frame ?? "inline"}
                         widgetId={`recording-learn-review-${recording.id}`}
                         folderName={folderName}
                         showTrigger={false}
+                        collapseReady
                     />
                 )}
 
