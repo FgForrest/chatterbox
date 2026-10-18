@@ -303,7 +303,7 @@ describe("folder default profile picker", () => {
 
         render(<FolderDefaultProfiles folderId="folder" />);
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
 
@@ -353,7 +353,7 @@ describe("folder default profile picker", () => {
 
         render(<FolderDefaultProfiles folderId="folder" />);
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
 
