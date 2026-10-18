@@ -552,6 +552,12 @@ const baseEnvSchema = z.object({
         .string()
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /** Timeout for each embedding request, in milliseconds. */
+    EMBEDDING_TIMEOUT_MS: positiveIntEnv(
+        "EMBEDDING_TIMEOUT_MS",
+        60_000,
+        Number.MAX_SAFE_INTEGER,
+    ),
     /**
      * How much memory, in MB, one process may hold of decrypted knowledge
      * before it evicts the least recently used scopes.
@@ -1674,6 +1680,7 @@ export function readEnvInput(): Record<EnvInputKey, string | undefined> {
         EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
         EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
         EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
+        EMBEDDING_TIMEOUT_MS: process.env.EMBEDDING_TIMEOUT_MS,
         LEARN_MCP_URL: process.env.LEARN_MCP_URL,
         LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
         KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,

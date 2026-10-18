@@ -390,17 +390,19 @@ That is a real trade, not a free win -- N concurrent agent sessions draw on the 
 
 ## Troubleshooting
 
-Errors surface in Chatterbox as a failed summary. `docker compose logs -f agent-bridge` shows the bridge side; the message in the 502 is the CLI's own stderr tail.
+`docker compose logs -f agent-bridge` shows the bridge side. On a non-zero exit, the bridge reads structured errors from the CLI's stdout first and falls back to stderr. Prompt text is removed, run tokens are redacted, and the diagnostic is bounded before it reaches either the response or the log. Invalid requests return 400, authentication failures preserve 401/403, usage and rate limits return 429 (with `Retry-After` when supplied), and unclassified failures return 502.
 
 | Symptom | Cause |
 |---|---|
 | `connect ECONNREFUSED agent-bridge:8787` | Container isn't up. The profile means `docker compose up -d` alone skips it — pass `--profile agent-bridge`. |
 | `401 missing or invalid bearer token` | `BRIDGE_TOKEN` in `.env` and the API Key on the provider have drifted. The bridge compares them exactly. |
 | `400 unknown model "llama3"` | The bridge only routes `claude…`, `codex…`, and `gpt-…` ids. Set a supported Default Model on the provider. |
+| `400 … model is not supported` | The selected model is not available to the CLI's account. Choose a model listed by that account, or use the bare `claude` / `codex` id to let the CLI pick its default. |
+| `429 … usage limit` | The CLI account has reached a usage or rate limit. The response carries `Retry-After` when the CLI supplied a usable delay. |
 | `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS`, or one of the built-in [hardening flags](#hardening-no-tools-no-persistence), isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`; pin a version the hardening was verified against. |
 | `502 … Unknown feature flag: <name>` | The installed Codex no longer knows a feature the bridge disables. Pin a verified version, then check `codex features list` for what the feature became before changing `lib.mjs`. |
 | `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild the image. Files written before that stay where they are; removing them is optional (see [Purging](#purging-session-data-from-before-this-fix-optional)). |
-| `502 … exited with code 1` mentioning login, credits, or a plan | Authentication or rate limit. Re-run the status commands under [Authentication](#authentication). |
+| `401` / `403` mentioning login or account access | Authentication or account access failed. Re-run the status commands under [Authentication](#authentication). |
 | `502 … produced output that is not the expected JSON envelope` | The Claude CLI's `--output-format json` envelope changed shape. Pin the version and check `parseClaudeEnvelope` in `lib.mjs`. |
 | `504 … exceeded BRIDGE_TIMEOUT_MS` | A long transcript against a slow model. Raise `BRIDGE_TIMEOUT_MS`. |
 | Summary contains the agent's prose, `keyPoints` empty | The reply wasn't recognisably JSON, so `extractJson` passed it through untouched and Chatterbox stored the whole thing. Usually a model that ignores the format instruction — try a stronger one. |

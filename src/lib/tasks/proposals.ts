@@ -58,7 +58,6 @@ import {
 import {
     type RankedTaskCandidate,
     rankTaskCandidates,
-    rankTaskCandidatesWithEmbeddings,
     rankTaskSearchCandidates,
     TASK_CANDIDATE_LIMIT,
     type TaskRankingCandidate,
@@ -468,9 +467,10 @@ async function currentContentVectors(
     key: ContentVectorKey,
     generation: string,
     text: string,
-): Promise<Float32Array[]> {
+): Promise<Map<number, Float32Array>> {
     const chunks = taskContentChunks(text);
-    if (chunks.length === 0) return [];
+    const vectors = new Map<number, Float32Array>();
+    if (chunks.length === 0) return vectors;
     const rows = await db
         .select({
             chunkIndex: taskContentVectors.chunkIndex,
@@ -488,29 +488,25 @@ async function currentContentVectors(
             ),
         )
         .orderBy(asc(taskContentVectors.chunkIndex));
-    if (rows.length !== chunks.length) return [];
-    const vectors: Float32Array[] = [];
-    for (const [index, chunk] of chunks.entries()) {
-        const row = rows[index];
+    for (const row of rows) {
+        const chunk = chunks[row.chunkIndex];
         if (
-            !row ||
-            row.chunkIndex !== index ||
-            row.inputHmac !== domainLookupHash("vector-input", chunk)
+            chunk !== undefined &&
+            row.inputHmac === domainLookupHash("vector-input", chunk)
         ) {
-            return [];
+            vectors.set(row.chunkIndex, decodeVector(decryptText(row.vector)));
         }
-        vectors.push(decodeVector(decryptText(row.vector)));
     }
     return vectors;
 }
 
-async function persistContentVectors(
+/** Persist content vectors without transferring an existing row's ownership. */
+export async function persistContentVectors(
     key: ContentVectorKey,
     generation: string,
-    text: string,
-    vectors: readonly Float32Array[],
+    chunks: readonly string[],
+    vectors: ReadonlyMap<number, Float32Array>,
 ): Promise<void> {
-    const chunks = taskContentChunks(text);
     await db.transaction(async (tx) => {
         await tx
             .delete(taskContentVectors)
@@ -525,25 +521,43 @@ async function persistContentVectors(
                     ),
                 ),
             );
-        if (chunks.length !== vectors.length || chunks.length === 0) return;
-        await tx
-            .insert(taskContentVectors)
-            .values(
-                chunks.map((chunk, index) => ({
+        const rows = [...vectors].flatMap(([index, vector]) => {
+            const chunk = chunks[index];
+            if (chunk === undefined) return [];
+            return [
+                {
                     userId: key.userId,
                     itemId: key.itemId,
                     contentSourceId: key.sourceId,
                     contentRevision: key.revision,
                     vectorGeneration: generation,
                     chunkIndex: index,
-                    dim: vectors[index]?.length ?? 0,
-                    vector: encryptText(
-                        encodeVector(vectors[index] as Float32Array),
-                    ),
+                    dim: vector.length,
+                    vector: encryptText(encodeVector(vector)),
                     inputHmac: domainLookupHash("vector-input", chunk),
-                })),
-            )
-            .onConflictDoNothing();
+                },
+            ];
+        });
+        if (rows.length === 0) return;
+        await tx
+            .insert(taskContentVectors)
+            .values(rows)
+            .onConflictDoUpdate({
+                target: [
+                    taskContentVectors.itemId,
+                    taskContentVectors.contentSourceId,
+                    taskContentVectors.contentRevision,
+                    taskContentVectors.vectorGeneration,
+                    taskContentVectors.chunkIndex,
+                ],
+                set: {
+                    dim: sql`excluded.dim`,
+                    vector: sql`excluded.vector`,
+                    inputHmac: sql`excluded.input_hmac`,
+                    createdAt: new Date(),
+                },
+                setWhere: sql`${taskContentVectors.userId} = excluded.user_id`,
+            });
     });
 }
 
@@ -569,51 +583,122 @@ async function rankedCandidateEntries(
     }
     try {
         const generation = vectorGenerationFor(client.model);
-        const [held, itemVectors] = await Promise.all([
+        const contentChunks = taskContentChunks(itemText);
+        if (contentChunks.length === 0) {
+            return {
+                ranked: rankTaskCandidates({
+                    itemText,
+                    participantPersonIds,
+                    candidates,
+                }),
+                usedEmbeddings: false,
+            };
+        }
+        const [taskVectorMap, contentVectorMap] = await Promise.all([
             currentTaskVectors(candidates, generation),
             contentKey
                 ? currentContentVectors(contentKey, generation, itemText)
-                : Promise.resolve([]),
+                : Promise.resolve(new Map<number, Float32Array>()),
         ]);
-        const withVectors = candidates.map((candidate) => ({
-            ...candidate,
-            vector: held.get(candidate.id) ?? null,
-        }));
-        const result = await rankTaskCandidatesWithEmbeddings(
-            {
+        type PendingEmbedding =
+            | { kind: "content"; index: number; text: string }
+            | { kind: "task"; candidate: CandidateTask; text: string };
+        const pending: PendingEmbedding[] = [
+            ...contentChunks.flatMap((text, index) =>
+                contentVectorMap.has(index)
+                    ? []
+                    : [{ kind: "content" as const, index, text }],
+            ),
+            ...candidates.flatMap((candidate) =>
+                taskVectorMap.has(candidate.id)
+                    ? []
+                    : [
+                          {
+                              kind: "task" as const,
+                              candidate,
+                              text: candidate.text,
+                          },
+                      ],
+            ),
+        ];
+        const persisted = new Set<number>();
+        const acceptBatch = async (
+            start: number,
+            vectors: readonly Float32Array[],
+        ) => {
+            const taskVectorsToPersist = new Map<string, Float32Array>();
+            const contentVectorsToPersist = new Map<number, Float32Array>();
+            for (const [offset, vector] of vectors.entries()) {
+                const requestIndex = start + offset;
+                if (persisted.has(requestIndex)) continue;
+                const request = pending[requestIndex];
+                if (!request) {
+                    throw new Error(
+                        "The embedding response does not match the request",
+                    );
+                }
+                persisted.add(requestIndex);
+                if (request.kind === "content") {
+                    contentVectorMap.set(request.index, vector);
+                    contentVectorsToPersist.set(request.index, vector);
+                } else {
+                    taskVectorMap.set(request.candidate.id, vector);
+                    taskVectorsToPersist.set(request.candidate.id, vector);
+                }
+            }
+            await Promise.all([
+                persistTaskVectors(
+                    candidates,
+                    generation,
+                    taskVectorsToPersist,
+                ),
+                contentKey
+                    ? persistContentVectors(
+                          contentKey,
+                          generation,
+                          contentChunks,
+                          contentVectorsToPersist,
+                      )
+                    : Promise.resolve(),
+            ]);
+        };
+        if (pending.length > 0) {
+            const vectors = await client.embed(
+                pending.map((request) => request.text),
+                {
+                    onBatch: (batch) => acceptBatch(batch.start, batch.vectors),
+                },
+            );
+            if (vectors.length !== pending.length) {
+                throw new Error(
+                    "The embedding response does not match the request",
+                );
+            }
+            await acceptBatch(0, vectors);
+        }
+        const itemVectors: Float32Array[] = [];
+        for (const index of contentChunks.keys()) {
+            const vector = contentVectorMap.get(index);
+            if (!vector) {
+                throw new Error("The embedding response omitted content");
+            }
+            itemVectors.push(vector);
+        }
+        const withVectors = candidates.map((candidate) => {
+            const vector = taskVectorMap.get(candidate.id);
+            if (!vector) {
+                throw new Error("The embedding response omitted a task");
+            }
+            return { ...candidate, vector };
+        });
+        return {
+            ranked: rankTaskCandidates({
                 itemText,
                 participantPersonIds,
                 candidates: withVectors,
                 itemVectors,
-            },
-            {
-                embed: (texts) => client.embed(texts),
-                onEmbeddingFailure: (error) => {
-                    console.warn(
-                        "[tasks] embedding ranking unavailable; using word overlap:",
-                        error,
-                    );
-                },
-            },
-        );
-        if (result.usedEmbeddings && result.generatedVectors.size > 0) {
-            await persistTaskVectors(
-                candidates,
-                generation,
-                result.generatedVectors,
-            );
-        }
-        if (result.usedEmbeddings && contentKey && itemVectors.length === 0) {
-            await persistContentVectors(
-                contentKey,
-                generation,
-                itemText,
-                result.itemVectors,
-            );
-        }
-        return {
-            ranked: result.ranked,
-            usedEmbeddings: result.usedEmbeddings,
+            }),
+            usedEmbeddings: true,
         };
     } catch (error) {
         console.warn(
@@ -966,8 +1051,11 @@ export async function resolveTaskProposals({
         participantOf(ref)?.displayName ?? null;
     const evidence = (quote: string | null) =>
         mail
-            ? mailEvidence(mail, quote)
-            : { evidenceStartMs: locateQuote(turns, quote), quotedAt: null };
+            ? mailEvidence(mail, quote, language)
+            : {
+                  evidenceStartMs: locateQuote(turns, quote, language),
+                  quotedAt: null,
+              };
     const speakers = transcriptionId
         ? await confirmedSpeakers(ownerUserId, transcriptionId, orgView)
         : new Map<string, { label: string; personId: string; name: string }>();
@@ -1152,6 +1240,7 @@ export async function resolveTaskProposals({
 function mailEvidence(
     mail: ItemContent,
     quote: string | null,
+    language: string | null,
 ): Pick<
     ProposedTask,
     "evidenceStartMs" | "evidenceText" | "evidenceProvenance" | "quotedAt"
@@ -1159,7 +1248,7 @@ function mailEvidence(
     const readable = mail.segments.filter(
         (segment) => !segment.knownItemId && segment.role !== "disclaimer",
     );
-    const range = locateTextQuote(readable, quote);
+    const range = locateTextQuote(readable, quote, language);
     const segment = range
         ? mail.segments.find((item) => item.index === range.segmentIndex)
         : undefined;

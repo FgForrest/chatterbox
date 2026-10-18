@@ -172,6 +172,50 @@ describe.each([
     });
 });
 
+it("keeps a manually started mail Learn run inline", async () => {
+    let reviewReads = 0;
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") return Response.json({});
+        reviewReads++;
+        return Response.json(
+            reviewReads === 1
+                ? {
+                      run: null,
+                      available: true,
+                      names: {},
+                      types: {},
+                      relations: {},
+                      items: [],
+                  }
+                : {
+                      run: { id: "run-2", status: "running" },
+                      available: true,
+                      names: {},
+                      types: {},
+                      relations: {},
+                      items: [],
+                  },
+        );
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-running"
+        />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Learn" }));
+
+    expect(
+        await screen.findByText("Learn is reading the message"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+});
+
 it("shows the Learn icon on its collapsed result line", async () => {
     vi.stubGlobal(
         "fetch",

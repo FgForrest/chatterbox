@@ -45,7 +45,7 @@ Automatic forwarding keeps the original sender, so it needs a secret address.
 
 A mail shows who sent it, with **Verified** when the sender's domain signed it, the recipients and the date. Quoted and forwarded messages are folded under their author. **Show formatted** shows the mail as it was designed, with nothing loaded from the internet. Attachments download only.
 
-As processing advances, the Learn review, **Summary**, and **Task review** widgets appear inline in that order. Finished widgets fold to one line while work continues. A step you start yourself after the workflow opens in a window with the same contents.
+As processing advances, the Learn review, **Summary**, and **Task review** widgets appear inline in that order. Finished widgets fold to one line while work continues. A step you start yourself after the workflow shows its running state in place; review windows open only when you click **Review** or **View results**.
 
 Mail sent by machines (auto-replies, mailing lists, notices) is kept but marked **Not processed**. No AI step runs for it.
 

@@ -7,10 +7,12 @@
  */
 
 export class BridgeError extends Error {
-    constructor(status, message) {
+    constructor(status, message, { retryAfter = null, report = false } = {}) {
         super(message);
         this.name = "BridgeError";
         this.status = status;
+        this.retryAfter = retryAfter;
+        this.report = report;
     }
 }
 
@@ -492,6 +494,8 @@ export function buildArgs(
     throw new BridgeError(400, `unknown backend "${backend}"`);
 }
 
+const MIN_QUOTED_PROMPT_LINE = 12;
+
 /**
  * Build the operator-facing tail of a failed CLI's stderr.
  *
@@ -500,19 +504,243 @@ export function buildArgs(
  * Riffado's logs. Observed on the first real deployment: a 502 for an
  * unsupported model led with the last line of the summary prompt.
  *
- * Any line appearing verbatim in the prompt is dropped. Diagnostics the
- * CLI generates itself -- warnings, API errors -- are not substrings of
- * the prompt, so they survive, which is what makes the error useful.
+ * Any line appearing verbatim in the prompt is dropped, and so is any line
+ * that quotes a prompt line of MIN_QUOTED_PROMPT_LINE characters or more.
+ * Shorter prompt lines are not looked for inside a diagnostic: a summary
+ * prompt carries lines such as `{` and `}`, which would drop every JSON
+ * error. Diagnostics the CLI generates itself -- warnings, API errors --
+ * are not substrings of the prompt, so they survive, which is what makes
+ * the error useful.
  */
 export function diagnosticTail(stderr, prompt = "", maxLines = 5, maxChars = 600) {
+    const promptLines = String(prompt)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length >= MIN_QUOTED_PROMPT_LINE);
     return String(stderr)
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean)
-        .filter((line) => !prompt.includes(line))
+        .filter(
+            (line) =>
+                !prompt.includes(line) &&
+                !promptLines.some((promptLine) => line.includes(promptLine)),
+        )
         .slice(-maxLines)
         .join("; ")
         .slice(0, maxChars);
+}
+
+/** Redact and bound a diagnostic after removing anything echoed from the prompt. */
+export function protectedDiagnostic(
+    text,
+    prompt = "",
+    secrets = [],
+    maxLines = 5,
+    maxChars = 600,
+) {
+    return redact(
+        diagnosticTail(text, prompt, maxLines, Number.MAX_SAFE_INTEGER),
+        secrets,
+    ).slice(0, maxChars);
+}
+
+function objectValue(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : null;
+}
+
+function parseJsonDiagnostic(value) {
+    if (typeof value !== "string") return null;
+    const candidate = value.trim().replace(/^ERROR:\s*/i, "");
+    if (!candidate.startsWith("{") && !candidate.startsWith("[")) return null;
+    try {
+        return JSON.parse(candidate);
+    } catch {
+        return null;
+    }
+}
+
+function numericStatus(value) {
+    const parsed =
+        typeof value === "number"
+            ? value
+            : typeof value === "string" && /^\d{3}$/.test(value.trim())
+              ? Number(value)
+              : null;
+    return Number.isInteger(parsed) && parsed >= 100 && parsed <= 599
+        ? parsed
+        : null;
+}
+
+function statusFromMessage(message) {
+    if (typeof message !== "string") return null;
+    const match = message.match(
+        /(?:unexpected\s+status|api\s+error|http(?:\s+status)?|status(?:\s+code)?)[\s:=()]*([1-5]\d{2})\b/i,
+    );
+    return match ? numericStatus(match[1]) : null;
+}
+
+function retryAfterValue(value) {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        return String(Math.ceil(value));
+    }
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+        return String(Math.ceil(Number(trimmed)));
+    }
+    const normalizedDate = trimmed.replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, "$1");
+    if (
+        !/[\r\n]/.test(normalizedDate) &&
+        Number.isFinite(Date.parse(normalizedDate))
+    ) {
+        return new Date(normalizedDate).toUTCString();
+    }
+    return null;
+}
+
+function retryAfterFromMessage(message) {
+    if (typeof message !== "string") return null;
+    const duration = message.match(
+        /(?:retry\s+after|try\s+again\s+in)\s*:?[\s]*(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m)?\b/i,
+    );
+    if (duration) {
+        const amount = Number(duration[1]);
+        const unit = (duration[2] || "seconds").toLowerCase();
+        if (unit.startsWith("m") && unit !== "ms" && !unit.startsWith("milli")) {
+            return String(Math.ceil(amount * 60));
+        }
+        if (unit === "ms" || unit.startsWith("milli")) {
+            return String(Math.ceil(amount / 1000));
+        }
+        return String(Math.ceil(amount));
+    }
+    const at = message.match(/try\s+again\s+at\s+([^\n]+?)(?:\.(?:\s|$)|$)/i);
+    return at ? retryAfterValue(at[1]) : null;
+}
+
+function errorParts(value, depth = 0) {
+    if (depth > 4) return { message: "", status: null, retryAfter: null };
+    if (typeof value === "string") {
+        const parsed = parseJsonDiagnostic(value);
+        if (parsed !== null) return errorParts(parsed, depth + 1);
+        // Claude Code reports "API Error: 400 {...}": a status, then the
+        // upstream body.
+        const brace = value.indexOf("{");
+        const embedded =
+            brace > 0 ? parseJsonDiagnostic(value.slice(brace)) : null;
+        if (embedded !== null) {
+            const inner = errorParts(embedded, depth + 1);
+            return {
+                message: inner.message || value.trim(),
+                status: inner.status ?? statusFromMessage(value),
+                retryAfter: inner.retryAfter ?? retryAfterFromMessage(value),
+            };
+        }
+        return {
+            message: value.trim(),
+            status: statusFromMessage(value),
+            retryAfter: retryAfterFromMessage(value),
+        };
+    }
+
+    const object = objectValue(value);
+    if (!object) return { message: "", status: null, retryAfter: null };
+
+    const nested = object.error !== undefined
+        ? errorParts(object.error, depth + 1)
+        : { message: "", status: null, retryAfter: null };
+    const messageParts =
+        typeof object.message === "string"
+            ? errorParts(object.message, depth + 1)
+            : typeof object.result === "string"
+              ? errorParts(object.result, depth + 1)
+              : { message: "", status: null, retryAfter: null };
+    const headers = objectValue(object.headers);
+    const explicitRetryAfter =
+        retryAfterValue(object.retry_after) ??
+        retryAfterValue(object.retryAfter) ??
+        retryAfterValue(headers?.["retry-after"]) ??
+        retryAfterValue(headers?.["Retry-After"]);
+
+    return {
+        message: nested.message || messageParts.message,
+        status:
+            numericStatus(object.status) ??
+            numericStatus(object.statusCode) ??
+            nested.status ??
+            messageParts.status,
+        retryAfter:
+            explicitRetryAfter ?? nested.retryAfter ?? messageParts.retryAfter,
+    };
+}
+
+function isRateLimitMessage(message) {
+    return /(?:rate[ -]?limit|usage limit|too many requests|quota (?:reached|exceeded|exhausted))/i.test(
+        message,
+    );
+}
+
+/** Map a CLI's upstream failure to the status exposed by the bridge. */
+export function cliErrorStatus(upstreamStatus, message = "") {
+    if (upstreamStatus === 401 || upstreamStatus === 403) return upstreamStatus;
+    if (upstreamStatus === 429 || isRateLimitMessage(message)) return 429;
+    if (
+        upstreamStatus === 400 ||
+        upstreamStatus === 404 ||
+        upstreamStatus === 422
+    ) {
+        return 400;
+    }
+    return 502;
+}
+
+/**
+ * Extract a safe terminal error from Codex JSONL or a Claude JSON envelope.
+ * Returns null when stdout contains no recognized error event.
+ */
+export function parseCliError(stdout, prompt = "", secrets = []) {
+    const events = [];
+    const whole = parseJsonDiagnostic(stdout);
+    if (whole !== null) events.push(whole);
+    if (events.length === 0) {
+        for (const line of String(stdout).split("\n")) {
+            const event = parseJsonDiagnostic(line);
+            if (event !== null) events.push(event);
+        }
+    }
+
+    const errors = [];
+    const terminal = [];
+    for (const event of events) {
+        const object = objectValue(event);
+        if (!object) continue;
+        if (object.type === "turn.failed") {
+            terminal.push(errorParts(object.error));
+        } else if (object.type === "error") {
+            errors.push(errorParts(object));
+        } else if (object.is_error === true) {
+            terminal.push(errorParts(object));
+        }
+    }
+
+    const fallback = errors.at(-1);
+    const selected = terminal.at(-1) ?? fallback;
+    if (!selected) return null;
+    const rawMessage = selected.message || fallback?.message || "";
+    const message = protectedDiagnostic(rawMessage, prompt, secrets);
+    const status = cliErrorStatus(
+        selected.status ?? fallback?.status,
+        message || rawMessage,
+    );
+    const retryAfter = selected.retryAfter ?? fallback?.retryAfter;
+    return {
+        message,
+        status,
+        ...(status === 429 && retryAfter ? { retryAfter } : {}),
+    };
 }
 
 /**
@@ -553,7 +781,7 @@ function nonnegativeNumber(value) {
 export function parseClaudeEnvelope(
     stdout,
     bin = "claude",
-    { structured = false } = {},
+    { structured = false, prompt = "", secrets = [] } = {},
 ) {
     let envelope;
     try {
@@ -566,9 +794,18 @@ export function parseClaudeEnvelope(
     }
 
     if (envelope.is_error) {
+        const extracted = parseCliError(stdout, prompt, secrets);
         throw new BridgeError(
-            502,
-            `${bin} reported an error (subtype: ${envelope.subtype ?? "unknown"})`,
+            extracted?.status ?? 502,
+            `${bin} reported an error${
+                extracted?.message
+                    ? `: ${extracted.message}`
+                    : ` (subtype: ${envelope.subtype ?? "unknown"})`
+            }`,
+            {
+                retryAfter: extracted?.retryAfter ?? null,
+                report: true,
+            },
         );
     }
 

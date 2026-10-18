@@ -122,7 +122,7 @@ export async function enqueueTranscriptionJob(input: {
             ...(input.attributionSource
                 ? { attributionSource: input.attributionSource }
                 : {}),
-            force: input.force ?? input.trigger === "manual",
+            force: input.force ?? false,
             ...(input.view === "org" ? { view: "org" } : {}),
         },
     });

@@ -138,6 +138,8 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
     let server: Server | null = null;
     let baseUrl = "";
     let down = false;
+    let requests = 0;
+    let failAfterSuccessfulRequests: number | null = null;
     let embedded: string[] = [];
     // Runs while a request is answered: what changes during a run.
     let meanwhile: (() => Promise<void>) | null = null;
@@ -163,10 +165,16 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
                 body += chunk;
             });
             request.on("end", async () => {
+                requests++;
                 const during = meanwhile;
                 meanwhile = null;
                 await during?.();
-                if (down || request.url !== "/v1/embeddings") {
+                if (
+                    down ||
+                    (failAfterSuccessfulRequests !== null &&
+                        requests > failAfterSuccessfulRequests) ||
+                    request.url !== "/v1/embeddings"
+                ) {
                     response.writeHead(503).end("down");
                     return;
                 }
@@ -200,6 +208,8 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
 
     beforeEach(async () => {
         down = false;
+        requests = 0;
+        failAfterSuccessfulRequests = null;
         embedded = [];
         meanwhile = null;
         knowledgeStore().invalidateAll();
@@ -296,6 +306,35 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
                 (await vectorsOf(ALICE)).map((row) => row.vectorGeneration),
             ),
         ).toEqual(new Set(["fake-b#r1"]));
+    });
+
+    it("keeps successful request vectors when a later request fails", async () => {
+        await aliceKnows();
+        const batched = new EmbeddingClient({
+            baseUrl,
+            model: "fake-a",
+            batchSize: 1,
+            failureThreshold: 100,
+        });
+        failAfterSuccessfulRequests = 1;
+
+        await expect(embedScope(ALICE, batched)).rejects.toBeInstanceOf(
+            EmbeddingUnavailable,
+        );
+
+        expect(await vectorsOf(ALICE)).toHaveLength(1);
+        const [firstText] = embedded;
+        failAfterSuccessfulRequests = null;
+        requests = 0;
+        embedded = [];
+
+        await expect(embedScope(ALICE, batched)).resolves.toMatchObject({
+            embedded: 1,
+        });
+
+        expect(embedded).toHaveLength(1);
+        expect(embedded[0]).not.toBe(firstText);
+        expect(await vectorsOf(ALICE)).toHaveLength(2);
     });
 
     it("finds by meaning what the reader may read, and nothing of anyone else's", async () => {

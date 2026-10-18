@@ -12,7 +12,7 @@ Nahrávka bez přepisu nabízí dvě tlačítka:
 - **Přepsat** odešle zvuk k poskytovateli přepisů Vašeho účtu (Nastavení → Přepis). Funguje i tehdy, když nahrávka ještě čeká na zařazení.
 - **Přepsat v prohlížeči** spustí Whisper ve vašem prohlížeči. Je to zdarma a nic neopustí váš počítač, ale je to pomalejší.
 
-**Znovu přepsat** u nahrávky, která už má přepis, spustí přepis s vaším aktuálním poskytovatelem. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
+**Znovu přepsat** u nahrávky, která už má přepis, nejprve požádá o potvrzení a pak spustí přepis s vaším aktuálním poskytovatelem. Jde o placené volání poskytovatele. Nahradí přepis a znovu vytvoří shrnutí, název, témata i výsledky Learn. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
 
 Nahrávka se přepíše automaticky až po zařazení a pouze tehdy, když má její [profil zpracování](processing-and-profiles.md) u přepisu zapnuté **Spouštět automaticky**. Profil může zvolit jiného poskytovatele a jazyk než výchozí hodnoty účtu používané tlačítkem **Přepsat**.
 
@@ -42,7 +42,7 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 ![Přepis s mluvčími, tématy a návrhy Learn](images/transcript-speakers.png)
 
-Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. **Sbalit přepis** skryje přepis. V zápatí vidíte, který poskytovatel a model jej vytvořil, v jakém jazyce a jak je dlouhý.
+Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. **Sbalit přepis** na pravém konci záhlaví přepis skryje; na stejném místě se pak zobrazí **Rozbalit přepis**. V zápatí vidíte, který poskytovatel a model jej vytvořil, v jakém jazyce a jak je dlouhý.
 
 <span id="naming-speakers" />
 
@@ -103,6 +103,6 @@ Viz [Learn](learn.md), kde vznikají opravy.
 
 ## Kopírování a stahování
 
-Dvě ikony vpravo nahoře u přepisu umožní přepis zkopírovat do schránky nebo stáhnout jako Markdown soubor, se jmény mluvčích a zapracovanými opravami. Shrnutí obsahuje stejné dvě ikony.
+Dvě ikony v záhlaví přepisu umožní přepis zkopírovat do schránky nebo stáhnout jako Markdown soubor, se jmény mluvčích a zapracovanými opravami. Shrnutí obsahuje stejné dvě ikony.
 
 Další: [Shrnutí a úkoly](summaries-and-tasks.md)

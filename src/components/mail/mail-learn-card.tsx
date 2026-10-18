@@ -82,7 +82,6 @@ export function MailLearnCard({
     }, [learning, load]);
 
     const start = async () => {
-        setOpen(true);
         setBusy(true);
         try {
             const response = await fetch(`${base}/learn${query}`, {

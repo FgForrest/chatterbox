@@ -20,6 +20,7 @@ import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useItemProcessing } from "@/hooks/use-item-processing";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
@@ -72,6 +73,10 @@ export function RecordingWorkstation({
     const playerRef = useRef<RecordingPlayerHandle>(null);
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
+    const { data: processing } = useItemProcessing({
+        itemId: recording.id,
+        kind: "audio",
+    });
     const isTranscribing = inFlightActions.get(recording.id) === "transcribing";
 
     useEffect(() => {
@@ -114,8 +119,13 @@ export function RecordingWorkstation({
     );
 
     const handleTranscribe = useCallback(
-        async (attributionSource?: string) => {
-            await transcribeById(recording.id, attributionSource);
+        async (attributionSource?: string, retranscribe = false) => {
+            await transcribeById(
+                recording.id,
+                attributionSource,
+                "private",
+                retranscribe,
+            );
         },
         [recording.id, transcribeById],
     );
@@ -254,6 +264,7 @@ export function RecordingWorkstation({
                             onTranscribe={handleTranscribe}
                             onTranscribeComplete={refresh}
                             onTranscriptStale={refresh}
+                            processing={processing}
                             // Shared, it is the organization account's.
                             readOnly={sharedRecordingIds(
                                 folderOrganization,

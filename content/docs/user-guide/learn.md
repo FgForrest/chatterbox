@@ -16,7 +16,7 @@ Learn is available on self-hosted instances with an AI provider that can write s
 
 ## Running Learn
 
-When Learn is manual, its widget says it is ready and offers **Learn**. Starting it opens a window; you can close that window while **Learn is reading the transcript** and leave the page. When it finishes, the same window holds the review.
+When Learn is manual, its widget says it is ready and offers **Learn**. Starting it changes the widget to **Learn is reading the transcript** without opening a window. You can leave the page while it runs. When it finishes, the widget offers **Review**.
 
 When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. If it finds suggestions, its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action jumps to the review. The title, summary and topics wait so they use the corrected transcript. After 72 hours they continue without the review, but the review stays open and still blocks an intended Organization share.
 
@@ -24,7 +24,7 @@ If Learn finds nothing to review and **Correct the transcript after Learn** is o
 
 ## Reviewing
 
-The review has the same contents inline or in the window opened by a run you started yourself. If you close a waiting window, **Review Learn** in the workflow strip reopens it:
+The review has the same contents inline or in a window. **Review** on the widget and **Review Learn** in the workflow strip open that window explicitly:
 
 ![The Learn review](images/learn-review.png)
 
@@ -41,7 +41,7 @@ You do not have to open the review: the proposals also appear in the transcript 
 
 ![What the review did](images/learn-results.png)
 
-After the review, the widget folds to **Learn complete** with **View results** while the workflow continues. Open the results to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** starts another run in a window; tick **Re-learn: also propose again what I rejected on this recording** if you changed your mind about something.
+After the review, the widget folds to **Learn complete** with **View results** while the workflow continues. Open the results to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** starts another run and shows its progress in place; tick **Re-learn: also propose again what I rejected on this recording** if you changed your mind about something.
 
 Accepted corrections are kept beside the original text, never in place of it, so they can always be undone. See [Corrected words](transcripts.md#corrected-words).
 

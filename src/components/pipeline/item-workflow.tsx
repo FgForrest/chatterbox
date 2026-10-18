@@ -239,7 +239,7 @@ interface ItemWorkflowProps extends FolderActions {
     view?: "private" | "org";
     onChanged?: () => void;
     onFolderCreated?: (folder: CreatedFolder) => void;
-    onTranscribe?: () => void;
+    onTranscribe?: (retranscribe?: boolean) => void;
     onLearn?: () => void;
     onSummary?: () => void;
     onReviewLearn?: () => void;
@@ -557,7 +557,7 @@ export function ItemWorkflow({
                 onReviewLearn?.();
                 break;
             case "transcribe":
-                onTranscribe?.();
+                onTranscribe?.(false);
                 break;
             case "reviewTasks":
                 onReviewTasks?.();
@@ -570,7 +570,7 @@ export function ItemWorkflow({
                 break;
             case "retry": {
                 const failedStep = workflow?.status?.params?.step;
-                if (failedStep === "transcribe") onTranscribe?.();
+                if (failedStep === "transcribe") onTranscribe?.(true);
                 else if (failedStep === "learn") onLearn?.();
                 else if (failedStep === "summary") onSummary?.();
                 break;
@@ -628,7 +628,7 @@ export function ItemWorkflow({
                             mode={filingMode}
                             reason={profileReason}
                             onFolderCreated={onFolderCreated}
-                            onTranscribe={onTranscribe}
+                            onTranscribe={() => onTranscribe?.(false)}
                             onOptimisticCategorize={optimisticCategorize}
                             onCategorized={() => {
                                 invalidate();

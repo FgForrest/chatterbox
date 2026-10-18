@@ -108,15 +108,18 @@ describe("WorkflowStrip", () => {
     afterEach(() => {
         cleanup();
         vi.unstubAllGlobals();
+        vi.restoreAllMocks();
     });
 
     it.each([
         [6, 820, "full"],
-        [7, 820, "focused"],
-        [6, 390, "compact"],
-        [7, 390, "compact"],
-        [6, 360, "compact"],
+        [7, 820, "full"],
+        [7, 760, "focused"],
+        [6, 390, "focused"],
+        [7, 390, "focused"],
+        [6, 360, "focused"],
         [7, 360, "compact"],
+        [6, 300, "compact"],
     ] as const)("uses %s-step %s px density %s without dropping accessible labels", async (count, width, density) => {
         mockStripWidth(width);
         render(<WorkflowStrip workflow={workflowWithSteps(count)} />);
@@ -140,6 +143,38 @@ describe("WorkflowStrip", () => {
                 }),
             ).toBeTruthy();
         }
+    });
+
+    it("fits the steps by their measured labels, not by equal columns", async () => {
+        vi.spyOn(
+            HTMLElement.prototype,
+            "getBoundingClientRect",
+        ).mockImplementation(function (this: HTMLElement) {
+            const longest = Math.max(
+                0,
+                ...[...this.children].map(
+                    (child) => child.textContent?.length ?? 0,
+                ),
+            );
+            return {
+                width: this.classList.contains("w-max") ? longest * 7 : 0,
+            } as DOMRect;
+        });
+        mockStripWidth(820);
+        render(<WorkflowStrip workflow={workflowWithSteps(6)} />);
+
+        await waitFor(() =>
+            expect(
+                screen
+                    .getByRole("region", { name: "Workflow" })
+                    .getAttribute("data-density"),
+            ).toBe("full"),
+        );
+        expect(
+            within(
+                screen.getByRole("list", { name: "Workflow steps" }),
+            ).getAllByText("Done"),
+        ).toHaveLength(3);
     });
 
     it("keeps every step in one non-wrapping row", () => {

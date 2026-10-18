@@ -93,13 +93,6 @@ export interface RankedTaskCandidate<T extends TaskRankingCandidate> {
     recency: number;
 }
 
-export interface TaskEmbeddingRankingResult<T extends TaskRankingCandidate> {
-    ranked: RankedTaskCandidate<T>[];
-    generatedVectors: Map<string, Float32Array>;
-    itemVectors: readonly Float32Array[];
-    usedEmbeddings: boolean;
-}
-
 function normalizedWords(text: string): Set<string> {
     const folded = text
         .normalize("NFKD")
@@ -246,92 +239,4 @@ export function taskContentChunks(text: string): string[] {
         if (start + CONTENT_CHUNK_WORDS >= words.length) break;
     }
     return chunks;
-}
-
-/** Embed missing task vectors and content chunks, falling back as one ranking. */
-export async function rankTaskCandidatesWithEmbeddings<
-    T extends TaskRankingCandidate,
->(
-    input: TaskRankingInput<T>,
-    options: {
-        embed?: (texts: readonly string[]) => Promise<readonly Float32Array[]>;
-        onEmbeddingFailure?: (error: unknown) => void;
-    } = {},
-): Promise<TaskEmbeddingRankingResult<T>> {
-    if (!options.embed) {
-        return {
-            ranked: rankTaskCandidates({ ...input, itemVectors: undefined }),
-            generatedVectors: new Map(),
-            itemVectors: [],
-            usedEmbeddings: false,
-        };
-    }
-    const contentChunks = taskContentChunks(input.itemText);
-    if (contentChunks.length === 0) {
-        return {
-            ranked: rankTaskCandidates({ ...input, itemVectors: undefined }),
-            generatedVectors: new Map(),
-            itemVectors: [],
-            usedEmbeddings: false,
-        };
-    }
-
-    const missing = input.candidates.filter((candidate) => !candidate.vector);
-    try {
-        const suppliedContent = input.itemVectors ?? [];
-        const texts = [
-            ...(suppliedContent.length > 0 ? [] : contentChunks),
-            ...missing.map((candidate) => candidate.text),
-        ];
-        const embedded = texts.length > 0 ? await options.embed(texts) : [];
-        if (embedded.length !== texts.length) {
-            throw new Error(
-                "The embedding response does not match the request",
-            );
-        }
-        const contentCount =
-            suppliedContent.length > 0 ? 0 : contentChunks.length;
-        const itemVectors =
-            suppliedContent.length > 0
-                ? suppliedContent
-                : embedded.slice(0, contentCount);
-        const generatedVectors = new Map<string, Float32Array>();
-        missing.forEach((candidate, index) => {
-            const vector = embedded[contentCount + index];
-            if (!vector) {
-                throw new Error("The embedding response omitted a task vector");
-            }
-            generatedVectors.set(candidate.id, vector);
-        });
-        const candidates = input.candidates.map((candidate) => ({
-            ...candidate,
-            vector:
-                candidate.vector ?? generatedVectors.get(candidate.id) ?? null,
-        }));
-        return {
-            ranked: rankTaskCandidates({
-                ...input,
-                candidates,
-                itemVectors,
-            }) as RankedTaskCandidate<T>[],
-            generatedVectors,
-            itemVectors,
-            usedEmbeddings: true,
-        };
-    } catch (error) {
-        options.onEmbeddingFailure?.(error);
-        return {
-            ranked: rankTaskCandidates({
-                ...input,
-                itemVectors: undefined,
-                candidates: input.candidates.map((candidate) => ({
-                    ...candidate,
-                    vector: null,
-                })),
-            }) as RankedTaskCandidate<T>[],
-            generatedVectors: new Map(),
-            itemVectors: [],
-            usedEmbeddings: false,
-        };
-    }
 }

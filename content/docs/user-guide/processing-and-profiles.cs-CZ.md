@@ -77,7 +77,7 @@ U každého kroku je stav **Hotovo**, **Další**, **Ke kontrole**, **Běží**,
 
 Věta pod kroky začíná **Na vás.**, **Pracuje se.**, **Ve frontě.**, **Problém.** nebo **Čeká na ostatní.** Vysvětluje, co bude následovat, a nabízí jedinou očekávanou akci, například **Zkontrolovat Learn**, **Zkontrolovat úkoly** nebo **Sdílet nyní**.
 
-S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, se otevře v okně se stejným obsahem. Akce v pruhu přeskočí k vloženému prvku nebo toto okno znovu otevře.
+S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, ukazuje svůj průběh na místě a žádné okno sám neotevře. Akce **Zkontrolovat**, **Zobrazit výsledky** a kontrolní akce v pruhu otevřou okno až na Vaše výslovné kliknutí.
 
 U položky s volbou **Bez automatického zpracování** končí pracovní postup po kroku **Zařazení** a pruh zmizí. Výjimkou je zamýšlené umístění v Organizaci: pruh zůstane, dokud nepoužijete **Sdílet nyní** nebo umístění nezrušíte.
 

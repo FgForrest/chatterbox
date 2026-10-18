@@ -246,6 +246,39 @@ describe("processing folder row", () => {
         expect(onTranscribe).toHaveBeenCalledOnce();
     });
 
+    it("forces a transcription retry after a failed run", () => {
+        const onTranscribe = vi.fn();
+        renderWorkflow({
+            initialData: {
+                ...processing,
+                outputs: {
+                    ...processing.outputs,
+                    transcript: true,
+                },
+                phases: {
+                    ...processing.phases,
+                    transcribe: {
+                        state: "failed",
+                        reason: "TRANSCRIPTION_FAILED",
+                        generation: 1,
+                        at: "2026-10-16T08:00:00.000Z",
+                    },
+                },
+                failures: [
+                    {
+                        phase: "transcribe",
+                        reasonCode: "TRANSCRIPTION_FAILED",
+                        retryAvailable: true,
+                    },
+                ],
+            },
+            onTranscribe,
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(onTranscribe).toHaveBeenCalledWith(true);
+    });
+
     it("focuses the profile control after a cold filing panel load", async () => {
         let resolvePanel: ((response: Response) => void) | undefined;
         const fetchMock = vi.fn(

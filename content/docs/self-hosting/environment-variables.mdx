@@ -146,14 +146,15 @@ Self-host with single sign-on only. Off unless `AUTHZ_MODE=idp`. See
 
 Self-host only; ignored when `IS_HOSTED=true`. All optional.
 
-| Variable             | Default  | Effect                                                                                                   |
-| -------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
-| `EMBEDDING_BASE_URL` | —        | An OpenAI-compatible `embeddings` endpoint. Unset, Learn matches names by their words only, and says so. |
-| `EMBEDDING_MODEL`    | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
-| `EMBEDDING_API_KEY`  | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
-| `LEARN_MCP_URL`      | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                       |
-| `LEARN_BRIDGE_URL`   | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
-| `KNOWLEDGE_MEMORY_MB`| `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.     |
+| Variable               | Default  | Effect                                                                                                   |
+| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `EMBEDDING_BASE_URL`   | —        | An OpenAI-compatible `embeddings` endpoint. Unset, Learn matches names by their words only, and says so. |
+| `EMBEDDING_MODEL`      | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
+| `EMBEDDING_API_KEY`    | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
+| `EMBEDDING_TIMEOUT_MS` | `60000`  | Timeout for each embedding request, in milliseconds.                                                     |
+| `LEARN_MCP_URL`        | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                    |
+| `LEARN_BRIDGE_URL`     | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
+| `KNOWLEDGE_MEMORY_MB`  | `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.       |
 
 ## SMTP (email notifications)
 
