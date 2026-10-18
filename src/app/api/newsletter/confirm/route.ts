@@ -3,7 +3,9 @@ import {
     confirmSubscriber,
     getSubscriberById,
 } from "@/db/queries/newsletter-subscriptions";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { verifyUnsubscribeToken } from "@/lib/email/unsubscribe-token";
+import { env } from "@/lib/env";
 import {
     type AppLocale,
     localeFromAcceptLanguage,
@@ -19,6 +21,8 @@ import { createEmailTranslator } from "@/lib/i18n/email-messages";
  * double opt-in without the user's action.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
+    if (!env.IS_HOSTED) return new NextResponse(null, { status: 404 });
+
     const requestLocale = localeFromAcceptLanguage(
         req.headers.get("accept-language"),
     );
@@ -42,6 +46,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+    if (!env.IS_HOSTED) return new NextResponse(null, { status: 404 });
+
     const requestLocale = localeFromAcceptLanguage(
         req.headers.get("accept-language"),
     );
@@ -84,12 +90,13 @@ function confirmPage(
     locale: AppLocale,
 ): NextResponse {
     const t = createEmailTranslator(locale);
+    const name = deploymentProductName(locale);
     return new NextResponse(
         renderPage({
             locale,
             title: t("newsletterConfirmPageTitle"),
             body: `
-                <p>${escapeHtml(t("newsletterConfirmPageBody"))}</p>
+                <p>${escapeHtml(t("newsletterConfirmPageBody", { name }))}</p>
                 <form method="post" action="/api/newsletter/confirm">
                     <input type="hidden" name="s" value="${escapeHtml(id)}" />
                     <input type="hidden" name="t" value="${escapeHtml(token)}" />
@@ -136,7 +143,7 @@ function renderPage({
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(title)} -- Riffado</title>
+  <title>${escapeHtml(title)} -- ${escapeHtml(deploymentProductName(locale))}</title>
   <meta name="robots" content="noindex" />
   <style>
     :root { color-scheme: light dark; }

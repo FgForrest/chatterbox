@@ -9,7 +9,7 @@ Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, 
 
 ![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
 
-1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Chatterbox si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
+1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Klepna si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
 2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**.
 
 Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, otevře se v okně; pruh pracovního postupu toto okno znovu otevře, pokud vyžaduje pozornost. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
@@ -24,7 +24,7 @@ Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví
 
 ### Instrukce shrnutí a Vícenásobné shrnování
 
-Chatterbox obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
+Klepna obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
@@ -63,7 +63,7 @@ Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo 
 
 ## Směrované návrhy
 
-Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Chatterbox ji předá někomu, kdo toto právo má. **Návrhy pro vás** na stránce Úkoly jsou schránkou těchto rozhodnutí a odznak v navigaci uvádí jejich počet. Při použití návrhu se oprávnění zkontroluje znovu.
+Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Klepna ji předá někomu, kdo toto právo má. **Návrhy pro vás** na stránce Úkoly jsou schránkou těchto rozhodnutí a odznak v navigaci uvádí jejich počet. Při použití návrhu se oprávnění zkontroluje znovu.
 
 ![Směrovaný návrh úkolu ve schránce na stránce Úkoly](images/tasks-routed.png)
 
@@ -79,7 +79,7 @@ Po smazání domovské položky se domovem stane nejnovější přeživší zmí
 
 ![Úkoly přiřazené Vám](images/tasks-mine.png)
 
-- **Moje**: úkoly přiřazené Vám. Chatterbox určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
+- **Moje**: úkoly přiřazené Vám. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
 - **Sledované**: ostatní úkoly z Vašich položek, přiřazené jiným osobám nebo zatím nikomu.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)

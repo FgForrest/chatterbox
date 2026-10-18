@@ -1,5 +1,7 @@
-export const HOSTED_LOCAL_BASE_URL_MESSAGE =
-    "We can't reach `localhost` or other private addresses from the hosted app — to use LM Studio or Ollama, self-host Riffado (`docker compose up`).";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { defaultLocale } from "@/lib/i18n/config";
+
+export const HOSTED_LOCAL_BASE_URL_MESSAGE = `We can't reach \`localhost\` or other private addresses from the hosted app — to use LM Studio or Ollama, self-host ${deploymentProductName(defaultLocale)} (\`docker compose up\`).`;
 
 export type BaseUrlValidationResult =
     | { ok: true }

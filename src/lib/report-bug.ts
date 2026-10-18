@@ -3,51 +3,29 @@ import { APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 export const SUPPORT_EMAIL = "support@riffado.com";
 
 const GITHUB_NEW_ISSUE_URL = `https://github.com/${APP_REPOSITORY}/issues/new`;
-const BUG_REPORT_TEMPLATE = "bug_report.yml";
 
 export interface ReportBugOptions {
     errorId?: string;
     errorContext?: string;
     page?: string;
     isHosted?: boolean;
+    /** Product name as this deployment shows it, for the subject line. */
+    name: string;
 }
 
+/** A blank GitHub issue with the report as title and body; no issue template. */
 export function buildReportBugUrl(opts: ReportBugOptions): string {
     const params = new URLSearchParams({
-        template: BUG_REPORT_TEMPLATE,
-        version: APP_VERSION,
+        title: buildSubject(opts),
+        body: buildBody(opts),
     });
-
-    const description = buildDescription(opts);
-    if (description) {
-        params.set("description", description);
-    }
-
-    if (opts.isHosted !== undefined) {
-        params.set(
-            "deployment",
-            opts.isHosted ? "Hosted (riffado.com)" : "Self-hosted",
-        );
-    }
-
-    const additional = buildAdditional(opts);
-    if (additional) {
-        params.set("additional", additional);
-    }
-
     return `${GITHUB_NEW_ISSUE_URL}?${params.toString()}`;
 }
 
 export function buildReportBugMailto(opts: ReportBugOptions): string {
-    const subject = opts.errorId
-        ? `Riffado bug report (${opts.errorId})`
-        : "Riffado bug report";
-    const body = [buildDescription(opts), "", "---", buildAdditional(opts)]
-        .filter(Boolean)
-        .join("\n");
-
-    const qs = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    return `mailto:${SUPPORT_EMAIL}?${qs}`;
+    const qs = `subject=${encodeURIComponent(buildSubject(opts))}&body=${encodeURIComponent(buildBody(opts))}`;
+    const recipient = opts.isHosted ? SUPPORT_EMAIL : "";
+    return `mailto:${recipient}?${qs}`;
 }
 
 export function buildReportBugBodyPreview(opts: ReportBugOptions): string {
@@ -55,6 +33,18 @@ export function buildReportBugBodyPreview(opts: ReportBugOptions): string {
         Boolean,
     );
     return parts.join("\n");
+}
+
+function buildSubject(opts: ReportBugOptions): string {
+    return opts.errorId
+        ? `${opts.name} bug report (${opts.errorId})`
+        : `${opts.name} bug report`;
+}
+
+function buildBody(opts: ReportBugOptions): string {
+    return [buildDescription(opts), "", "---", buildAdditional(opts)]
+        .filter(Boolean)
+        .join("\n");
 }
 
 function buildDescription(opts: ReportBugOptions): string {

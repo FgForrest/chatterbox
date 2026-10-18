@@ -3,7 +3,7 @@ title: Architektura
 description: Jak jednotlivé části zapadají do sebe — Next.js aplikace, Postgres, synchronizační worker, rozšiřitelná úložiště a AI.
 ---
 
-Chatterbox je jedna aplikace Next.js s podporou Postgres.
+Klepna je jedna aplikace Next.js s podporou Postgres.
 Neexistuje žádná separátní API služba, žádný samostatný worker kontejner ani message broker.
 Vše běží v jednom procesu; horizontální škálování znamená spustit více kopií tohoto procesu za load balancerem.
 Úlohy, které musí přežít požadavek nebo proces, ve kterém byly spuštěny, jsou řazeny do fronty v Postgresu místo brokera — viz [Odolné úlohy](#durable-jobs).
@@ -39,7 +39,7 @@ Vše běží v jednom procesu; horizontální škálování znamená spustit ví
 
 ## Synchronizace je pull-based
 
-Plaud nemá push API. Synchronizační worker Chatterbox
+Plaud nemá push API. Synchronizační worker Klepna
 (`src/lib/sync/sync-recordings.ts`) je pull smyčka:
 
 1. Seznam nahrávek z připojeného Plaud účtu (stránkované).
@@ -64,7 +64,7 @@ Kód jednotlivých funkcionalit nikdy nerozlišuje typ úložiště. Toto dělá
 
 ## Rozšiřitelná AI
 
-Chatterbox nemá abstraktní třídu na úrovni poskytovatele. OpenAI SDK je nakonfigurován per uživatel s jeho `baseURL` a stejné SDK volání fungují proti OpenAI, Groq, OpenRouter, Ollama, LM Studio a jakémukoli dalšímu, co využívá OpenAI wire protokol.
+Klepna nemá abstraktní třídu na úrovni poskytovatele. OpenAI SDK je nakonfigurován per uživatel s jeho `baseURL` a stejné SDK volání fungují proti OpenAI, Groq, OpenRouter, Ollama, LM Studio a jakémukoli dalšímu, co využívá OpenAI wire protokol.
 
 Existuje pět stylů přepisu:
 
@@ -112,7 +112,7 @@ Retrye jsou omezené (`max_attempts`, počítáno od prvního převzetí, takže
 
 ## Bezpečnost více procesů
 
-Background workery je možné bezpečně spouštět ve více Chatterbox procesech nad stejnou databází, ale ne vždy ze stejného důvodu. Všechny v paměti držené `running` flagy mají pouze informativní charakter; zajištění bezpečnosti popisujeme níže. Výchozí Docker Compose deployment spouští jednu app kontejner proti jednomu Postgresu; na tom toto nezávisí.
+Background workery je možné bezpečně spouštět ve více Klepna procesech nad stejnou databází, ale ne vždy ze stejného důvodu. Všechny v paměti držené `running` flagy mají pouze informativní charakter; zajištění bezpečnosti popisujeme níže. Výchozí Docker Compose deployment spouští jednu app kontejner proti jednomu Postgresu; na tom toto nezávisí.
 
 **Převzetí řádky.** Odolný job worker (`src/lib/jobs/worker.ts`) a exportní worker (`src/lib/export/worker.ts`) vybírají práci pomocí `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`, takže dva procesy spouštěné ve stejnou chvíli nemohou převzít stejný řádek. Oba pak váží každý další zápis na náhodné claim tokeny, což umožňuje bezpečné převzetí úlohy od zatuhlého workeru, i když nelze spolehlivě rozlišit mezi zatuhlostí a pouze pomalou činností.
 

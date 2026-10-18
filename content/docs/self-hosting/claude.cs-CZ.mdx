@@ -3,7 +3,7 @@ title: Claude a Claude Code
 description: Umožněte lidem ptát se Claude (claude.ai, Desktop, Cowork) a Claude Code na své nahrávky, s přihlášením přes váš realm v Keycloaku a v mezích jejich rolí.
 ---
 
-[Externí MCP server](./mcp) umožňuje AI klientům číst, co Chatterbox ví.
+[Externí MCP server](./mcp) umožňuje AI klientům číst, co Klepna ví.
 Tato stránka k němu připojí oba produkty Claude od Anthropicu:
 
 - **Claude**: claude.ai, Claude Desktop, mobilní aplikace a Cowork. Ke
@@ -14,8 +14,8 @@ Tato stránka k němu připojí oba produkty Claude od Anthropicu:
 
 Bez přihlášení na přihlašovací stránce vašeho realmu se nikdo nedostane
 dovnitř a nikdo neuvidí víc, než dovolí jeho role v Keycloaku a vlastní
-pravidla aplikace Chatterbox. Co lidé dělají po připojení, popisuje kapitola
-[Chatterbox v Claude](../user-guide/claude.md).
+pravidla aplikace Klepna. Co lidé dělají po připojení, popisuje kapitola
+[Klepna v Claude](../user-guide/claude.md).
 
 <span id="how-it-works" />
 
@@ -30,13 +30,13 @@ pravidla aplikace Chatterbox. Co lidé dělají po připojení, popisuje kapitol
    realmu vymění s tajemstvím klienta `claude`. Dostane access token
    (15 minut) a offline refresh token (platí, dokud se použije aspoň
    jednou za 30 dní).
-4. Každé volání `/api/mcp` nese access token. Chatterbox ho ověří proti
+4. Každé volání `/api/mcp` nese access token. Klepna ho ověří proti
    podpisovým klíčům realmu, najde člověka (`sub`) a jeho role a nabídne
    jen nástroje, které tyto role otevírají.
 5. Claude token na pozadí obnovuje. Každé obnovení znovu načte role
    člověka v Keycloaku.
 
-Chatterbox nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
+Klepna nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
 
 <span id="before-you-start" />
 
@@ -45,7 +45,7 @@ Chatterbox nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
 - [Externí MCP server](./mcp) funguje ve vnitřní síti: `MCP_AUDIENCE` je
   nastaveno, resource klient `chatterbox-mcp` má svých šest rolí a lidé mají
   role, které mít mají.
-- Doporučujeme Keycloak 26.6 nebo novější; testy aplikace Chatterbox běží proti
+- Doporučujeme Keycloak 26.6 nebo novější; testy aplikace Klepna běží proti
   26.6.4. Discovery dokument a token endpoint realmu musí být dostupné z
   cloudu Anthropicu a jeho přihlašovací stránka z prohlížečů lidí, kteří
   se připojují.
@@ -54,7 +54,7 @@ Chatterbox nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
 - Pro celou organizaci: tarif Claude Team nebo Enterprise, jehož Owner
   konektor jednou přidá. Lidé s osobním tarifem (Free, Pro, Max) si ho
   přidávají sami, každý s vlastním klientem (krok 1).
-- Každý, kdo se připojuje, se už jednou přihlásil do aplikace Chatterbox. Účty se z
+- Každý, kdo se připojuje, se už jednou přihlásil do aplikace Klepna. Účty se z
   tokenu nikdy nevytvářejí.
 
 <span id="step-1-keycloak-clients" />
@@ -101,7 +101,7 @@ Stejně jako `claude`, kromě:
   callback Claude Code.
 - Consent screen není potřeba.
 
-Chatterbox obsluhuje tokeny `claude-code` jen z vnitřní sítě (krok 3):
+Klepna obsluhuje tokeny `claude-code` jen z vnitřní sítě (krok 3):
 stejný token přicházející z cloudu Anthropicu by musel být odcizen z
 něčího počítače.
 
@@ -136,12 +136,12 @@ nebo smazáním klienta.
   uživatele s některými rolemi: `aud` access tokenu je přesně
   `chatterbox-mcp`, `sub` je přítomné a `resource_access.chatterbox-mcp.roles`
   vypisuje role tohoto uživatele. S pouhými `basic` a `roles` token
-  nenese `preferred_username`; Chatterbox ho nepotřebuje.
+  nenese `preferred_username`; Klepna ho nepotřebuje.
 
-<span id="step-2-riffado" />
+<span id="step-2-klepna" />
 <span id="step-2-chatterbox" />
 
-## Krok 2: Chatterbox
+## Krok 2: Klepna
 
 ```bash
 MCP_AUDIENCE=chatterbox-mcp
@@ -175,7 +175,7 @@ request headers (viz krok 4). Klíče uchovávejte s ostatními tajemstvími.
 Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
 
 - Veřejný DNS záznam pro host z `APP_URL`. Lidé uvnitř dál chodí do
-  aplikace Chatterbox přes vnitřní síť (split-horizon DNS).
+  aplikace Klepna přes vnitřní síť (split-horizon DNS).
 - Zablokujte přímý přístup z internetu na porty aplikace a databáze.
   Přibalený `docker-compose.yml` zveřejňuje porty 3000 a 5432 na všech
   rozhraních hostitele; cloudovým firewallem nebo pravidly firewallu pro
@@ -187,11 +187,11 @@ Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
 - Jen z `160.79.104.0/21` a jen dvě přesné cesty: `/api/mcp` a
   `/.well-known/oauth-protected-resource/api/mcp`. Ne prefix:
   `/api/mcp/learn` musí zůstat interní. `GET` a `DELETE` na `/api/mcp`
-  také propusťte (Chatterbox odpoví 405, což Claude očekává).
+  také propusťte (Klepna odpoví 405, což Claude očekává).
 - Veřejná proxy nastaví na každý přeposlaný požadavek hlavičku
   pojmenovanou v `MCP_PUBLIC_INGRESS_HEADER` a přepíše, co přišlo
   zvenku. Vnitřní cesta ji odebere.
-- Objem požadavků omezte na proxy ještě před ověřením tokenu. Chatterbox
+- Objem požadavků omezte na proxy ještě před ověřením tokenu. Klepna
   počítá ověřené požadavky na člověka a klienta; všichni uživatelé Claude
   přicházejí z několika stejných adres Anthropicu. Použijte hrubý společný
   limit podle kapacity instance, ne nízký limit na IP adresu.
@@ -227,7 +227,7 @@ location / {
 proxy_set_header X-MCP-Ingress "";
 ```
 
-Chatterbox zapisuje IP klienta do přístupového logu, když je
+Klepna zapisuje IP klienta do přístupového logu, když je
 `RATE_LIMIT_TRUST_PROXY_HEADERS=true` a proxy přepisuje `X-Real-IP`
 (viz [Proměnné prostředí](./environment-variables)).
 
@@ -239,7 +239,7 @@ Chatterbox zapisuje IP klienta do přístupového logu, když je
 
 1. **Organization settings → Connectors → Add → Custom** (na dotaz typ
    **Web**).
-2. **Name:** Chatterbox. **MCP server URL:** přesně `<APP_URL>/api/mcp`.
+2. **Name:** Klepna. **MCP server URL:** přesně `<APP_URL>/api/mcp`.
 3. **Authentication:** Sign in now. **OAuth client:** Use your own OAuth
    client, s client ID `claude` a tajemstvím z kroku 1 (v **Advanced
    settings**, pokud je dialog na jedné obrazovce).
@@ -249,7 +249,7 @@ Chatterbox zapisuje IP klienta do přístupového logu, když je
    mimo `MCP_CONNECTOR_KEYS`.
 5. **Add.**
 
-Členové pak otevřou **Customize → Connectors**, najdou Chatterbox se
+Členové pak otevřou **Customize → Connectors**, najdou Klepna se
 štítkem **Custom**, kliknou na **Connect** a přihlásí se na stránce
 realmu.
 
@@ -290,7 +290,7 @@ proxy a jakákoliv jiná cesta 404. Ověřte také, že TCP spojení na veřejno
 IP adresu hostitele na portech 3000 a 5432 selžou. HTTP odpověď z portu
 3000 znamená, že lze proxy obejít.
 
-V Claude se připojte a zeptejte se „Které nástroje aplikace Chatterbox můžeš
+V Claude se připojte a zeptejte se „Které nástroje aplikace Klepna můžeš
 používat?“. Odpověď má vyjmenovat nástroje vašich rolí. Pak se podívejte
 do přístupového logu:
 
@@ -313,15 +313,15 @@ odmítnutí: `[mcp] refused (<reason>) a token of client <client>`, a
 
 | Důvod | Význam | Řešení |
 | --- | --- | --- |
-| `no-account` | Člověk se do aplikace Chatterbox nikdy nepřihlásil. | Jednou se přihlásí do aplikace Chatterbox a pak se připojí znovu. |
+| `no-account` | Člověk se do aplikace Klepna nikdy nepřihlásil. | Jednou se přihlásí do aplikace Klepna a pak se připojí znovu. |
 | `no-roles` | Token nenese žádnou ze šesti rolí. | Dejte člověku roli na `chatterbox-mcp` a klientovi její mapování ve scope. |
 | `client-not-allowed` | Klient není v `MCP_ALLOWED_CLIENTS`. | Přidejte ho. |
 | `client-not-public` | Veřejným vstupem přišel klient mimo `MCP_PUBLIC_CLIENTS`. | U `claude-code` zvenku očekávané; jinak přidejte zapomenutého osobního klienta. |
 | `connector-key` | `X-API-Key` chybí nebo nesouhlasí. | Zkontrolujte request header konektoru; konektor přidejte znovu. |
-| `suspended` | Účet v aplikaci Chatterbox je pozastavený. | |
+| `suspended` | Účet v aplikaci Klepna je pozastavený. | |
 | `no-organization` | Servisní účet při vypnuté Organizaci. | |
 
-Chyby na straně realmu ukončí přihlášení dřív, než Chatterbox token uvidí:
+Chyby na straně realmu ukončí přihlášení dřív, než Klepna token uvidí:
 
 | Keycloak hlásí | Řešení |
 | --- | --- |
@@ -346,7 +346,7 @@ odpovídá „Unknown tool“.
 - **Okamžité odpojení:** vypněte uživatele v Keycloaku nebo odhlaste
   jeho relace (**Users → daný člověk → Sessions**, včetně offline).
   Access token, který už drží, funguje do vypršení, nejvýš 15 minut:
-  Chatterbox ověřuje tokeny lokálně a neptá se Keycloaku při každém volání.
+  Klepna ověřuje tokeny lokálně a neptá se Keycloaku při každém volání.
 - **Osobní klient:** vypněte nebo smažte ho v Keycloaku a odeberte ho
   ze všech tří seznamů.
 - **Výměna tajemství `claude` nebo klíče konektoru:** vygenerujte nové
@@ -367,15 +367,15 @@ Keycloak 26.6 a novější umí svázat token s URL, pro kterou byl vyžádán
 1. Spusťte Keycloak s `--features=resource-indicators`.
 2. Nastavte klientovi `chatterbox-mcp` atribut `resource_url` na
    `<APP_URL>/api/mcp`.
-3. Nastavte v aplikaci Chatterbox `MCP_RESOURCE_AUDIENCE=true` a restartujte.
+3. Nastavte v aplikaci Klepna `MCP_RESOURCE_AUDIENCE=true` a restartujte.
 
 Token, o který Claude pro tento server požádá, pak nese jako audience
 `<APP_URL>/api/mcp` a přihlášení pro URL jiného serveru je odmítnuto s
 `invalid_target`. Obnovené tokeny a požadavky bez `resource` (ostatní
 aplikace realmu, servisní účty) si ponechají `chatterbox-mcp`, které
-Chatterbox dál přijímá. Požadavků bez `resource` se funkce netýká. Známé na
+Klepna dál přijímá. Požadavků bez `resource` se funkce netýká. Známé na
 Keycloaku 26.6.4: člověk bez kterékoliv ze šesti rolí dostane při
-připojení chybu serveru Keycloaku místo 403 od aplikace Chatterbox. Vyzkoušejte to
+připojení chybu serveru Keycloaku místo 403 od aplikace Klepna. Vyzkoušejte to
 nejdřív na testovacím realmu; end-to-end stack na to má override (viz
 [Vyzkoušení lokálně](./mcp#trying-it-locally)).
 
@@ -389,7 +389,7 @@ nejdřív na testovacím realmu; end-to-end stack na to má override (viz
   by si mohl přidat vlastní konektor s vaším realmem a client id
   `claude`; vaši lidé by se přihlásili na skutečné stránce a Claude by
   tomu konektoru předal skutečné tokeny, které by mohl posílat do
-  aplikace Chatterbox ze stejných adres Anthropicu. S tajemstvím umí přihlášení
+  aplikace Klepna ze stejných adres Anthropicu. S tajemstvím umí přihlášení
   dokončit jen konektor, který ho zná, takže `azp: claude` znamená
   konektor vaší organizace.
 - **Claude Code jen uvnitř.** Jeho klient tajemství neudrží, takže token
@@ -398,17 +398,17 @@ nejdřív na testovacím realmu; end-to-end stack na to má override (viz
   váš Owner, navíc k tajemství, které k němu váže přihlášení.
 - **Žádný limit na IP adresu.** Celý Claude sdílí několik adres; limit na
   adresu by jednomu vytíženému člověku dovolil zablokovat všechny.
-  Chatterbox počítá 60 požadavků za minutu na člověka a klienta a 10
+  Klepna počítá 60 požadavků za minutu na člověka a klienta a 10
   hledání.
 - **Co zůstává na vašem úsudku.** Přepisy jsou to, co lidé řekli, a
-  Cowork jedná sám. Chatterbox modelu říká, že výsledky nástrojů jsou data,
+  Cowork jedná sám. Klepna modelu říká, že výsledky nástrojů jsou data,
   ne instrukce, a jediné, co Claude může změnit, je stav nebo přiřazení
   úkolu (`tasks:write`). Lidé mohou v Claude zablokovat jednotlivé
   nástroje (**Customize → Connectors →** konektor) a vy můžete
   `tasks:write` vynechat ze scope klienta `claude`.
 - **Tokeny drží Anthropic.** Claude ukládá tokeny každého člověka na
-  straně Anthropicu. Platí jen pro Chatterbox, access token 15 minut, a
+  straně Anthropicu. Platí jen pro Klepna, access token 15 minut, a
   refresh token funguje jen s tajemstvím klienta, které drží také
-  Anthropic. Odpovědi, které Claude od aplikace Chatterbox dostane, se k Anthropicu
+  Anthropic. Odpovědi, které Claude od aplikace Klepna dostane, se k Anthropicu
   dostanou jako cokoliv jiného v konverzaci, podle podmínek vašeho
   tarifu Claude.

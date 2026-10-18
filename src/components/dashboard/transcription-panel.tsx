@@ -34,6 +34,7 @@ import {
     WorkflowWidgetLine,
     workflowWidgetHeadingProps,
 } from "@/components/pipeline/workflow-widget";
+import { useProductName } from "@/components/product-name-provider";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -259,6 +260,7 @@ export function TranscriptionPanel({
     processing = null,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its
@@ -297,7 +299,7 @@ export function TranscriptionPanel({
         transcriptQuiet ||
         Boolean(isTranscribing && widgets?.transcript.frame === "dialog");
     const transcriptWidgetId = `recording-transcription-${recording.id}`;
-    let transcriptSourceLabel = "Riffado";
+    let transcriptSourceLabel = name;
     if (activeTranscript?.source === "plaud") transcriptSourceLabel = "Plaud";
     if (activeTranscript?.source === "mixed") {
         transcriptSourceLabel = i18n("Mix");
@@ -658,7 +660,7 @@ export function TranscriptionPanel({
         summaryProfileOptions.find((profile) => profile.id === summaryProfileId)
             ?.name;
     if (!summaryLineFacts) {
-        summaryLineFacts = summarySource === "plaud" ? "Plaud" : "Riffado";
+        summaryLineFacts = summarySource === "plaud" ? "Plaud" : name;
     }
 
     // The title, summary and topics automatic Learn held back are made by

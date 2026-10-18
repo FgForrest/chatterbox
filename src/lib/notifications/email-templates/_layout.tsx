@@ -1,4 +1,6 @@
 import type React from "react";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { env } from "@/lib/env";
 import {
     Body,
     Container,
@@ -10,7 +12,7 @@ import {
     Section,
     Text,
 } from "../email-components";
-import { getEmailTranslator } from "../email-template-i18n";
+import { getEmailLocale, getEmailTranslator } from "../email-template-i18n";
 import { emailStyles } from "./styles";
 
 interface EmailLayoutProps {
@@ -22,17 +24,18 @@ interface EmailLayoutProps {
     children: React.ReactNode;
 }
 
-/**
- * Shared chrome for all Riffado-sent emails. Wraps the body in the
- * brand container, includes the inbox preview text, viewport/color-scheme
- * meta tags, and the minimal logo + footer.
- */
+/** Shared chrome for all application-sent emails. */
 export function EmailLayout({
     previewText,
     footerLink,
     children,
 }: EmailLayoutProps) {
     const i18n = getEmailTranslator();
+    const name = deploymentProductName(getEmailLocale());
+    const logoUrl = new URL(
+        "/logo.png",
+        env.APP_URL ?? "http://localhost:3000",
+    ).toString();
     return (
         <Html>
             <Head>
@@ -49,8 +52,8 @@ export function EmailLayout({
                     <Section style={emailStyles.header}>
                         <div style={{ textAlign: "center" }}>
                             <Img
-                                src="https://riffado.com/logo.png"
-                                alt={i18n("Riffado")}
+                                src={logoUrl}
+                                alt={name}
                                 width="32"
                                 height="32"
                                 style={emailStyles.logo}
@@ -73,7 +76,8 @@ export function EmailLayout({
                         ) : null}
                         <Text style={emailStyles.footerText}>
                             {i18n(
-                                "Riffado. Your recordings, your transcripts.",
+                                "{name}. Your recordings, your transcripts.",
+                                { name },
                             )}
                         </Text>
                     </Section>

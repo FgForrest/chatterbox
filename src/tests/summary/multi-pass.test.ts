@@ -9,6 +9,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/deployment-brand", () => ({
+    deploymentProductName: () => "Chatterbox",
+}));
+
 import {
     buildMergeInput,
     clampRounds,

@@ -11,17 +11,17 @@ export function AccountDeletedEmail({ signupUrl }: Props) {
     const i18n = getEmailTranslator();
     return (
         <EmailLayout
-            previewText={i18n("Your Riffado account has been deleted.")}
+            previewText={i18n("Your {name} account has been deleted.")}
         >
             <Heading style={emailStyles.h1}>{i18n("Account deleted.")}</Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Your Riffado account, recordings, transcripts, and summaries have been permanently deleted. We don't keep backups of deleted user data, so this is irreversible.",
+                    "Your {name} account, recordings, transcripts, and summaries have been permanently deleted. We don't keep backups of deleted user data, so this is irreversible.",
                 )}
             </Text>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Thanks for trying Riffado. If you change your mind, you can always",
+                    "Thanks for trying {name}. If you change your mind, you can always",
                 )}{" "}
                 <a href={signupUrl} style={emailStyles.link}>
                     {i18n("start fresh")}

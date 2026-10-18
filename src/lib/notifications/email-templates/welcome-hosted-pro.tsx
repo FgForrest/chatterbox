@@ -45,7 +45,7 @@ export function WelcomeHostedProEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "You're on Riffado Hosted Pro: 50 GB storage, 15 hours of Mynah transcription, unlimited devices.",
+                "You're on {name} Hosted Pro: 50 GB storage, 15 hours of Mynah transcription, unlimited devices.",
             )}
             footerLink={{
                 href: settingsUrl,
@@ -107,14 +107,14 @@ export function WelcomeHostedProEmail({
             ) : null}
             <Section style={emailStyles.buttonSection}>
                 <Button style={emailStyles.button} href={dashboardUrl}>
-                    {i18n("Open Riffado")}
+                    {i18n("Open {name}")}
                 </Button>
             </Section>
             <Text style={emailStyles.text}>
                 {i18n(
                     "\"Email support\" isn't a ticket queue here. Reply to this email if anything's off or you have a question. It reaches me directly.",
                 )}{" "}
-                <br /> {i18n("Kacper, building Riffado")}
+                <br /> {i18n("Kacper, building {name}")}
             </Text>
         </EmailLayout>
     );

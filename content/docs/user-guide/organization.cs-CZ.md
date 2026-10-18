@@ -13,7 +13,7 @@ Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Za�
 
 ![Řádek složek a nabídka Přidat do složky se složkami Organizace](images/add-to-folder.png)
 
-Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Chatterbox ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
+Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Klepna ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
 
 - u nahrávky existuje přepis,
 - každý mluvčí je pojmenovaný nebo označený jako neznámý,
@@ -40,7 +40,7 @@ Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, 
 
 ## Vzetí položky zpět
 
-Chcete-li položku odebrat z Organizace, odeberte ji z poslední složky Organizace. Chatterbox Vás nejprve požádá o potvrzení a sdělí, co se stane podle retenčních pravidel. Sdílený pohled potom kolegům zmizí a položka bude opět soukromá.
+Chcete-li položku odebrat z Organizace, odeberte ji z poslední složky Organizace. Klepna Vás nejprve požádá o potvrzení a sdělí, co se stane podle retenčních pravidel. Sdílený pohled potom kolegům zmizí a položka bude opět soukromá.
 
 Odebráním domovské položky úkolu z Organizace se domov přesune na nejnovější zbývající sdílenou zmínku. Pokud žádná nezůstane, úkol se stane soukromým spolu s odebranou položkou. Vymazání sdílené položky nebo její části ji nejprve odebere z Organizace.
 

@@ -4,6 +4,7 @@ import { getExtracted, getLocale } from "next-intl/server";
 import type { ReactNode } from "react";
 import { createBaseOptions, createDocsTabs } from "@/app/layout.config";
 import { DocsImage } from "@/components/help/docs-image";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { source } from "@/lib/source";
 import "fumadocs-ui/style.css";
 import "./docs.css";
@@ -14,7 +15,9 @@ export default async function DocsRootLayout({
     children: ReactNode;
 }) {
     const [i18n, locale] = await Promise.all([getExtracted(), getLocale()]);
-    const baseOptions = createBaseOptions(i18n("Riffado Docs"));
+    const baseOptions = createBaseOptions(
+        i18n("{name} Docs", { name: deploymentProductName(locale) }),
+    );
     const docsTabs = createDocsTabs([
         i18n("User guide"),
         i18n("Guides"),

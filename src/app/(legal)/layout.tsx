@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { useLocale } from "next-intl";
 import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { LandingFooter } from "@/components/landing-footer";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 
 /**
@@ -24,7 +24,7 @@ export default function LegalLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     if (!env.IS_HOSTED) {
         notFound();
     }

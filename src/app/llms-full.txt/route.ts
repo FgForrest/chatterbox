@@ -1,8 +1,12 @@
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
 export function GET() {
-    const lines: string[] = ["# Riffado docs", ""];
+    const lines: string[] = [
+        `# ${deploymentProductName(defaultLocale)} docs`,
+        "",
+    ];
 
     for (const page of source.getPages(defaultLocale)) {
         lines.push(`## ${page.data.title}`);

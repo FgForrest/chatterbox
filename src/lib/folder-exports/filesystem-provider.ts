@@ -11,6 +11,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { productName } from "@/lib/brand";
+import { defaultLocale } from "@/lib/i18n/config";
 import type {
     FilesystemNodeKind,
     FilesystemNodeStore,
@@ -26,9 +28,9 @@ export const MAX_EXPORT_PATH_LENGTH = 1024;
 
 /** A file the export did not create sits where it has to write. */
 export class ExportPathTakenError extends Error {
-    constructor(relativePath: string) {
+    constructor(relativePath: string, name = productName(defaultLocale)) {
         super(
-            `A file Riffado did not create is in the way of the export at ${relativePath}`,
+            `A file ${name} did not create is in the way of the export at ${relativePath}`,
         );
         this.name = "ExportPathTakenError";
     }
@@ -118,13 +120,19 @@ async function isKind(target: string, kind: OwnedEntryKind): Promise<boolean> {
 export class FilesystemExportProvider implements ExportProvider {
     private readonly root: string;
     private readonly nodes: FilesystemNodeStore;
+    private readonly productName: string;
     /** The node store, loaded once a plan starts. */
     private snapshot: Map<string, FilesystemNodeKind> | null = null;
 
-    constructor(root: string, nodes: FilesystemNodeStore) {
+    constructor(
+        root: string,
+        nodes: FilesystemNodeStore,
+        name = productName(defaultLocale),
+    ) {
         if (!root) throw new Error("Filesystem export is not configured");
         this.root = root;
         this.nodes = nodes;
+        this.productName = name;
     }
 
     private async loadSnapshot(): Promise<Map<string, FilesystemNodeKind>> {
@@ -446,14 +454,14 @@ export class FilesystemExportProvider implements ExportProvider {
                 throw new Error("Export target is not a regular file");
             }
             if ((await this.owned(relativePath)) !== "file") {
-                throw new ExportPathTakenError(relativePath);
+                throw new ExportPathTakenError(relativePath, this.productName);
             }
             replacing = true;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
 
-        const suffix = `.riffado-${crypto.randomUUID()}.tmp`;
+        const suffix = `.export-${crypto.randomUUID()}.tmp`;
         const temporary = `${target}${suffix}`;
         const temporaryPath = `${relativePath}${suffix}`;
         await this.claim(temporaryPath, "file");

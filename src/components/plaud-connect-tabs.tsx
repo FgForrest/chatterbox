@@ -4,6 +4,7 @@ import { Check, Copy } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +19,7 @@ import {
 const CONNECTOR_CHROME_URL =
     "https://github.com/riffado/connector#installation";
 
-// API contract for the Riffado Connector extension; bump `version` on both sides.
+// API contract for the connector extension; bump `version` on both sides.
 interface ConnectorBridge {
     version: number;
     connect(): Promise<{
@@ -145,6 +146,7 @@ function ConnectorPane({
     onUseToken,
 }: ConnectorPaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [isLoading, setIsLoading] = useState(false);
 
     const handleConnect = useCallback(async () => {
@@ -169,6 +171,7 @@ function ConnectorPane({
                 await toastApiError(res, {
                     fallback: "Failed to connect Plaud",
                     errorContext: "connect Plaud via connector extension",
+                    productName: name,
                 });
                 return;
             }
@@ -181,7 +184,7 @@ function ConnectorPane({
         } finally {
             setIsLoading(false);
         }
-    }, [onConnected, i18n]);
+    }, [onConnected, i18n, name]);
 
     if (!hasConnector) {
         return (
@@ -189,7 +192,7 @@ function ConnectorPane({
                 <p className="text-sm text-muted-foreground leading-relaxed">
                     {i18n("Easiest path: install the")}{" "}
                     <span className="font-medium">
-                        {i18n("Riffado Connector")}
+                        {i18n("connector extension")}
                     </span>{" "}
                     {i18n(
                         "browser extension. Sign in to Plaud the way you normally do (Google, Apple, or email) and the connector hands the session back here, no copy-pasting.",
@@ -201,12 +204,13 @@ function ConnectorPane({
                         target="_blank"
                         rel="noopener noreferrer"
                     >
-                        {i18n("Install Riffado Connector")}
+                        {i18n("Install connector extension")}
                     </a>
                 </Button>
                 <p className="text-xs text-muted-foreground/80 leading-relaxed">
                     {i18n(
-                        "Already installed? Reload this page so Riffado can detect it. Or use the",
+                        "Already installed? Reload this page so {name} can detect it. Or use the",
+                        { name },
                     )}{" "}
                     <button
                         type="button"
@@ -277,6 +281,7 @@ interface EmailCodePaneProps {
 
 function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [step, setStep] = useState<EmailStep>("email");
     const [email, setEmail] = useState("");
     const [code, setCode] = useState("");
@@ -315,6 +320,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
                 await toastApiError(res, {
                     fallback: "Failed to send code",
                     errorContext: "send Plaud verification code",
+                    productName: name,
                 });
                 return;
             }
@@ -333,7 +339,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [email, lastSentAt, i18n]);
+    }, [email, lastSentAt, i18n, name]);
 
     const handleVerify = useCallback(async () => {
         const trimmed = code.trim();
@@ -357,6 +363,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
                 await toastApiError(res, {
                     fallback: "Verification failed",
                     errorContext: "verify Plaud OTP code",
+                    productName: name,
                 });
                 return;
             }
@@ -371,7 +378,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [code, otpToken, apiBase, email, onConnected, i18n]);
+    }, [code, otpToken, apiBase, email, onConnected, i18n, name]);
 
     if (step === "email") {
         return (
@@ -579,6 +586,7 @@ interface PasteTokenPaneProps {
 
 function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [token, setToken] = useState("");
     const [serverKey, setServerKey] =
         useState<PlaudServerKey>(DEFAULT_SERVER_KEY);
@@ -615,6 +623,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                 await toastApiError(res, {
                     fallback: "Failed to connect Plaud",
                     errorContext: "connect Plaud via pasted access token",
+                    productName: name,
                 });
                 return;
             }
@@ -629,7 +638,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [token, apiBase, serverKey, onConnected, i18n]);
+    }, [token, apiBase, serverKey, onConnected, i18n, name]);
 
     return (
         <div className="space-y-4">
@@ -639,7 +648,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                     {i18n(
-                        "The Riffado Connector signs you in and captures the right long-lived token automatically — no copying, and it won't stop working after a day.",
+                        "The connector extension signs you in and captures the right long-lived token automatically — no copying, and it won't stop working after a day.",
                     )}{" "}
                     <button
                         type="button"
@@ -746,7 +755,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                                 onClick={onUseConnector}
                                 className="underline decoration-dotted underline-offset-2 hover:text-foreground transition-colors"
                             >
-                                {i18n("Use the Riffado Connector")}
+                                {i18n("Use the connector extension")}
                             </button>{" "}
                             {i18n("and it captures the right token for you.")}
                         </p>

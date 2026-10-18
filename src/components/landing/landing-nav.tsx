@@ -6,11 +6,11 @@ import { LandingNavMenu } from "@/components/landing/landing-nav-menu";
 import { LandingNavMobile } from "@/components/landing/landing-nav-mobile";
 import { MetalButton } from "@/components/metal-button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 
 export function LandingNav() {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     return (
         <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
             <div className="container relative mx-auto flex h-16 items-center justify-between px-4">

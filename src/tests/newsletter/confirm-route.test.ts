@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { queriesMock, tokenMock } = vi.hoisted(() => ({
+const { envMock, queriesMock, tokenMock } = vi.hoisted(() => ({
+    envMock: { IS_HOSTED: true },
     queriesMock: {
         confirmSubscriber: vi.fn(),
         getSubscriberById: vi.fn(),
@@ -12,6 +13,7 @@ const { queriesMock, tokenMock } = vi.hoisted(() => ({
 
 vi.mock("@/db/queries/newsletter-subscriptions", () => queriesMock);
 vi.mock("@/lib/email/unsubscribe-token", () => tokenMock);
+vi.mock("@/lib/env", () => ({ env: envMock }));
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/newsletter/confirm/route";
@@ -72,6 +74,32 @@ describe("POST /api/newsletter/confirm", () => {
         tokenMock.verifyUnsubscribeToken.mockReturnValue(false);
         const res = await POST(postRequest({ s: "sub_1", t: "bad" }));
         expect(res.status).toBe(400);
+        expect(queriesMock.confirmSubscriber).not.toHaveBeenCalled();
+    });
+});
+
+describe("/api/newsletter/confirm on self-host", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        envMock.IS_HOSTED = false;
+        tokenMock.verifyUnsubscribeToken.mockReturnValue(true);
+    });
+
+    afterEach(() => {
+        envMock.IS_HOSTED = true;
+    });
+
+    it("answers 404 to GET without reading the subscriber", async () => {
+        const res = await GET(getRequest({ s: "sub_1", t: "tok" }));
+        expect(res.status).toBe(404);
+        expect(queriesMock.getSubscriberById).not.toHaveBeenCalled();
+        expect(queriesMock.confirmSubscriber).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 to POST without confirming", async () => {
+        const res = await POST(postRequest({ s: "sub_1", t: "tok" }));
+        expect(res.status).toBe(404);
+        expect(queriesMock.getSubscriberById).not.toHaveBeenCalled();
         expect(queriesMock.confirmSubscriber).not.toHaveBeenCalled();
     });
 });

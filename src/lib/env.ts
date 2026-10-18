@@ -467,7 +467,7 @@ const baseEnvSchema = z.object({
     DOCS_REPOSITORY: z
         .string()
         .optional()
-        .transform((val) => val?.trim() || "riffado/riffado")
+        .transform((val) => val?.trim() || "FgForrest/chatterbox")
         .refine((val) => /^[\w.-]+\/[\w.-]+$/.test(val), {
             message: "DOCS_REPOSITORY must look like owner/name",
         }),
@@ -860,7 +860,7 @@ const baseEnvSchema = z.object({
                 ),
             {
                 message:
-                    "ADMIN_HOSTNAME must be a bare hostname (e.g., admin.riffado.com) -- no scheme, port, or path",
+                    "ADMIN_HOSTNAME must be a bare hostname (e.g., admin.example.com) -- no scheme, port, or path",
             },
         ),
 

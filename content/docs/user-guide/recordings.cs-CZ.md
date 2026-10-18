@@ -23,8 +23,8 @@ Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, sesk
 
 Nahrávky přibývají dvěma způsoby:
 
-- **Z Vašeho záznamníku.** Chatterbox stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
-- **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. Nová nahrávka bude vybraná vpravo a pracovní postup bude na začátku. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+- **Z Vašeho záznamníku.** Klepna stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
+- **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. Nová nahrávka bude vybraná vpravo a pracovní postup bude na začátku. U videa si Klepna ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
 
 Účet bez nahrávek přesto zobrazuje panel složek vlevo. Pomocí **Nová složka** tak můžete knihovnu uspořádat ještě před první synchronizací nebo nahráním.
 
@@ -73,9 +73,9 @@ Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá z
 
 **Vymazat** odstraní části nahrávky a zbytek ponechá:
 
-- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Chatterbox. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
+- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Klepna. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
 - **Vymazat přepisy** a **Vymazat souhrny** odstraní pouze tyto položky.
-- **Smazat všechna místní data** vymaže nahrávku z Chatterbox, ale originál zůstane ve Vašem cloudu rekordéru.
+- **Smazat všechna místní data** vymaže nahrávku z Klepna, ale originál zůstane ve Vašem cloudu rekordéru.
 - **Přemístit originál Plaud do Koše** přesune originál do Koše na Vašem cloudu rekordéru.
 - **Smazat všude** provede obojí. Akci potvrdíte opsáním názvu nahrávky.
 

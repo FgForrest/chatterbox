@@ -6,6 +6,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Panel } from "@/components/panel";
+import { useProductName } from "@/components/product-name-provider";
 import type {
     ProviderCardItem,
     ProviderScope,
@@ -111,6 +112,7 @@ export function ProviderFormDialog({
     onSuccess,
 }: ProviderFormDialogProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const presets = getVisiblePresets({ isHosted });
     const editing = mode === "edit";
     const duplicating = mode === "duplicate";
@@ -360,7 +362,8 @@ export function ProviderFormDialog({
                                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                                 <span>
                                     {i18n(
-                                        "This local provider is not reachable from the hosted app. Use a public endpoint or self-host Chatterbox.",
+                                        "This local provider is not reachable from the hosted app. Use a public endpoint or self-host {name}.",
+                                        { name },
                                     )}
                                 </span>
                             </div>

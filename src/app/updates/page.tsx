@@ -1,12 +1,16 @@
 import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { getExtracted } from "next-intl/server";
 import { LandingNav } from "@/components/landing/landing-nav";
 import { LandingFooter } from "@/components/landing-footer";
 import { NewsletterForm } from "@/components/marketing/newsletter-form";
+import { env } from "@/lib/env";
 import { marketingMetadata } from "@/lib/seo/marketing-metadata";
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
     const i18n = await getExtracted();
@@ -20,6 +24,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function UpdatesPage() {
+    if (!env.IS_HOSTED) notFound();
+
     const i18n = useExtracted();
     return (
         <div className="min-h-screen flex flex-col bg-background text-foreground">

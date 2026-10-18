@@ -108,7 +108,9 @@ describe("localized email content", () => {
 
     it("resolves semantic email subjects in Czech", () => {
         const email = createEmailTranslator("cs-CZ");
-        expect(email("test")).toBe("Testovací e-mail z Riffado");
+        expect(email("test", { name: "Klepna" })).toBe(
+            "Testovací e-mail aplikace Klepna",
+        );
     });
 });
 

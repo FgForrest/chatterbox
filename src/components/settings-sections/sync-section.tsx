@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { ToggleRow } from "@/components/settings/toggle-row";
@@ -29,6 +30,7 @@ const syncIntervalPresets = [
 
 export function SyncSection() {
     const i18n = useExtracted();
+    const name = useProductName();
     const { isLoadingSettings, isSavingSettings, setIsLoadingSettings } =
         useSettings();
     const [syncInterval, setSyncInterval] = useState(300000);
@@ -147,7 +149,8 @@ export function SyncSection() {
             <SettingsSectionHeader
                 title={i18n("Sync")}
                 description={i18n(
-                    "When and how Riffado pulls new recordings from your Plaud device.",
+                    "When and how {name} pulls new recordings from your Plaud device.",
+                    { name },
                 )}
                 icon={RefreshCw}
             />

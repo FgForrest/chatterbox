@@ -138,13 +138,13 @@ export function TransitionStartEmail({
 
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Riffado started as a simple idea: your recordings and transcripts should belong to you, and you should choose which AI touches them. That part worked. But hosted Riffado runs on real infrastructure: servers, storage for your audio, and the compute behind Mynah, the transcription service included with Hosted Pro. Free hosting was the right call for an early cohort helping us find the rough edges. Thank you for that. It's not something we can run forever on goodwill, so Hosted Pro is now a paid plan.",
+                    "{name} started as a simple idea: your recordings and transcripts should belong to you, and you should choose which AI touches them. That part worked. But hosted {name} runs on real infrastructure: servers, storage for your audio, and the compute behind Mynah, the transcription service included with Hosted Pro. Free hosting was the right call for an early cohort helping us find the rough edges. Thank you for that. It's not something we can run forever on goodwill, so Hosted Pro is now a paid plan.",
                 )}
             </Text>
 
             <Text style={emailStyles.text}>
                 {i18n(
-                    "A subscription is the most honest way to fund this: no ads, no selling your data, no lock-in. And because Riffado is one AGPL codebase, everything a Hosted Pro subscription funds ships to self-hosters too. Paying for Hosted Pro pays for the project, not just your own account.",
+                    "A subscription is the most honest way to fund this: no ads, no selling your data, no lock-in. And because {name} is one AGPL codebase, everything a Hosted Pro subscription funds ships to self-hosters too. Paying for Hosted Pro pays for the project, not just your own account.",
                 )}
             </Text>
 
@@ -162,7 +162,7 @@ export function TransitionStartEmail({
 
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Hosted Pro includes 50 GB of storage, 15 hours of Mynah transcription every month, unlimited devices, and background sync that keeps pulling recordings even when your browser is closed. Bring your own AI key if you'd rather (OpenAI, Groq, anything compatible); Riffado adds no markup when you do.",
+                    "Hosted Pro includes 50 GB of storage, 15 hours of Mynah transcription every month, unlimited devices, and background sync that keeps pulling recordings even when your browser is closed. Bring your own AI key if you'd rather (OpenAI, Groq, anything compatible); {name} adds no markup when you do.",
                 )}
             </Text>
 
@@ -235,7 +235,7 @@ export function TransitionStartEmail({
                 {i18n(
                     "Questions, or something looks off? Reply. It comes straight to me, and I read this inbox.",
                 )}{" "}
-                <br /> {i18n("Kacper, building Riffado")}
+                <br /> {i18n("Kacper, building {name}")}
             </Text>
         </EmailLayout>
     );

@@ -27,7 +27,7 @@ export function PaymentFailedEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "Your Riffado Pro payment couldn't be processed. Update your payment method to keep Pro active.",
+                "Your {name} Pro payment couldn't be processed. Update your payment method to keep Pro active.",
             )}
             footerLink={{
                 href: billingUrl,
@@ -37,7 +37,7 @@ export function PaymentFailedEmail({
             <Heading style={emailStyles.h1}>{i18n("Payment failed.")}</Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "We couldn't process this cycle's charge for your Riffado Pro subscription. This usually means the card was declined or the bank flagged the transaction.",
+                    "We couldn't process this cycle's charge for your {name} Pro subscription. This usually means the card was declined or the bank flagged the transaction.",
                 )}
             </Text>
             <Text style={emailStyles.text}>

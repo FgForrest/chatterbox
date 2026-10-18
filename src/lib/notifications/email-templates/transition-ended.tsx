@@ -62,7 +62,7 @@ export function TransitionEndedEmail({
                 </Button>
             </Section>
             <Text style={emailStyles.text}>
-                {i18n("Want to keep Riffado free? You can")}{" "}
+                {i18n("Want to keep {name} free? You can")}{" "}
                 <a href={selfHostUrl} style={emailStyles.link}>
                     {i18n("self-host")}
                 </a>{" "}

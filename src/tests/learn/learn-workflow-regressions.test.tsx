@@ -26,6 +26,7 @@ import type { Recording } from "@/types/recording";
 vi.mock("next-intl", () => ({
     useExtracted: () => (value: string | { message: string }) =>
         typeof value === "string" ? value : value.message,
+    useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({

@@ -3,6 +3,7 @@
 import { Video } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { MeetingRecorderSetup } from "@/components/meeting-recorder-setup";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { RECORDER_EXTENSION_STORE_URL } from "@/lib/recorder-extension/extension-id";
@@ -10,12 +11,14 @@ import { RECORDER_EXTENSION_STORE_URL } from "@/lib/recorder-extension/extension
 /** Meeting Recorder settings section. */
 export function RecorderSection() {
     const i18n = useExtracted();
+    const name = useProductName();
     return (
         <div className="space-y-6">
             <SettingsSectionHeader
                 title={i18n("Meeting Recorder")}
                 description={i18n(
-                    "Record browser meetings and send them to your Chatterbox library.",
+                    "Record browser meetings and send them to your {name} library.",
+                    { name },
                 )}
                 icon={Video}
             />

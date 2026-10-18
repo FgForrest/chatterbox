@@ -6,7 +6,7 @@ import {
 import { LoginForm } from "@/components/auth/login-form";
 import { SsoLogin } from "@/components/auth/sso-login";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import { isSmtpConfigured } from "@/lib/smtp";
 import { isSsoEnabled } from "@/lib/sso/config";
@@ -18,11 +18,10 @@ interface LoginPageProps {
 export default async function LoginPage({ searchParams }: LoginPageProps) {
     const i18n = await getExtracted();
     const locale = await getLocale();
-    const name = productName(locale);
-    const instanceSubtitle =
-        locale === "cs-CZ"
-            ? "Přihlaste se ke své instanci Klepna."
-            : "Sign in to your Chatterbox instance.";
+    const name = deploymentProductName(locale);
+    const instanceSubtitle = i18n("Sign in to your {name} instance.", {
+        name,
+    });
     await redirectIfAuthenticated();
 
     if (isSsoEnabled()) {
@@ -49,11 +48,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         return (
             <HostedAuthChrome
                 title={i18n("Sign in")}
-                subtitle={
-                    locale === "cs-CZ"
-                        ? "Vítejte zpět v aplikaci Klepna."
-                        : `Welcome back to ${name}.`
-                }
+                subtitle={i18n("Welcome back to {name}.", { name })}
             >
                 <LoginForm {...formProps} />
             </HostedAuthChrome>

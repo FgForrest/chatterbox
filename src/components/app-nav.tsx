@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { WaveformLogo } from "@/components/icons/waveform-logo";
 import { usePendingReviews } from "@/components/learn/review-events";
+import { useProductName } from "@/components/product-name-provider";
 import { usePendingTasks } from "@/components/tasks/use-pending-tasks";
-import { productName } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 export function AppNav({ className }: { className?: string }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const name = useProductName();
     const pathname = usePathname();
     // Learn reviews waiting for the viewer: a badge on the Almanac, which
     // lists them. Nothing shows where Learn is unavailable (the count is 0).
@@ -37,7 +38,7 @@ export function AppNav({ className }: { className?: string }) {
         <div className={cn("flex min-w-0 items-center gap-6", className)}>
             <Link
                 href="/dashboard"
-                aria-label={`${productName(locale)} ${locale === "cs-CZ" ? "domů" : "home"}`}
+                aria-label={`${name} ${locale === "cs-CZ" ? "domů" : "home"}`}
                 className="hidden shrink-0 text-primary transition-opacity hover:opacity-80 md:block"
             >
                 <WaveformLogo className="h-10 w-9" />

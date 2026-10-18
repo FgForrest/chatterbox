@@ -1,9 +1,9 @@
 ---
 title: Almanach
-description: Lidé a věci, které Chatterbox zná, jejich přezdívky a fakta.
+description: Lidé a věci, které Klepna zná, jejich přezdívky a fakta.
 ---
 
-Almanach obsahuje vše, co Chatterbox ví o lidech a věcech, o kterých Vaše nahrávky hovoří: kdo je kdo, na čem kdo pracuje, jak se jmenuje projekt a jak bývá často špatně rozuměn. Přepis, Naučit se, souhrny a úkoly z něj vycházejí.
+Almanach obsahuje vše, co Klepna ví o lidech a věcech, o kterých Vaše nahrávky hovoří: kdo je kdo, na čem kdo pracuje, jak se jmenuje projekt a jak bývá často špatně rozuměn. Přepis, Naučit se, souhrny a úkoly z něj vycházejí.
 
 Obsahuje čtyři karty: **Lidé**, **Věci**, **Slovník** a **Revize**.
 
@@ -21,9 +21,9 @@ Kliknutím na osobu otevřete její stránku:
 
 - **Také známý jako**: přezdívky a jiné varianty jmen. Vyhledávání podle nich osobu najde a Naučit se je rozpoznává v přepisech.
 - **Poznámky**: cokoli si chcete zapamatovat. U organizačních osob jsou poznámky Vaše vlastní.
-- **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli Operations director*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Chatterbox odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
+- **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli Operations director*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Klepna odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
 - **Nahrávky**: kde tato osoba mluví.
-- **To jsem já** určuje aplikaci Chatterbox, která osoba jste Vy. Naučit se pak ví, kdo nahrávku vytvořil, a Vaše úkoly se zobrazují pod záložkou **Moje**.
+- **To jsem já** určuje aplikaci Klepna, která osoba jste Vy. Naučit se pak ví, kdo nahrávku vytvořil, a Vaše úkoly se zobrazují pod záložkou **Moje**.
 - **Přejmenovat**, **Sloučit do…** (pokud dvě položky představují tutéž osobu) a **Smazat**.
 
 <span id="things" />

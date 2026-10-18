@@ -14,13 +14,12 @@ description: Install Chatterbox on your own infrastructure with Docker Compose.
 ## Install
 
 Every release on GitHub attaches the `docker-compose.yml` and the
-`env.example` it was built with. Replace `<owner>/<repository>` with the
-repository you run:
+`env.example` it was built with:
 
 ```bash
 mkdir chatterbox && cd chatterbox
-curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
-curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
+curl -fLO https://github.com/FgForrest/chatterbox/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/FgForrest/chatterbox/releases/latest/download/env.example -o .env
 ```
 
 Generate the secrets and put them into `.env`:
@@ -49,8 +48,8 @@ the stored recordings, transcripts and credentials cannot be read.
 Releases are numbered `YYYY.N`: the year, then the release number within
 that year (`2026.1`, `2026.2`, ...). The `latest` image tag always points
 at the newest release; to stay on one release, download the assets of that
-release instead of `latest` and set `RIFFADO_VERSION` in `.env` to that
-version.
+release instead of `latest` and set `CHATTERBOX_VERSION` in `.env` to that
+version. The deprecated `RIFFADO_VERSION` remains a fallback for one release.
 
 Upgrade with `docker compose pull && docker compose up -d`. Database
 migrations run when the app container starts.

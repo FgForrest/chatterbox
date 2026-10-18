@@ -191,7 +191,7 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
 
     const options: ServerOptions = {
         name: config.hostname,
-        banner: "Klepna mail receiver",
+        banner: "Mail receiver",
         secure: false,
         key: config.tlsKey,
         cert: config.tlsCert,

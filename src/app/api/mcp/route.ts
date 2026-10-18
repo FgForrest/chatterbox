@@ -1,7 +1,9 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import { deniedOnAdminHost } from "@/lib/hosted/hostname-gate";
 import { readBoundedJson } from "@/lib/http/bounded-json";
+import { defaultLocale } from "@/lib/i18n/config";
 import { recordMcpAccess } from "@/lib/mcp/audit";
 import {
     type CallerRefusal,
@@ -33,9 +35,9 @@ type Admission =
 type GenuineToken = Exclude<McpTokenCheck, { kind: "invalid" }>;
 
 const REFUSAL_MESSAGES: Partial<Record<Refusal, string>> = {
-    "no-account": "Sign in to Chatterbox once first",
-    "no-roles": "This token carries no Chatterbox MCP permission",
-    "no-access": "Your access to Chatterbox has been withdrawn",
+    "no-account": `Sign in to ${deploymentProductName(defaultLocale)} once first`,
+    "no-roles": `This token carries no ${deploymentProductName(defaultLocale)} MCP permission`,
+    "no-access": `Your access to ${deploymentProductName(defaultLocale)} has been withdrawn`,
 };
 
 function notFound(): Response {

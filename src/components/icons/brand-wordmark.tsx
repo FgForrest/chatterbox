@@ -1,6 +1,6 @@
 import { useLocale } from "next-intl";
 import type { HTMLAttributes } from "react";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { cn } from "@/lib/utils";
 import { WaveformLogo } from "./waveform-logo";
 
@@ -9,7 +9,7 @@ export function BrandWordmark({
     className,
     ...props
 }: HTMLAttributes<HTMLSpanElement>) {
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     return (
         <span
             {...props}
