@@ -38,12 +38,12 @@ import {
     buildPrompt,
     chatCompletion,
     claudeMcpConfig,
-    diagnosticTail,
     MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseCliError,
     parseCodexUsage,
     parseLearnRequest,
-    redact,
+    protectedDiagnostic,
     resolveBackend,
     schemaForCodex,
     sanitizeForLog,
@@ -136,6 +136,8 @@ async function runClaude(model, prompt, learn, signal) {
         );
         return parseClaudeEnvelope(stdout, CLAUDE_BIN, {
             structured: Boolean(learn.schema),
+            prompt,
+            secrets: learn.mcp ? [learn.mcp.token] : [],
         });
     } finally {
         await rm(dir, { recursive: true, force: true });
@@ -258,16 +260,20 @@ function execCli(
                 return;
             }
             if (code !== 0) {
-                // Codex DOES echo the prompt to stderr -- the original
-                // assumption here was wrong, and shipped a 502 body
-                // carrying transcript text. diagnosticTail drops any
-                // line that came from the prompt.
-                // And never the run token, should a CLI print it.
-                const tail = redact(diagnosticTail(stderr, stdinText), secrets);
+                const extracted =
+                    parseCliError(stdout, stdinText, secrets) ??
+                    parseCliError(stderr, stdinText, secrets);
+                const tail =
+                    extracted?.message ||
+                    protectedDiagnostic(stderr, stdinText, secrets);
                 reject(
                     new BridgeError(
-                        502,
+                        extracted?.status ?? 502,
                         `${bin} exited with code ${code}${tail ? `: ${tail}` : ""}`,
+                        {
+                            retryAfter: extracted?.retryAfter ?? null,
+                            report: true,
+                        },
                     ),
                 );
                 return;
@@ -353,20 +359,24 @@ function readBody(req) {
     });
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
     const body = JSON.stringify(payload);
     res.writeHead(status, {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body),
+        ...headers,
     });
     res.end(body);
 }
 
 /** OpenAI-shaped error, so the `openai` SDK surfaces a usable message. */
-function sendError(res, status, message) {
-    sendJson(res, status, {
-        error: { message, type: "agent_bridge_error", code: status },
-    });
+function sendError(res, status, message, retryAfter = null) {
+    sendJson(
+        res,
+        status,
+        { error: { message, type: "agent_bridge_error", code: status } },
+        retryAfter ? { "Retry-After": retryAfter } : {},
+    );
 }
 
 async function handleChatCompletions(req, res) {
@@ -467,9 +477,19 @@ const server = createServer(async (req, res) => {
         const status = err instanceof BridgeError ? err.status : 500;
         const message =
             err instanceof BridgeError ? err.message : "internal bridge error";
-        if (status >= 500) console.error("[agent-bridge]", err);
-        if (!res.headersSent) sendError(res, status, message);
-        else res.end();
+        if (err instanceof BridgeError && err.report) {
+            console.error(`[agent-bridge] ${message}`);
+        } else if (status >= 500) {
+            console.error("[agent-bridge]", err);
+        }
+        if (!res.headersSent) {
+            sendError(
+                res,
+                status,
+                message,
+                err instanceof BridgeError ? err.retryAfter : null,
+            );
+        } else res.end();
     }
 });
 
