@@ -147,6 +147,65 @@ describe("enhancement-only providers cannot become the transcription default", (
             expect(db.transaction).toHaveBeenCalledTimes(1);
         });
 
+        it("rolls back provider creation when the in-transaction default write fails", async () => {
+            const createdRows: { id: string }[] = [];
+            const tx = {
+                update: () => ({
+                    set: () => ({
+                        where: vi.fn().mockResolvedValue(undefined),
+                    }),
+                }),
+                insert: () => ({
+                    values: () => ({
+                        returning: vi.fn().mockImplementation(async () => {
+                            const row = {
+                                id: "rolled-back-provider",
+                                provider: "OpenAI",
+                                baseUrl: null,
+                                defaultModel: null,
+                            };
+                            createdRows.push(row);
+                            return [row];
+                        }),
+                    }),
+                }),
+            };
+            (db.transaction as Mock).mockImplementationOnce(
+                async (run: (transaction: typeof tx) => Promise<unknown>) => {
+                    try {
+                        return await run(tx);
+                    } catch (error) {
+                        createdRows.length = 0;
+                        throw error;
+                    }
+                },
+            );
+            setDefaultProvider.mockRejectedValueOnce(
+                new Error("default write failed"),
+            );
+            const consoleError = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => {});
+
+            const response = await addProvider(
+                jsonRequest({
+                    provider: "OpenAI",
+                    apiKey: "secret",
+                    isDefaultEnhancement: true,
+                }),
+            );
+
+            expect(response.status).toBe(500);
+            expect(createdRows).toEqual([]);
+            expect(setDefaultProvider).toHaveBeenCalledWith(
+                "user-1",
+                "summary",
+                "rolled-back-provider",
+                { transaction: tx },
+            );
+            consoleError.mockRestore();
+        });
+
         it("still rejects a transcription-only provider for enhancements", async () => {
             const response = await addProvider(
                 jsonRequest({

@@ -23,6 +23,7 @@ import type {
     ProcessingFolderSummary,
     ProcessingResolution,
 } from "@/lib/pipeline/categorization-presentation";
+import { accountDefaultUnavailableApplies } from "@/lib/profiles/default-availability";
 
 export type CategorizePanelData = CategorizationPanelPresentation;
 
@@ -65,11 +66,22 @@ function resolutionChoice(resolution: ProcessingResolution): string {
     return resolution.manualOnly ? MANUAL_ONLY : resolution.profile.id;
 }
 
+function unresolvedAccountDefault(data: CategorizePanelData): boolean {
+    const higherPrecedenceResolved =
+        data.currentProfile !== null ||
+        (data.resolution.status === "resolved" &&
+            data.resolution.source === "folder");
+    return accountDefaultUnavailableApplies(
+        data.defaultProfileUnavailable,
+        higherPrecedenceResolved,
+    );
+}
+
 function initialProfileChoice(data: CategorizePanelData): string {
     if (data.currentProfile) {
         return data.currentManualOnly ? MANUAL_ONLY : data.currentProfile.id;
     }
-    if (data.defaultProfileUnavailable) return UNAVAILABLE_DEFAULT;
+    if (unresolvedAccountDefault(data)) return UNAVAILABLE_DEFAULT;
     if (
         data.followsOrganizationDefault &&
         data.organizationDefault &&
@@ -142,6 +154,7 @@ export function CategorizePanel({
     const [creating, setCreating] = useState(false);
     const [newFolderOpen, setNewFolderOpen] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
+    const defaultProfileUnavailable = unresolvedAccountDefault(data);
     const roots = folders.filter(
         (folder) =>
             folder.parentId === null &&
@@ -576,7 +589,7 @@ export function CategorizePanel({
                                         })}
                                     </SelectItem>
                                 )}
-                                {data.defaultProfileUnavailable && (
+                                {defaultProfileUnavailable && (
                                     <SelectItem
                                         value={UNAVAILABLE_DEFAULT}
                                         disabled
@@ -603,7 +616,7 @@ export function CategorizePanel({
                             </SelectContent>
                         </Select>
                         <p className="text-xs text-muted-foreground">
-                            {data.defaultProfileUnavailable && (
+                            {defaultProfileUnavailable && (
                                 <>
                                     {i18n(
                                         "Your selected Organization profile is unavailable. Choose another default.",

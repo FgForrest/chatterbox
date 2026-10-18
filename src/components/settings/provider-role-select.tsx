@@ -200,6 +200,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         candidate?.source === "member-fallback" ? candidateProvider : undefined;
 
     const save = async (id: string) => {
+        if (id === NOT_CHOSEN && !selectedId) return;
         setSaving(true);
         try {
             const clear =
@@ -297,7 +298,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                         !selectedId &&
                         !organizationDefaultAvailable &&
                         automaticProvider && (
-                            <SelectItem value={NOT_CHOSEN}>
+                            <SelectItem value={NOT_CHOSEN} disabled>
                                 {i18n("Automatic: {provider}", {
                                     provider: providerLabel(automaticProvider),
                                 })}
