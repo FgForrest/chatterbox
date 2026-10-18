@@ -121,6 +121,11 @@ export default async function RecordingDetailPage({
                 startTime: recording.occurredAt.toISOString(),
                 waveformPeaks,
                 audioReaped: recording.audioReapedAt !== null,
+                audioReapedAt: recording.audioReapedAt?.toISOString() ?? null,
+                transcriptReapedAt:
+                    recording.contentReapedAt?.toISOString() ?? null,
+                summaryReapedAt:
+                    recording.summaryReapedAt?.toISOString() ?? null,
                 hasTranscript: transcriptRows.length > 0,
             }}
             initialPlaybackSpeed={settingsRow?.defaultPlaybackSpeed ?? 1.0}

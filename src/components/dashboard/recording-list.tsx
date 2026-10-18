@@ -49,6 +49,7 @@ interface RecordingListProps {
     currentRecording: Recording | null;
     pendingUploads: PendingUpload[];
     inFlightActions: Map<string, "transcribing" | "summarizing">;
+    sharedItemIds?: ReadonlySet<string>;
     onSelect: (recording: Recording) => void;
     onDelete: (recording: Recording) => Promise<void>;
     initialDateTimeFormat: DateTimeFormat;
@@ -98,6 +99,7 @@ export function RecordingList({
     currentRecording,
     pendingUploads,
     inFlightActions,
+    sharedItemIds,
     onSelect,
     onDelete,
     initialDateTimeFormat,
@@ -468,6 +470,9 @@ export function RecordingList({
                                         dateTimeFormat={dateTimeFormat}
                                         onSelect={onSelect}
                                         onDelete={onDelete}
+                                        shared={sharedItemIds?.has(
+                                            recording.id,
+                                        )}
                                         registerRef={registerRowRef}
                                     />
                                 ))}

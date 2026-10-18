@@ -43,10 +43,12 @@ type EraseOperation =
     | "audio"
     | "transcript"
     | "summary"
+    | "learn"
     | "local"
     | "plaud"
     | "everywhere"
-    | "restore-audio";
+    | "restore-audio"
+    | "mail-delete";
 
 interface EraseRecordingMenuProps {
     recording: Recording;
@@ -55,13 +57,20 @@ interface EraseRecordingMenuProps {
      * change, so erasing any of it takes it out of the Organization first.
      */
     shared?: boolean;
-    onDeleteLocal: (recording: Recording) => Promise<void>;
+    onDeleteLocal?: (recording: Recording) => Promise<void>;
+    onDeleteMail?: (mail: Recording) => Promise<void>;
     onChanged: () => void;
 }
 
 async function postOperation(
     recordingId: string,
-    scope: "audio" | "transcript" | "summary" | "plaud" | "restore-audio",
+    scope:
+        | "audio"
+        | "transcript"
+        | "summary"
+        | "learn"
+        | "plaud"
+        | "restore-audio",
     withdraw = false,
 ): Promise<void> {
     const response = await fetch(`/api/recordings/${recordingId}/erase`, {
@@ -77,10 +86,89 @@ async function postOperation(
     }
 }
 
-export function EraseRecordingMenu({
+export function MailDeleteDialog({
+    mail,
+    shared = false,
+    open,
+    onOpenChange,
+    onDelete,
+}: {
+    mail: Recording;
+    shared?: boolean;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onDelete: (mail: Recording) => Promise<void>;
+}) {
+    const i18n = useExtracted();
+    const [working, setWorking] = useState(false);
+
+    const execute = async () => {
+        setWorking(true);
+        try {
+            await onDelete(mail);
+            toast.success(i18n("Mail deleted."));
+            onOpenChange(false);
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("The mail could not be deleted."),
+            );
+        } finally {
+            setWorking(false);
+        }
+    };
+
+    return (
+        <Dialog
+            open={open}
+            onOpenChange={(next) => {
+                if (!working) onOpenChange(next);
+            }}
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>{i18n("Delete this mail?")}</DialogTitle>
+                    <DialogDescription>
+                        {i18n(
+                            "The message, its attachments and anything made from it are removed for good.",
+                        )}
+                    </DialogDescription>
+                </DialogHeader>
+                {shared && (
+                    <p className="text-sm font-medium">
+                        {i18n(
+                            "This mail is shared with the Organization. It will leave the Organization first, and colleagues will no longer see it.",
+                        )}
+                    </p>
+                )}
+                <DialogFooter>
+                    <Button
+                        variant="outline"
+                        onClick={() => onOpenChange(false)}
+                        disabled={working}
+                    >
+                        {i18n("Cancel")}
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        onClick={() => void execute()}
+                        disabled={working}
+                    >
+                        {working && <Loader2 className="size-4 animate-spin" />}
+                        {i18n("Delete mail")}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+export function ItemEraseMenu({
     recording,
     shared = false,
     onDeleteLocal,
+    onDeleteMail,
     onChanged,
 }: EraseRecordingMenuProps) {
     const i18n = useExtracted();
@@ -88,6 +176,7 @@ export function EraseRecordingMenu({
     const [operation, setOperation] = useState<EraseOperation | null>(null);
     const [confirmText, setConfirmText] = useState("");
     const [working, setWorking] = useState(false);
+    const isMail = recording.kind === "mail";
     const isPlaudRecording = recording.deviceSn !== "local";
     const operationCopy: Record<
         Exclude<EraseOperation, "restore-audio">,
@@ -111,12 +200,26 @@ export function EraseRecordingMenu({
             success: i18n("Transcripts erased"),
         },
         summary: {
-            title: i18n("Erase all summaries for this recording?"),
+            title: isMail
+                ? i18n("Erase this mail's summary?")
+                : i18n("Erase all summaries for this recording?"),
+            description: isMail
+                ? i18n(
+                      "The generated summary and tasks derived only from it will be removed. The message stays available. You can summarize it again manually.",
+                  )
+                : i18n(
+                      "All Plaud and custom summaries and exported summary files for the selected recording will be removed. Its transcripts and all other recordings remain unchanged.",
+                  ),
+            action: isMail ? i18n("Erase summary") : i18n("Erase summaries"),
+            success: isMail ? i18n("Summary erased") : i18n("Summaries erased"),
+        },
+        learn: {
+            title: i18n("Erase Learn results for this item?"),
             description: i18n(
-                "All Plaud and custom summaries and exported summary files for the selected recording will be removed. Its transcripts and all other recordings remain unchanged.",
+                "Removes what Learn found in this item and its review history. What you already added to the Almanac stays.",
             ),
-            action: i18n("Erase summaries"),
-            success: i18n("Summaries erased"),
+            action: i18n("Erase Learn results"),
+            success: i18n("Learn results erased"),
         },
         local: {
             title: i18n("Delete all local data for this recording?"),
@@ -145,6 +248,14 @@ export function EraseRecordingMenu({
             action: i18n("Delete everywhere"),
             success: i18n("Recording deleted everywhere"),
         },
+        "mail-delete": {
+            title: i18n("Delete this mail?"),
+            description: i18n(
+                "The message, its attachments and anything made from it are removed for good.",
+            ),
+            action: i18n("Delete mail"),
+            success: i18n("Mail deleted."),
+        },
     };
 
     const selectOperation = (next: EraseOperation) => {
@@ -170,12 +281,20 @@ export function EraseRecordingMenu({
     };
 
     const execute = async () => {
-        if (!operation || operation === "restore-audio") return;
+        if (
+            !operation ||
+            operation === "restore-audio" ||
+            operation === "mail-delete"
+        ) {
+            return;
+        }
         setWorking(true);
         try {
             if (operation === "local") {
+                if (!onDeleteLocal) return;
                 await onDeleteLocal(recording);
             } else if (operation === "everywhere") {
+                if (!onDeleteLocal) return;
                 await postOperation(recording.id, "plaud");
                 await onDeleteLocal(recording);
             } else {
@@ -200,12 +319,18 @@ export function EraseRecordingMenu({
     };
 
     const copy =
-        operation && operation !== "restore-audio"
+        operation &&
+        operation !== "restore-audio" &&
+        operation !== "mail-delete"
             ? operationCopy[operation]
             : null;
     const requiresTitle = operation === "everywhere";
     // Everything but the Plaud original is the recording itself.
-    const withdraws = shared && operation !== null && operation !== "plaud";
+    const withdraws =
+        shared &&
+        operation !== null &&
+        operation !== "plaud" &&
+        operation !== "restore-audio";
     // What the owner's retention will delete matters only for a recording
     // that stays: not one deleted outright.
     const keepsRecording =
@@ -224,7 +349,11 @@ export function EraseRecordingMenu({
                         variant="outline"
                         className="h-11 gap-2.5 rounded-lg px-4 text-muted-foreground hover:text-destructive"
                         disabled={working}
-                        aria-label={i18n("Erase recording artifacts")}
+                        aria-label={
+                            isMail
+                                ? i18n("Erase mail artifacts")
+                                : i18n("Erase recording artifacts")
+                        }
                     >
                         {working ? (
                             <Loader2 className="size-4 animate-spin" />
@@ -238,66 +367,121 @@ export function EraseRecordingMenu({
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuLabel>
-                        {i18n("Local artifacts")}
-                    </DropdownMenuLabel>
-                    {recording.audioReaped && isPlaudRecording ? (
-                        <DropdownMenuItem
-                            // Shared, only the organization account changes it.
-                            disabled={shared}
-                            onSelect={() => void restoreAudio()}
-                        >
-                            <RotateCcw className="size-4" />{" "}
-                            {i18n("Restore audio from Plaud")}
-                        </DropdownMenuItem>
-                    ) : (
-                        <DropdownMenuItem
-                            disabled={recording.audioReaped}
-                            onSelect={() => selectOperation("audio")}
-                        >
-                            <FileAudio className="size-4" />{" "}
-                            {i18n("Erase local audio")}
-                        </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem
-                        disabled={recording.hasTranscript === false}
-                        onSelect={() => selectOperation("transcript")}
-                    >
-                        <FileText className="size-4" />{" "}
-                        {i18n("Erase transcripts")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                        disabled={recording.hasSummary === false}
-                        onSelect={() => selectOperation("summary")}
-                    >
-                        <Sparkles className="size-4" />{" "}
-                        {i18n("Erase summaries")}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => selectOperation("local")}>
-                        <FolderX className="size-4" />{" "}
-                        {i18n("Delete all local data")}
-                    </DropdownMenuItem>
-                    {isPlaudRecording && (
+                    {isMail ? (
                         <>
                             <DropdownMenuItem
-                                onSelect={() => selectOperation("plaud")}
+                                disabled={recording.hasSummary === false}
+                                onSelect={() => selectOperation("summary")}
                             >
-                                <CloudOff className="size-4" />{" "}
-                                {i18n("Move Plaud original to Trash")}
+                                <Sparkles className="size-4" />{" "}
+                                {i18n("Erase summary")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => selectOperation("learn")}
+                            >
+                                <FileText className="size-4" />{" "}
+                                {i18n("Erase Learn results")}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 variant="destructive"
-                                onSelect={() => selectOperation("everywhere")}
+                                onSelect={() => selectOperation("mail-delete")}
                             >
                                 <Trash2 className="size-4" />{" "}
-                                {i18n("Delete everywhere")}
+                                {i18n("Delete mail")}
                             </DropdownMenuItem>
+                        </>
+                    ) : (
+                        <>
+                            <DropdownMenuLabel>
+                                {i18n("Local artifacts")}
+                            </DropdownMenuLabel>
+                            {recording.audioReaped && isPlaudRecording ? (
+                                <DropdownMenuItem
+                                    // Shared, only the organization account changes it.
+                                    disabled={shared}
+                                    onSelect={() => void restoreAudio()}
+                                >
+                                    <RotateCcw className="size-4" />{" "}
+                                    {i18n("Restore audio from Plaud")}
+                                </DropdownMenuItem>
+                            ) : (
+                                <DropdownMenuItem
+                                    disabled={recording.audioReaped}
+                                    onSelect={() => selectOperation("audio")}
+                                >
+                                    <FileAudio className="size-4" />{" "}
+                                    {i18n("Erase local audio")}
+                                </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem
+                                disabled={recording.hasTranscript === false}
+                                onSelect={() => selectOperation("transcript")}
+                            >
+                                <FileText className="size-4" />{" "}
+                                {i18n("Erase transcripts")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                disabled={recording.hasSummary === false}
+                                onSelect={() => selectOperation("summary")}
+                            >
+                                <Sparkles className="size-4" />{" "}
+                                {i18n("Erase summaries")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => selectOperation("learn")}
+                            >
+                                <FileText className="size-4" />{" "}
+                                {i18n("Erase Learn results")}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                onSelect={() => selectOperation("local")}
+                            >
+                                <FolderX className="size-4" />{" "}
+                                {i18n("Delete all local data")}
+                            </DropdownMenuItem>
+                            {isPlaudRecording && (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={() =>
+                                            selectOperation("plaud")
+                                        }
+                                    >
+                                        <CloudOff className="size-4" />{" "}
+                                        {i18n("Move Plaud original to Trash")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        onSelect={() =>
+                                            selectOperation("everywhere")
+                                        }
+                                    >
+                                        <Trash2 className="size-4" />{" "}
+                                        {i18n("Delete everywhere")}
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                         </>
                     )}
                 </DropdownMenuContent>
             </DropdownMenu>
+
+            {isMail && onDeleteMail && (
+                <MailDeleteDialog
+                    mail={recording}
+                    shared={shared}
+                    open={operation === "mail-delete"}
+                    onOpenChange={(open) => {
+                        if (!open) setOperation(null);
+                    }}
+                    onDelete={async (mail) => {
+                        await onDeleteMail(mail);
+                        onChanged();
+                    }}
+                />
+            )}
 
             <Dialog
                 open={copy !== null}
@@ -316,9 +500,13 @@ export function EraseRecordingMenu({
                             </DialogHeader>
                             {withdraws && (
                                 <p className="text-sm font-medium">
-                                    {i18n(
-                                        "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
-                                    )}
+                                    {isMail
+                                        ? i18n(
+                                              "This mail is shared with the Organization. It will leave the Organization first, and colleagues will no longer see it.",
+                                          )
+                                        : i18n(
+                                              "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
+                                          )}
                                 </p>
                             )}
                             {keepsRecording && (
@@ -374,3 +562,5 @@ export function EraseRecordingMenu({
         </>
     );
 }
+
+export { ItemEraseMenu as EraseRecordingMenu };

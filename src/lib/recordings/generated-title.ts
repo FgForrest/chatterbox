@@ -19,6 +19,7 @@ import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type GeneratedTitleStoreOptions = {
     skipIfTitleStepDoneForFence?: boolean;
+    actsForOrganization?: boolean;
 };
 
 async function readTitleProcessingInTx(tx: Tx, userId: string, itemId: string) {
@@ -198,6 +199,7 @@ export async function storeGeneratedTitle(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
+                actsForOrganization: options?.actsForOrganization,
             })
         ) {
             return { stored: false, advance: false };
@@ -300,6 +302,7 @@ export async function storeGeneratedMailTitle(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
+                actsForOrganization: options?.actsForOrganization,
             })
         ) {
             return { stored: false, advance: false };

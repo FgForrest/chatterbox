@@ -116,12 +116,9 @@ export function ProcessingFolderRow({
                             <span className="inline-flex items-center gap-1.5 px-2.5 text-foreground">
                                 <Users
                                     className="size-3.5 text-primary"
-                                    aria-hidden
+                                    aria-label={i18n("Organization")}
                                 />
                                 <span>{intent.path}</span>
-                                <span className="text-muted-foreground">
-                                    · {i18n("Organization")}
-                                </span>
                             </span>
                             {intent.confirmationRequired &&
                                 !intent.confirmed && (
@@ -176,14 +173,17 @@ export function ProcessingFolderRow({
                                     />
                                     <span className="truncate">
                                         {processing.profile.name}
-                                        {processing.profile.scope ===
-                                        "organization"
-                                            ? ` · ${i18n("Organization")}`
-                                            : ""}
                                         {processing.manualOnly
                                             ? ` · ${i18n("Nothing automatic")}`
                                             : ""}
                                     </span>
+                                    {processing.profile.scope ===
+                                        "organization" && (
+                                        <Users
+                                            className="size-3.5 shrink-0 text-primary"
+                                            aria-label={i18n("Organization")}
+                                        />
+                                    )}
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
@@ -206,9 +206,14 @@ export function ProcessingFolderRow({
                                             >
                                                 {profile.name}
                                                 {profile.scope ===
-                                                "organization"
-                                                    ? ` · ${i18n("Organization")}`
-                                                    : ""}
+                                                    "organization" && (
+                                                    <Users
+                                                        className="ml-auto size-3.5 text-primary"
+                                                        aria-label={i18n(
+                                                            "Organization",
+                                                        )}
+                                                    />
+                                                )}
                                             </DropdownMenuRadioItem>
                                         ))}
                                         <DropdownMenuSeparator />

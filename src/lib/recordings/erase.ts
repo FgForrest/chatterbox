@@ -5,6 +5,8 @@ import {
     aiEnhancements,
     asyncJobs,
     chatterItems,
+    learnDismissals,
+    learnRuns,
     plaudConnections,
     recordings,
     transcriptions,
@@ -418,6 +420,195 @@ export async function eraseLocalArtifact(
             500,
         );
     }
+}
+
+/** Erase a mail's generated summary and tasks derived only from it. */
+export async function eraseMailSummary(
+    userId: string,
+    itemId: string,
+    options: { withdraw?: boolean } = {},
+): Promise<void> {
+    const [item] = await db
+        .select({ id: chatterItems.id })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                eq(chatterItems.userId, userId),
+                eq(chatterItems.kind, "mail"),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!item) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
+    }
+
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            const scopes = new Set<string>();
+            if (orgUserId && options.withdraw) await lockOrgTree(tx);
+            await lockItemTaskGraphInTx(tx, {
+                itemId,
+                ownerUserId: userId,
+            });
+            const [locked] = await tx
+                .select({ deletedAt: chatterItems.deletedAt })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                        eq(chatterItems.kind, "mail"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked || locked.deletedAt) {
+                throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
+            }
+            if (orgUserId && (await isRecordingShared(itemId, orgUserId, tx))) {
+                if (!options.withdraw) throw recordingShared();
+                for (const scope of await withdrawRecordingInTx(
+                    tx,
+                    orgUserId,
+                    itemId,
+                    userId,
+                )) {
+                    scopes.add(scope);
+                }
+                withdrew = true;
+            }
+            await cancelArtifactJobs(tx, userId, itemId, ["summary"], now);
+            await tx
+                .delete(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, itemId),
+                        eq(aiEnhancements.userId, userId),
+                    ),
+                );
+            await dropTasksWithoutSummaryInTx(tx, {
+                recordingId: itemId,
+                ownerUserId: userId,
+            });
+            await tx
+                .update(chatterItems)
+                .set({ summaryReapedAt: now, updatedAt: now })
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                );
+            await bumpScopeInTx(tx, scopes);
+        }),
+    );
+    if (withdrew) await orgTreeChanged();
+}
+
+/** Remove one item's Learn run history without changing accepted Almanac data. */
+export async function eraseLearnResults(
+    userId: string,
+    itemId: string,
+    options: { withdraw?: boolean } = {},
+): Promise<void> {
+    const [item] = await db
+        .select({ id: chatterItems.id })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                eq(chatterItems.userId, userId),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!item) {
+        throw new AppError(
+            ErrorCode.RECORDING_NOT_FOUND,
+            "Recording not found",
+            404,
+        );
+    }
+
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            const scopes = new Set<string>();
+            if (orgUserId && options.withdraw) await lockOrgTree(tx);
+            const [locked] = await tx
+                .select({ deletedAt: chatterItems.deletedAt })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked || locked.deletedAt) {
+                throw new AppError(
+                    ErrorCode.RECORDING_NOT_FOUND,
+                    "Recording not found",
+                    404,
+                );
+            }
+            if (orgUserId && (await isRecordingShared(itemId, orgUserId, tx))) {
+                if (!options.withdraw) throw recordingShared();
+                for (const scope of await withdrawRecordingInTx(
+                    tx,
+                    orgUserId,
+                    itemId,
+                    userId,
+                )) {
+                    scopes.add(scope);
+                }
+                withdrew = true;
+            }
+            await cancelArtifactJobs(
+                tx,
+                userId,
+                itemId,
+                ["learn.run", "learn.release", "learn.correct"],
+                now,
+            );
+            await tx
+                .delete(learnRuns)
+                .where(
+                    and(
+                        eq(learnRuns.itemId, itemId),
+                        eq(learnRuns.userId, userId),
+                    ),
+                );
+            await tx
+                .delete(learnDismissals)
+                .where(
+                    and(
+                        eq(learnDismissals.itemId, itemId),
+                        eq(learnDismissals.userId, userId),
+                    ),
+                );
+            await tx
+                .update(chatterItems)
+                .set({ summaryDueAt: null, updatedAt: now })
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                );
+            await bumpScopeInTx(tx, scopes);
+        }),
+    );
+    if (withdrew) await orgTreeChanged();
 }
 
 export async function allowManualArtifactGeneration(

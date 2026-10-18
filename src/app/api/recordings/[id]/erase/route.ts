@@ -3,16 +3,26 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
+    eraseLearnResults,
     eraseLocalArtifact,
+    eraseMailSummary,
     movePlaudRecordingToTrash,
     restoreAudioFromPlaud,
 } from "@/lib/recordings/erase";
+import { requireRecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 
 type IdContext = { params: Promise<{ id: string }> };
 
 const requestSchema = z.object({
-    scope: z.enum(["audio", "transcript", "summary", "plaud", "restore-audio"]),
+    scope: z.enum([
+        "audio",
+        "transcript",
+        "summary",
+        "learn",
+        "plaud",
+        "restore-audio",
+    ]),
     /**
      * The owner agreed that erasing a shared recording takes it out of the
      * Organization first; without it that erase is refused (409).
@@ -30,13 +40,22 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         throw new AppError(ErrorCode.INVALID_INPUT, "Invalid erase scope", 400);
     }
 
+    const access = await requireRecordingView(session.user.id, id, "private", {
+        kinds: ["audio", "mail"],
+    });
+    const options = { withdraw: parsed.data.withdraw === true };
+
     if (parsed.data.scope === "plaud") {
         await movePlaudRecordingToTrash(session.user.id, id);
     } else if (parsed.data.scope === "restore-audio") {
         await restoreAudioFromPlaud(session.user.id, id);
+    } else if (parsed.data.scope === "learn") {
+        await eraseLearnResults(session.user.id, id, options);
+    } else if (parsed.data.scope === "summary" && access.kind === "mail") {
+        await eraseMailSummary(session.user.id, id, options);
     } else {
         await eraseLocalArtifact(session.user.id, id, parsed.data.scope, {
-            withdraw: parsed.data.withdraw === true,
+            ...options,
         });
     }
 

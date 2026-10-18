@@ -690,14 +690,21 @@ export function Workstation({
                 setCurrentRecording(next);
             }
             try {
-                const res = await fetch(`/api/recordings/${id}`, {
-                    method: "DELETE",
-                });
+                const res = await fetch(
+                    recording.kind === "mail"
+                        ? `/api/mail/${id}`
+                        : `/api/recordings/${id}`,
+                    {
+                        method: "DELETE",
+                    },
+                );
                 if (!res.ok) throw new Error(i18n("Delete failed"));
                 if (posthog.__loaded) {
                     posthog.capture("recording_deleted");
                 }
-                toast.success(i18n("Recording deleted"));
+                if (recording.kind !== "mail") {
+                    toast.success(i18n("Recording deleted"));
+                }
                 refresh();
             } catch (err) {
                 // Rollback
@@ -1159,6 +1166,7 @@ export function Workstation({
                                     currentRecording={currentRecording}
                                     pendingUploads={pendingUploads}
                                     inFlightActions={libraryInFlightActions}
+                                    sharedItemIds={sharedIds}
                                     onSelect={selectRecordingByUser}
                                     onDelete={handleDelete}
                                     onOrganize={() => {

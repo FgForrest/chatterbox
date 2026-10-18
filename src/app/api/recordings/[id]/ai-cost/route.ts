@@ -16,6 +16,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         session.user.id,
         id,
         requestedRecordingView(request),
+        { kinds: ["audio", "mail"] },
     );
     return NextResponse.json(await recordingAiCost(id, session.user.id));
 });
