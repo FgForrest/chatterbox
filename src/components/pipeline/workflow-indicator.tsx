@@ -21,6 +21,7 @@ interface WorkflowStripProps {
     workflow: WorkflowStatus;
     kind?: "audio" | "mail";
     onAction?: (action: WorkflowActionCode) => void;
+    readOnly?: boolean;
 }
 
 type WorkflowDensity = "full" | "focused" | "compact";
@@ -211,6 +212,7 @@ export function WorkflowStrip({
     workflow,
     kind = "audio",
     onAction,
+    readOnly = false,
 }: WorkflowStripProps) {
     const i18n = useExtracted();
     const stripRef = useRef<HTMLElement>(null);
@@ -657,7 +659,7 @@ export function WorkflowStrip({
                             )}
                             {message()}
                         </p>
-                        {workflow.status.action && (
+                        {workflow.status.action && !readOnly && (
                             <Button
                                 type="button"
                                 size="sm"

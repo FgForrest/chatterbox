@@ -9,7 +9,10 @@ import {
     within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import {
+    TranscriptionPanel,
+    type TranscriptOption,
+} from "@/components/dashboard/transcription-panel";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { Recording } from "@/types/recording";
 
@@ -155,7 +158,7 @@ function panel(
     isTranscribing: boolean,
     processing: ItemProcessingPresentation | null = personTranscribing,
     options: {
-        transcripts?: Array<{ source: string; text: string }>;
+        transcripts?: TranscriptOption[];
         onTranscribe?: (
             attributionSource?: string,
             retranscribe?: boolean,
@@ -320,6 +323,56 @@ describe("transcription dialog", () => {
         fireEvent.click(reTranscribeButtons.at(-1) as HTMLButtonElement);
         expect(onTranscribe).toHaveBeenCalledWith("riffado", true);
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("uses the shared widget shell for the transcript header, body, and footer", () => {
+        render(
+            panel(false, null, {
+                transcripts: [
+                    {
+                        source: "riffado",
+                        text: "Hello world.",
+                        language: "en",
+                        provider: "openai",
+                        model: "whisper-1",
+                    },
+                ],
+            }),
+        );
+
+        const heading = screen.getByRole("heading", {
+            name: "Transcription",
+        });
+        const widget = heading.closest("[data-workflow-widget]");
+        expect(widget).toBeTruthy();
+        expect(widget?.querySelector("[data-widget-body]")).toBeTruthy();
+        const header = heading.closest("header");
+        expect(header).toBeTruthy();
+        expect(
+            within(header as HTMLElement).getByRole("button", {
+                name: "Re-transcribe",
+            }),
+        ).toBeTruthy();
+        const collapse = within(header as HTMLElement).getByRole("button", {
+            name: "Collapse transcript",
+        });
+        expect(collapse.getAttribute("aria-expanded")).toBe("true");
+
+        const footer = widget?.querySelector("footer");
+        expect(footer?.textContent).toContain("Custom");
+        expect(footer?.textContent).toContain("openai");
+        expect(footer?.textContent).toContain("whisper-1");
+        expect(footer?.textContent).toContain("Language: en");
+        expect(footer?.textContent).toContain("2 words");
+        expect(footer?.textContent).toContain("12 characters");
+
+        fireEvent.click(collapse);
+        expect(
+            screen
+                .getByRole("button", { name: "Expand transcript" })
+                .getAttribute("aria-expanded"),
+        ).toBe("false");
+        expect(widget?.querySelector("footer")).toBeTruthy();
     });
 
     it("keeps transcript and summary toggles last outside the workflow", () => {

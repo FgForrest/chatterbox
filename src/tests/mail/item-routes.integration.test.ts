@@ -14,6 +14,7 @@ import {
     aiEnhancements,
     aiUsageEvents,
     chatterItems,
+    itemProcessing,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -113,7 +114,10 @@ vi.mock("@/lib/auth-server", async () => {
     });
 });
 
-import { DELETE as deleteMailRoute } from "@/app/api/mail/[id]/route";
+import {
+    DELETE as deleteMailRoute,
+    GET as getMailDetail,
+} from "@/app/api/mail/[id]/route";
 import { GET as aiCost } from "@/app/api/recordings/[id]/ai-cost/route";
 import { POST as erase } from "@/app/api/recordings/[id]/erase/route";
 import { PATCH as rename } from "@/app/api/recordings/[id]/route";
@@ -414,6 +418,50 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
                 )
             ).status,
         ).toBe(200);
+    });
+
+    it("returns the owner's processing projection only to allowed mail viewers", async () => {
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: MAIL,
+                userId: OWNER,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        at: "2026-10-18T12:00:00.000Z",
+                    },
+                },
+            });
+        expect(
+            (await call(getMailDetail, OTHER, MAIL, `/api/mail/${MAIL}`))
+                .status,
+        ).toBe(404);
+        const owner = await call(
+            getMailDetail,
+            OWNER,
+            MAIL,
+            `/api/mail/${MAIL}`,
+        );
+        expect(owner.status).toBe(200);
+        await expect(owner.json()).resolves.toMatchObject({
+            processing: { itemId: MAIL, kind: "mail" },
+        });
+
+        await share();
+        const member = await call(
+            getMailDetail,
+            OTHER,
+            MAIL,
+            `/api/mail/${MAIL}`,
+        );
+        expect(member.status).toBe(200);
+        await expect(member.json()).resolves.toMatchObject({
+            processing: { itemId: MAIL, kind: "mail" },
+        });
     });
 
     it("erases a mail summary and its derived tasks without touching another user", async () => {
