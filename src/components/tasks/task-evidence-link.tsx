@@ -3,7 +3,7 @@
 import { Mail, Pause, Play } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { formatClock } from "@/lib/topics/timeline";
 
@@ -37,25 +37,14 @@ export function TaskEvidenceLink({
     showQuote?: boolean;
 }) {
     const i18n = useExtracted();
+    const evidenceId = useId();
     const [playing, setPlaying] = useState(false);
-    const startedHere = useRef(false);
-    const requested = useRef(false);
     useEffect(() => {
         if (!playback) return;
         return playback.subscribe((state) => {
-            if (state.playing && startedHere.current) {
-                requested.current = false;
-                setPlaying(true);
-            } else if (
-                !state.playing &&
-                startedHere.current &&
-                !requested.current
-            ) {
-                startedHere.current = false;
-                setPlaying(false);
-            }
+            setPlaying(state.owner === evidenceId);
         });
-    }, [playback]);
+    }, [evidenceId, playback]);
 
     const className =
         "inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline";
@@ -100,15 +89,11 @@ export function TaskEvidenceLink({
                     const startMs = evidence.startMs as number;
                     if (playback) {
                         if (playing) {
-                            requested.current = false;
-                            startedHere.current = false;
                             setPlaying(false);
                             playback.pause();
                         } else {
-                            requested.current = true;
-                            startedHere.current = true;
                             setPlaying(true);
-                            playback.play(startMs);
+                            playback.play(startMs, evidenceId);
                         }
                     } else {
                         onPlay?.(startMs);

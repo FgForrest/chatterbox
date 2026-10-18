@@ -491,18 +491,32 @@ describe("task review rows", () => {
 
     it("compares an unticked suggested match and toggles its timed evidence", async () => {
         const onPlay = vi.fn();
-        let listener:
-            | ((state: { ms: number; playing: boolean }) => void)
-            | undefined;
+        const listeners = new Set<
+            (state: {
+                ms: number;
+                playing: boolean;
+                owner?: string | null;
+            }) => void
+        >();
+        let currentMs = 0;
         const playback: TranscriptPlayback = {
-            play: vi.fn((ms) => listener?.({ ms, playing: true })),
-            pause: vi.fn(() => listener?.({ ms: 12_500, playing: false })),
+            play: vi.fn((ms, owner) => {
+                currentMs = ms;
+                for (const listener of listeners) {
+                    listener({ ms, playing: true, owner });
+                }
+            }),
+            pause: vi.fn(() => {
+                for (const listener of listeners) {
+                    listener({ ms: currentMs, playing: false, owner: null });
+                }
+            }),
             seek: vi.fn(),
             subscribe: vi.fn((next) => {
-                listener = next;
+                listeners.add(next);
                 next({ ms: 0, playing: false });
                 return () => {
-                    listener = undefined;
+                    listeners.delete(next);
                 };
             }),
         };
@@ -511,7 +525,21 @@ describe("task review rows", () => {
             reviewed: false,
             tasks: [],
             proposals: [],
-            updates: [],
+            updates: [
+                update({
+                    evidenceStartMs: 25_000,
+                    evidenceText: null,
+                    task: {
+                        id: "existing-1",
+                        recordingId: "earlier-item",
+                        recordingTitle: "Follow-up planning",
+                        text: "Confirm contract delivery",
+                        dueDate: "2026-10-18",
+                        duePhrase: null,
+                        assigneeName: "Dana",
+                    },
+                }),
+            ],
             matches: [match()],
         });
         render(
@@ -553,13 +581,42 @@ describe("task review rows", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Play evidence at 00:12" }),
         );
-        expect(playback.play).toHaveBeenCalledWith(12_500);
-        const pause = await screen.findByRole("button", {
+        expect(playback.play).toHaveBeenCalledWith(12_500, expect.any(String));
+        await screen.findByRole("button", {
             name: "Pause evidence at 00:12",
         });
+        expect(
+            screen.getAllByRole("button", { name: /Pause evidence/ }),
+        ).toHaveLength(1);
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Play evidence at 00:25" }),
+        );
+        expect(
+            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+        ).toBeTruthy();
+        const pause = await screen.findByRole("button", {
+            name: "Pause evidence at 00:25",
+        });
+        expect(
+            screen.getAllByRole("button", { name: /Pause evidence/ }),
+        ).toHaveLength(1);
         expect(pause.getAttribute("aria-pressed")).toBe("true");
         fireEvent.click(pause);
         expect(playback.pause).toHaveBeenCalledTimes(1);
+        expect(
+            screen.queryByRole("button", { name: /Pause evidence/ }),
+        ).toBeNull();
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+        );
+        playback.play(40_000);
+        await waitFor(() =>
+            expect(
+                screen.queryByRole("button", { name: /Pause evidence/ }),
+            ).toBeNull(),
+        );
     });
 
     it("shows an unplaced quote as text without a dead link", () => {

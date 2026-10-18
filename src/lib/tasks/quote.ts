@@ -4,7 +4,7 @@
  * words counts when none holds it whole.
  */
 
-import { stemVariants } from "@/lib/knowledge/stemming";
+import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 
 interface QuoteTurn {
     startMs: number;
@@ -14,14 +14,25 @@ interface QuoteTurn {
 function words(text: string): string[] {
     return text
         .toLocaleLowerCase()
+        .normalize("NFC")
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(Boolean);
+}
+
+function locatorWords(text: string): string[] {
+    return text
+        .toLocaleLowerCase()
         .normalize("NFKD")
         .replace(/\p{M}+/gu, "")
         .split(/[^\p{L}\p{N}]+/u)
         .filter(Boolean);
 }
 
-function czechStems(word: string): readonly string[] {
-    return stemVariants(word, "cs");
+function locatorStems(
+    word: string,
+    language: string | null,
+): readonly string[] {
+    return stemVariants(word, language);
 }
 
 /** Below this share of the quote's words in one turn, the quote is not placed. */
@@ -31,19 +42,23 @@ const MIN_OVERLAP = 0.6;
 export function locateQuote(
     turns: readonly QuoteTurn[] | null | undefined,
     quote: string | null | undefined,
+    language?: string | null,
 ): number | null {
     if (!turns?.length || !quote) return null;
-    const wanted = words(quote);
+    const wanted = locatorWords(quote);
     if (wanted.length === 0) return null;
+    const stemmer = stemmingLanguage(language);
     const phrase = wanted.join(" ");
     let best: { startMs: number; share: number } | null = null;
     for (const turn of turns) {
-        const turnWords = words(turn.text);
+        const turnWords = locatorWords(turn.text);
         if (turnWords.join(" ").includes(phrase)) return turn.startMs;
-        const present = new Set(turnWords.flatMap(czechStems));
+        const present = new Set(
+            turnWords.flatMap((word) => locatorStems(word, stemmer)),
+        );
         const share =
             wanted.filter((word) =>
-                czechStems(word).some((stem) => present.has(stem)),
+                locatorStems(word, stemmer).some((stem) => present.has(stem)),
             ).length / wanted.length;
         if (share >= MIN_OVERLAP && (!best || share > best.share)) {
             best = { startMs: turn.startMs, share };
@@ -69,7 +84,8 @@ function positionedWords(
 ): { word: string; start: number; end: number }[] {
     return [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({
         word:
-            words(match[0])[0] ?? match[0].toLocaleLowerCase().normalize("NFC"),
+            locatorWords(match[0])[0] ??
+            match[0].toLocaleLowerCase().normalize("NFC"),
         start: match.index ?? 0,
         end: (match.index ?? 0) + match[0].length,
     }));
@@ -83,10 +99,12 @@ function positionedWords(
 export function locateTextQuote(
     segments: readonly QuoteSegment[] | null | undefined,
     quote: string | null | undefined,
+    language?: string | null,
 ): TextQuoteRange | null {
     if (!segments?.length || !quote) return null;
-    const wanted = words(quote);
+    const wanted = locatorWords(quote);
     if (wanted.length === 0) return null;
+    const stemmer = stemmingLanguage(language);
     let best: (TextQuoteRange & { share: number }) | null = null;
     for (const segment of segments) {
         const found = positionedWords(segment.text);
@@ -99,11 +117,20 @@ export function locateTextQuote(
                 };
             }
         }
-        const wantedSet = new Set(wanted);
-        const hits = found.filter((entry) => wantedSet.has(entry.word));
+        const wantedStems = wanted.map((word) => locatorStems(word, stemmer));
+        const hits = found.filter((entry) => {
+            const stems = new Set(locatorStems(entry.word, stemmer));
+            return wantedStems.some((variants) =>
+                variants.some((stem) => stems.has(stem)),
+            );
+        });
         const share =
-            wanted.filter((word) => hits.some((hit) => hit.word === word))
-                .length / wanted.length;
+            wantedStems.filter((variants) =>
+                hits.some((hit) => {
+                    const stems = new Set(locatorStems(hit.word, stemmer));
+                    return variants.some((stem) => stems.has(stem));
+                }),
+            ).length / wanted.length;
         const [first] = hits;
         const last = hits.at(-1);
         if (

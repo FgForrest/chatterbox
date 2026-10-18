@@ -12,7 +12,11 @@ import {
     recordingOffsetMinutes,
     SUMMARY_TASKS_DIRECTIVE,
 } from "@/lib/tasks/directive";
-import { locateQuote, normalizeTaskText } from "@/lib/tasks/quote";
+import {
+    locateQuote,
+    locateTextQuote,
+    normalizeTaskText,
+} from "@/lib/tasks/quote";
 import {
     isoDateOrNull,
     readTaskItems,
@@ -464,16 +468,27 @@ describe("locateQuote", () => {
             locateQuote(
                 czechTurns,
                 "Připravím podklady k novému projektu a pošlu je zítra",
+                "ces",
             ),
         ).toBe(4_000);
         expect(
             locateQuote(
                 czechTurns,
                 "Pripravim podklady k novemu projektu a poslu je zitra",
+                "cze",
             ),
         ).toBe(4_000);
         expect(
-            locateQuote(czechTurns, "Objednáme občerstvení do zasedačky"),
+            locateQuote(czechTurns, "Objednáme občerstvení do zasedačky", "cs"),
+        ).toBeNull();
+    });
+
+    it("does not apply Czech suffix stemming to English evidence", () => {
+        expect(
+            locateQuote([{ startMs: 2_000, text: "rat" }], "rate", "en"),
+        ).toBeNull();
+        expect(
+            locateTextQuote([{ index: 0, text: "rat" }], "rate", "eng"),
         ).toBeNull();
     });
 });
@@ -483,5 +498,13 @@ describe("normalizeTaskText", () => {
         expect(
             normalizeTaskText("[Speaker 1](#speaker-1): Draft the page!"),
         ).toBe(normalizeTaskText("speaker 1 draft THE page"));
+    });
+
+    it("keeps the dev fingerprint normalization for Czech diacritics", () => {
+        expect(
+            normalizeTaskText(
+                "[Speaker 1](#speaker-1): Připravit podklady pro nový projekt!",
+            ),
+        ).toBe("speaker 1 připravit podklady pro nový projekt");
     });
 });
