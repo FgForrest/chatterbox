@@ -182,4 +182,19 @@ describe("chat credential fallback", () => {
             ]),
         ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
     });
+
+    it("skips a managed credential", () => {
+        expect(
+            defaultProviderCandidates("summary", empty(), null, [
+                {
+                    id: "riffado-included",
+                    provider: "Mynah",
+                    managed: true,
+                    disabledAt: null,
+                    createdAt: new Date(0),
+                },
+                ...credentials,
+            ]),
+        ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
+    });
 });

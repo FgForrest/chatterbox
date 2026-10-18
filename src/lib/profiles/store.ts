@@ -728,6 +728,113 @@ export type ProfileDeleteDisposition = "delete" | "archive";
 
 type ProfileQueryExecutor = Pick<typeof db, "select">;
 
+type ProfileRemovalExecutor = Pick<typeof db, "select" | "update">;
+
+interface ProfileRemovalFallbackInput {
+    ownerUserId: string;
+    profileId: string;
+    actorUserId: string;
+    organizationUserId: string | null;
+    organizationAvailable: boolean;
+    settings: Pick<
+        typeof userSettings.$inferSelect,
+        "defaultAudioProfileId" | "defaultMailProfileId"
+    > | null;
+    profile: Pick<
+        StoredProfile,
+        "channel" | "ownerUserId" | "scope" | "isDefault"
+    >;
+}
+
+async function applyOrganizationFallbackForProfileRemoval(
+    executor: ProfileRemovalExecutor,
+    input: ProfileRemovalFallbackInput,
+): Promise<void> {
+    if (input.profile.scope === "organization" && input.profile.isDefault) {
+        throw new DefaultProfileArchiveError();
+    }
+    const pointerId = pointerFromSettings(
+        input.settings,
+        input.profile.channel,
+    );
+    const switchesToOrganization =
+        input.profile.scope === "personal" &&
+        (pointerId === input.profileId ||
+            (pointerId === null && input.profile.isDefault));
+    if (!switchesToOrganization) return;
+
+    let organizationDefault:
+        | Pick<StoredProfile, "id" | "ownerUserId" | "scope">
+        | undefined;
+    if (input.organizationAvailable && input.organizationUserId) {
+        [organizationDefault] = await executor
+            .select({
+                id: processingProfiles.id,
+                ownerUserId: processingProfiles.ownerUserId,
+                scope: processingProfiles.scope,
+            })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(
+                        processingProfiles.ownerUserId,
+                        input.organizationUserId,
+                    ),
+                    eq(processingProfiles.scope, "organization"),
+                    eq(processingProfiles.channel, input.profile.channel),
+                    eq(processingProfiles.isDefault, true),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            )
+            .for("update")
+            .limit(1);
+    }
+    if (
+        !organizationDefault ||
+        !(await mayUseProfile(input.actorUserId, organizationDefault))
+    ) {
+        throw new DefaultProfileArchiveError();
+    }
+    await executor
+        .update(processingProfiles)
+        .set({ isDefault: false })
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.channel, input.profile.channel),
+                eq(processingProfiles.scope, "personal"),
+                eq(processingProfiles.isDefault, true),
+            ),
+        );
+    if (input.profile.channel === "audio") {
+        await executor
+            .update(userSettings)
+            .set({
+                defaultAudioProfileId: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(userSettings.userId, input.ownerUserId),
+                    eq(userSettings.defaultAudioProfileId, input.profileId),
+                ),
+            );
+        return;
+    }
+    await executor
+        .update(userSettings)
+        .set({
+            defaultMailProfileId: null,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(userSettings.userId, input.ownerUserId),
+                eq(userSettings.defaultMailProfileId, input.profileId),
+            ),
+        );
+}
+
 async function profileHistoryReferences(
     executor: ProfileQueryExecutor,
     ownerUserId: string,
@@ -869,20 +976,8 @@ export interface DeletePersonalProfileResult {
 export async function deletePersonalProfile(
     input: ArchiveProfileInput,
 ): Promise<DeletePersonalProfileResult | null> {
-    const state = await getDefaultProfileState(
-        input.ownerUserId,
-        "audio",
-        input.actor.actorId,
-    );
-    const mailState = await getDefaultProfileState(
-        input.ownerUserId,
-        "mail",
-        input.actor.actorId,
-    );
     const [current] = await db
         .select({
-            id: processingProfiles.id,
-            channel: processingProfiles.channel,
             ownerUserId: processingProfiles.ownerUserId,
             scope: processingProfiles.scope,
         })
@@ -898,29 +993,38 @@ export async function deletePersonalProfile(
     if (!current) return null;
     await assertEditAccess(input.actor, current);
     if (current.scope !== "personal") throw new ProfilePermissionError();
-    const channelState = current.channel === "audio" ? state : mailState;
-    const isCurrentDefault = channelState.effective?.id === current.id;
-    if (isCurrentDefault && !channelState.organizationDefault) {
-        throw new DefaultProfileArchiveError();
+    const organizationUserId = await getOrgUserId();
+    const organizationAvailable =
+        organizationUserId !== null &&
+        organizationUserId !== input.ownerUserId &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(input.actor.actorId));
+    if (organizationAvailable && organizationUserId) {
+        await ensureProfiles(organizationUserId);
     }
-    const disposition = await profileDeleteDisposition(
-        input.ownerUserId,
-        input.profileId,
-    );
-    if (!disposition) return null;
 
     return db.transaction(async (tx) => {
         await tx
             .insert(userSettings)
             .values({ userId: input.ownerUserId })
             .onConflictDoNothing({ target: userSettings.userId });
-        await tx
-            .select({ id: userSettings.id })
+        const [settings] = await tx
+            .select({
+                id: userSettings.id,
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+                defaultMailProfileId: userSettings.defaultMailProfileId,
+            })
             .from(userSettings)
             .where(eq(userSettings.userId, input.ownerUserId))
-            .for("update");
+            .for("update")
+            .limit(1);
         const [locked] = await tx
-            .select({ id: processingProfiles.id })
+            .select({
+                channel: processingProfiles.channel,
+                ownerUserId: processingProfiles.ownerUserId,
+                scope: processingProfiles.scope,
+                isDefault: processingProfiles.isDefault,
+            })
             .from(processingProfiles)
             .where(
                 and(
@@ -933,6 +1037,16 @@ export async function deletePersonalProfile(
             .for("update")
             .limit(1);
         if (!locked) return null;
+        await assertEditAccess(input.actor, locked);
+        await applyOrganizationFallbackForProfileRemoval(tx, {
+            ownerUserId: input.ownerUserId,
+            profileId: input.profileId,
+            actorUserId: input.actor.actorId,
+            organizationUserId,
+            organizationAvailable,
+            settings: settings ?? null,
+            profile: locked,
+        });
         const actualDisposition = await profileHistoryReferences(
             tx,
             input.ownerUserId,
@@ -968,27 +1082,6 @@ export async function deletePersonalProfile(
                             folders.map(({ id }) => id),
                         ),
                         eq(folderDefaultProfiles.profileId, input.profileId),
-                    ),
-                );
-        }
-        if (current.channel === "audio") {
-            await tx
-                .update(userSettings)
-                .set({ defaultAudioProfileId: null, updatedAt: new Date() })
-                .where(
-                    and(
-                        eq(userSettings.userId, input.ownerUserId),
-                        eq(userSettings.defaultAudioProfileId, input.profileId),
-                    ),
-                );
-        } else {
-            await tx
-                .update(userSettings)
-                .set({ defaultMailProfileId: null, updatedAt: new Date() })
-                .where(
-                    and(
-                        eq(userSettings.userId, input.ownerUserId),
-                        eq(userSettings.defaultMailProfileId, input.profileId),
                     ),
                 );
         }
@@ -1338,95 +1431,15 @@ export async function archiveProfile(
             .limit(1);
         if (!current) return false;
         await assertEditAccess(input.actor, current);
-        if (current.scope === "organization" && current.isDefault) {
-            throw new DefaultProfileArchiveError();
-        }
-        const pointerId = pointerFromSettings(
-            settings ?? null,
-            current.channel,
-        );
-        const switchesToOrganization =
-            current.scope === "personal" &&
-            (pointerId === input.profileId ||
-                (pointerId === null && current.isDefault));
-        if (switchesToOrganization) {
-            let organizationDefault:
-                | Pick<StoredProfile, "id" | "ownerUserId" | "scope">
-                | undefined;
-            if (organizationAvailable && organizationUserId) {
-                [organizationDefault] = await tx
-                    .select({
-                        id: processingProfiles.id,
-                        ownerUserId: processingProfiles.ownerUserId,
-                        scope: processingProfiles.scope,
-                    })
-                    .from(processingProfiles)
-                    .where(
-                        and(
-                            eq(
-                                processingProfiles.ownerUserId,
-                                organizationUserId,
-                            ),
-                            eq(processingProfiles.scope, "organization"),
-                            eq(processingProfiles.channel, current.channel),
-                            eq(processingProfiles.isDefault, true),
-                            isNull(processingProfiles.archivedAt),
-                        ),
-                    )
-                    .for("update")
-                    .limit(1);
-            }
-            if (
-                !organizationDefault ||
-                !(await mayUseProfile(input.actor.actorId, organizationDefault))
-            ) {
-                throw new DefaultProfileArchiveError();
-            }
-            await tx
-                .update(processingProfiles)
-                .set({ isDefault: false })
-                .where(
-                    and(
-                        eq(processingProfiles.ownerUserId, input.ownerUserId),
-                        eq(processingProfiles.channel, current.channel),
-                        eq(processingProfiles.scope, "personal"),
-                        eq(processingProfiles.isDefault, true),
-                    ),
-                );
-            if (current.channel === "audio") {
-                await tx
-                    .update(userSettings)
-                    .set({
-                        defaultAudioProfileId: null,
-                        updatedAt: new Date(),
-                    })
-                    .where(
-                        and(
-                            eq(userSettings.userId, input.ownerUserId),
-                            eq(
-                                userSettings.defaultAudioProfileId,
-                                input.profileId,
-                            ),
-                        ),
-                    );
-            } else {
-                await tx
-                    .update(userSettings)
-                    .set({
-                        defaultMailProfileId: null,
-                        updatedAt: new Date(),
-                    })
-                    .where(
-                        and(
-                            eq(userSettings.userId, input.ownerUserId),
-                            eq(
-                                userSettings.defaultMailProfileId,
-                                input.profileId,
-                            ),
-                        ),
-                    );
-            }
-        }
+        await applyOrganizationFallbackForProfileRemoval(tx, {
+            ownerUserId: input.ownerUserId,
+            profileId: input.profileId,
+            actorUserId: input.actor.actorId,
+            organizationUserId,
+            organizationAvailable,
+            settings: settings ?? null,
+            profile: current,
+        });
         const archived = await tx
             .update(processingProfiles)
             .set({

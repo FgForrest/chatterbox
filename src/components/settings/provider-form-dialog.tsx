@@ -115,7 +115,7 @@ export function ProviderFormDialog({
     const editing = mode === "edit";
     const duplicating = mode === "duplicate";
     const personal = scope === "personal";
-    const sourceDisabled = source?.disabledAt != null;
+    const sourceDisabled = editing && source?.disabledAt != null;
     const [provider, setProvider] = useState("");
     const [apiKey, setApiKey] = useState("");
     const [baseUrl, setBaseUrl] = useState("");

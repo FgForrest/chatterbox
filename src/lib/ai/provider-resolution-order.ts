@@ -23,6 +23,7 @@ interface DefaultProviderCredential {
     provider: string;
     disabledAt?: Date | string | null;
     createdAt: Date | string;
+    managed?: boolean;
 }
 
 /** Build the provider-pointer resolution order before managed fallback. */
@@ -67,6 +68,7 @@ export function defaultProviderCandidates(
             .filter(
                 (credential) =>
                     credential.disabledAt == null &&
+                    credential.managed !== true &&
                     !isTranscriptionOnlyProvider(credential.provider),
             )
             .sort((left, right) => {

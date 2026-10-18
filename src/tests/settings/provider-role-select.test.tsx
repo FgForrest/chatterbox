@@ -149,6 +149,40 @@ describe("empty provider picker", () => {
             await screen.findByText("Automatic: Personal AI · model"),
         ).toBeTruthy();
     });
+
+    it("skips managed Mynah when naming the automatic chat fallback", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) => {
+                const body = url.includes("organization-providers")
+                    ? { providers: [] }
+                    : {
+                          providers: [
+                              {
+                                  ...provider("riffado-included", "Mynah"),
+                                  managed: true,
+                                  createdAt: new Date(0),
+                              },
+                              provider("personal", "Personal AI"),
+                          ],
+                          defaults: {
+                              transcription: null,
+                              summary: null,
+                              learn: null,
+                              topics: null,
+                              title: null,
+                          },
+                      };
+                return Promise.resolve(Response.json(body));
+            }),
+        );
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText("Automatic: Personal AI · model"),
+        ).toBeTruthy();
+        expect(screen.queryByText(/Unavailable: Mynah/)).toBeNull();
+    });
 });
 
 describe("unavailable provider defaults", () => {

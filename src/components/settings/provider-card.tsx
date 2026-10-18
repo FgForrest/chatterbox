@@ -200,6 +200,7 @@ function ProviderRow({
                         size="icon-sm"
                         title={i18n("Duplicate")}
                         aria-label={i18n("Duplicate {name}", { name: label })}
+                        disabled={busy}
                         onClick={() => onDuplicate(provider)}
                     >
                         <Copy className="size-4" />
@@ -210,6 +211,7 @@ function ProviderRow({
                         size="icon-sm"
                         title={i18n("Edit")}
                         aria-label={i18n("Edit {name}", { name: label })}
+                        disabled={busy}
                         onClick={() => onEdit(provider)}
                     >
                         <Pencil className="size-4" />

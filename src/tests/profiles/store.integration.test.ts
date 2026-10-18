@@ -68,6 +68,7 @@ import {
     DefaultProfileArchiveError,
     deletePersonalProfile,
     duplicateProfile,
+    getDefaultProfile,
     getProfile,
     listProfiles,
     ProfilePermissionError,
@@ -102,6 +103,33 @@ describeWithDatabase("profile store", () => {
     function db() {
         if (!database) throw new Error("test database was not initialized");
         return database.db;
+    }
+
+    async function deleteAfterConcurrentPointerAssignment(profileId: string) {
+        await db()
+            .insert(userSettings)
+            .values({ userId: ALICE })
+            .onConflictDoNothing({ target: userSettings.userId });
+        let deletion: ReturnType<typeof deletePersonalProfile> | undefined;
+        await db().transaction(async (tx) => {
+            await tx
+                .select({ id: userSettings.id })
+                .from(userSettings)
+                .where(eq(userSettings.userId, ALICE))
+                .for("update");
+            deletion = deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId,
+                actor: actor(ALICE),
+            });
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            await tx
+                .update(userSettings)
+                .set({ defaultAudioProfileId: profileId })
+                .where(eq(userSettings.userId, ALICE));
+        });
+        if (!deletion) throw new Error("profile deletion did not start");
+        return deletion;
     }
 
     beforeAll(async () => {
@@ -529,6 +557,91 @@ describeWithDatabase("profile store", () => {
                 actor: actor(ALICE),
             }),
         ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
+    });
+
+    it("deletes a concurrently assigned default and follows the Organization fallback", async () => {
+        await ensureProfiles(ALICE);
+        const target = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Concurrent Organization fallback",
+            settings: defaultProfileSettings("audio"),
+        });
+        mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.ORG_ACCOUNT_EMAIL = "profiles-organization@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "test-password";
+        await ensureProfiles(ORGANIZATION);
+        const [organizationDefault] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORGANIZATION),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!organizationDefault) {
+            throw new Error("Organization audio default was not seeded");
+        }
+
+        await expect(
+            deleteAfterConcurrentPointerAssignment(target.id),
+        ).resolves.toEqual({ disposition: "delete" });
+        const [settings] = await db()
+            .select({
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, ALICE));
+        const personalDefaults = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            );
+        expect(settings?.defaultAudioProfileId).toBeNull();
+        expect(personalDefaults).toHaveLength(0);
+        await expect(
+            getDefaultProfile(ALICE, "audio", ALICE),
+        ).resolves.toMatchObject({
+            id: organizationDefault.id,
+            scope: "organization",
+        });
+        await expect(getProfile(ALICE, target.id, ALICE)).resolves.toBeNull();
+    });
+
+    it("refuses to delete a concurrently assigned default without an Organization fallback", async () => {
+        await ensureProfiles(ALICE);
+        const target = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Concurrent refused fallback",
+            settings: defaultProfileSettings("audio"),
+        });
+
+        await expect(
+            deleteAfterConcurrentPointerAssignment(target.id),
+        ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
+        const [settings] = await db()
+            .select({
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, ALICE));
+        expect(settings?.defaultAudioProfileId).toBe(target.id);
+        await expect(
+            getProfile(ALICE, target.id, ALICE),
+        ).resolves.toMatchObject({ id: target.id, archivedAt: null });
     });
 
     it("archives a profile referenced by another owner's queued job payload", async () => {

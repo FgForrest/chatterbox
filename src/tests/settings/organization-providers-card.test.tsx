@@ -84,6 +84,7 @@ let personal: ProviderCardItem[];
 let organization: ProviderCardItem[];
 let manager: boolean;
 let requests: RequestRecord[];
+let mutationGate: Promise<Response> | null;
 
 function providerFor(scope: ProviderScope): ProviderCardItem {
     return scope === "personal" ? personalProvider : organizationProvider;
@@ -165,6 +166,9 @@ function installFetch() {
                     };
                 }
             }
+            if (mutationGate && (method === "PUT" || method === "DELETE")) {
+                return mutationGate;
+            }
             return Response.json({ success: true, provider: { id: "new" } });
         }),
     );
@@ -191,6 +195,7 @@ beforeEach(() => {
     organization = [{ ...organizationProvider }];
     manager = true;
     requests = [];
+    mutationGate = null;
     installFetch();
 });
 
@@ -258,9 +263,15 @@ describe.each([
         });
     });
 
-    it("sets a checked role default on a duplicate", async () => {
+    it("duplicates a disabled provider with a checked role default", async () => {
+        const disabledProvider = {
+            ...providerFor(scope),
+            disabledAt: new Date().toISOString(),
+        };
+        if (scope === "personal") personal = [disabledProvider];
+        else organization = [disabledProvider];
         renderSection();
-        const provider = providerFor(scope);
+        const provider = disabledProvider;
         const card = await cardFor(scope);
         fireEvent.click(
             within(card).getByRole("button", {
@@ -271,9 +282,11 @@ describe.each([
             scope === "personal"
                 ? "Use for summaries"
                 : "Organization default for summaries";
-        fireEvent.click(
-            await screen.findByRole("checkbox", { name: roleLabel }),
-        );
+        const roleCheckbox = await screen.findByRole("checkbox", {
+            name: roleLabel,
+        });
+        expect((roleCheckbox as HTMLInputElement).disabled).toBe(false);
+        fireEvent.click(roleCheckbox);
         fireEvent.click(screen.getByRole("button", { name: "Add Copy" }));
 
         await waitFor(() => {
@@ -287,6 +300,45 @@ describe.each([
                     }),
                 }),
             );
+        });
+    });
+
+    it("disables Duplicate and Edit while the row mutation runs", async () => {
+        const disabledProvider = {
+            ...providerFor(scope),
+            disabledAt: new Date().toISOString(),
+        };
+        if (scope === "personal") personal = [disabledProvider];
+        else organization = [disabledProvider];
+        let finishMutation: ((response: Response) => void) | undefined;
+        mutationGate = new Promise<Response>((resolve) => {
+            finishMutation = resolve;
+        });
+        renderSection();
+        const card = await cardFor(scope);
+        const label = `${disabledProvider.provider} · ${disabledProvider.defaultModel}`;
+        fireEvent.click(
+            within(card).getByRole("button", { name: `Enable ${label}` }),
+        );
+
+        await waitFor(() => {
+            const duplicate = within(card).getByRole("button", {
+                name: `Duplicate ${label}`,
+            });
+            const edit = within(card).getByRole("button", {
+                name: `Edit ${label}`,
+            });
+            expect((duplicate as HTMLButtonElement).disabled).toBe(true);
+            expect((edit as HTMLButtonElement).disabled).toBe(true);
+        });
+        finishMutation?.(
+            Response.json({ success: true, provider: { id: "new" } }),
+        );
+        await waitFor(() => {
+            const duplicate = within(card).getByRole("button", {
+                name: `Duplicate ${label}`,
+            });
+            expect((duplicate as HTMLButtonElement).disabled).toBe(false);
         });
     });
 
