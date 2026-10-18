@@ -687,6 +687,8 @@ export function MailDetailPane({
                 (!widgets || widgets.summary.visible) && (
                     <MailSummaryCard
                         mail={mail}
+                        detail={detail}
+                        processing={processing}
                         canChange={canChange}
                         widget={widgets?.summary}
                         taskWidget={widgets?.taskReview}
