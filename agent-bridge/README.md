@@ -327,11 +327,11 @@ One sidecar serves both CLIs; the `model` field picks the backend.
 | Model id | Backend |
 |---|---|
 | `claude…` (e.g. `claude-sonnet-5`, `claude-haiku-4-5-20251001`) | Claude Code CLI |
-| `codex…`, `gpt-5…` | Codex CLI |
+| `codex…`, `gpt-…` (any GPT model id, e.g. `gpt-6.1-sol`) | Codex CLI |
 | exactly `claude` or `codex` | that CLI, with **no `--model`** — the account's own default |
 | anything else | **400** |
 
-The 400 is deliberate. Chatterbox falls back to `gpt-4o-mini` when a credential has no Default Model, and silently routing that to Codex would be a confusing way to find out the field was left blank.
+Every valid id starting with `gpt-` routes to Codex and passes through to the CLI unchanged, so the usable set tracks whatever the installed CLI supports rather than a list this bridge has to keep current. Ids outside the `claude…`, `codex…`, and `gpt-…` families, such as `llama3` or `mistral-large`, return 400.
 
 ### Pin a cheap model; the default is the expensive one
 
@@ -358,7 +358,7 @@ The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account
 
 — while the same CLI, given no `--model`, resolved `gpt-6-astra` on the same account.
 
-Anything other than a bare id passes through to the CLI unchanged, so the usable set tracks whatever the installed CLI supports rather than a list this bridge has to keep current.
+Any routed id other than a bare backend id passes through to the CLI unchanged.
 
 ## Things worth knowing
 
@@ -396,7 +396,7 @@ Errors surface in Chatterbox as a failed summary. `docker compose logs -f agent-
 |---|---|
 | `connect ECONNREFUSED agent-bridge:8787` | Container isn't up. The profile means `docker compose up -d` alone skips it — pass `--profile agent-bridge`. |
 | `401 missing or invalid bearer token` | `BRIDGE_TOKEN` in `.env` and the API Key on the provider have drifted. The bridge compares them exactly. |
-| `400 unknown model "gpt-4o-mini"` | The provider's Default Model is blank, so Chatterbox substituted its own fallback. Set it. |
+| `400 unknown model "llama3"` | The bridge only routes `claude…`, `codex…`, and `gpt-…` ids. Set a supported Default Model on the provider. |
 | `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS`, or one of the built-in [hardening flags](#hardening-no-tools-no-persistence), isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`; pin a version the hardening was verified against. |
 | `502 … Unknown feature flag: <name>` | The installed Codex no longer knows a feature the bridge disables. Pin a verified version, then check `codex features list` for what the feature became before changing `lib.mjs`. |
 | `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild the image. Files written before that stay where they are; removing them is optional (see [Purging](#purging-session-data-from-before-this-fix-optional)). |
