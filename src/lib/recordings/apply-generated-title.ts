@@ -34,6 +34,7 @@ export async function applyGeneratedTitle(input: {
     view?: RecordingView;
     fence?: TitleInputFence;
     skipIfTitleStepDoneForFence?: boolean;
+    skipIfAutomaticTitleSettled?: boolean;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -60,6 +61,8 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                   },
               )
             : await storeGeneratedTitle(
@@ -72,6 +75,8 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                   },
               )
         : false;

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -37,7 +37,6 @@ import {
 } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import type { ProviderPin } from "@/lib/profiles/settings";
-import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
@@ -348,7 +347,6 @@ export async function gatherFacts(
                     eq(asyncJobs.userId, userId),
                     inArray(asyncJobs.kind, [
                         SUMMARY_JOB_KIND,
-                        TITLE_JOB_KIND,
                         TOPICS_JOB_KIND,
                     ]),
                     eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
@@ -367,15 +365,11 @@ export async function gatherFacts(
                     eq(asyncJobs.userId, userId),
                     inArray(asyncJobs.kind, [
                         SUMMARY_JOB_KIND,
-                        TITLE_JOB_KIND,
                         TOPICS_JOB_KIND,
                     ]),
                     eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
                     eq(asyncJobs.status, "failed"),
-                    or(
-                        eq(asyncJobs.kind, TITLE_JOB_KIND),
-                        sql`${asyncJobs.payload} ->> 'trigger' <> 'manual'`,
-                    ),
+                    sql`${asyncJobs.payload} ->> 'trigger' <> 'manual'`,
                 ),
             )
             .orderBy(desc(asyncJobs.completedAt), desc(asyncJobs.createdAt)),
@@ -821,11 +815,9 @@ export async function gatherFacts(
                     const step =
                         job.kind === SUMMARY_JOB_KIND
                             ? "summary"
-                            : job.kind === TITLE_JOB_KIND
-                              ? "title"
-                              : job.kind === TOPICS_JOB_KIND
-                                ? "topics"
-                                : null;
+                            : job.kind === TOPICS_JOB_KIND
+                              ? "topics"
+                              : null;
                     if (!step || !job.completedAt) return [];
                     return [
                         [

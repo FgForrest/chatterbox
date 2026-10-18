@@ -156,7 +156,6 @@ function paidActions(plan: ReturnType<typeof planAdvance>) {
         [
             "queueTranscription",
             "startAutoLearn",
-            "queueTitleJob",
             "queueTopics",
             "queueSummary",
         ].includes(action.type),
@@ -165,7 +164,18 @@ function paidActions(plan: ReturnType<typeof planAdvance>) {
 
 describe("outdated pipeline results", () => {
     it("marks a summary outdated for a replacement transcript and queues its automatic rerun", () => {
-        const plan = planAdvance(facts());
+        const current = facts();
+        if (!current.profile) throw new Error("Expected profile facts");
+        current.profile.automatic.title = true;
+        const summary = current.phases.summary;
+        if (!summary?.steps) throw new Error("Expected Summary steps");
+        summary.steps.title = {
+            ...OLD_INPUT,
+            generation: 3,
+            state: "done",
+            reason: "generated",
+        };
+        const plan = planAdvance(current);
 
         expect(plan.actions).toContainEqual(
             expect.objectContaining({
@@ -174,12 +184,44 @@ describe("outdated pipeline results", () => {
                 record: expect.objectContaining({
                     state: "outdated",
                     reason: "content_changed",
+                    steps: expect.objectContaining({
+                        title: expect.objectContaining({ state: "done" }),
+                    }),
                 }),
             }),
         );
         expect(plan.actions).toContainEqual(
             expect.objectContaining({ type: "queueSummary" }),
         );
+        expect(plan.actions.map((action) => action.type)).not.toContain(
+            "queueTitleJob",
+        );
+    });
+
+    it("keeps a generated title settled across a profile revision change", () => {
+        const current = handledFacts(
+            facts().phases.categorize ?? {
+                state: "done",
+                generation: 3,
+                at: "2026-10-15T00:00:00.000Z",
+            },
+        );
+        const title = current.phases.summary?.steps?.title;
+        if (!title) throw new Error("Expected title step");
+        title.state = "done";
+        title.reason = "generated";
+
+        const changed = markPhasesOutdatedForProfileChange(
+            current.phases,
+            8,
+            "2026-10-15T01:00:00.000Z",
+        );
+
+        expect(changed.summary?.steps?.title).toMatchObject({
+            state: "done",
+            reason: "generated",
+            generation: 3,
+        });
     });
 
     it("does not invalidate finished outputs when the assigned immutable revision did not change", () => {

@@ -1,22 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-    limit: vi.fn(),
-    titleStillGenerated: vi.fn(),
     applyGeneratedTitle: vi.fn(),
     emitEvent: vi.fn(),
+    limit: vi.fn(),
+    markAutomaticTitleSkipped: vi.fn(),
+    readProcessing: vi.fn(),
     resolveItemProfile: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
     db: {
-        select: () => ({
-            from: () => ({ where: () => ({ limit: mocks.limit }) }),
-        }),
+        select: () => {
+            const chain = {
+                from: () => chain,
+                leftJoin: () => chain,
+                where: () => chain,
+                limit: mocks.limit,
+            };
+            return chain;
+        },
     },
 }));
-vi.mock("@/lib/recordings/generated-title", () => ({
-    titleStillGenerated: mocks.titleStillGenerated,
+vi.mock("@/lib/pipeline/state", () => ({
+    markAutomaticTitleSkipped: mocks.markAutomaticTitleSkipped,
+    readProcessing: mocks.readProcessing,
 }));
 vi.mock("@/lib/recordings/apply-generated-title", () => ({
     applyGeneratedTitle: mocks.applyGeneratedTitle,
@@ -28,29 +36,43 @@ vi.mock("@/lib/profiles/resolve", () => ({
 
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 
+const fence = {
+    contentId: "transcript-1",
+    contentSourceId: "riffado",
+    contentRevision: 2,
+    profileRevisionId: "profile-revision-1",
+};
 const input = {
     userId: "user-1",
     recordingId: "rec-1",
     summary: "The group planned the quarterly launch.",
     keyPoints: ["The launch is in November."],
+    fence,
 };
 
 describe("title after summary", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mocks.limit
-            .mockResolvedValueOnce([
-                { autoGenerateTitle: true, syncTitleToPlaud: false },
-            ])
-            .mockResolvedValueOnce([{ plaudFileId: "plaud-1" }]);
-        mocks.titleStillGenerated.mockResolvedValue(true);
-        mocks.applyGeneratedTitle.mockResolvedValue(true);
+        mocks.readProcessing.mockResolvedValue({ phases: {} });
         mocks.resolveItemProfile.mockResolvedValue({
+            assigned: true,
+            revisionId: "profile-revision-1",
             settings: { steps: { title: { automatic: true } } },
         });
+        mocks.limit
+            .mockResolvedValueOnce([
+                {
+                    kind: "audio",
+                    plaudFileId: "plaud-1",
+                    titleEditedAt: null,
+                },
+            ])
+            .mockResolvedValueOnce([{ syncTitleToPlaud: false }]);
+        mocks.applyGeneratedTitle.mockResolvedValue(true);
+        mocks.markAutomaticTitleSkipped.mockResolvedValue(true);
     });
 
-    it("retitles from the completed summary and announces the change", async () => {
+    it("generates the first automatic title from the completed summary", async () => {
         await updateTitleAfterSummary(input);
 
         expect(mocks.applyGeneratedTitle).toHaveBeenCalledWith({
@@ -58,8 +80,11 @@ describe("title after summary", () => {
             recordingId: "rec-1",
             text: "The group planned the quarterly launch.\nThe launch is in November.",
             source: "summary",
+            kind: "audio",
             plaudFileId: "plaud-1",
             syncTitleToPlaud: false,
+            fence,
+            skipIfAutomaticTitleSettled: true,
         });
         expect(mocks.emitEvent).toHaveBeenCalledWith(
             "recording.updated",
@@ -68,23 +93,118 @@ describe("title after summary", () => {
         );
     });
 
-    it("preserves a title a person edited", async () => {
-        mocks.titleStillGenerated.mockResolvedValue(false);
+    it("does not generate again after the automatic title step is done", async () => {
+        mocks.readProcessing.mockResolvedValue({
+            phases: {
+                summary: {
+                    steps: { title: { state: "done" } },
+                },
+            },
+        });
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.resolveItemProfile).not.toHaveBeenCalled();
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+    });
+
+    it("records a hand-edited title as permanently protected", async () => {
+        mocks.limit.mockReset();
+        mocks.limit.mockResolvedValueOnce([
+            {
+                kind: "audio",
+                plaudFileId: "plaud-1",
+                titleEditedAt: new Date(),
+            },
+        ]);
 
         await updateTitleAfterSummary(input);
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.emitEvent).not.toHaveBeenCalled();
+        expect(mocks.markAutomaticTitleSkipped).toHaveBeenCalledWith({
+            itemId: "rec-1",
+            userId: "user-1",
+            content: fence,
+            reason: "first_summary_title_edited",
+        });
     });
 
-    it("does not retitle when profile title automation is off", async () => {
+    it("settles the title decision when profile title automation is off", async () => {
         mocks.resolveItemProfile.mockResolvedValue({
+            assigned: true,
+            revisionId: "profile-revision-1",
             settings: { steps: { title: { automatic: false } } },
         });
 
         await updateTitleAfterSummary(input);
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.emitEvent).not.toHaveBeenCalled();
+        expect(mocks.markAutomaticTitleSkipped).toHaveBeenCalledWith({
+            itemId: "rec-1",
+            userId: "user-1",
+            content: fence,
+            reason: "first_summary_title_disabled",
+        });
+    });
+
+    it("closes a failed attempt without settling the title", async () => {
+        mocks.applyGeneratedTitle.mockResolvedValue(false);
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.markAutomaticTitleSkipped).toHaveBeenCalledWith({
+            itemId: "rec-1",
+            userId: "user-1",
+            content: fence,
+            reason: "first_summary_title_failed",
+        });
+    });
+
+    it("tries again at the next summary after a failed attempt", async () => {
+        mocks.readProcessing.mockResolvedValue({
+            phases: {
+                summary: {
+                    steps: {
+                        title: {
+                            state: "skipped",
+                            reason: "first_summary_title_failed",
+                        },
+                    },
+                },
+            },
+        });
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.applyGeneratedTitle).toHaveBeenCalledOnce();
+    });
+
+    it("still records the failure when the title provider throws", async () => {
+        mocks.applyGeneratedTitle.mockRejectedValue(new Error("provider down"));
+
+        await expect(updateTitleAfterSummary(input)).rejects.toThrow(
+            "provider down",
+        );
+        expect(mocks.markAutomaticTitleSkipped).toHaveBeenCalledWith(
+            expect.objectContaining({ reason: "first_summary_title_failed" }),
+        );
+    });
+
+    it("applies the same first-summary rule when mail title automation is enabled", async () => {
+        mocks.limit.mockReset();
+        mocks.limit.mockResolvedValueOnce([
+            { kind: "mail", plaudFileId: null, titleEditedAt: null },
+        ]);
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.applyGeneratedTitle).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: "mail",
+                source: "summary",
+                syncTitleToPlaud: false,
+            }),
+        );
+        expect(mocks.limit).toHaveBeenCalledTimes(1);
     });
 });

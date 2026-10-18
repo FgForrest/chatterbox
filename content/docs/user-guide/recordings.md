@@ -33,7 +33,7 @@ Click a recording to open it on the right.
 
 At the top:
 
-- **The title.** Click the pencil next to it to rename the recording. A title you set yourself is never replaced by a generated one.
+- **The title.** Click the pencil next to it to rename the recording. The first completed summary can generate one automatic title. Later processing never replaces it. Click the refresh icon to regenerate the title whenever you want; it uses the summary when one exists, otherwise the transcript. A title you set yourself is never replaced automatically.
 - **When, how long, how large.**
 - **Estimated AI spend** (see below).
 - The [workflow strip](processing-and-profiles.md#the-workflow-indicator). While work remains, it shows the current step, whose turn it is, and one expected action.

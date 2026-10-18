@@ -16,7 +16,6 @@ import type {
     PipelineAction,
     PipelineView,
 } from "@/lib/pipeline/types";
-import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { applyPlaudActionItemProposals } from "@/lib/tasks/plaud-proposals";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
@@ -86,9 +85,6 @@ export async function executePipelineAction(
                 trigger: "pipeline",
                 view,
             });
-            return;
-        case "queueTitleJob":
-            await enqueueTitleJob(userId, itemId);
             return;
         case "startAutoLearn": {
             await db.transaction((tx) =>

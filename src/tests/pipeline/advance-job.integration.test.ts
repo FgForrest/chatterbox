@@ -700,7 +700,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             "riffado",
             { strict: true },
         );
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
     });
 
     it("queues transcript follow-ups again after the content row is replaced", async () => {
@@ -1097,7 +1097,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await pipelineAdvanceJobHandler.run(jobContext());
 
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
         expect((await processing())?.phases.categorize).toMatchObject({

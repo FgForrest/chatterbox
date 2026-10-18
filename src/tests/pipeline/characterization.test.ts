@@ -775,14 +775,14 @@ describe("transcribeRecording post-write triggers", () => {
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("queues the title, then timed topics and the summary", async () => {
+    it("queues timed topics and the summary without a parallel title job", async () => {
         mountTranscription();
 
         const result = await transcribeAndAdvance();
 
         expect(result.success).toBe(true);
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledWith(USER_ID, ITEM_ID);
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).toHaveBeenCalledWith(
             USER_ID,
             ITEM_ID,
@@ -795,14 +795,11 @@ describe("transcribeRecording post-write triggers", () => {
             null,
             { strict: true },
         );
-        expect(mocks.enqueueTitleJob.mock.invocationCallOrder[0]).toBeLessThan(
-            mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0,
-        );
         expect(mocks.queueAutoTopics.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.queueAutoSummary.mock.invocationCallOrder[0] ?? 0,
         );
         expect(mocks.emitEvent.mock.invocationCallOrder[0]).toBeLessThan(
-            mocks.enqueueTitleJob.mock.invocationCallOrder[0] ?? 0,
+            mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0,
         );
     });
 
@@ -835,7 +832,7 @@ describe("transcribeRecording post-write triggers", () => {
         await transcribeAndAdvance();
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
     });
@@ -874,7 +871,7 @@ describe("transcribeRecording post-write triggers", () => {
         await transcribeAndAdvance();
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
@@ -1113,29 +1110,29 @@ describe("learn.release triggers", () => {
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("uses the seeded profile's automatic title", async () => {
+    it("does not generate the automatic title without a summary", async () => {
         mountRelease({ autoGenerateTitle: true, autoSummarize: false });
 
         await runLearnRelease();
 
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledWith(USER_ID, ITEM_ID);
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("returns the pipeline job it queued, then the driver queues summary and title", async () => {
+    it("returns the pipeline job it queued, then the driver queues the summary", async () => {
         mountRelease({ autoGenerateTitle: true });
 
         await expect(runLearnRelease()).resolves.toEqual({
             queued: ["pipeline.advance"],
         });
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
     });
 
     it.each([
-        { autoGenerateTitle: true, expectedCalls: 1 },
+        { autoGenerateTitle: true, expectedCalls: 0 },
         { autoGenerateTitle: false, expectedCalls: 0 },
-    ])("queues the title according to autoGenerateTitle=$autoGenerateTitle", async ({
+    ])("does not queue a title job when autoGenerateTitle=$autoGenerateTitle", async ({
         autoGenerateTitle,
         expectedCalls,
     }) => {
@@ -1144,11 +1141,5 @@ describe("learn.release triggers", () => {
         await runLearnRelease();
 
         expect(mocks.enqueueTitleJob).toHaveBeenCalledTimes(expectedCalls);
-        if (autoGenerateTitle) {
-            expect(mocks.enqueueTitleJob).toHaveBeenCalledWith(
-                USER_ID,
-                ITEM_ID,
-            );
-        }
     });
 });

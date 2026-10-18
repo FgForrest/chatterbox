@@ -168,7 +168,6 @@ export type PipelineAction =
           strict: boolean;
           source?: "riffado" | "plaud";
       }
-    | { type: "queueTitleJob" }
     | {
           type: "startAutoLearn";
           source: "plaud" | "riffado" | "mail";

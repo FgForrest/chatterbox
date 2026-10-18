@@ -27,7 +27,7 @@ Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upra
 
 ![Seznam profilů zpracování](images/profiles.png)
 
-Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Vypnutý krok lze stále spustit ručně.
+Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Automatický název se vytvoří jen jednou, z prvního dokončeného shrnutí. Opakované shrnutí či přepis, oprava pomocí Učení, změna profilu ani volba **Zpracovat znovu** jej nenahradí. Vypnutý krok lze stále spustit ručně.
 
 Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přepisu, instrukce shrnutí, jazyk a formát výstupu a nastavení funkce **Vícenásobné shrnování**. **Automaticky (podle obsahu)** zachová jazyk položky. Úprava profilu vytvoří novou revizi; rozpracované položky si ponechají revizi, se kterou začaly.
 
@@ -69,7 +69,7 @@ Pruh pod názvem položky zobrazuje všechny kroky v jednom řádku a potřebné
 | **Zařazení** | Čeká na složky a určí profil. |
 | **Přepis** | Vytvoří přepis nahrávky. U pošty se tato fáze nezobrazuje. |
 | **Učení** | Najde jména, opravy a fakta ke kontrole. |
-| **Shrnout** | Vytvoří název, shrnutí a témata zvolená profilem. |
+| **Shrnout** | Vytvoří shrnutí a témata zvolená profilem. První dokončené shrnutí může vytvořit jediný automatický název položky. |
 | **Kontrola úkolů** | Čeká na kontrolu navržených úkolů a jejich změn. |
 | **Sdílet** | Po splnění kontrol nasdílí zamýšlené umístění v Organizaci. |
 

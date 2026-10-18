@@ -1,7 +1,7 @@
 /**
- * The title job (Task 5.4). The processing pipeline queues it in Summary,
- * after Transcribe and Learn. Its webhook is `recording.updated`:
- * `transcription.completed` fires without waiting for it.
+ * Legacy title jobs. New automatic titles run from the first completed
+ * summary; this definition remains so jobs queued by an older deployment can
+ * be parsed and drained safely.
  *
  * Only the worker registration imports the handler
  * (`title-job-handler.ts`) and what generating a title needs.
@@ -27,7 +27,7 @@ export function parseTitleJobPayload(
     return { recordingId: raw.recordingId };
 }
 
-/** Queue an item's title; one at a time per item. */
+/** Queue a legacy title job; retained for stored-job compatibility. */
 export async function enqueueTitleJob(
     userId: string,
     recordingId: string,

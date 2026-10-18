@@ -328,8 +328,6 @@ describe("planAdvance audio", () => {
         expect(actionTypes(actions)).toEqual([
             "markPhase",
             "markPhase",
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -389,8 +387,6 @@ describe("planAdvance audio", () => {
         });
 
         expect(planAdvance(facts).actions).toEqual([
-            { type: "queueTitleJob" },
-            expect.objectContaining({ type: "markPhase", phase: "summary" }),
             { type: "queueTopics", strict: true },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
             {
@@ -498,14 +494,7 @@ describe("planAdvance audio", () => {
         {
             name: "a timed transcript",
             facts: audioFacts(),
-            expected: [
-                "queueTitleJob",
-                "markPhase",
-                "queueTopics",
-                "markPhase",
-                "queueSummary",
-                "markPhase",
-            ],
+            expected: ["queueTopics", "markPhase", "queueSummary", "markPhase"],
         },
         {
             name: "automatic titles off",
@@ -526,10 +515,9 @@ describe("planAdvance audio", () => {
             }),
             expected: [
                 "markPhase",
-                "queueTitleJob",
-                "markPhase",
                 "markPhase",
                 "queueSummary",
+                "markPhase",
                 "markPhase",
             ],
         },
@@ -543,12 +531,7 @@ describe("planAdvance audio", () => {
             facts: audioFacts({
                 profile: profileAutomatic({ summary: false }),
             }),
-            expected: [
-                "queueTitleJob",
-                "markPhase",
-                "queueTopics",
-                "markPhase",
-            ],
+            expected: ["queueTopics", "markPhase"],
         },
     ])("reproduces the transcript path for $name", ({ facts, expected }) => {
         expect(actionTypes(planAdvance(facts).actions)).toEqual(expected);
@@ -583,8 +566,6 @@ describe("planAdvance audio", () => {
             audioFacts({ phases: { learn: releasedLearn() }, summary }),
         );
         expect(actionTypes(result.actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             ...(expectedSummary ? ["queueSummary", "markPhase"] : []),
@@ -605,8 +586,6 @@ describe("planAdvance audio", () => {
             profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
         ]);
@@ -625,14 +604,12 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("uses the seeded profile's release-time title automation", () => {
+    it("does not generate a title when automatic summaries are off", () => {
         const facts = audioFacts({
             phases: { learn: releasedLearn() },
             profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
         ]);
@@ -644,8 +621,6 @@ describe("planAdvance audio", () => {
             generation: 5,
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -676,8 +651,6 @@ describe("planAdvance audio", () => {
         released.generation = 5;
         released.phases.learn = releasedLearn(7, 5);
         expect(actionTypes(planAdvance(released).actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -735,8 +708,6 @@ describe("planAdvance audio", () => {
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
             "markPhase",
-            "markPhase",
-            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
@@ -1002,7 +973,7 @@ describe("planAdvance audio", () => {
     });
 
     it.each([
-        ["use", ["markPhase", "markPhase", "queueTitleJob", "markPhase"]],
+        ["use", ["markPhase", "markPhase"]],
         ["also_transcribe", ["queueTranscription", "markPhase"]],
     ] as const)("handles a Plaud transcript with the %s policy", (plaudTranscript, expected) => {
         const plaud = {
@@ -1071,7 +1042,7 @@ describe("planAdvance audio", () => {
                 }),
             }),
         );
-        expect(actionTypes(actions)).toContain("queueTitleJob");
+        expect(actionTypes(actions)).toContain("queueSummary");
         expect(actionTypes(actions)).not.toContain("queueTopics");
     });
 
@@ -1096,7 +1067,6 @@ describe("planAdvance audio", () => {
                     state: "done",
                     reason: "completed",
                     steps: {
-                        title: expect.objectContaining({ state: "skipped" }),
                         topics: expect.objectContaining({ state: "skipped" }),
                         summary: expect.objectContaining({ state: "skipped" }),
                     },
@@ -1224,20 +1194,18 @@ describe("planAdvance audio", () => {
     it("carries transcript arguments and the requested revision in marks", () => {
         const actions = planAdvance(audioFacts()).actions;
         expect(actionTypes(actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
             "markPhase",
         ]);
-        expect(actions[2]).toEqual({ type: "queueTopics", strict: true });
-        expect(actions[4]).toEqual({
+        expect(actions[0]).toEqual({ type: "queueTopics", strict: true });
+        expect(actions[2]).toEqual({
             type: "queueSummary",
             presetId: null,
             strict: true,
         });
-        expect(actions[5]).toEqual(
+        expect(actions[3]).toEqual(
             expect.objectContaining({
                 phase: "summary",
                 record: expect.objectContaining({
@@ -1299,8 +1267,6 @@ describe("planAdvance audio", () => {
             "markPhase",
             "markPhase",
             "markPhase",
-            "queueTitleJob",
-            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -1315,8 +1281,6 @@ describe("planAdvance audio", () => {
             },
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "markPhase",
-            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
@@ -1410,17 +1374,12 @@ describe("planAdvance mail", () => {
         {
             name: "no enhancement credential",
             facts: mailFacts({ hasEnhancementCredential: false }),
-            expected: ["markPhase", "markPhase", "markPhase"],
+            expected: ["markPhase", "markPhase"],
         },
         {
             name: "normal mail without Learn",
             facts: mailFacts(),
-            expected: [
-                "queueTitleJob",
-                "markPhase",
-                "queueSummary",
-                "markPhase",
-            ],
+            expected: ["queueSummary", "markPhase"],
         },
         {
             name: "normal mail with Learn",
@@ -1432,12 +1391,7 @@ describe("planAdvance mail", () => {
         {
             name: "the seeded mail profile",
             facts: mailFacts(),
-            expected: [
-                "queueTitleJob",
-                "markPhase",
-                "queueSummary",
-                "markPhase",
-            ],
+            expected: ["queueSummary", "markPhase"],
         },
         {
             name: "already shared mail",
@@ -1479,7 +1433,7 @@ describe("planAdvance mail", () => {
     });
 
     it("queues mail summary with no preset and retryable delivery", () => {
-        expect(planAdvance(mailFacts()).actions[2]).toEqual({
+        expect(planAdvance(mailFacts()).actions[0]).toEqual({
             type: "queueSummary",
             presetId: null,
             strict: true,
@@ -1488,13 +1442,8 @@ describe("planAdvance mail", () => {
 
     it("plans mail content from the mail source", () => {
         const actions = planAdvance(mailFacts()).actions;
-        expect(actionTypes(actions)).toEqual([
-            "queueTitleJob",
-            "markPhase",
-            "queueSummary",
-            "markPhase",
-        ]);
-        expect(actions[3]).toEqual(
+        expect(actionTypes(actions)).toEqual(["queueSummary", "markPhase"]);
+        expect(actions[1]).toEqual(
             expect.objectContaining({
                 record: expect.objectContaining({
                     inputs: {
