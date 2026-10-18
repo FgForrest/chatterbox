@@ -23,6 +23,19 @@ describe("buildReportBugUrl", () => {
         expect(params.get("body")).toContain("Mode: Self-hosted");
     });
 
+    it("keeps the upstream name and mode on hosted", () => {
+        const params = query(
+            buildReportBugUrl({
+                isHosted: true,
+                errorId: "err-2",
+                locale: "cs-CZ",
+            }),
+        );
+
+        expect(params.get("title")).toBe("Riffado bug report (err-2)");
+        expect(params.get("body")).toContain("Mode: Hosted (riffado.com)");
+    });
+
     it("names the product in the interface language", () => {
         const params = query(
             buildReportBugUrl({ isHosted: false, locale: "cs-CZ" }),
@@ -36,6 +49,12 @@ describe("buildReportBugMailto", () => {
     it("leaves the recipient empty on self-host", () => {
         expect(buildReportBugMailto({ isHosted: false, locale: "en" })).toMatch(
             /^mailto:\?subject=Chatterbox%20bug%20report&body=/,
+        );
+    });
+
+    it("addresses support on hosted", () => {
+        expect(buildReportBugMailto({ isHosted: true, locale: "en" })).toMatch(
+            /^mailto:support@riffado\.com\?subject=Riffado%20bug%20report&body=/,
         );
     });
 });
