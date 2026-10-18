@@ -1644,17 +1644,24 @@ export function TranscriptionPanel({
                                             ? i18n(
                                                   "No Plaud summary has been imported. It will appear after Plaud sync when available.",
                                               )
-                                            : summaryTranscript && heldForReview
+                                            : summaryTranscript &&
+                                                heldForReview &&
+                                                correcting
                                               ? i18n(
-                                                    'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
+                                                    'The summary waits while Learn corrects the transcript, then starts by itself. Click "Summarize" to make it now.',
                                                 )
-                                              : summaryTranscript
+                                              : summaryTranscript &&
+                                                  heldForReview
                                                 ? i18n(
-                                                      'No custom summary yet. Click "Summarize" to generate one.',
+                                                      'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
                                                   )
-                                                : i18n(
-                                                      "A custom transcript is required before generating a custom summary.",
-                                                  )}
+                                                : summaryTranscript
+                                                  ? i18n(
+                                                        'No custom summary yet. Click "Summarize" to generate one.',
+                                                    )
+                                                  : i18n(
+                                                        "A custom transcript is required before generating a custom summary.",
+                                                    )}
                                     </p>
                                     {/* Tasks a replaced summary left, until a new one comes */}
                                     <div className="mt-6 w-full space-y-3 text-left">

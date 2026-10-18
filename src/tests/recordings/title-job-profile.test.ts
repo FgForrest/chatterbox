@@ -77,6 +77,7 @@ describe("title job profile switch", () => {
         mocks.readTitleInput.mockResolvedValue({
             source: "summary",
             text: "Quarterly launch",
+            contentLanguage: "ces",
         });
         mocks.applyGeneratedTitle.mockResolvedValue(true);
         mocks.processing.phases = {};
@@ -101,6 +102,7 @@ describe("title job profile switch", () => {
         if (automatic) {
             expect(mocks.applyGeneratedTitle).toHaveBeenCalledWith(
                 expect.objectContaining({
+                    contentLanguage: "ces",
                     skipIfTitleStepDoneForFence: true,
                 }),
             );
@@ -128,6 +130,7 @@ describe("title job profile switch", () => {
         mocks.readTitleInput.mockResolvedValue({
             source: "summary",
             text: "Quarterly launch",
+            contentLanguage: "ces",
             fence: {
                 contentId: "summary-source-1",
                 contentSourceId: "riffado",

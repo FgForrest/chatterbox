@@ -1113,19 +1113,61 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             actions.push({ type: "releaseLearnTimeout" });
             return { actions };
         }
-        if (
-            !phaseMatches(
-                learn,
-                "waiting",
-                "review_pending",
-                minimumGeneration,
-                input,
-            )
-        ) {
-            actions.push(
-                markPhase(facts, "learn", "waiting", "review_pending", input),
-            );
+        if (facts.learnRunReadyForReview) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "waiting",
+                    "review_pending",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(
+                        facts,
+                        "learn",
+                        "waiting",
+                        "review_pending",
+                        input,
+                    ),
+                );
+            }
+            return { actions };
         }
+        if (facts.learnRunInFlight) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "running",
+                    "started",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(facts, "learn", "running", "started", input),
+                );
+            }
+            return { actions };
+        }
+        if (facts.learnCorrectionInFlight) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "running",
+                    "correcting",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(facts, "learn", "running", "correcting", input),
+                );
+            }
+            return { actions };
+        }
+        actions.push({ type: "releaseLearnHold" });
         return { actions };
     }
 

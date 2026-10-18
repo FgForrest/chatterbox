@@ -361,6 +361,10 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                 return i18n(
                     "Learn is reading the transcript with your Almanac.",
                 );
+            case "learnCorrecting":
+                return i18n(
+                    "Learn is correcting misheard words in the transcript. The summary follows.",
+                );
             case "learnReview":
                 return i18n(
                     "Learn found {count, plural, one {# suggestion} other {# suggestions}}. The summary waits for your review, at most 3 days.",

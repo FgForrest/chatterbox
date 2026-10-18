@@ -489,7 +489,10 @@ describe("planAdvance audio", () => {
     it.each([
         {
             name: "an active Learn hold",
-            facts: audioFacts({ summaryDueAt: AT }),
+            facts: audioFacts({
+                summaryDueAt: AT,
+                learnRunReadyForReview: true,
+            }),
             expected: ["markPhase"],
         },
         {
@@ -650,10 +653,23 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("waits while held, then takes the release path", () => {
-        const held = audioFacts({ summaryDueAt: AT });
+    it("marks the correction pass as running, then takes the release path", () => {
+        const held = audioFacts({
+            summaryDueAt: AT,
+            learnCorrectionInFlight: true,
+        });
         const waiting = planAdvance(held);
         expect(actionTypes(waiting.actions)).toEqual(["markPhase"]);
+        expect(waiting.actions[0]).toEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "learn",
+                record: expect.objectContaining({
+                    state: "running",
+                    reason: "correcting",
+                }),
+            }),
+        );
 
         const released = applyMarks(held, waiting.actions);
         released.summaryDueAt = null;
@@ -669,12 +685,41 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("does not repeat the waiting mark for the same held generation", () => {
-        const held = audioFacts({ summaryDueAt: AT });
+    it("does not repeat the correcting mark for the same held generation", () => {
+        const held = audioFacts({
+            summaryDueAt: AT,
+            learnCorrectionInFlight: true,
+        });
         const first = planAdvance(held);
         expect(planAdvance(applyMarks(held, first.actions)).actions).toEqual(
             [],
         );
+    });
+
+    it("marks a ready held Learn run for review", () => {
+        const actions = planAdvance(
+            audioFacts({
+                summaryDueAt: AT,
+                learnRunReadyForReview: true,
+            }),
+        ).actions;
+
+        expect(actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "learn",
+                record: expect.objectContaining({
+                    state: "waiting",
+                    reason: "review_pending",
+                }),
+            }),
+        ]);
+    });
+
+    it("releases a hold with no Learn work behind it", () => {
+        expect(planAdvance(audioFacts({ summaryDueAt: AT })).actions).toEqual([
+            { type: "releaseLearnHold" },
+        ]);
     });
 
     it("uses the transcript path for a newer transcript than the released one", () => {
@@ -1416,6 +1461,7 @@ describe("planAdvance mail", () => {
             ...facts,
             summaryDueAt: "2026-10-17T12:00:00.000Z",
             learnRunOpen: true,
+            learnRunInFlight: true,
             phases: {
                 ...facts.phases,
                 learn: {
@@ -1429,10 +1475,7 @@ describe("planAdvance mail", () => {
             },
         } satisfies PipelineFacts;
         const waiting = planAdvance(held);
-        expect(actionTypes(waiting.actions)).toEqual(["markPhase"]);
-        expect(planAdvance(applyMarks(held, waiting.actions)).actions).toEqual(
-            [],
-        );
+        expect(waiting.actions).toEqual([]);
     });
 
     it("queues mail summary with no preset and retryable delivery", () => {

@@ -11,10 +11,12 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    transcriptCorrectionPasses,
     transcriptions,
     users,
 } from "@/db/schema";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
+import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { mailShareProblems } from "@/lib/mail/share-gate";
@@ -321,6 +323,7 @@ export async function gatherFacts(
         [recording],
         [openLearnRun],
         recentLearnRuns,
+        activeCorrectionPasses,
         [completedTranscriptionJob],
         plaudTaskSource,
     ] = await Promise.all([
@@ -486,6 +489,36 @@ export async function gatherFacts(
                 ),
             )
             .orderBy(desc(learnRuns.createdAt)),
+        item.kind === "audio"
+            ? db
+                  .select({
+                      transcriptionId:
+                          transcriptCorrectionPasses.transcriptionId,
+                      transcriptRevision:
+                          transcriptCorrectionPasses.transcriptRevision,
+                  })
+                  .from(asyncJobs)
+                  .innerJoin(
+                      transcriptCorrectionPasses,
+                      eq(
+                          transcriptCorrectionPasses.id,
+                          sql`${asyncJobs.payload} ->> 'passId'`,
+                      ),
+                  )
+                  .where(
+                      and(
+                          eq(asyncJobs.userId, userId),
+                          eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
+                          eq(
+                              asyncJobs.subjectId,
+                              recordingJobSubject(itemId, view),
+                          ),
+                          inArray(asyncJobs.status, ["pending", "processing"]),
+                          eq(transcriptCorrectionPasses.userId, userId),
+                          eq(transcriptCorrectionPasses.view, view),
+                      ),
+                  )
+            : Promise.resolve([]),
         item.kind === "audio"
             ? db
                   .select({ createdAt: asyncJobs.createdAt })
@@ -762,6 +795,11 @@ export async function gatherFacts(
             openLearnRun?.status === "queued" ||
             openLearnRun?.status === "running",
         learnRunReadyForReview: openLearnRun?.status === "ready",
+        learnCorrectionInFlight: activeCorrectionPasses.some(
+            (pass) =>
+                pass.transcriptionId === content?.id &&
+                pass.transcriptRevision === content.revision,
+        ),
         plaudTasks:
             plaudTaskSource && plaudTaskSource.actionItems.length > 0
                 ? {

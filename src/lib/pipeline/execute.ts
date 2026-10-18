@@ -134,6 +134,9 @@ export async function executePipelineAction(
             if (requested) nudge();
             return;
         }
+        case "releaseLearnHold":
+            await releaseAutoLearnHold(itemId);
+            return;
         case "releaseLearnTimeout":
             await releaseAutoLearnHold(itemId, { expired: true });
             return;

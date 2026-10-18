@@ -124,6 +124,7 @@ export interface PipelineFacts {
     learnRunOpen?: boolean;
     learnRunInFlight?: boolean;
     learnRunReadyForReview?: boolean;
+    learnCorrectionInFlight?: boolean;
     plaudTasks?: {
         fingerprint: string;
     };
@@ -173,6 +174,7 @@ export type PipelineAction =
           source: "plaud" | "riffado" | "mail";
           input: ContentRevisionInput;
       }
+    | { type: "releaseLearnHold" }
     | { type: "releaseLearnTimeout" }
     | { type: "executeShares" }
     | {

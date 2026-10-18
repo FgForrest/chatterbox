@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const followUps = vi.hoisted(() => ({ held: false, correcting: false }));
+
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
@@ -51,8 +53,8 @@ vi.mock("@/hooks/use-transcript-topics", () => ({
 }));
 vi.mock("@/hooks/use-learn-follow-ups", () => ({
     useLearnFollowUps: () => ({
-        held: false,
-        correcting: false,
+        held: followUps.held,
+        correcting: followUps.correcting,
         follow: vi.fn(),
     }),
 }));
@@ -66,6 +68,8 @@ describe("per-run summary profile picker", () => {
 
     beforeEach(() => {
         requests = [];
+        followUps.held = false;
+        followUps.correcting = false;
         itemProfileId = "interview-profile";
         profiles = [
             {
@@ -251,5 +255,42 @@ describe("per-run summary profile picker", () => {
             name: "Processing profile",
         });
         expect(picker.textContent).toContain("Member's interviews");
+    });
+
+    it("says a held summary starts after transcript correction", async () => {
+        followUps.held = true;
+        followUps.correcting = true;
+
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "recording-1",
+                    filename: "Interview.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                    kind: "audio",
+                }}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: "Interview transcript",
+                        provider: "OpenAI",
+                        model: "whisper-1",
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+
+        expect(
+            await screen.findByText(
+                /The summary waits while Learn corrects the transcript, then starts by itself/,
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByText(/waits for your Learn review/)).toBeNull();
+        expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
     });
 });

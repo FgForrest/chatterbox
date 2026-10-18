@@ -28,6 +28,7 @@ export async function applyGeneratedTitle(input: {
     syncTitleToPlaud: boolean;
     kind?: "audio" | "mail";
     source?: "summary" | "transcript";
+    contentLanguage?: string | null;
     expectedTitleEditedAt?: Date | null;
     actorUserId?: string;
     view?: RecordingView;
@@ -43,6 +44,7 @@ export async function applyGeneratedTitle(input: {
         input.source ?? "transcript",
         userId,
         input.view ?? "private",
+        input.contentLanguage,
     );
 
     // Not stored when a person has set a title, and then nothing below runs.
