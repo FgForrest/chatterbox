@@ -1,10 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
+vi.mock("@/lib/env", () => ({
+    env: {
+        IS_HOSTED: false,
+        EMBEDDING_BASE_URL: undefined,
+        EMBEDDING_MODEL: "bge-m3",
+        EMBEDDING_API_KEY: undefined,
+        EMBEDDING_TIMEOUT_MS: 60_000,
+    },
+}));
 
 import {
     EmbeddingClient,
     EmbeddingUnavailable,
+    embeddingClient,
 } from "@/lib/knowledge/embeddings";
 
 /** A fake OpenAI-compatible endpoint: each text becomes [length, 1, 0]. */
@@ -79,6 +88,47 @@ describe("EmbeddingClient", () => {
         for (const vector of vectors) {
             expect(Math.hypot(...vector)).toBeCloseTo(1, 5);
         }
+    });
+
+    it("splits requests by character budget while preserving order", async () => {
+        const { fetch, calls } = fakeFetch();
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            maxBatchCharacters: 6,
+            fetch,
+        });
+
+        const vectors = await client.embed(["aaaa", "bb", "ccc", "d"]);
+
+        expect(calls.map((call) => call.body.input)).toEqual([
+            ["aaaa", "bb"],
+            ["ccc", "d"],
+        ]);
+        expect(vectors.map((vector) => vector[0])).toEqual([
+            expect.closeTo(4 / Math.hypot(4, 1), 6),
+            expect.closeTo(2 / Math.hypot(2, 1), 6),
+            expect.closeTo(3 / Math.hypot(3, 1), 6),
+            expect.closeTo(1 / Math.hypot(1, 1), 6),
+        ]);
+    });
+
+    it("sends a text larger than the character budget by itself", async () => {
+        const { fetch, calls } = fakeFetch();
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            maxBatchCharacters: 5,
+            fetch,
+        });
+
+        await client.embed(["aa", "1234567", "bb"]);
+
+        expect(calls.map((call) => call.body.input)).toEqual([
+            ["aa"],
+            ["1234567"],
+            ["bb"],
+        ]);
     });
 
     it("gives up on a slow endpoint", async () => {
@@ -174,5 +224,9 @@ describe("EmbeddingClient", () => {
         });
         expect(await client.embed([])).toEqual([]);
         expect(calls).toHaveLength(0);
+    });
+
+    it("has no configured client without an endpoint", () => {
+        expect(embeddingClient()).toBeNull();
     });
 });

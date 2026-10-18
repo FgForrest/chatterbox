@@ -43,6 +43,8 @@ export interface EmbeddingClientOptions {
     model: string;
     apiKey?: string;
     batchSize?: number;
+    /** Estimated character budget for one request. */
+    maxBatchCharacters?: number;
     timeoutMs?: number;
     /** Consecutive failures that open the breaker. */
     failureThreshold?: number;
@@ -50,6 +52,44 @@ export interface EmbeddingClientOptions {
     openMs?: number;
     fetch?: typeof globalThis.fetch;
     now?: () => number;
+}
+
+export interface EmbeddingBatch {
+    /** Index of the first text in the original input. */
+    start: number;
+    texts: readonly string[];
+    vectors: readonly Float32Array[];
+}
+
+interface PendingBatch {
+    start: number;
+    texts: string[];
+}
+
+function requestBatches(
+    texts: readonly string[],
+    countLimit: number,
+    characterLimit: number,
+): PendingBatch[] {
+    const batches: PendingBatch[] = [];
+    let current: PendingBatch | null = null;
+    let characters = 0;
+    for (const [index, text] of texts.entries()) {
+        if (
+            current &&
+            (current.texts.length >= countLimit ||
+                characters + text.length > characterLimit)
+        ) {
+            batches.push(current);
+            current = null;
+            characters = 0;
+        }
+        current ??= { start: index, texts: [] };
+        current.texts.push(text);
+        characters += text.length;
+    }
+    if (current) batches.push(current);
+    return batches;
 }
 
 function normalize(values: readonly number[]): Float32Array {
@@ -78,19 +118,37 @@ export class EmbeddingClient {
      */
     async embed(
         texts: readonly string[],
-        { signal }: { signal?: AbortSignal } = {},
+        {
+            signal,
+            onBatch,
+        }: {
+            signal?: AbortSignal;
+            onBatch?: (batch: EmbeddingBatch) => void | Promise<void>;
+        } = {},
     ): Promise<Float32Array[]> {
         if (texts.length === 0) return [];
         if (!this.available) {
             throw new EmbeddingUnavailable("The embedding service is paused");
         }
-        const size = this.options.batchSize ?? 32;
+        const countLimit = Math.max(1, this.options.batchSize ?? 32);
+        const characterLimit = Math.max(
+            1,
+            this.options.maxBatchCharacters ?? 6_000,
+        );
         const vectors: Float32Array[] = [];
-        for (let start = 0; start < texts.length; start += size) {
+        for (const request of requestBatches(
+            texts,
+            countLimit,
+            characterLimit,
+        )) {
             signal?.throwIfAborted();
-            vectors.push(
-                ...(await this.batch(texts.slice(start, start + size), signal)),
-            );
+            const batchVectors = await this.batch(request.texts, signal);
+            await onBatch?.({
+                start: request.start,
+                texts: request.texts,
+                vectors: batchVectors,
+            });
+            vectors.push(...batchVectors);
         }
         return vectors;
     }
@@ -116,7 +174,7 @@ export class EmbeddingClient {
                 },
                 body: JSON.stringify({ model: this.options.model, input }),
                 signal: AbortSignal.any([
-                    AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
+                    AbortSignal.timeout(this.options.timeoutMs ?? 60_000),
                     ...(cancel ? [cancel] : []),
                 ]),
                 redirect: "error",
@@ -168,6 +226,7 @@ export function embeddingClient(): EmbeddingClient | null {
                   baseUrl: env.EMBEDDING_BASE_URL,
                   model: env.EMBEDDING_MODEL,
                   apiKey: env.EMBEDDING_API_KEY,
+                  timeoutMs: env.EMBEDDING_TIMEOUT_MS,
               })
             : null;
     return client;
