@@ -26,6 +26,7 @@ import {
     type SMTPServerSession,
 } from "smtp-server";
 import { authenticateMessage } from "@/lib/mail/dkim";
+import type { DkimSignature } from "@/lib/mail/policy";
 import type { AllowedSources } from "@/lib/mail/receiver/sources";
 
 export interface ReceiverConfig {
@@ -61,6 +62,17 @@ export interface ReceiverConfig {
 type ServerOptions = Omit<SMTPServerOptions, "useProxy"> & {
     useProxy?: string[];
 };
+
+type ReceiverDkim = Pick<
+    DkimSignature,
+    "domain" | "selector" | "result" | "comment"
+>;
+
+interface DeliveryOutcome {
+    code: number;
+    verdict: string;
+    dkim: ReceiverDkim[];
+}
 
 /** An SMTP error with its reply code. */
 function smtpError(code: number, message: string): Error {
@@ -121,7 +133,7 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
     const deliver = async (
         raw: Buffer,
         session: SMTPServerSession,
-    ): Promise<{ code: number; verdict: string }> => {
+    ): Promise<DeliveryOutcome> => {
         const recipients = session.envelope.rcptTo.map((rcpt) =>
             rcpt.address.toLowerCase(),
         );
@@ -129,6 +141,14 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
             resolver: config.resolver,
             now: new Date(),
         });
+        const dkim = facts.dkim.map(
+            ({ domain, selector, result, comment }) => ({
+                domain,
+                selector,
+                result,
+                comment,
+            }),
+        );
         const precheck = await callApp("/api/internal/mail/precheck", {
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -146,7 +166,9 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
         if (!precheck.ok)
             throw new Error(`precheck answered ${precheck.status}`);
         const { accepted } = (await precheck.json()) as { accepted: string[] };
-        if (accepted.length === 0) return { code: 250, verdict: "refused" };
+        if (accepted.length === 0) {
+            return { code: 250, verdict: "refused", dkim };
+        }
         const ingest = await callApp("/api/internal/mail/ingest", {
             // fetch sends the body's length itself; undici on Node 22
             // refuses one set by hand.
@@ -161,9 +183,10 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
         });
         if (!ingest.ok) throw new Error(`ingest answered ${ingest.status}`);
         const result = (await ingest.json()) as { overQuota?: boolean };
-        return result.overQuota
-            ? { code: 452, verdict: "over_quota" }
-            : { code: 250, verdict: "delivered" };
+        if (result.overQuota) {
+            return { code: 452, verdict: "over_quota", dkim };
+        }
+        return { code: 250, verdict: "delivered", dkim };
     };
 
     const options: ServerOptions = {
@@ -260,6 +283,7 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
                         size: raw.length,
                         recipients: session.envelope.rcptTo.length,
                         tag: messageTag(raw),
+                        dkim: outcome.dkim,
                     });
                     if (outcome.code === 452) {
                         return callback(

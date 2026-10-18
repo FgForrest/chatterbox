@@ -1,3 +1,4 @@
+import { promises as dnsPromises } from "node:dns";
 import { type DNSResolver, dkimVerify } from "mailauth";
 import { parseAddressList } from "@/lib/mail/address-list";
 import {
@@ -6,14 +7,24 @@ import {
     readRawHeaders,
     withDkimSignatures,
 } from "@/lib/mail/headers";
-import type { DkimSignature, MessageFacts } from "@/lib/mail/policy";
+import type {
+    DkimSignature,
+    MessageFacts,
+    RefusalReason,
+} from "@/lib/mail/policy";
 
 /** Signatures verified per message: aligned ones first. */
 export const MAX_DKIM_SIGNATURES = 3;
 
+/** Longest DKIM selector kept from a signature, the length of a DNS name. */
+export const MAX_DKIM_SELECTOR_LENGTH = 253;
+
+/** Longest verifier diagnostic kept from a signature. */
+export const MAX_DKIM_COMMENT_LENGTH = 256;
+
 /** What the authentication of a message found, stored (encrypted) with it. */
 export interface MailAuth {
-    dkim: { domain: string; selector: string | null; result: string }[];
+    dkim: { domain: string; result: string }[];
     /** The receiver's SPF result: shown, never used to authorize. */
     spf: string | null;
     senderVerified: boolean;
@@ -23,9 +34,45 @@ export interface MailAuth {
 interface VerifierResult {
     signingDomain?: string;
     selector?: string;
-    status?: { result?: string };
+    status?: { result?: string; comment?: string };
     signTime?: string | Date;
     signingHeaders?: { headers?: string[] };
+}
+
+const dkimRefusalReasons = new Set<RefusalReason>([
+    "not_signed",
+    "signature_untimed",
+    "signature_stale",
+]);
+
+/**
+ * Resolves mail-authentication DNS. A DKIM selector has exactly one key
+ * record, so all TXT answer strings are returned as that record under both
+ * Node and Bun; other answers and DNS errors pass through unchanged.
+ */
+export async function resolveDkimDns(
+    name: string,
+    type: string,
+): Promise<string[][] | string[]> {
+    const answer = await (dnsPromises.resolve as DNSResolver)(name, type);
+    if (type === "TXT" && name.toLowerCase().includes("._domainkey.")) {
+        return [answer.flat()];
+    }
+    return answer;
+}
+
+/** Logs per-signature diagnostics for a DKIM-based mail refusal. */
+export function logDkimRefusal(
+    reason: RefusalReason,
+    signatures: readonly DkimSignature[],
+    log: (message: string) => void = console.warn,
+): void {
+    if (!dkimRefusalReasons.has(reason)) return;
+    for (const signature of signatures) {
+        log(
+            `[mail] refused ${reason}: dkim ${signature.domain}/${signature.selector} ${signature.result} ${signature.comment}`,
+        );
+    }
 }
 
 function domainOf(address: string): string {
@@ -93,7 +140,7 @@ export async function authenticateMessage(
                           keep.has(index),
                       ),
                       {
-                          resolver: options.resolver,
+                          resolver: options.resolver ?? resolveDkimDns,
                           curTime: options.now,
                           minBitLength: 1024,
                       },
@@ -106,7 +153,15 @@ export async function authenticateMessage(
             const signTime = result.signTime ? new Date(result.signTime) : null;
             return {
                 domain: (result.signingDomain ?? "").toLowerCase(),
+                selector: (result.selector ?? "").slice(
+                    0,
+                    MAX_DKIM_SELECTOR_LENGTH,
+                ),
                 result: result.status?.result ?? "none",
+                comment: (result.status?.comment ?? "").slice(
+                    0,
+                    MAX_DKIM_COMMENT_LENGTH,
+                ),
                 signedRecipients: signedRecipients(
                     result.signingHeaders?.headers ?? [],
                 ),
@@ -133,7 +188,6 @@ export function summarizeAuth(
     return {
         dkim: facts.dkim.map((signature) => ({
             domain: signature.domain,
-            selector: null,
             result: signature.result,
         })),
         spf,
