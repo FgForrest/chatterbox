@@ -1,6 +1,8 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import React from "react";
 import { claimEmailSend, releaseEmailSend } from "@/db/queries/email-log";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { resolveFromAddress } from "@/lib/email/transport";
 import { env } from "@/lib/env";
 import {
     type AppLocale,
@@ -77,8 +79,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
             return false;
         }
 
-        const fromEmail =
-            env.SMTP_FROM || env.SMTP_USER || "noreply@riffado.com";
+        const fromEmail = resolveFromAddress("transactional");
 
         await mailer.sendMail({
             from: fromEmail,
@@ -109,7 +110,7 @@ export async function sendEmailWithError(options: EmailOptions): Promise<void> {
         );
     }
 
-    const fromEmail = env.SMTP_FROM || env.SMTP_USER || "noreply@riffado.com";
+    const fromEmail = resolveFromAddress("transactional");
 
     try {
         await mailer.sendMail({
@@ -203,7 +204,9 @@ export async function sendPasswordResetEmail(
     requestedLocale?: AppLocale | null,
 ): Promise<boolean> {
     const locale = resolveEmailLocale(requestedLocale);
-    const subject = createEmailTranslator(locale)("passwordReset");
+    const subject = createEmailTranslator(locale)("passwordReset", {
+        name: deploymentProductName(locale),
+    });
 
     const html = await renderEmailHtml(
         React.createElement(PasswordResetEmail, {
@@ -262,7 +265,9 @@ export async function sendWelcomeHostedProEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("welcomeHostedPro"),
+                subject: createEmailTranslator(locale)("welcomeHostedPro", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -294,7 +299,9 @@ export async function sendPaymentFailedEmail(input: {
     );
     await sendEmailWithError({
         to: input.email,
-        subject: createEmailTranslator(locale)("paymentFailed"),
+        subject: createEmailTranslator(locale)("paymentFailed", {
+            name: deploymentProductName(locale),
+        }),
         html,
     });
 }
@@ -328,7 +335,9 @@ export async function sendOverCapEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("overCap"),
+                subject: createEmailTranslator(locale)("overCap", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -360,7 +369,9 @@ export async function sendVerifyEmail(input: {
     );
     return sendEmail({
         to: input.email,
-        subject: createEmailTranslator(locale)("verify"),
+        subject: createEmailTranslator(locale)("verify", {
+            name: deploymentProductName(locale),
+        }),
         html,
     });
 }
@@ -394,7 +405,9 @@ export async function sendEmailChangeConfirm(input: {
     );
     return sendEmail({
         to: input.sendTo,
-        subject: createEmailTranslator(locale)("emailChange"),
+        subject: createEmailTranslator(locale)("emailChange", {
+            name: deploymentProductName(locale),
+        }),
         html,
     });
 }
@@ -439,7 +452,10 @@ export async function sendGraceStartedEmail(input: {
                     input.gracePath === "trial"
                         ? "graceStartedTrial"
                         : "graceStartedPaid",
-                    { days: input.graceDays },
+                    {
+                        days: input.graceDays,
+                        name: deploymentProductName(locale),
+                    },
                 ),
                 html,
             };
@@ -467,7 +483,9 @@ export async function sendExportReadyEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("exportReady"),
+                subject: createEmailTranslator(locale)("exportReady", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -504,6 +522,7 @@ export async function sendGraceReminderEmail(input: {
                 to: input.email,
                 subject: createEmailTranslator(locale)("graceReminder", {
                     days: input.daysLeft,
+                    name: deploymentProductName(locale),
                 }),
                 html,
             };
@@ -537,7 +556,9 @@ export async function sendGraceLastDayEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("graceLastDay"),
+                subject: createEmailTranslator(locale)("graceLastDay", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -565,7 +586,9 @@ export async function sendAccountDeletedEmail(input: {
     );
     return sendEmail({
         to: input.email,
-        subject: createEmailTranslator(locale)("accountDeleted"),
+        subject: createEmailTranslator(locale)("accountDeleted", {
+            name: deploymentProductName(locale),
+        }),
         html,
     });
 }
@@ -607,7 +630,9 @@ export async function sendTransitionStartEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("transitionStart"),
+                subject: createEmailTranslator(locale)("transitionStart", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -654,6 +679,7 @@ export async function sendTransitionReminderEmail(input: {
                 to: input.email,
                 subject: createEmailTranslator(locale)("transitionReminder", {
                     days: input.daysLeft,
+                    name: deploymentProductName(locale),
                 }),
                 html,
             };
@@ -692,7 +718,9 @@ export async function sendTransitionEndedEmail(input: {
             );
             return {
                 to: input.email,
-                subject: createEmailTranslator(locale)("transitionEnded"),
+                subject: createEmailTranslator(locale)("transitionEnded", {
+                    name: deploymentProductName(locale),
+                }),
                 html,
             };
         },
@@ -704,7 +732,9 @@ export async function sendTestEmail(
     requestedLocale?: AppLocale | null,
 ): Promise<void> {
     const locale = resolveEmailLocale(requestedLocale);
-    const subject = createEmailTranslator(locale)("test");
+    const subject = createEmailTranslator(locale)("test", {
+        name: deploymentProductName(locale),
+    });
 
     const baseUrl = env.APP_URL;
     const dashboardUrl = `${baseUrl}/dashboard`;

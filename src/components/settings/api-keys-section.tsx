@@ -4,6 +4,7 @@ import { Check, Clipboard, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ function formatDate(
 export function ApiKeysSection() {
     const i18n = useExtracted();
     const locale = useLocale();
+    const productName = useProductName();
     const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
@@ -156,7 +158,8 @@ export function ApiKeysSection() {
             <SettingsSectionHeader
                 title={i18n("API Keys")}
                 description={i18n(
-                    "Personal access tokens for the Riffado public API.",
+                    "Personal access tokens for the {name} public API.",
+                    { name: productName },
                 )}
                 icon={KeyRound}
                 action={

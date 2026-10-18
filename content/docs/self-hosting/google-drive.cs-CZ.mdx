@@ -7,17 +7,16 @@ Export složky může zapisovat do Google Drive místo do souborového systému 
 
 Integrace je určena pro instance s vlastním hostingem v rámci jednoho Google Workspace. Používá OAuth consent screen typu **Interní**, který mohou využívat pouze účty Vašeho Workspace a který Google nekontroluje.
 
-<span id="what-riffado-can-see" />
 <span id="what-chatterbox-can-see" />
 
-## Co Chatterbox může vidět
+## Co Klepna může vidět
 
-Chatterbox vyžaduje rozsah `drive.file`. Díky tomu Chatterbox vidí pouze:
+Klepna vyžaduje rozsah `drive.file`. Díky tomu Klepna vidí pouze:
 
 - složku, kterou uživatel vybere v Google Pickeru, a
-- složky a soubory, které Chatterbox samo vytvoří.
+- složky a soubory, které Klepna samo vytvoří.
 
-Nemůže zobrazit ani číst žádné jiné položky v Google Drive uživatele. Na druhou stranu: Chatterbox také nemůže vidět soubory, které lidé vloží do složek vytvořených aplikací Chatterbox. Sleduje pouze své vlastní složky a kdykoliv nějakou složku už nepotřebuje a nemá v ní žádné své soubory, přesune ji do koše Google Drive. Jakékoliv položky, které tam uživatelé vložili, jdou do koše spolu s ní a zůstávají obnovitelné po dobu 30 dnů. Každá složka vytvořená aplikací Chatterbox nese v popisu Drive text: „Managed by Riffado. Content you add here may be removed.“ Tento uložený popis zachovává původní název projektu.
+Nemůže zobrazit ani číst žádné jiné položky v Google Drive uživatele. Na druhou stranu: Klepna také nemůže vidět soubory, které lidé vloží do složek vytvořených aplikací Klepna. Sleduje pouze své vlastní složky a kdykoliv nějakou složku už nepotřebuje a nemá v ní žádné své soubory, přesune ji do koše Google Drive. Jakékoliv položky, které tam uživatelé vložili, jdou do koše spolu s ní a zůstávají obnovitelné po dobu 30 dnů. Každá složka vytvořená aplikací Klepna nese v popisu Drive text: „Managed by Klepna. Content you add here may be removed.“
 
 Google Docs jsou znovu generovány pokaždé, když se změní přepis nebo souhrn, a to do téhož dokumentu (jeho odkaz i sdílení zůstává platné). Úpravy provedené přímo v dokumentu jsou přepsány.
 
@@ -55,19 +54,19 @@ GOOGLE_CLOUD_PROJECT_NUMBER=1234567890
 GOOGLE_WORKSPACE_DOMAINS=example.com
 ```
 
-Restartujte Chatterbox. V části **Nastavení → Google účet** nyní můžete propojit účet a v dialogu exportu složky zvolit **Přidat export do Google Drive**.
+Restartujte Klepna. V části **Nastavení → Google účet** nyní můžete propojit účet a v dialogu exportu složky zvolit **Přidat export do Google Drive**.
 
 <span id="exporting-the-organization-tree-to-a-shared-drive" />
 
 ## Export stromu Organizace do sdíleného disku
 
 Účet organizace exportuje strom Organizace stejně jako každý jiný. Propojte jej s dedikovanou služební schránkou (například
-`chatterbox@example.com`, licenci Workspace uživatele), ne s osobním účtem: export probíhá přes tento účet a pokud je odstraněn, export se zastaví. Přidejte schránku na sdílený disk jako **Správce obsahu**, přihlaste se do aplikace Chatterbox jako účet organizace, propojte schránku a vyberte složku sdíleného disku.
+`chatterbox@example.com`, licenci Workspace uživatele), ne s osobním účtem: export probíhá přes tento účet a pokud je odstraněn, export se zastaví. Přidejte schránku na sdílený disk jako **Správce obsahu**, přihlaste se do aplikace Klepna jako účet organizace, propojte schránku a vyberte složku sdíleného disku.
 
 <span id="when-the-connection-breaks" />
 
 ## Když dojde k přerušení propojení
 
-Pokud je přístup k účtu odvolán, změní se heslo účtu způsobem, který odvolá tokeny, nebo je účet odstraněn z Workspace, Google přestane přijímat obnovovací token Chatterbox. Propojení je pak označeno k opětovnému připojení, exporty na Drive tohoto uživatele se pozastaví a dialog exportu i nastavení na to upozorňují. Opětovné propojení téhož účtu automaticky obnoví všechny pozastavené exporty.
+Pokud je přístup k účtu odvolán, změní se heslo účtu způsobem, který odvolá tokeny, nebo je účet odstraněn z Workspace, Google přestane přijímat obnovovací token Klepna. Propojení je pak označeno k opětovnému připojení, exporty na Drive tohoto uživatele se pozastaví a dialog exportu i nastavení na to upozorňují. Opětovné propojení téhož účtu automaticky obnoví všechny pozastavené exporty.
 
 Export se také zastaví, pokud je jeho složka smazána nebo přesunuta do koše, nebo pokud účet již nemůže přidávat do složky soubory. Chcete-li pokračovat, vyberte jinou složku v nastavení exportu.

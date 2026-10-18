@@ -15,7 +15,7 @@ import { TheMath } from "@/components/landing/the-math";
 import { LandingFooter } from "@/components/landing-footer";
 import { getFoundingMemberAvailability } from "@/db/queries/billing";
 import { getSession } from "@/lib/auth-server";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import {
     resolveCurrency,
@@ -26,7 +26,7 @@ import { marketingMetadata } from "@/lib/seo/marketing-metadata";
 
 export async function generateMetadata(): Promise<Metadata> {
     const i18n = await getExtracted();
-    const name = productName(await getLocale());
+    const name = deploymentProductName(await getLocale());
     return marketingMetadata({
         title: i18n(
             "Riffado | Open-source AI transcription for voice recorders",

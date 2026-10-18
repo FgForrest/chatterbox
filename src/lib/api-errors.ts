@@ -40,12 +40,13 @@ export async function getApiErrorMessage(
 export interface ToastApiErrorOptions {
     fallback?: string;
     errorContext?: string;
+    productName: string;
 }
 
 /** Toast a non-OK response; attaches a "Report" action when an `errorId` is present. */
 export async function toastApiError(
     response: Response,
-    opts: ToastApiErrorOptions = {},
+    opts: ToastApiErrorOptions,
 ): Promise<ApiErrorBody> {
     const body = await parseApiError(response);
     const message = body.error || opts.fallback || "Request failed";
@@ -58,6 +59,7 @@ export async function toastApiError(
         const url = buildReportBugUrl({
             errorId,
             errorContext: opts.errorContext,
+            name: opts.productName,
             page:
                 typeof window !== "undefined"
                     ? window.location.pathname

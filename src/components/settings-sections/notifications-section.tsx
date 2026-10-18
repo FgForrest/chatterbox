@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { ToggleRow } from "@/components/settings/toggle-row";
@@ -21,6 +22,7 @@ import { requestNotificationPermission } from "@/lib/notifications/browser";
 
 export function NotificationsSection() {
     const i18n = useExtracted();
+    const name = useProductName();
     const {
         isLoadingSettings,
         isSavingSettings,
@@ -179,7 +181,8 @@ export function NotificationsSection() {
             <SettingsSectionHeader
                 title={i18n("Notifications")}
                 description={i18n(
-                    "Choose how and when Riffado lets you know about new recordings and sync events.",
+                    "Choose how and when {name} lets you know about new recordings and sync events.",
+                    { name },
                 )}
                 icon={Bell}
             />

@@ -13,14 +13,14 @@ export function NewsletterConfirmEmail({
     const i18n = getEmailTranslator();
     return (
         <EmailLayout
-            previewText={i18n("Confirm your Riffado newsletter subscription")}
+            previewText={i18n("Confirm your {name} newsletter subscription")}
         >
             <Heading style={emailStyles.h1}>
                 {i18n("Confirm your subscription")}
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "You asked to receive Riffado product updates. Click the button below to confirm. If you didn't sign up, ignore this email -- without confirmation we'll never email this address again.",
+                    "You asked to receive {name} product updates. Click the button below to confirm. If you didn't sign up, ignore this email -- without confirmation we'll never email this address again.",
                 )}
             </Text>
             <Section style={emailStyles.buttonSection}>

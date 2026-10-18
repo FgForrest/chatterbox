@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
+import { useProductName } from "@/components/product-name-provider";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
 import {
     type SpeakerAttributions,
@@ -152,6 +153,7 @@ export function SpeakerTags({
     readOnly = false,
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
+    const productName = useProductName();
     const speakersUrl = withRecordingView(
         `/api/recordings/${recordingId}/speakers?source=${encodeURIComponent(source)}`,
         view,
@@ -294,6 +296,7 @@ export function SpeakerTags({
                     ? i18n("Failed to identify this speaker")
                     : i18n("Failed to unlink this speaker"),
                 errorContext: "update a transcript speaker",
+                productName,
             });
             return false;
         }

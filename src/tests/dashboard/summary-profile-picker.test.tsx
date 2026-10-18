@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
         Object.entries(values ?? {}).reduce(
             (result, [key, value]) => result.replace(`{${key}}`, String(value)),

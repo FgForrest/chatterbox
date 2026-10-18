@@ -1,9 +1,9 @@
 ---
 title: Proměnné prostředí
-description: Všechny proměnné prostředí, které Chatterbox načítá, jejich funkce a výchozí hodnoty.
+description: Všechny proměnné prostředí, které Klepna načítá, jejich funkce a výchozí hodnoty.
 ---
 
-Chatterbox ověřuje každou proměnnou prostředí pomocí schématu Zod v
+Klepna ověřuje každou proměnnou prostředí pomocí schématu Zod v
 `src/lib/env.ts` při startu procesu. Nesprávně nastavené prostředí způsobí
 pád serveru s přesnou chybovou zprávou namísto spuštění v poškozeném
 stavu — to je záměrné. Tato stránka slouží jako zdroj pravdy
@@ -32,13 +32,14 @@ nezávisel na produkčních tajemstvích.
 | ------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `DISABLE_REGISTRATION`              | `false`                            | Při `true` je registrace odmítnuta na straně serveru a stránka `/register` je zakázána. Stávající uživatelé dál fungují. S [jednotným přihlašováním](./sso) se mohou přihlásit pouze existující účty. |
 | `DISABLE_UPDATE_CHECK`              | `false`                            | Při hodnotě `true` patička nikdy nekontroluje u `api.github.com` nové vydané verze.                                 |
-| `DOCS_REPOSITORY`                   | `riffado/riffado`                  | GitHub repozitář (`owner/name`), na který směřují odkazy **Upravit na GitHubu** v dokumentaci. Čte se při buildu dokumentace: předává se jako build argument Dockeru. |
+| `DOCS_REPOSITORY`                   | `FgForrest/chatterbox`             | GitHub repozitář (`owner/name`), na který směřují odkazy **Upravit na GitHubu** v dokumentaci. Čte se při buildu dokumentace: předává se jako build argument Dockeru. |
 | `SELF_HOST_MODE`                    | `shared`                           | `shared` umožňuje úroveň Organization; `local` drží každý účet striktně soukromě.                           |
 | `ORG_ACCOUNT_EMAIL`                 | nenastaveno                          | Při `ORG_ACCOUNT_PASSWORD` povolí úroveň Organization: sdílenou stromovou strukturu složek a jeden účet organizace, který ji spravuje. Nesmí odpovídat e-mailu žádného stávajícího uživatele. |
 | `ORG_ACCOUNT_PASSWORD`              | nenastaveno                          | Heslo účtu organizace (alespoň 12 znaků). Při každém startu se opětovně nastavuje. Volitelné při jednotném přihlašování, kde účet nemá interaktivní přihlášení. |
 | `ORG_ACCOUNT_NAME`                  | `Organization`                     | Zobrazované jméno účtu organizace.                                                                                |
 | `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` | `60`                         | Nejvyšší počet volání, která může jeden člen provést u každého poskytovatele AI Organizace v jednom hodinovém okně. Ostatní členové mají samostatné limity. |
-| `RIFFADO_VERSION`                 | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které image tagy Compose stahuje.                                  |
+| `CHATTERBOX_VERSION`             | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které image tagy Compose stahuje.                                  |
+| `RIFFADO_VERSION`                | nenastaveno                        | Zastaralá po dobu jednoho vydání. Použije se pouze tehdy, když `CHATTERBOX_VERSION` není nastavena.                |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro bucketování rate-limitů. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
 | `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace session secretu. |
@@ -163,7 +164,7 @@ Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 | `EMBEDDING_BASE_URL` | —        | OpenAI-kompatibilní endpoint `embeddings`. Pokud není, Learn páruje pouze podle slov, a informuje o tom. |
 | `EMBEDDING_MODEL`    | `bge-m3` | Embedding model, který bude endpointu požadován.                                                            |
 | `EMBEDDING_API_KEY`  | —        | Posílá se jako bearer token, pokud ho endpoint vyžaduje.                                                         |
-| `LEARN_MCP_URL`      | —        | Jediná URL read-only znalostních nástrojů aplikace Chatterbox, kterou Learn bridge může volat zpět.                      |
+| `LEARN_MCP_URL`      | —        | Jediná URL read-only znalostních nástrojů aplikace Klepna, kterou Learn bridge může volat zpět.                      |
 | `LEARN_BRIDGE_URL`   | —        | Základní URL agent bridge tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Learn přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
 | `KNOWLEDGE_MEMORY_MB`| `256`    | Kolik dešifrovaných znalostí drží v paměti jeden proces, než vytlačí nejméně používanou položku.         |
 

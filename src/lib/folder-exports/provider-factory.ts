@@ -1,4 +1,6 @@
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
+import { defaultLocale } from "@/lib/i18n/config";
 import {
     getGoogleAccessToken,
     googleAccessTokenSource,
@@ -6,7 +8,10 @@ import {
 } from "@/lib/integrations/google/connection";
 import { createDriveClient } from "@/lib/integrations/google/drive-client";
 import { DbDriveNodeStore } from "./drive-nodes";
-import { DriveExportProvider } from "./drive-provider";
+import {
+    DriveExportProvider,
+    managedFolderDescription,
+} from "./drive-provider";
 import { DbFilesystemNodeStore } from "./filesystem-nodes";
 import { FilesystemExportProvider } from "./filesystem-provider";
 import type { ExportTarget } from "./target";
@@ -24,6 +29,7 @@ export async function createExportProvider(
             return new FilesystemExportProvider(
                 env.FILESYSTEM_EXPORT_ROOT ?? "",
                 new DbFilesystemNodeStore(target.userId, target.id),
+                deploymentProductName(defaultLocale),
             );
         case "google-drive": {
             const drive = target.googleDrive;
@@ -44,6 +50,9 @@ export async function createExportProvider(
                         invalidateGoogleAccessToken(target.userId),
                 }),
                 nodes: new DbDriveNodeStore(target.userId, target.id),
+                managedFolderDescription: managedFolderDescription(
+                    deploymentProductName(defaultLocale),
+                ),
             });
         }
     }

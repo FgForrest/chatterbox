@@ -67,19 +67,16 @@ export function sanitizeForLog(value, maxLength = 128) {
  * One sidecar serves both CLIs, so the `model` field is what picks the
  * backend. Returns "claude", "codex", or null.
  *
- * An unrecognised id is a hard error upstream rather than a guess:
- * Riffado falls back to `gpt-4o-mini` when a credential has no
- * `defaultModel` (`generate-summary.ts`), and silently routing that to
- * Codex would be a confusing way to discover the model field was left
- * blank.
+ * Valid ids starting with `claude` route to Claude Code. Valid ids
+ * starting with `codex` or `gpt-` route to Codex. Any other id is a hard
+ * error upstream.
  */
 export function resolveBackend(model) {
     if (typeof model !== "string") return null;
     const id = model.trim();
     if (!MODEL_ID_PATTERN.test(id)) return null;
     if (id.startsWith("claude")) return "claude";
-    if (Object.hasOwn(CODEX_MODELS, id) || id.startsWith("codex") || id.startsWith("gpt-5"))
-        return "codex";
+    if (id.startsWith("codex") || id.startsWith("gpt-")) return "codex";
     return null;
 }
 

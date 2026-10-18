@@ -3,7 +3,7 @@ title: Zpracování a profily
 description: Zařazení nových položek, volba receptu zpracování a čtení pracovního postupu.
 ---
 
-Nové nahrávky a pošta čekají na zařazení, než Chatterbox spustí placený krok AI. Složka tak může zvolit správný recept zpracování a nevznikne nechtěný přepis ani shrnutí.
+Nové nahrávky a pošta čekají na zařazení, než Klepna spustí placený krok AI. Složka tak může zvolit správný recept zpracování a nevznikne nechtěný přepis ani shrnutí.
 
 ## Zařazení nové položky
 
@@ -17,7 +17,7 @@ Položku můžete také přetáhnout na složku ve stromu. Položky adresované 
 
 Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
-Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Chatterbox ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích, Učení a úkolů. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
+Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích, Učení a úkolů. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
 
 <span id="profiles-are-processing-recipes" />
 
@@ -33,21 +33,21 @@ Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přep
 
 ![Úprava profilu Nahrávky](images/profile-editor.png)
 
-V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a poštu. Každý může sledovat aktuální výchozí profil Organizace, použít konkrétní profil Organizace nebo jeden z Vašich profilů. Osobní profily můžete vytvářet, duplikovat, mazat, archivovat a obnovovat. Smazání nepoužitého profilu jej odstraní natrvalo; pokud na něj odkazuje historie zpracování nebo úloha ve frontě, Chatterbox jej odebere ze seznamů, ale ponechá jej pod **Archivované**, aby mohla práce skončit a historie zůstala zachována. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky, poté Vaším účinným výchozím profilem, a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
+V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a poštu. Každý může sledovat aktuální výchozí profil Organizace, použít konkrétní profil Organizace nebo jeden z Vašich profilů. Osobní profily můžete vytvářet, duplikovat, mazat, archivovat a obnovovat. Smazání nepoužitého profilu jej odstraní natrvalo; pokud na něj odkazuje historie zpracování nebo úloha ve frontě, Klepna jej odebere ze seznamů, ale ponechá jej pod **Archivované**, aby mohla práce skončit a historie zůstala zachována. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky, poté Vaším účinným výchozím profilem, a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
 
 **Profily Organizace** jsou sdílené recepty. Členové je mohou používat na soukromé položky a duplikovat do osobního profilu. Štítek **Vaše výchozí** označuje profil, který právě používáte; **Výchozí profil Organizace** označuje volbu Organizace. Když sledujete výchozí profil Organizace, tento profil má oba štítky. Kurátoři mohou vytvářet a upravovat verze Organizace.
 
-Pokud je konkrétní profil Organizace, který jste zvolili, archivován nebo k němu ztratíte přístup, Chatterbox Vaši volbu zachová a v Profilech, nastavení složky i kartě Zařazení ji označí jako nedostupnou. Nové zpracování se zastaví, dokud nezvolíte jiný výchozí profil. Před archivací profilu Organizace kurátor uvidí počet členů, kteří jej zvolili, a stejné upozornění.
+Pokud je konkrétní profil Organizace, který jste zvolili, archivován nebo k němu ztratíte přístup, Klepna Vaši volbu zachová a v Profilech, nastavení složky i kartě Zařazení ji označí jako nedostupnou. Nové zpracování se zastaví, dokud nezvolíte jiný výchozí profil. Před archivací profilu Organizace kurátor uvidí počet členů, kteří jej zvolili, a stejné upozornění.
 
 <span id="folder-default-profiles" />
 
 ## Výchozí profily složky
 
-Otevřete nastavení složky a zvolte **Výchozí profily**. Nahrávky a pošta mají samostatné výchozí hodnoty:
+Otevřete složku a zvolte **Zpracování**. Nahrávky a pošta mají samostatné výchozí hodnoty:
 
 ![Výběr výchozích profilů složky](images/folder-default-profiles.png)
 
-- **Dědit** použije nejbližšího předka s nastavenou volbou. Pokud ji nemá žádný, Chatterbox použije Váš výchozí profil pro daný druh položky.
+- **Dědit** použije nejbližšího předka s nastavenou volbou. Pokud ji nemá žádný, Klepna použije Váš výchozí profil pro daný druh položky.
 - Výběrem profilu přiřadíte položkám zařazeným do složky tento recept.
 - **Bez automatického zpracování** přiřadí běžný výchozí profil, ale vypne všechny automatické kroky. Kroky můžete stále spouštět ručně.
 

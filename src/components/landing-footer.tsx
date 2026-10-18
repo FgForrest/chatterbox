@@ -3,7 +3,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { Github, X } from "@/components/icons/icons";
 import { NewsletterForm } from "@/components/marketing/newsletter-form";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 
 /**
  * Marketing footer for hosted public surfaces. Currently mounted on:
@@ -55,7 +55,7 @@ function FooterLinkItem({ label, href, external }: FooterLink) {
 export function LandingFooter() {
     const i18n = useExtracted();
     const locale = useLocale();
-    const name = productName(locale);
+    const name = deploymentProductName(locale);
     const currentYear = new Date().getFullYear();
     const columns: FooterColumn[] = [
         {

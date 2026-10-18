@@ -5,7 +5,7 @@ import { Github } from "@/components/icons/icons";
 import { WaveformLogo } from "@/components/icons/waveform-logo";
 import { ReportBugButton } from "@/components/report-bug-dialog";
 import { UpdateBadge } from "@/components/update-badge";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import { APP_RELEASE_URL, APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 
@@ -25,7 +25,7 @@ import { APP_RELEASE_URL, APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 export function Footer() {
     const i18n = useExtracted();
     const locale = useLocale();
-    const name = productName(locale);
+    const name = deploymentProductName(locale);
     const currentYear = new Date().getFullYear();
 
     return (

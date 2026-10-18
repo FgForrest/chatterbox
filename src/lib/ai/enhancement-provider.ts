@@ -1,16 +1,29 @@
-/**
- * The chat model to run enhancement with.
- *
- * The configured "default model" on a credential can be a Whisper
- * (transcription-only) id when the user only set up a transcription
- * provider. Pick a sane lightweight chat model per provider in that case so
- * enhancement still works.
- */
+import { AppError, ErrorCode } from "@/lib/errors";
+
+/** The product-facing fix for a provider without an enhancement model. */
+export function enhancementModelRequiredMessage(provider: string): string {
+    return `Set a Default Model on ${provider} in Settings > Providers.`;
+}
+
+/** The chat model to run enhancement with. */
 export function enhancementChatModel(credentials: {
+    id?: string;
+    provider: string;
     defaultModel: string | null;
     baseUrl: string | null;
 }): string {
-    const model = credentials.defaultModel || "gpt-4o-mini";
+    const model = credentials.defaultModel;
+    if (!model?.trim()) {
+        throw new AppError(
+            ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+            enhancementModelRequiredMessage(credentials.provider),
+            400,
+            {
+                field: "defaultModel",
+                ...(credentials.id ? { providerId: credentials.id } : {}),
+            },
+        );
+    }
     if (!model.includes("whisper")) return model;
     const baseUrl = credentials.baseUrl || "";
     if (baseUrl.includes("groq")) return "llama-3.1-8b-instant";

@@ -3,7 +3,7 @@ title: Veřejné API
 description: Veřejné rozhraní /api/v1/* — ověřování, koncové body, chyby a limity.
 ---
 
-Rozhraní `/api/v1/*` je veřejné a stabilní API služby Chatterbox.
+Rozhraní `/api/v1/*` je veřejné a stabilní API služby Klepna.
 Ověření probíhá pomocí osobních API klíčů; integrace jako Zapier, n8n,
 a vaše vlastní skripty jej mohou používat.
 
@@ -120,7 +120,7 @@ curl -H "Authorization: Bearer op_K7vR8x..." \
 ```js
 const res = await fetch(
   "https://your-host/api/v1/recordings?limit=20",
-  { headers: { Authorization: `Bearer ${process.env.RIFFADO_KEY}` } },
+  { headers: { Authorization: `Bearer ${process.env.CHATTERBOX_KEY}` } },
 );
 const { data, next_cursor, has_more } = await res.json();
 ```
@@ -276,7 +276,7 @@ curl -L -H "Authorization: Bearer op_..." \
 - Pro nahrávky v **S3 úložišti** je odpovědí přesměrování `302`
   na předem podepsané URL platné 5 minut. Řiďte se přesměrováním (`curl -L`);
   Váš HTTP klient následně stáhne audio přímo ze S3 – bez dalšího
-  přenášení přes Chatterbox.
+  přenášení přes Klepna.
 
 `416` s hlavičkou `Content-Range: bytes */<size>` je vrácen pouze
 pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné hodnoty

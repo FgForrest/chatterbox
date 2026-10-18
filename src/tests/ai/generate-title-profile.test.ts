@@ -24,6 +24,9 @@ vi.mock("@/lib/profiles/providers", () => ({
 vi.mock("@/lib/ai/usage-cost", () => ({
     recordChatCompletionUsage: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerException: vi.fn(),
+}));
 
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
@@ -98,5 +101,44 @@ describe("profile-backed title generation", () => {
                 "owner-1",
             ),
         ).rejects.toBe(error);
+    });
+
+    it("logs the provider id when automatic title generation has no model", async () => {
+        selectRows([{ detectedLanguage: "en" }]);
+        selectRows([{ uiLocale: "en" }]);
+        mocks.resolveStepProvider.mockResolvedValueOnce({
+            kind: "credential",
+            credential: {
+                id: "credential-without-model",
+                provider: "Custom",
+                apiKey: "secret",
+                baseUrl: "https://example.com/v1",
+                defaultModel: null,
+            },
+            payerUserId: "owner-1",
+            reserveCall: vi.fn().mockResolvedValue(undefined),
+            organizationCredential: false,
+        });
+        const consoleError = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+
+        await expect(
+            generateTitleFromTranscription(
+                "actor-1",
+                "recording-1",
+                "Transcript",
+                "transcript",
+                "owner-1",
+            ),
+        ).resolves.toBeNull();
+        expect(consoleError).toHaveBeenCalledWith(
+            "Error generating title with provider credential-without-model:",
+            expect.objectContaining({
+                message:
+                    "Set a Default Model on Custom in Settings > Providers.",
+            }),
+        );
+        consoleError.mockRestore();
     });
 });

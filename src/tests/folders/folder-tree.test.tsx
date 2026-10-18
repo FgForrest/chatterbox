@@ -432,10 +432,15 @@ describe("folder navigation", () => {
                 onEnterSelectFirst={vi.fn()}
                 searchRef={{ current: null }}
                 filteredCount={2}
-                totalCount={2}
+                channelCounts={{ audio: 2, mail: 0 }}
                 sortOrder="newest"
                 onSortOrderChange={vi.fn()}
                 onOrganize={onOrganize}
+                showMail={false}
+                kindFilter="all"
+                onKindFilterChange={vi.fn()}
+                searchScopes={new Set(["title", "content", "summary"])}
+                onSearchScopesChange={vi.fn()}
             />,
         );
 

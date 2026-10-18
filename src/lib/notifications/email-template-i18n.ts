@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TranslationValues } from "use-intl/core";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { type AppLocale, defaultLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import "./email-template-catalog";
@@ -23,5 +24,8 @@ export function getEmailLocale(): AppLocale {
 export function getEmailTranslator() {
     const locale = getEmailLocale();
     return (sourceMessage: string, values?: TranslationValues) =>
-        translatedSourceMessage(locale, sourceMessage, values);
+        translatedSourceMessage(locale, sourceMessage, {
+            name: deploymentProductName(locale),
+            ...values,
+        });
 }

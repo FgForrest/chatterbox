@@ -3,12 +3,12 @@ import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
 import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { Panel } from "@/components/panel";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 
 interface AuthChromeProps {
     /** Headline above the form. e.g. "Sign in" / "Create account". */
     title: string;
-    /** Optional sub-headline. e.g. "Welcome back to Riffado." */
+    /** Optional sub-headline. e.g. "Welcome back to Chatterbox." */
     subtitle?: string;
     /** The form body (fields + submit + internal nav links). */
     children: ReactNode;
@@ -30,7 +30,7 @@ export function HostedAuthChrome({
     children,
 }: AuthChromeProps) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     const bullets = [
         {
             label: i18n("Choose your AI"),
@@ -163,7 +163,7 @@ export function HostedAuthChrome({
 // ---------------------------------------------------------------------------
 // Used when `env.IS_HOSTED` is unset/false. The audience here is the
 // operator (and maybe 1-2 invitees) of an instance they deployed
-// themselves. They already know what Riffado is -- marketing copy is
+// themselves. They already know what Chatterbox is -- marketing copy is
 // wasted space.
 //
 // Surfaces ONLY non-sensitive context below the card:
@@ -184,7 +184,7 @@ export function SelfHostAuthChrome({
     subtitle,
     children,
 }: AuthChromeProps) {
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     return (
         <div className="relative flex min-h-screen items-center justify-center px-4 py-12">
             <div className="relative z-10 w-full max-w-md space-y-6">
@@ -217,19 +217,14 @@ function InstanceFooter() {
     return (
         <div className="flex justify-center text-xs text-muted-foreground font-mono">
             <div className="flex items-center gap-4">
-                <Link
-                    href="https://riffado.com/docs"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:text-foreground"
-                >
+                <Link href="/docs" className="hover:text-foreground">
                     {i18n("Docs")}
                 </Link>
                 <span aria-hidden className="text-muted-foreground/40">
                     ·
                 </span>
                 <Link
-                    href="https://github.com/riffado/riffado"
+                    href="https://github.com/FgForrest/chatterbox"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-foreground"
@@ -239,12 +234,7 @@ function InstanceFooter() {
                 <span aria-hidden className="text-muted-foreground/40">
                     ·
                 </span>
-                <Link
-                    href="https://riffado.com/discord"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:text-foreground"
-                >
+                <Link href="/discord" className="hover:text-foreground">
                     {i18n("Discord")}
                 </Link>
             </div>

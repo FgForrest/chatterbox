@@ -1,5 +1,6 @@
 import { generateOGImage } from "fumadocs-ui/og";
 import { notFound } from "next/navigation";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { defaultLocale, isSupportedLocale, locales } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
@@ -31,7 +32,7 @@ export async function GET(_req: Request, { params }: RouteContext) {
     return generateOGImage({
         title: page.data.title,
         description: page.data.description,
-        site: "Riffado",
+        site: deploymentProductName(locale),
         // sRGB of `oklch(0.6171 0.1375 39.0427)` from globals.css. Satori
         // (next/og renderer) does not support `oklch()`; keep both in sync.
         primaryColor: "#c96442",

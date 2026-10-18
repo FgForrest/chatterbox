@@ -90,9 +90,6 @@ export async function generateTitleFromTranscription(
             maxRetries: resolved.organizationCredential ? 0 : undefined,
         });
 
-        // Use a lightweight model for title generation
-        // Prefer chat models (gpt-4o-mini, gpt-3.5-turbo) over Whisper models
-        // Fallback to default model if no specific model is set
         const model = enhancementChatModel(credentials);
 
         // Truncate transcription if too long (to save tokens)
@@ -175,7 +172,10 @@ export async function generateTitleFromTranscription(
 
         return cleanedTitle || null;
     } catch (error) {
-        console.error("Error generating title:", error);
+        console.error(
+            `Error generating title with provider ${resolved.credential.id}:`,
+            error,
+        );
         return null;
     }
 }

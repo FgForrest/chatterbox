@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/format-date";
@@ -27,6 +28,7 @@ export interface PersonSummary {
 export function PeopleList({ people }: { people: PersonSummary[] }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const productName = useProductName();
     const router = useRouter();
     const [query, setQuery] = useState("");
     const [creating, setCreating] = useState(false);
@@ -137,7 +139,8 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
                         </h1>
                         <p className="mt-3 max-w-md text-pretty text-sm leading-6 text-foreground/70 sm:text-base">
                             {i18n(
-                                "Name a speaker once and Riffado remembers them across recordings, keeping every conversation easier to follow.",
+                                "Name a speaker once and {name} remembers them across recordings, keeping every conversation easier to follow.",
+                                { name: productName },
                             )}
                         </p>
                         <div className="mt-7 w-full">

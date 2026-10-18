@@ -108,7 +108,9 @@ describe("localized email content", () => {
 
     it("resolves semantic email subjects in Czech", () => {
         const email = createEmailTranslator("cs-CZ");
-        expect(email("test")).toBe("Testovací e-mail z Riffado");
+        expect(email("test", { name: "Klepna" })).toBe(
+            "Testovací e-mail aplikace Klepna",
+        );
     });
 });
 
@@ -126,5 +128,22 @@ describe("localized plural content", () => {
         expect(translatedSourceMessage("cs-CZ", source, { count: 5 })).toBe(
             "5 nahrávek",
         );
+    });
+
+    it.each([
+        {
+            source: "{count, plural, one {# item} other {# items}}",
+            forms: ["1 položka", "2 položky", "1,5 položky", "5 položek"],
+        },
+        {
+            source: "{count, plural, one {# folder} other {# folders}}",
+            forms: ["1 složka", "2 složky", "1,5 složky", "5 složek"],
+        },
+    ])("uses every Czech CLDR form for $source", ({ source, forms }) => {
+        expect(
+            [1, 2, 1.5, 5].map((count) =>
+                translatedSourceMessage("cs-CZ", source, { count }),
+            ),
+        ).toEqual(forms);
     });
 });

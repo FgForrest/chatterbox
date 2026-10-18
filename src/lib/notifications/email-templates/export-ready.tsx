@@ -11,7 +11,7 @@ export function ExportReadyEmail({ downloadUrl }: Props) {
     const i18n = getEmailTranslator();
     return (
         <EmailLayout
-            previewText={i18n("Your Riffado data export is ready to download.")}
+            previewText={i18n("Your {name} data export is ready to download.")}
             footerLink={{ href: downloadUrl, label: i18n("Download export") }}
         >
             <Heading style={emailStyles.h1}>

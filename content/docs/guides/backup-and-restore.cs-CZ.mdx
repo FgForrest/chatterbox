@@ -3,7 +3,7 @@ title: Záloha a obnovení
 description: Exportujte své nahrávky, přepisy a audio, abyste mohli kdykoliv odejít.
 ---
 
-Chatterbox má záměrně dvě oddělené cesty pro export. Slouží
+Klepna má záměrně dvě oddělené cesty pro export. Slouží
 různým účelům:
 
 - **`/api/backup`** — kompletní JSON archiv každého řádku nahrávky
@@ -99,7 +99,7 @@ a proto se do úspěšného sdílení objevují pouze v jeho osobní záloze.
 Hotové archivy zůstávají ke stažení po **7 dní**, poté jsou při úklidu
 odstraněny.
 
-Obsah je **v otevřené čitelné podobě**. Chatterbox před zápisem do archivu
+Obsah je **v otevřené čitelné podobě**. Klepna před zápisem do archivu
 dešifruje všechna pole chráněná šifrováním uložených dat, protože
 záloha je *Váš* export Vašich dat — od této chvíle je vlastníte Vy.
 K souboru se proto chovejte stejně jako k nezašifrovanému výpisu databáze:
@@ -238,7 +238,7 @@ Několik věcí, které byste měli před spuštěním vědět:
   ji uložíte.
 - **Markdown vedlejší soubory nejsou ovlivněny.** `<recording>.transcript.md` ve
   Vaší složce úložiště je export, o který jste sami požádali, nikoli kopie
-  od Chatterbox; retence odstraní řádky v databázi a audio blob, ale nesmaže
+  od Klepna; retence odstraní řádky v databázi a audio blob, ale nesmaže
   soubory, které jste si uložili sami. Pokud je chcete smazat, udělejte to
   ručně.
 - Retenční mazání běží jednou za hodinu, po dávkách, a loguje co bylo
@@ -271,4 +271,4 @@ Připomínka, protože to mnoho uživatelů mate:
 - **V zálohách vytvořených pomocí `/api/backup`** jsou tato pole
   před serializací dešifrována. Od tohoto okamžiku je odpovědnost na Vás.
 - **Audio soubory v úložišti** nejsou šifrovány aplikační vrstvou
-  aplikace Chatterbox — pokud potřebujete šifrování, použijte SSE na úrovni bucketu.
+  aplikace Klepna — pokud potřebujete šifrování, použijte SSE na úrovni bucketu.

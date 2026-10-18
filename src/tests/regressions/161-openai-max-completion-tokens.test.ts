@@ -31,6 +31,9 @@ describe("usesMaxCompletionTokens — model-name detection", () => {
         ["gpt-5-mini", true],
         ["gpt-5-nano", true],
         ["GPT-5-mini", true],
+        ["gpt-6.1-sol", true],
+        ["gpt-35-turbo", false],
+        ["gpt-35-turbo-16k", false],
         ["o1", true],
         ["o1-mini", true],
         ["o3-mini", true],
@@ -56,6 +59,23 @@ describe("buildChatCompletionParams — picks the right token-limit param", () =
     it("sends max_completion_tokens for gpt-5-mini", () => {
         const params = buildChatCompletionParams({
             model: "gpt-5-mini",
+            messages,
+            temperature: 0.5,
+            maxTokens: 2000,
+        });
+        expect(
+            (params as { max_completion_tokens?: number })
+                .max_completion_tokens,
+        ).toBe(2000);
+        expect((params as { max_tokens?: number }).max_tokens).toBeUndefined();
+    });
+
+    it.each([
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+    ])("sends max_completion_tokens for %s", (model) => {
+        const params = buildChatCompletionParams({
+            model,
             messages,
             temperature: 0.5,
             maxTokens: 2000,

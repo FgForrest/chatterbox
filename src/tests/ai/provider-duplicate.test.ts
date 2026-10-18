@@ -128,6 +128,7 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
         const response = await post({
             provider: "OpenAI",
             copyKeyFrom: "cred-1",
+            defaultModel: "gpt-4o-mini",
             isDefaultEnhancement: true,
         });
 
@@ -136,6 +137,12 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
             "user-1",
             "summary",
             "cred-2",
+            {
+                transaction: expect.objectContaining({
+                    insert: expect.any(Function),
+                    update: expect.any(Function),
+                }),
+            },
         );
     });
 
@@ -144,6 +151,7 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
             provider: "Codex",
             apiKey: "new-token",
             copyKeyFrom: "cred-1",
+            defaultModel: "gpt-5.6-luna",
         });
 
         expect(response.status).toBe(200);
@@ -159,6 +167,7 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
         const response = await post({
             provider: "Claude Code",
             copyKeyFrom: "someone-elses",
+            defaultModel: "claude-sonnet-5",
         });
 
         expect(response.status).toBe(404);
@@ -171,6 +180,7 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
         const response = await post({
             provider: "Groq",
             copyKeyFrom: "cred-1",
+            defaultModel: "whisper-large-v3-turbo",
         });
         const body = await response.json();
 
@@ -192,6 +202,7 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
         const response = await post({
             provider: "Claude Code",
             copyKeyFrom: "cred-1",
+            defaultModel: "claude-sonnet-5",
             isDefaultTranscription: true,
         });
 

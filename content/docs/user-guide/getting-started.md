@@ -16,7 +16,7 @@ The first time you open Chatterbox, a short wizard helps you set up the essentia
 | Step | What it does |
 | --- | --- |
 | ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Chatterbox does: sync recordings, transcribe them, and summarize them with AI. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the Riffado Connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. |
+| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Set up an AI provider.** Opens Settings, where you add the service that transcribes and summarizes. See [AI providers](settings.md#ai-providers). |
 | Google Calendar and Meet (when configured) | **Connect Google Calendar and Meet.** Read-only access helps identify meetings and suggest speakers from invited guests and Meet attendees. |
 | Meeting Recorder | **Set up Meeting Recorder.** Install the Chrome extension and connect it to this Chatterbox instance. |

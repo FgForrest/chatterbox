@@ -1,11 +1,12 @@
 "use client";
 
-import { FolderOpen, Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { CloudUpload, FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { HelpLink } from "@/components/help/help-button";
 import { GoogleConnectionPanel } from "@/components/integrations/google-connection-panel";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -107,6 +108,7 @@ export function FolderExportActions({
     privateTree,
 }: FolderExportActionsProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [open, setOpen] = useState(false);
     const [configurations, setConfigurations] = useState<
         FolderExportConfigurationDto[]
@@ -363,7 +365,7 @@ export function FolderExportActions({
                 className="h-9"
                 onClick={() => setOpen(true)}
             >
-                <Settings /> {i18n("Settings")}
+                <CloudUpload /> {i18n("Export")}
             </Button>
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="max-w-xl">
@@ -466,7 +468,8 @@ export function FolderExportActions({
                                     </div>
                                     <p className="text-xs text-muted-foreground">
                                         {i18n(
-                                            "Riffado manages the folders it creates inside this folder. Do not keep your own files in them: a folder Riffado no longer needs goes to the Google Drive trash with everything in it. Google Docs are regenerated when the recording changes, so edits made in them are overwritten.",
+                                            "{name} manages the folders it creates inside this folder. Do not keep your own files in them: a folder {name} no longer needs goes to the Google Drive trash with everything in it. Google Docs are regenerated when the recording changes, so edits made in them are overwritten.",
+                                            { name },
                                         )}
                                     </p>
                                 </div>

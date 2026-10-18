@@ -1,32 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { queriesMock, transportMock, tokenMock, rateLimitMock, renderMock } =
-    vi.hoisted(() => ({
-        queriesMock: { upsertSubscriber: vi.fn() },
-        transportMock: {
-            sendEmailWithHeaders: vi.fn(),
-            resolveFromAddress: vi.fn().mockReturnValue("noreply@riffado.com"),
-            htmlToText: vi.fn().mockReturnValue("text"),
-            SmtpNotConfiguredError: class SmtpNotConfiguredError extends Error {},
-        },
-        tokenMock: { signUnsubscribeToken: vi.fn().mockReturnValue("tok") },
-        rateLimitMock: {
-            getClientIp: vi.fn().mockReturnValue("1.2.3.4"),
-            consumeRateLimitBucket: vi
-                .fn()
-                .mockResolvedValue({ allowed: true }),
-        },
-        renderMock: {
-            renderEmailHtml: vi.fn().mockResolvedValue("<html></html>"),
-        },
-    }));
+const {
+    envMock,
+    queriesMock,
+    transportMock,
+    tokenMock,
+    rateLimitMock,
+    renderMock,
+} = vi.hoisted(() => ({
+    envMock: { APP_URL: "https://riffado.com", IS_HOSTED: true },
+    queriesMock: { upsertSubscriber: vi.fn() },
+    transportMock: {
+        sendEmailWithHeaders: vi.fn(),
+        resolveFromAddress: vi.fn().mockReturnValue("noreply@riffado.com"),
+        htmlToText: vi.fn().mockReturnValue("text"),
+        SmtpNotConfiguredError: class SmtpNotConfiguredError extends Error {},
+    },
+    tokenMock: { signUnsubscribeToken: vi.fn().mockReturnValue("tok") },
+    rateLimitMock: {
+        getClientIp: vi.fn().mockReturnValue("1.2.3.4"),
+        consumeRateLimitBucket: vi.fn().mockResolvedValue({ allowed: true }),
+    },
+    renderMock: {
+        renderEmailHtml: vi.fn().mockResolvedValue("<html></html>"),
+    },
+}));
 
 vi.mock("@/db/queries/newsletter-subscriptions", () => queriesMock);
 vi.mock("@/lib/email/transport", () => transportMock);
 vi.mock("@/lib/email/unsubscribe-token", () => tokenMock);
 vi.mock("@/lib/rate-limit", () => rateLimitMock);
 vi.mock("@/lib/notifications/render-email", () => renderMock);
-vi.mock("@/lib/env", () => ({ env: { APP_URL: "https://riffado.com" } }));
+vi.mock("@/lib/env", () => ({ env: envMock }));
 vi.mock("@/lib/notifications/email-templates/newsletter-confirm-email", () => ({
     NewsletterConfirmEmail: () => null,
 }));
@@ -45,6 +50,7 @@ function request(body: unknown) {
 describe("POST /api/newsletter/subscribe", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        envMock.IS_HOSTED = true;
         rateLimitMock.consumeRateLimitBucket.mockResolvedValue({
             allowed: true,
         });
@@ -89,5 +95,14 @@ describe("POST /api/newsletter/subscribe", () => {
         );
         expect(res.status).toBe(200);
         expect(transportMock.sendEmailWithHeaders).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 without touching newsletter data on self-host", async () => {
+        envMock.IS_HOSTED = false;
+
+        const res = await POST(request({ email: "user@example.com" }));
+
+        expect(res.status).toBe(404);
+        expect(queriesMock.upsertSubscriber).not.toHaveBeenCalled();
     });
 });

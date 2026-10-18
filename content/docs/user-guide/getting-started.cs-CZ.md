@@ -7,7 +7,7 @@ description: Přihlášení, průvodce prvním spuštěním a orientace v prost�
 
 ## Přihlášení
 
-Otevřete svou adresu Chatterbox v prohlížeči a přihlaste se pomocí svého e-mailu a hesla. Na nové instanci s vlastním hostingem se první zaregistrovaný účet stává administrátorem.
+Otevřete svou adresu Klepna v prohlížeči a přihlaste se pomocí svého e-mailu a hesla. Na nové instanci s vlastním hostingem se první zaregistrovaný účet stává administrátorem.
 
 Pokud vaše organizace používá jednotné přihlašování, na přihlašovací obrazovce se místo toho zobrazí jedno tlačítko, například **Přihlásit se přes Keycloak**. Váš účet se vytvoří při prvním přihlášení. Registrace může být na vaší instanci uzavřená; v tom případě požádejte svého administrátora o přístup.
 
@@ -15,17 +15,17 @@ Pokud vaše organizace používá jednotné přihlašování, na přihlašovací
 
 ## Průvodce prvním spuštěním
 
-Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Kroky s integracemi jsou nepovinné a zobrazí se jen tehdy, když je správce nastavil.
+Při prvním otevření Klepna vám krátký průvodce pomůže nastavit základní věci. Kroky s integracemi jsou nepovinné a zobrazí se jen tehdy, když je správce nastavil.
 
 | Krok | Co dělá |
 | --- | --- |
-| ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Chatterbox umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče Riffado Connector, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Chatterbox začíná pravidelně stahovat vaše nahrávky. |
+| ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Klepna umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
+| ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Klepna začíná pravidelně stahovat vaše nahrávky. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
 | Kalendář Google a Meet (pokud jsou nastavené) | **Připojte Kalendář Google a Meet.** Přístup jen pro čtení pomůže rozpoznat schůzky a navrhnout mluvčí podle pozvaných hostů a účastníků Meet. |
-| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Chatterboxu. |
-| E-mail (pokud je nastavený) | **Posílejte e-maily do Chatterboxu.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
-| Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Chatterbox jako vlastní konektor do Claude nebo Claude Code. |
+| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Klepny. |
+| E-mail (pokud je nastavený) | **Posílejte e-maily do Klepny.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
+| Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Klepna jako vlastní konektor do Claude nebo Claude Code. |
 | ![Done](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
 Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje.
@@ -39,7 +39,7 @@ Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nast
 Horní lišta obsahuje tři sekce:
 
 - **Nahrávky**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
-- **Almanach**: osoby a objekty, o kterých Chatterbox ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
+- **Almanach**: osoby a objekty, o kterých Klepna ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
 - **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
@@ -61,7 +61,7 @@ Klikněte na **Nápověda** v horní liště nebo stiskněte `h` pro otevření 
 - **Otevřít celou příručku** otevře stejnou stránku v nové záložce s navigací a vyhledáváním.
 - Malé **?** u některých funkcí, například na kartách Přepis a Shrnutí, v recenzi Učit se nebo u nastavení exportu složek, otevře panel přímo u této funkce.
 
-Celá příručka je také dostupná na `/docs` na vaší adrese Chatterbox v sekci **Uživatelská příručka**.
+Celá příručka je také dostupná na `/docs` na vaší adrese Klepna v sekci **Uživatelská příručka**.
 
 ![Uživatelská příručka na /docs](images/docs-user-guide.png)
 
@@ -93,6 +93,6 @@ Paleta během psaní vyhledává v názvech i přepisech. Stiskněte `Enter` pro
 
 ## Jazyk
 
-Chatterbox komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Chatterbox zasílá, se také posílají ve stejném jazyce.
+Klepna komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Klepna zasílá, se také posílají ve stejném jazyce.
 
 Pokračujte: [Zpracování a profily](processing-and-profiles.md)

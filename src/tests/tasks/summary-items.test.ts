@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/deployment-brand", () => ({
+    deploymentProductName: () => "Chatterbox",
+}));
+
 import { parseSummaryPayload } from "@/lib/summary/payload";
 import {
     buildPlaudActionItemHints,

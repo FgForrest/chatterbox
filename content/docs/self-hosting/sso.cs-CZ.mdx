@@ -1,17 +1,17 @@
 ---
 title: Jednotné přihlášení (OpenID Connect)
-description: Umožněte lidem přihlašovat se prostřednictvím vašeho poskytovatele identity (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) místo hesla k Chatterbox.
+description: Umožněte lidem přihlašovat se prostřednictvím vašeho poskytovatele identity (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) místo hesla k Klepna.
 ---
 
-Chatterbox ve vlastním hostingu může předat přihlašování poskytovateli identity OpenID Connect. Jakmile je nastaveno, je **jedinou** možností přihlášení:
+Klepna ve vlastním hostingu může předat přihlašování poskytovateli identity OpenID Connect. Jakmile je nastaveno, je **jedinou** možností přihlášení:
 
 - na přihlašovací stránce se zobrazuje pouze jedno tlačítko **Přihlásit se pomocí &lt;provider&gt;**;
 - přihlašování e-mailem a heslem, registrace a obnova hesla jsou na serveru vypnuty, nejen skryty;
-- každý, koho poskytovatel propustí, získá při prvním přihlášení účet Chatterbox. Kdo může Chatterbox používat, je rozhodnuto u poskytovatele (například přiřazením uživatelů nebo skupin ke klientovi).
+- každý, koho poskytovatel propustí, získá při prvním přihlášení účet Klepna. Kdo může Klepna používat, je rozhodnuto u poskytovatele (například přiřazením uživatelů nebo skupin ke klientovi).
 
-S `DISABLE_REGISTRATION=true` zůstává instance uzavřená: přihlásit se mohou pouze lidé, kteří už mají účet Chatterbox, a jejich účet je propojen při prvním přihlášení přes SSO, jak je popsáno níže. Všichni ostatní uvidí hlášení, že instance nepřijímá nové účty. Pokud chcete pustit nového kolegu, proměnnou vypněte, restartujte, nechte ho jednou přihlásit a poté opět zapněte.
+S `DISABLE_REGISTRATION=true` zůstává instance uzavřená: přihlásit se mohou pouze lidé, kteří už mají účet Klepna, a jejich účet je propojen při prvním přihlášení přes SSO, jak je popsáno níže. Všichni ostatní uvidí hlášení, že instance nepřijímá nové účty. Pokud chcete pustit nového kolegu, proměnnou vypněte, restartujte, nechte ho jednou přihlásit a poté opět zapněte.
 
-Hostovaný Chatterbox tyto proměnné ignoruje.
+Hostovaný Klepna tyto proměnné ignoruje.
 
 <span id="provider-setup" />
 
@@ -21,9 +21,9 @@ Vytvořte důvěrného klienta OpenID Connect (authorization code flow) s těmit
 
 - **Přesměrovací URI:** `<APP_URL>/api/auth/oauth2/callback/oidc`
 - **Scope:** `openid`, `profile`, `email`
-- **PKCE:** `S256` (Chatterbox vždy posílá code challenge)
+- **PKCE:** `S256` (Klepna vždy posílá code challenge)
 
-Chatterbox potřebuje položky `sub`, `email`, `name` a `email_verified`.
+Klepna potřebuje položky `sub`, `email`, `name` a `email_verified`.
 
 <details>
 <summary>Keycloak</summary>
@@ -57,7 +57,7 @@ OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
 # OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
 ```
 
-Chatterbox načítá endpoints poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Issuer musí být `https`: Chatterbox věří ID tokenu, který získá přímo od endpoints poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
+Klepna načítá endpoints poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Issuer musí být `https`: Klepna věří ID tokenu, který získá přímo od endpoints poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
 
 Všechny tři údaje – issuer, client id a secret – musí být nastaveny; částečná konfigurace zastaví server s chybou.
 
@@ -67,11 +67,11 @@ Všechny tři údaje – issuer, client id a secret – musí být nastaveny; č
 
 Když je pro instanci zapnuto jednotné přihlášení, která již má účty, první SSO přihlášení osoby se spáruje s jejich existujícím účtem (včetně nahrávek, nastavení a všeho), **pokud se e-mail shoduje a poskytovatel jej označí jako ověřený** (`email_verified: true`).
 
-Pokud poskytovatel adresu neověřil, Chatterbox odmítne propojit s existujícím účtem a přihlašovací stránka ukáže důvod. Ověřte e-mail u poskytovatele (v Keycloak: přepínač **Email verified** uživatele) a přihlašte se znovu. Neověřený e-mail, který zatím nikdo nepoužívá, prostě vytvoří nový účet.
+Pokud poskytovatel adresu neověřil, Klepna odmítne propojit s existujícím účtem a přihlašovací stránka ukáže důvod. Ověřte e-mail u poskytovatele (v Keycloak: přepínač **Email verified** uživatele) a přihlašte se znovu. Neověřený e-mail, který zatím nikdo nepoužívá, prostě vytvoří nový účet.
 
-Od této chvíle je účet vázán na uživatelské id poskytovatele (`sub`): jméno i e-mail odpovídají údajům u poskytovatele při každém přihlášení. E-mail, který už používá jiný účet Chatterbox, nebude převzat; uživatel si ponechá svůj stávající.
+Od této chvíle je účet vázán na uživatelské id poskytovatele (`sub`): jméno i e-mail odpovídají údajům u poskytovatele při každém přihlášení. E-mail, který už používá jiný účet Klepna, nebude převzat; uživatel si ponechá svůj stávající.
 
-Účet je navíc vázán na issuer, který za něj ručil, bez ohledu na `AUTHZ_MODE`. Přesměrování Chatterbox na jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením „belongs to a different identity provider“. Issuer se odvíjí od adresy poskytovatele, takže přesun téhož realmu na nový hostname, z `http` na `https` nebo pod nový název realmu odmítne stejně všechny. Po takovém přesunu účty jednou odvažte; každý se při dalším přihlášení naváže na nový issuer:
+Účet je navíc vázán na issuer, který za něj ručil, bez ohledu na `AUTHZ_MODE`. Přesměrování Klepna na jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením „belongs to a different identity provider“. Issuer se odvíjí od adresy poskytovatele, takže přesun téhož realmu na nový hostname, z `http` na `https` nebo pod nový název realmu odmítne stejně všechny. Po takovém přesunu účty jednou odvažte; každý se při dalším přihlášení naváže na nový issuer:
 
 ```sql
 UPDATE accounts SET issuer = NULL WHERE provider_id = 'oidc';
@@ -84,15 +84,15 @@ Dělejte to jen pro tentýž realm na nové adrese. Chcete-li lidi záměrně p�
 ## Relace
 
 - První spuštění s jednotným přihlášením ukončí **všechny** existující relace, takže nikdo nezůstane přihlášen přes heslo. Vypnutí a opětovné zapnutí SSO to způsobí znovu.
-- Relace trvá `OIDC_SESSION_MAX_AGE` sekund (výchozí 24 hodin) a její délka se nepřidlužuje použitím. Uživatel deaktivovaný u poskytovatele ztratí přístup do Chatterbox v tomto intervalu.
-- **Odhlásit se** ukončí pouze relaci Chatterbox. Relace poskytovatele zůstává, takže další **Přihlášení** může automaticky projít bez výzvy.
+- Relace trvá `OIDC_SESSION_MAX_AGE` sekund (výchozí 24 hodin) a její délka se nepřidlužuje použitím. Uživatel deaktivovaný u poskytovatele ztratí přístup do Klepna v tomto intervalu.
+- **Odhlásit se** ukončí pouze relaci Klepna. Relace poskytovatele zůstává, takže další **Přihlášení** může automaticky projít bez výzvy.
 - Osobní API tokeny nejsou relace a nadále fungují.
 
 <span id="the-almanac" />
 
 ## Almanach
 
-Každé přihlášení přes SSO zaznamená osobu (jméno a e-mail) do Almanachu organizace, případně do jejího vlastního almanachu, pokud [Organizace](./organization) není aktivní. Známá osoba je určena podle e-mailu a přebírá aktuální jméno od poskytovatele; přezdívky, poznámky a fakta přidaná v Chatterbox se zachovávají.
+Každé přihlášení přes SSO zaznamená osobu (jméno a e-mail) do Almanachu organizace, případně do jejího vlastního almanachu, pokud [Organizace](./organization) není aktivní. Známá osoba je určena podle e-mailu a přebírá aktuální jméno od poskytovatele; přezdívky, poznámky a fakta přidaná v Klepna se zachovávají.
 
 <span id="the-organization-account" />
 
@@ -104,7 +104,7 @@ Při jednotném přihlášení je `ORG_ACCOUNT_PASSWORD` volitelné a nikdo se n
 
 ## Oprávnění od poskytovatele identity
 
-Ve výchozím stavu smí Chatterbox používat každý, koho poskytovatel propustí,
+Ve výchozím stavu smí Klepna používat každý, koho poskytovatel propustí,
 a Organizaci spravuje [účet organizace](./organization). S
 `AUTHZ_MODE=idp` místo toho poskytovatel uděluje tři oprávnění jako
 klientské role přihlašovacího klienta (`OIDC_CLIENT_ID`, nebo
@@ -220,24 +220,24 @@ klíče; záznamník nabídne opakování toho, co si ponechal.
 
 Access token, který už AI klient drží, platí až do své expirace (doba
 platnosti v realmu, 15 minut u uživatelských MCP klientů v lokálním příkladu);
-Chatterbox při každém volání MCP znovu kontroluje `use` dané osoby. Pokud
+Klepna při každém volání MCP znovu kontroluje `use` dané osoby. Pokud
 váš adresář deaktivuje lidi ještě před Keycloakem, celkové zpoždění
 zahrnuje i dobu, než se změna do Keycloaku dostane.
 
 Každá změna i odmítnutí se zaznamená do tabulky `access_change_log`: kdo
 žádal, pro koho, o co žádal, co má poskytovatel poté uloženo a zda byly
 relace osoby ukončeny. Tokeny se nikdy nezaznamenávají. Změna se zaznamená
-jako `pending` ještě předtím, než se Chatterbox zeptá poskytovatele, a
+jako `pending` ještě předtím, než se Klepna zeptá poskytovatele, a
 doplní se, jakmile skončí; záznam, který zůstal `pending`, tedy označuje
 změnu, jejíž výsledek se ztratil (pád, chyba databáze). Ověřte osobu u
 poskytovatele.
 
-Odebrání `use` ukončí relace osoby v Chatterbox okamžitě. Když poskytovatel
+Odebrání `use` ukončí relace osoby v Klepna okamžitě. Když poskytovatel
 nedokáže ukončit své relace této osoby, záznam uvádí `pending` nebo
 `failed`. **Nastavení → Přístupy** takové osoby vypíše nahoře a označí je
 v seznamu a obrazovka přístupů osoby nabídne **Ukončit relace** k
 opakování. Automaticky se to neopakuje: ukončení vyžaduje vlastní
-přihlášení správce, které žádná úloha na pozadí nemá. Do Chatterbox se
+přihlášení správce, které žádná úloha na pozadí nemá. Do Klepna se
 osoba v obou případech nedostane.
 
 <span id="trying-it-locally" />
@@ -251,4 +251,4 @@ RIFFADO_E2E_APP_URL=http://localhost:3310 \
 docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --build
 ```
 
-Chatterbox pak běží na `http://localhost:3310` a Keycloak na `http://localhost:8180`, oba na loopbacku. Realm je pouze pro testování: administrátorem je `admin/admin` a všechna hesla jsou veřejná.
+Klepna pak běží na `http://localhost:3310` a Keycloak na `http://localhost:8180`, oba na loopbacku. Realm je pouze pro testování: administrátorem je `admin/admin` a všechna hesla jsou veřejná.

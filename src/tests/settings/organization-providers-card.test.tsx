@@ -519,6 +519,70 @@ describe.each([
     });
 });
 
+describe("provider Default Model validation", () => {
+    it("shows an inline error for an enhancement-capable provider", async () => {
+        const source = {
+            ...personalProvider,
+            provider: "Custom",
+            defaultModel: null,
+        };
+        render(
+            <ProviderFormDialog
+                scope="personal"
+                mode="edit"
+                provider={source}
+                open
+                isHosted={false}
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Update Provider" }),
+        );
+
+        expect((await screen.findByRole("alert")).textContent).toBe(
+            "Enter a default model. Summaries, titles, topics and Learn run on it.",
+        );
+        expect(requests).toHaveLength(0);
+    });
+
+    it("allows a transcription-only provider without a Default Model", async () => {
+        const source = {
+            ...personalProvider,
+            provider: "ElevenLabs",
+            defaultModel: null,
+        };
+        render(
+            <ProviderFormDialog
+                scope="personal"
+                mode="edit"
+                provider={source}
+                open
+                isHosted={false}
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Update Provider" }),
+        );
+
+        await waitFor(() => {
+            expect(requests).toContainEqual(
+                expect.objectContaining({
+                    url: "/api/settings/ai/providers/personal-provider",
+                    method: "PUT",
+                    body: expect.objectContaining({ defaultModel: null }),
+                }),
+            );
+        });
+        expect(screen.queryByRole("alert")).toBeNull();
+    });
+});
+
 describe("Organization provider permissions and usage", () => {
     it("shows a read-only card without actions or Add", async () => {
         manager = false;

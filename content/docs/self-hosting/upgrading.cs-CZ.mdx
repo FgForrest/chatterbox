@@ -3,7 +3,7 @@ title: Aktualizace
 description: Stáhněte nový image, restartujte stack a vyberte správný tag podle vaší míry tolerance rizika.
 ---
 
-Chatterbox je distribuován jako jeden Docker image na GitHub Container Registry.
+Klepna je distribuován jako jeden Docker image na GitHub Container Registry.
 Aktualizace probíhá stažením image a restartem; migrace databáze se spouští
 automaticky při startu kontejneru.
 
@@ -57,7 +57,7 @@ hodnotu 60. Chcete-li ji změnit, upravte předání prostředí do služby apli
 Compose podle [Proměnných prostředí](./environment-variables#optional-knobs).
 
 Aktualizace je podle ověření bezpečná. Před aktualizací vytvořte `pg_dump`
-databáze Riffado. Podporovaný rollback spočívá v obnovení tohoto výpisu a
+databáze Klepny. Podporovaný rollback spočívá v obnovení tohoto výpisu a
 spuštění předchozího image. Spuštění předchozího image nad aktualizovanou
 databází podporované není: proběhne bez chyby, ale vyřešené návrhy znovu zobrazí
 jako čekající. Přijetí takového návrhu v kontrole úkolů použije zastaralou změnu
@@ -68,17 +68,19 @@ nahrané během rollbacku je po návratu vpřed nutné spustit ručně.
 
 ## Výběr tagu
 
-`RIFFADO_VERSION` ve vašem `.env` určuje, který tag image Compose stáhne.
+`CHATTERBOX_VERSION` ve vašem `.env` určuje, který tag image Compose stáhne.
+Zastaralá proměnná `RIFFADO_VERSION` zůstává po dobu jednoho vydání jako
+náhradní, pokud `CHATTERBOX_VERSION` není nastavena.
 
 | Tag             | Co získáte                                | Kdy použít                              |
 | --------------- | ----------------------------------------  | --------------------------------------- |
 | `latest`        | Nejnovější stabilní verze                 | Výchozí; většina uživatelů              |
-| `0.4.2`, `0.4`  | Konkrétní verze / minoritní linie           | Produkční prostředí; zamčení pro opakovatelnost |
-| `dev`           | Průběžné sestavení z `main`                | Nejnovější vývoj; přijměte občasné chyby |
+| `2026.1`        | Jedno konkrétní vydání                    | Produkční prostředí; zamčení pro opakovatelnost |
+| `dev`           | Průběžné sestavení z větve `dev`          | Nejnovější vývoj; přijměte občasné chyby |
 
-`main` je **průběžná integrační větev** a může být rozbitá v libovolném
-commitu. Stabilní nasazení vychází z vydaných tagovaných verzí. Nikdy
-nedeployujte pouhým klonováním repozitáře a sestavením z `main`;
+`dev` je **integrační větev** a může být rozbitá v libovolném commitu.
+Každý push do `main` je vydání, publikované jako tag `YYYY.N` a `latest`.
+Nikdy nenasazujte klonováním repozitáře a vlastním sestavením;
 používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 v sekci o větvení.
 
@@ -99,11 +101,11 @@ instance nemá nikdy „volat domů“, nastavte `DISABLE_UPDATE_CHECK=true` ve 
 ## Vracení zpět (rollback)
 
 Pro bezpečný rollback obnovte `pg_dump` vytvořený před aktualizací, nastavte
-`RIFFADO_VERSION` na předchozí tag a spusťte stack:
+`CHATTERBOX_VERSION` na předchozí tag a spusťte stack:
 
 ```bash
 # In .env
-RIFFADO_VERSION=0.4.1
+CHATTERBOX_VERSION=2026.1
 ```
 
 ```bash
@@ -117,7 +119,7 @@ vyřešené návrhy jako čekající a jejich přijetí může použít zastaral
 
 ## Zálohování před aktualizací
 
-Před aktualizací nejprve vytvořte logický výpis `pg_dump` databáze Riffado.
+Před aktualizací nejprve vytvořte logický výpis `pg_dump` databáze Klepny.
 Před aktualizací na hlavní (major) verzi také nezapomeňte zálohovat dvě věci:
 
 1. Svazek Postgresu (cesta, na kterou váš compose soubor mapuje

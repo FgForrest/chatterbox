@@ -6,6 +6,7 @@ import {
     loadDefaultProviderPointers,
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
+import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -60,6 +61,24 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
     }
 
+    const effectiveDisabled =
+        typeof disabled === "boolean" ? disabled : existing.disabledAt !== null;
+    const effectiveDefaultModel =
+        defaultModel === undefined ? existing.defaultModel : defaultModel;
+    if (
+        !effectiveDisabled &&
+        !isTranscriptionOnlyProvider(existing.provider) &&
+        (typeof effectiveDefaultModel !== "string" ||
+            !effectiveDefaultModel.trim())
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            enhancementModelRequiredMessage(existing.provider),
+            400,
+            { field: "defaultModel" },
+        );
+    }
+
     if (
         isDefaultEnhancement &&
         isTranscriptionOnlyProvider(existing.provider)
@@ -84,8 +103,6 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const effectiveDisabled =
-        typeof disabled === "boolean" ? disabled : existing.disabledAt !== null;
     if (
         effectiveDisabled &&
         ((isDefaultTranscription === true &&

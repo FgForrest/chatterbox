@@ -1,6 +1,6 @@
 ---
 title: Učení
-description: Nechte Chatterbox navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
+description: Nechte Klepna navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
 ---
 
 Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje nalezené položky:
@@ -65,7 +65,7 @@ Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení p
 
 - Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
 - Mluvčí označený pouze křestním jménem je podle toho označen. Křestní jméno, které sdílí dvě osoby v Almanachu, nepřiřadí žádné z nich.
-- Zařazení nového záznamu jako toho, který už máte, naučí Chatterbox nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
+- Zařazení nového záznamu jako toho, který už máte, naučí Klepna nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
 - Profil zpracování může Učení přiřadit vlastního poskytovatele a model, například výkonnější než pro shrnutí. Viz [Zpracování a profily](processing-and-profiles.md).
 
 Pokračujte zde: [Organizace](organization.md)

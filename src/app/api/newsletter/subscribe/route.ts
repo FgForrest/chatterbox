@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import React from "react";
 import { z } from "zod";
 import { upsertSubscriber } from "@/db/queries/newsletter-subscriptions";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import {
     htmlToText,
     resolveFromAddress,
@@ -27,6 +28,10 @@ const subscribeSchema = z.object({
 });
 
 export const POST = apiHandler(async (req: Request) => {
+    if (!env.IS_HOSTED) {
+        return new NextResponse(null, { status: 404 });
+    }
+
     const requestLocale = localeFromAcceptLanguage(
         req.headers.get("accept-language"),
     );
@@ -130,7 +135,9 @@ async function sendConfirmation(
     await sendEmailWithHeaders({
         to: email,
         from: resolveFromAddress("transactional"),
-        subject: createEmailTranslator(locale)("newsletterConfirm"),
+        subject: createEmailTranslator(locale)("newsletterConfirm", {
+            name: deploymentProductName(locale),
+        }),
         html,
         text: htmlToText(html),
     });

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/env", () => ({
+    env: { APP_URL: "https://example.test", IS_HOSTED: false },
+}));
+
 import { defaultLocale } from "@/lib/i18n/config";
 import { TestEmail } from "@/lib/notifications/email-templates/test-email";
 import { TransitionStartEmail } from "@/lib/notifications/email-templates/transition-start";
@@ -104,13 +109,15 @@ describe("TransitionStartEmail", () => {
     it("renders localized email outside a React internationalization context", async () => {
         const html = await renderEmailHtml(
             React.createElement(TestEmail, {
-                dashboardUrl: "https://riffado.com",
-                settingsUrl: "https://riffado.com/settings",
+                dashboardUrl: "https://example.test",
+                settingsUrl: "https://example.test/settings",
             }),
             "cs-CZ",
         );
 
         expect(html).toContain("Testovací e-mail");
-        expect(html).toContain("e-mailová oznámení fungují");
+        expect(html).toContain("e-mailová upozornění fungují");
+        expect(html).toContain("Klepna");
+        expect(html).not.toContain("Riffado");
     });
 });

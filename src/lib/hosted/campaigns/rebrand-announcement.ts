@@ -1,4 +1,5 @@
 import React from "react";
+import { UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
 import { hostedUserAudience } from "@/lib/email/audience/hosted-users";
 import type { CampaignDefinition, Recipient } from "@/lib/email/types";
 import { env } from "@/lib/env";
@@ -28,7 +29,7 @@ export function buildRebrandCampaign(): CampaignDefinition {
 
     return {
         slug: REBRAND_CAMPAIGN_SLUG,
-        subject: "OpenPlaud is now Riffado",
+        subject: `OpenPlaud is now ${UPSTREAM_PRODUCT_NAME}`,
         kind: "announcement",
         audience: () =>
             hostedUserAudience({
@@ -53,7 +54,9 @@ export function buildRebrandCampaign(): CampaignDefinition {
             );
             return {
                 html,
-                subject: createEmailTranslator(locale)("rebrandAnnouncement"),
+                subject: createEmailTranslator(locale)("rebrandAnnouncement", {
+                    name: UPSTREAM_PRODUCT_NAME,
+                }),
             };
         },
     };

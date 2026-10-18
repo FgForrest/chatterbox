@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({ useExtracted: () => (text: string) => text }));
+vi.mock("next-intl", () => ({
+    useExtracted: () => (text: string) => text,
+    useLocale: () => "en",
+}));
 vi.mock("@/components/integrations/google-connection-panel", () => ({
     GoogleConnectionPanel: () => null,
 }));

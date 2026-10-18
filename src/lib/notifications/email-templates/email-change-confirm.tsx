@@ -20,7 +20,7 @@ export function EmailChangeConfirmEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "Confirm the email change on your Riffado account.",
+                "Confirm the email change on your {name} account.",
             )}
         >
             <Heading style={emailStyles.h1}>
@@ -28,7 +28,7 @@ export function EmailChangeConfirmEmail({
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "A change request was made to update the email on your Riffado account to {newEmail}. Click below to confirm. The link expires in {hours, plural, one {# hour} other {# hours}}.",
+                    "A change request was made to update the email on your {name} account to {newEmail}. Click below to confirm. The link expires in {hours, plural, one {# hour} other {# hours}}.",
                     { newEmail, hours: expiresInHours },
                 )}
             </Text>

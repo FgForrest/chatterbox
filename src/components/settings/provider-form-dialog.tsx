@@ -6,6 +6,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Panel } from "@/components/panel";
+import { useProductName } from "@/components/product-name-provider";
 import type {
     ProviderCardItem,
     ProviderScope,
@@ -111,6 +112,7 @@ export function ProviderFormDialog({
     onSuccess,
 }: ProviderFormDialogProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const presets = getVisiblePresets({ isHosted });
     const editing = mode === "edit";
     const duplicating = mode === "duplicate";
@@ -125,6 +127,9 @@ export function ProviderFormDialog({
     const [isDefaultLearn, setIsDefaultLearn] = useState(false);
     const [isDefaultTopics, setIsDefaultTopics] = useState(false);
     const [isDefaultTitle, setIsDefaultTitle] = useState(false);
+    const [defaultModelError, setDefaultModelError] = useState<string | null>(
+        null,
+    );
     const [pricing, setPricing] = useState<PricingDraft>(EMPTY_PRICING);
     const [saving, setSaving] = useState(false);
 
@@ -139,6 +144,7 @@ export function ProviderFormDialog({
             setIsDefaultLearn(false);
             setIsDefaultTopics(false);
             setIsDefaultTitle(false);
+            setDefaultModelError(null);
             setPricing(EMPTY_PRICING);
             return;
         }
@@ -155,6 +161,7 @@ export function ProviderFormDialog({
         setIsDefaultLearn(editing && source?.isDefaultLearn === true);
         setIsDefaultTopics(editing && source?.isDefaultTopics === true);
         setIsDefaultTitle(editing && source?.isDefaultTitle === true);
+        setDefaultModelError(null);
         setPricing(duplicating ? EMPTY_PRICING : pricingDraft(source?.rate));
     }, [duplicating, editing, open, source]);
 
@@ -172,6 +179,7 @@ export function ProviderFormDialog({
         if (!preset) return;
         setBaseUrl(preset.baseUrl);
         setDefaultModel(preset.defaultModel);
+        setDefaultModelError(null);
         if (preset.transcriptionOnly) {
             setIsDefaultEnhancement(false);
             setIsDefaultLearn(false);
@@ -191,6 +199,15 @@ export function ProviderFormDialog({
             toast.error(i18n("Provider ID is missing"));
             return;
         }
+        if (!sourceDisabled && !transcriptionOnly && !defaultModel.trim()) {
+            setDefaultModelError(
+                i18n(
+                    "Enter a default model. Summaries, titles, topics and Learn run on it.",
+                ),
+            );
+            return;
+        }
+        setDefaultModelError(null);
         const rates = pricingPayload(provider, pricing);
         if (!rates) {
             toast.error(i18n("Enter both token prices, or neither."));
@@ -345,7 +362,8 @@ export function ProviderFormDialog({
                                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                                 <span>
                                     {i18n(
-                                        "This local provider is not reachable from the hosted app. Use a public endpoint or self-host Chatterbox.",
+                                        "This local provider is not reachable from the hosted app. Use a public endpoint or self-host {name}.",
+                                        { name },
                                     )}
                                 </span>
                             </div>
@@ -405,9 +423,17 @@ export function ProviderFormDialog({
                         apiKey={apiKey}
                         baseUrl={baseUrl}
                         value={defaultModel}
-                        onChange={setDefaultModel}
+                        onChange={(value) => {
+                            setDefaultModel(value);
+                            setDefaultModelError(null);
+                        }}
                         disabled={saving}
                     />
+                    {defaultModelError && (
+                        <p className="text-sm text-destructive" role="alert">
+                            {defaultModelError}
+                        </p>
+                    )}
                     <Panel variant="inset" className="space-y-2 text-sm">
                         <label
                             className={

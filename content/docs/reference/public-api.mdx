@@ -107,7 +107,7 @@ curl -H "Authorization: Bearer op_K7vR8x..." \
 ```js
 const res = await fetch(
   "https://your-host/api/v1/recordings?limit=20",
-  { headers: { Authorization: `Bearer ${process.env.RIFFADO_KEY}` } },
+  { headers: { Authorization: `Bearer ${process.env.CHATTERBOX_KEY}` } },
 );
 const { data, next_cursor, has_more } = await res.json();
 ```

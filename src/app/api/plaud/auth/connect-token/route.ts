@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { defaultLocale } from "@/lib/i18n/config";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import {
     decodeAccessTokenExpiry,
@@ -77,7 +79,7 @@ export const POST = apiHandler(async (request: Request) => {
     if (isPlaudWorkspaceToken(accessToken)) {
         throw new AppError(
             ErrorCode.PLAUD_WORKSPACE_TOKEN_PASTED,
-            "That's a workspace token, which expires in about 24 hours. Riffado needs your long-lived account token. Easiest fix: use the Riffado Connector. To paste manually, grab the value of localStorage 'pld_tokenstr' on web.plaud.ai (Application → Local Storage), not the Authorization header from a /device/list request.",
+            `That's a workspace token, which expires in about 24 hours. ${deploymentProductName(defaultLocale)} needs your long-lived account token. Easiest fix: use the connector extension. To paste manually, grab the value of localStorage 'pld_tokenstr' on web.plaud.ai (Application → Local Storage), not the Authorization header from a /device/list request.`,
             400,
             { field: "accessToken" },
         );

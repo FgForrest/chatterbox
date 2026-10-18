@@ -14,6 +14,7 @@ import {
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import {
     useWithdrawPreview,
     WithdrawRetentionWarning,
@@ -83,6 +84,7 @@ export function EraseRecordingMenu({
     onChanged,
 }: EraseRecordingMenuProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [operation, setOperation] = useState<EraseOperation | null>(null);
     const [confirmText, setConfirmText] = useState("");
     const [working, setWorking] = useState(false);
@@ -94,7 +96,8 @@ export function EraseRecordingMenu({
         audio: {
             title: i18n("Erase local audio for this recording?"),
             description: i18n(
-                "Only the locally stored audio for the selected recording will be removed. Its transcripts and summaries stay available, and all other recordings remain unchanged. Riffado will not download this audio again automatically.",
+                "Only the locally stored audio for the selected recording will be removed. Its transcripts and summaries stay available, and all other recordings remain unchanged. {name} will not download this audio again automatically.",
+                { name },
             ),
             action: i18n("Erase audio"),
             success: i18n("Local audio erased"),
@@ -118,7 +121,8 @@ export function EraseRecordingMenu({
         local: {
             title: i18n("Delete all local data for this recording?"),
             description: i18n(
-                "All data stored by Riffado for the selected recording will be removed: audio, transcripts, summaries, metadata, speaker assignments, and exported files. All other recordings remain unchanged. The Plaud original stays in your account and will not be synced back automatically.",
+                "All data stored by {name} for the selected recording will be removed: audio, transcripts, summaries, metadata, speaker assignments, and exported files. All other recordings remain unchanged. The Plaud original stays in your account and will not be synced back automatically.",
+                { name },
             ),
             action: i18n("Delete all local data"),
             success: i18n("All local data deleted"),
@@ -126,7 +130,8 @@ export function EraseRecordingMenu({
         plaud: {
             title: i18n("Move this recording's Plaud original to Trash?"),
             description: i18n(
-                "Only the Plaud original for the selected recording will be moved to Trash. Its local Riffado data and all other recordings remain unchanged. Plaud requires a separate action in its Trash to delete the recording permanently.",
+                "Only the Plaud original for the selected recording will be moved to Trash. Its local {name} data and all other recordings remain unchanged. Plaud requires a separate action in its Trash to delete the recording permanently.",
+                { name },
             ),
             action: i18n("Move Plaud original to Trash"),
             success: i18n("Moved Plaud original to Trash"),
@@ -134,7 +139,8 @@ export function EraseRecordingMenu({
         everywhere: {
             title: i18n("Delete this recording everywhere?"),
             description: i18n(
-                "Only the selected recording will be affected. Its Plaud original will be moved to Trash, then all of its local data and exported files will be removed from Riffado. All other recordings remain unchanged. This cannot be undone from Riffado.",
+                "Only the selected recording will be affected. Its Plaud original will be moved to Trash, then all of its local data and exported files will be removed from {name}. All other recordings remain unchanged. This cannot be undone from {name}.",
+                { name },
             ),
             action: i18n("Delete everywhere"),
             success: i18n("Recording deleted everywhere"),

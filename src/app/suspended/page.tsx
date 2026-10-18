@@ -1,15 +1,19 @@
 import { eq } from "drizzle-orm";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getExtracted } from "next-intl/server";
+import { getExtracted, getLocale } from "next-intl/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getSession } from "@/lib/auth-server";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { env } from "@/lib/env";
 
 export async function generateMetadata(): Promise<Metadata> {
-    const i18n = await getExtracted();
+    const [i18n, locale] = await Promise.all([getExtracted(), getLocale()]);
     return {
-        title: i18n("Account suspended | Riffado"),
+        title: i18n("Account suspended | {name}", {
+            name: deploymentProductName(locale),
+        }),
         robots: { index: false, follow: false },
     };
 }
@@ -43,16 +47,31 @@ export default async function SuspendedPage() {
                     {i18n("Your account is suspended")}
                 </h1>
                 <p className="text-sm text-muted-foreground mb-4">
-                    {i18n(
-                        "Access to recordings, sync, and transcription is paused while we review your account.",
-                    )}
+                    {env.IS_HOSTED
+                        ? i18n(
+                              "Access to recordings, sync, and transcription is paused while we review your account.",
+                          )
+                        : i18n(
+                              "Access to recordings, sync, and transcription was paused by your instance administrator.",
+                          )}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                    {i18n("Reach out at")}{" "}
-                    <a href="mailto:support@riffado.com" className="underline">
-                        {i18n("support@riffado.com")}
-                    </a>{" "}
-                    {i18n("if you think this is a mistake.")}
+                    {env.IS_HOSTED ? (
+                        <>
+                            {i18n("Reach out at")}{" "}
+                            <a
+                                href="mailto:support@riffado.com"
+                                className="underline"
+                            >
+                                {i18n("support@riffado.com")}
+                            </a>{" "}
+                            {i18n("if you think this is a mistake.")}
+                        </>
+                    ) : (
+                        i18n(
+                            "Contact your instance administrator if you think this is a mistake.",
+                        )
+                    )}
                 </p>
                 <form
                     action="/api/auth/sign-out"
