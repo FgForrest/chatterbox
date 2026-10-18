@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
     startLearnRun: vi.fn(),
     getActiveJob: vi.fn(),
     isSummaryStale: vi.fn(),
-    enqueueTitleJob: vi.fn(),
     recordingJobSubject: vi.fn(),
     requestAdvance: vi.fn(),
     requestAdvanceInTx: vi.fn(),
@@ -177,10 +176,6 @@ vi.mock("@/lib/rate-limit", () => ({
 
 vi.mock("@/lib/recordings/apply-generated-title", () => ({
     applyGeneratedTitle: mocks.applyGeneratedTitle,
-}));
-
-vi.mock("@/lib/recordings/title-job", () => ({
-    enqueueTitleJob: mocks.enqueueTitleJob,
 }));
 
 vi.mock("@/lib/sharing/access", () => ({
@@ -700,7 +695,6 @@ beforeEach(() => {
     mocks.autoLearnMail.mockResolvedValue({ status: "started" });
     mocks.getActiveJob.mockResolvedValue(null);
     mocks.isSummaryStale.mockResolvedValue(false);
-    mocks.enqueueTitleJob.mockResolvedValue(undefined);
     mocks.recordingJobSubject.mockImplementation(
         (recordingId: string, view: string) => `${recordingId}:${view}`,
     );
@@ -782,7 +776,6 @@ describe("transcribeRecording post-write triggers", () => {
 
         expect(result.success).toBe(true);
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).toHaveBeenCalledWith(
             USER_ID,
             ITEM_ID,
@@ -832,7 +825,6 @@ describe("transcribeRecording post-write triggers", () => {
         await transcribeAndAdvance();
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
     });
@@ -871,7 +863,6 @@ describe("transcribeRecording post-write triggers", () => {
         await transcribeAndAdvance();
 
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
@@ -1043,7 +1034,6 @@ describe("learn.release triggers", () => {
         await expect(runLearnRelease()).resolves.toEqual({ skipped: "gone" });
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1115,7 +1105,6 @@ describe("learn.release triggers", () => {
 
         await runLearnRelease();
 
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
@@ -1126,20 +1115,27 @@ describe("learn.release triggers", () => {
             queued: ["pipeline.advance"],
         });
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
     });
 
     it.each([
-        { autoGenerateTitle: true, expectedCalls: 0 },
-        { autoGenerateTitle: false, expectedCalls: 0 },
-    ])("does not queue a title job when autoGenerateTitle=$autoGenerateTitle", async ({
-        autoGenerateTitle,
-        expectedCalls,
-    }) => {
+        true,
+        false,
+    ])("does not schedule a title step without a summary when autoGenerateTitle=%s", async (autoGenerateTitle) => {
         mountRelease({ autoGenerateTitle, autoSummarize: false });
 
         await runLearnRelease();
 
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledTimes(expectedCalls);
+        expect(mocks.updatePhaseInTx).not.toHaveBeenCalledWith(
+            expect.anything(),
+            ITEM_ID,
+            "private",
+            USER_ID,
+            "summary",
+            expect.objectContaining({
+                steps: expect.objectContaining({
+                    title: expect.anything(),
+                }),
+            }),
+        );
     });
 });
