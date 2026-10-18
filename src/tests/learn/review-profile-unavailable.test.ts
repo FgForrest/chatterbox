@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError, ErrorCode } from "@/lib/errors";
 
 const mocks = vi.hoisted(() => ({
     loadReview: vi.fn(),
@@ -42,9 +43,17 @@ vi.mock("@/lib/sharing/writer", () => ({ assertMayChange: vi.fn() }));
 import { GET } from "@/app/api/recordings/[id]/review/route";
 
 describe("review route profile availability", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it("returns the review when the item's profile cannot be resolved", async () => {
         mocks.resolveItemProfile.mockRejectedValue(
-            new Error("Profile is unavailable"),
+            new AppError(ErrorCode.CONFLICT, "Profile is unavailable", 409),
         );
         mocks.loadReview.mockResolvedValue({
             status: "ready",
@@ -66,5 +75,27 @@ describe("review route profile availability", () => {
             availabilityReason: "profile_unavailable",
         });
         expect(mocks.isLearnAvailableFor).not.toHaveBeenCalled();
+    });
+
+    it("returns a server error when profile resolution throws an unexpected error", async () => {
+        mocks.resolveItemProfile.mockRejectedValue(new Error("database down"));
+        const consoleError = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+
+        const response = await GET(
+            new Request(
+                "https://app.example.test/api/recordings/recording-1/review",
+            ),
+            { params: Promise.resolve({ id: "recording-1" }) },
+        );
+
+        expect(response.status).toBe(500);
+        expect(await response.json()).toMatchObject({
+            code: ErrorCode.INTERNAL_ERROR,
+        });
+        expect(mocks.loadReview).not.toHaveBeenCalled();
+        expect(mocks.isLearnAvailableFor).not.toHaveBeenCalled();
+        consoleError.mockRestore();
     });
 });

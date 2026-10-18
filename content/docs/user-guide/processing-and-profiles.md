@@ -43,7 +43,7 @@ If a specific Organization profile you selected is archived or you lose access t
 
 ## Folder default profiles
 
-Open a folder's settings and choose **Default profiles**. Recordings and mail have separate defaults:
+Open a folder and choose **Processing**. Recordings and mail have separate defaults:
 
 ![Choosing a folder's default profiles](images/folder-default-profiles.png)
 

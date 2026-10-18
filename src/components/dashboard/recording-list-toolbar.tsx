@@ -1,7 +1,7 @@
 "use client";
 
 import {
-    ArrowDownAZ,
+    ChevronDown,
     FolderTree,
     GraduationCap,
     Search,
@@ -12,10 +12,12 @@ import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
+    DropdownMenuCheckboxItem,
     DropdownMenuContent,
     DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -25,28 +27,34 @@ export type SortOrder = "newest" | "oldest" | "name";
 /** Which kinds of item the pile shows. */
 export type KindFilter = "all" | "audio" | "mail";
 
+/** A field the Chatter search reads. */
+export type SearchScope = "title" | "content" | "summary";
+
 export function RecordingListToolbar({
     query,
     onQueryChange,
     onEnterSelectFirst,
     searchRef,
     filteredCount,
-    totalCount,
+    channelCounts,
     sortOrder,
     onSortOrderChange,
     onOrganize,
     reviewCount = 0,
     needsReviewOnly = false,
     onNeedsReviewOnlyChange,
+    showMail,
     kindFilter,
     onKindFilterChange,
+    searchScopes,
+    onSearchScopesChange,
 }: {
     query: string;
     onQueryChange: (next: string) => void;
     onEnterSelectFirst: () => void;
     searchRef: React.RefObject<HTMLInputElement | null>;
     filteredCount: number;
-    totalCount: number;
+    channelCounts: Record<Exclude<KindFilter, "all">, number>;
     sortOrder: SortOrder;
     onSortOrderChange: (next: SortOrder) => void;
     onOrganize: () => void;
@@ -54,11 +62,86 @@ export function RecordingListToolbar({
     reviewCount?: number;
     needsReviewOnly?: boolean;
     onNeedsReviewOnlyChange?: (next: boolean) => void;
-    /** Shown once the pile holds mail; absent hides the filter. */
-    kindFilter?: KindFilter;
-    onKindFilterChange?: (next: KindFilter) => void;
+    /** Offers the Mail channel; with one channel the menu has no channel choice. */
+    showMail: boolean;
+    kindFilter: KindFilter;
+    onKindFilterChange: (next: KindFilter) => void;
+    searchScopes: ReadonlySet<SearchScope>;
+    onSearchScopesChange: (next: Set<SearchScope>) => void;
 }) {
     const i18n = useExtracted();
+    const channels = (
+        [
+            { value: "audio", label: i18n("Recordings") },
+            { value: "mail", label: i18n("Mail") },
+        ] as const
+    ).filter((channel) => showMail || channel.value !== "mail");
+    const showChannelChoice = channels.length > 1;
+    const showReviewChoice = reviewCount > 0 && !!onNeedsReviewOnlyChange;
+    const scopes = [
+        {
+            value: "title",
+            label: i18n({ id: "chatter-search-titles", message: "Titles" }),
+        },
+        {
+            value: "content",
+            label: i18n({
+                id: "chatter-search-content",
+                message: "Transcripts and message text",
+            }),
+        },
+        {
+            value: "summary",
+            label: i18n({
+                id: "chatter-search-summaries",
+                message: "Summaries",
+            }),
+        },
+    ] as const;
+    const selectedChannels = new Set<Exclude<KindFilter, "all">>(
+        kindFilter === "all"
+            ? channels.map((channel) => channel.value)
+            : [kindFilter],
+    );
+    const channelLabel =
+        selectedChannels.size === channels.length
+            ? i18n("All")
+            : channels
+                  .filter((channel) => selectedChannels.has(channel.value))
+                  .map((channel) => channel.label)
+                  .join(", ");
+    const nameLabel = i18n({ id: "chatter-sort-name", message: "Name" });
+    let sortLabel = nameLabel;
+    if (sortOrder === "newest") sortLabel = i18n("Newest");
+    if (sortOrder === "oldest") sortLabel = i18n("Oldest");
+    const menuLabel = showChannelChoice
+        ? `${channelLabel} · ${sortLabel}`
+        : sortLabel;
+    const toggleChannel = (channel: Exclude<KindFilter, "all">) => {
+        const next = new Set(selectedChannels);
+        if (next.has(channel)) {
+            if (next.size === 1) return;
+            next.delete(channel);
+        } else {
+            next.add(channel);
+        }
+        if (next.size === channels.length) {
+            onKindFilterChange("all");
+            return;
+        }
+        const [only] = next;
+        if (only) onKindFilterChange(only);
+    };
+    const toggleSearchScope = (scope: SearchScope) => {
+        const next = new Set(searchScopes);
+        if (next.has(scope)) {
+            if (next.size === 1) return;
+            next.delete(scope);
+        } else {
+            next.add(scope);
+        }
+        onSearchScopesChange(next);
+    };
     return (
         <div className="flex flex-col gap-2 border-b p-3">
             <div className="relative">
@@ -90,63 +173,102 @@ export function RecordingListToolbar({
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                    {filteredCount}
-                    {query ? i18n(" matching") : ""} {i18n("of")} {totalCount}{" "}
-                    {i18n(
-                        "{count, plural, one {# recording} other {# recordings}}",
-                        { count: totalCount },
-                    )}
+                    {i18n("{count, plural, one {# item} other {# items}}", {
+                        count: filteredCount,
+                    })}
                 </span>
                 <div className="flex items-center gap-1">
-                    {kindFilter && onKindFilterChange && (
-                        <fieldset
-                            aria-label={i18n("Show")}
-                            className="flex items-center rounded-md border p-0.5"
-                        >
-                            {(
-                                [
-                                    ["all", i18n("All")],
-                                    ["audio", i18n("Audio")],
-                                    ["mail", i18n("Mail")],
-                                ] as const
-                            ).map(([value, label]) => (
-                                <button
-                                    key={value}
-                                    type="button"
-                                    aria-pressed={kindFilter === value}
-                                    onClick={() => onKindFilterChange(value)}
-                                    className={
-                                        kindFilter === value
-                                            ? "rounded bg-secondary px-1.5 py-0.5 text-foreground"
-                                            : "rounded px-1.5 py-0.5 hover:text-foreground"
-                                    }
-                                >
-                                    {label}
-                                </button>
-                            ))}
-                        </fieldset>
-                    )}
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 className="h-7 px-2 text-xs"
-                                aria-label={i18n("Sort")}
                             >
-                                <ArrowDownAZ className="size-3.5" />
-                                <span>
-                                    {sortOrder === "newest"
-                                        ? i18n("Newest")
-                                        : sortOrder === "oldest"
-                                          ? i18n("Oldest")
-                                          : i18n("Name")}
-                                </span>
+                                <span>{menuLabel}</span>
+                                <ChevronDown className="size-3.5" />
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" className="min-w-64">
+                            {(showChannelChoice || showReviewChoice) && (
+                                <>
+                                    <DropdownMenuLabel>
+                                        {i18n("Show")}
+                                    </DropdownMenuLabel>
+                                    {showChannelChoice &&
+                                        channels.map((channel) => (
+                                            <DropdownMenuCheckboxItem
+                                                key={channel.value}
+                                                checked={selectedChannels.has(
+                                                    channel.value,
+                                                )}
+                                                disabled={
+                                                    selectedChannels.size ===
+                                                        1 &&
+                                                    selectedChannels.has(
+                                                        channel.value,
+                                                    )
+                                                }
+                                                onCheckedChange={() =>
+                                                    toggleChannel(channel.value)
+                                                }
+                                                onSelect={(event) =>
+                                                    event.preventDefault()
+                                                }
+                                            >
+                                                {channel.label}
+                                                <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                                    {
+                                                        channelCounts[
+                                                            channel.value
+                                                        ]
+                                                    }
+                                                </span>
+                                            </DropdownMenuCheckboxItem>
+                                        ))}
+                                    {showReviewChoice && (
+                                        <DropdownMenuCheckboxItem
+                                            checked={needsReviewOnly}
+                                            onCheckedChange={(checked) =>
+                                                onNeedsReviewOnlyChange?.(
+                                                    checked === true,
+                                                )
+                                            }
+                                            onSelect={(event) =>
+                                                event.preventDefault()
+                                            }
+                                        >
+                                            <GraduationCap className="mr-2 size-3.5" />
+                                            {i18n("Needs review ({count})", {
+                                                count: String(reviewCount),
+                                            })}
+                                        </DropdownMenuCheckboxItem>
+                                    )}
+                                    <DropdownMenuSeparator />
+                                </>
+                            )}
                             <DropdownMenuLabel>
-                                {i18n("Sort by")}
+                                {i18n("Search in")}
+                            </DropdownMenuLabel>
+                            {scopes.map((scope) => (
+                                <DropdownMenuCheckboxItem
+                                    key={scope.value}
+                                    checked={searchScopes.has(scope.value)}
+                                    disabled={
+                                        searchScopes.size === 1 &&
+                                        searchScopes.has(scope.value)
+                                    }
+                                    onCheckedChange={() =>
+                                        toggleSearchScope(scope.value)
+                                    }
+                                    onSelect={(event) => event.preventDefault()}
+                                >
+                                    {scope.label}
+                                </DropdownMenuCheckboxItem>
+                            ))}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>
+                                {i18n("Sort")}
                             </DropdownMenuLabel>
                             <DropdownMenuRadioGroup
                                 value={sortOrder}
@@ -155,33 +277,17 @@ export function RecordingListToolbar({
                                 }
                             >
                                 <DropdownMenuRadioItem value="newest">
-                                    {i18n("Newest first")}
+                                    {i18n("Newest")}
                                 </DropdownMenuRadioItem>
                                 <DropdownMenuRadioItem value="oldest">
-                                    {i18n("Oldest first")}
+                                    {i18n("Oldest")}
                                 </DropdownMenuRadioItem>
                                 <DropdownMenuRadioItem value="name">
-                                    {i18n("Name")}
+                                    {nameLabel}
                                 </DropdownMenuRadioItem>
                             </DropdownMenuRadioGroup>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                    {reviewCount > 0 && onNeedsReviewOnlyChange && (
-                        <Button
-                            variant={needsReviewOnly ? "secondary" : "ghost"}
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            aria-pressed={needsReviewOnly}
-                            onClick={() =>
-                                onNeedsReviewOnlyChange(!needsReviewOnly)
-                            }
-                        >
-                            <GraduationCap className="size-3.5" />
-                            {i18n("Needs review ({count})", {
-                                count: String(reviewCount),
-                            })}
-                        </Button>
-                    )}
                     <Button
                         variant="ghost"
                         size="sm"

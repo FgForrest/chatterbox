@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRoleSelect } from "@/components/settings/provider-role-select";
@@ -11,8 +17,22 @@ vi.mock("next-intl", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 vi.mock("@/components/ui/select", () => ({
-    Select: ({ children }: { children: React.ReactNode }) => (
-        <div>{children}</div>
+    Select: ({
+        children,
+        onValueChange,
+    }: {
+        children: React.ReactNode;
+        onValueChange: (value: string) => void;
+    }) => (
+        <div>
+            <button
+                type="button"
+                onClick={() => onValueChange("__not-chosen__")}
+            >
+                Choose automatic
+            </button>
+            {children}
+        </div>
     ),
     SelectContent: ({ children }: { children: React.ReactNode }) => (
         <div>{children}</div>
@@ -148,6 +168,35 @@ describe("empty provider picker", () => {
         expect(
             await screen.findByText("Automatic: Personal AI · model"),
         ).toBeTruthy();
+    });
+
+    it("does not write when the unset automatic fallback is selected", async () => {
+        const fetchMock = vi.fn((url: string) => {
+            const body = url.includes("organization-providers")
+                ? { providers: [] }
+                : {
+                      providers: [provider("personal", "Personal AI")],
+                      defaults: {
+                          transcription: null,
+                          summary: null,
+                          learn: null,
+                          topics: null,
+                          title: null,
+                      },
+                  };
+            return Promise.resolve(Response.json(body));
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText("Automatic: Personal AI · model"),
+        ).toBeTruthy();
+        const loadRequestCount = fetchMock.mock.calls.length;
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose automatic" }),
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(loadRequestCount);
     });
 
     it("skips managed Mynah when naming the automatic chat fallback", async () => {

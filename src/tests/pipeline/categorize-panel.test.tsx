@@ -234,6 +234,30 @@ describe("CategorizePanel", () => {
         ).toBe(true);
     });
 
+    it("uses a resolved folder profile when the account default is unavailable", () => {
+        renderPanel({
+            ...base,
+            defaultProfileUnavailable: true,
+        });
+
+        expect(
+            screen.getByRole("combobox", { name: "Profile" }).textContent,
+        ).toContain("Meetings");
+        expect(
+            screen.queryByText("Unavailable Organization profile"),
+        ).toBeNull();
+        expect(
+            screen.queryByText(
+                "Your selected Organization profile is unavailable. Choose another default.",
+            ),
+        ).toBeNull();
+        expect(
+            screen
+                .getByRole("button", { name: "Categorize recording" })
+                .hasAttribute("disabled"),
+        ).toBe(false);
+    });
+
     it("creates a first-level folder without a parent picker", async () => {
         const onFolderCreated = vi.fn();
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

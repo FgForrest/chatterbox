@@ -6,7 +6,8 @@ import { RecordingList } from "@/components/dashboard/recording-list";
 import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
-    useExtracted: () => (text: string) => text,
+    useExtracted: () => (input: string | { message: string }) =>
+        typeof input === "string" ? input : input.message,
     useLocale: () => "en",
 }));
 

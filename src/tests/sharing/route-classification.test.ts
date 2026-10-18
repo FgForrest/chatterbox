@@ -131,6 +131,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "mail/addresses/[id]/route.ts": { PATCH: "owner", DELETE: "owner" },
     "mail/addresses/[id]/rotate/route.ts": { POST: "owner" },
     "mail/delivery-log/route.ts": { GET: "owner" },
+    "mail/status/route.ts": { GET: "owner" },
     "people/route.ts": { GET: "people", POST: "people" },
     "people/[id]/route.ts": {
         GET: "people",

@@ -136,6 +136,12 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
             "user-1",
             "summary",
             "cred-2",
+            {
+                transaction: expect.objectContaining({
+                    insert: expect.any(Function),
+                    update: expect.any(Function),
+                }),
+            },
         );
     });
 

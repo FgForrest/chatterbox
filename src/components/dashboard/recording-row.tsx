@@ -77,7 +77,7 @@ export function RecordingRow({
                     <div className="flex items-center gap-2">
                         {recording.kind === "mail" && (
                             <Mail
-                                className="size-3.5 shrink-0 text-muted-foreground"
+                                className="size-3.5 shrink-0 text-primary"
                                 aria-label={i18n("Mail")}
                             />
                         )}

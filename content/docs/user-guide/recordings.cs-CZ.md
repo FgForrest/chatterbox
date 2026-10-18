@@ -8,13 +8,12 @@ description: Seznam nahrávek, přehrávač, nahrávání souborů, složky, maz
 
 ## Seznam nahrávek
 
-Seznam vlevo v části **Nahrávky** zobrazuje Vaše nejnovější nahrávky jako první, seskupené podle dne. Každý řádek ukazuje název a první slova přepisu, nebo délku a datum, pokud ještě není přepis k dispozici.
+Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, seskupené podle dne. Každý řádek ukazuje název a první odpovídající slova, nebo odesílatele, délku a datum, pokud není k dispozici text.
 
 ![Seznam nahrávek s filtrem Potřebuje zkontrolovat](images/recording-list-needs-review.png)
 
-- **Hledat** vyhledává slova v názvech a přepisech. Prohledává opravené přepisy, takže pokud opravíte např. jméno, najde je podle Vašeho zápisu. E-mail najde podle odesílatele a podle toho, co píše on sám, ne podle citovaných dřívějších zpráv, podpisu ani právního dovětku.
-- **Nejnovější** mění pořadí: od nejnovějších, od nejstarších nebo podle názvu.
-- **Potřebuje zkontrolovat** se zobrazí, když má Learn návrhy čekající na schválení v některých nahrávkách, a zobrazí pouze tyto nahrávky. Viz [Learn](learn.md).
+- **Hledat** prohledává pole vybraná v části **Hledat v**: názvy, přepisy a text zpráv nebo shrnutí. Prohledává opravené přepisy. Text pošty nezahrnuje citované dřívější zprávy, podpisy ani právní dovětky.
+- Nabídka **Vše · Nejnovější** určuje zobrazené kanály a řadí výsledek od nejnovějších, od nejstarších nebo podle názvu. Volba **Potřebuje zkontrolovat** se v nabídce objeví, když má Learn návrhy čekající na schválení. Viz [Learn](learn.md).
 - **Organizovat** přepne seznam do režimu složek. Viz [Soubory](#folders).
 - Nabídka **⋯** na řádku otevře detail nahrávky, stáhne zvuk nebo ji odstraní.
 
@@ -105,6 +104,6 @@ Kliknutím na složku zobrazíte její nahrávky v tabulce, kterou lze řadit po
 
 ![Složka](images/folder-pane.png)
 
-**Nastavení** u složky určuje **Výchozí profily** pro nahrávky a poštu nebo nastavuje export na disk či Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
+**Zpracování** u složky určuje profily pro nahrávky a poštu. **Export** nastavuje export na disk či Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
 
 Další: [Přepisy](transcripts.md)
