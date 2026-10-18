@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
+import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
 import { parseProviderRates } from "@/lib/ai/provider-rate-input";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSessionActor } from "@/lib/auth-server";
@@ -68,6 +70,17 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
     const body = parsed.data;
+    if (
+        !isTranscriptionOnlyProvider(body.provider) &&
+        !body.defaultModel?.trim()
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            enhancementModelRequiredMessage(body.provider),
+            400,
+            { field: "defaultModel" },
+        );
+    }
     const baseUrlCheck = validateAiBaseUrl(body.baseUrl, {
         isHosted: env.IS_HOSTED,
     });

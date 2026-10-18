@@ -124,6 +124,7 @@ describe("enhancement-only providers cannot become the transcription default", (
                 jsonRequest({
                     provider: "Claude Code",
                     apiKey: "bridge-token",
+                    defaultModel: "claude-sonnet-5",
                     isDefaultTranscription: true,
                 }),
             );
@@ -139,6 +140,7 @@ describe("enhancement-only providers cannot become the transcription default", (
                 jsonRequest({
                     provider: "Claude Code",
                     apiKey: "bridge-token",
+                    defaultModel: "claude-sonnet-5",
                     isDefaultEnhancement: true,
                 }),
             );
@@ -162,7 +164,7 @@ describe("enhancement-only providers cannot become the transcription default", (
                                 id: "rolled-back-provider",
                                 provider: "OpenAI",
                                 baseUrl: null,
-                                defaultModel: null,
+                                defaultModel: "gpt-4o-mini",
                             };
                             createdRows.push(row);
                             return [row];
@@ -191,6 +193,7 @@ describe("enhancement-only providers cannot become the transcription default", (
                 jsonRequest({
                     provider: "OpenAI",
                     apiKey: "secret",
+                    defaultModel: "gpt-4o-mini",
                     isDefaultEnhancement: true,
                 }),
             );
@@ -224,7 +227,12 @@ describe("enhancement-only providers cannot become the transcription default", (
     describe("PUT /api/settings/ai/providers/[id]", () => {
         it("rejects flipping an existing Codex credential to transcription", async () => {
             queueSelect([
-                { id: "cred-1", userId: "user-1", provider: "Codex" },
+                {
+                    id: "cred-1",
+                    userId: "user-1",
+                    provider: "Codex",
+                    defaultModel: "gpt-5.6-luna",
+                },
             ]);
 
             const response = await updateProvider(
@@ -244,6 +252,7 @@ describe("enhancement-only providers cannot become the transcription default", (
                     id: "cred-1",
                     userId: "user-1",
                     provider: "OpenAI",
+                    defaultModel: "gpt-4o-mini",
                     disabledAt: null,
                     isDefaultTranscription: false,
                     isDefaultEnhancement: false,
