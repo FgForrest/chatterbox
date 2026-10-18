@@ -10,7 +10,7 @@ A recording without a transcript offers two buttons:
 - **Transcribe** sends the audio to your account's transcription provider (Settings → Transcription). It also works while the recording is still waiting to be filed.
 - **Transcribe in browser** runs Whisper inside your browser. It is free and nothing leaves your computer, but it is slower.
 
-**Re-transcribe** on a recording that has a transcript runs it again with your current provider. Speaker names you gave are carried over to the new transcript as suggestions, to confirm with one click.
+**Re-transcribe** on a recording that has a transcript asks for confirmation, then runs it again with your current provider. This is a paid provider call. It replaces the transcript and regenerates the summary, title, topics, and Learn results. Speaker names you gave are carried over to the new transcript as suggestions, to confirm with one click.
 
 A recording is transcribed automatically only after it is filed and its [processing profile](processing-and-profiles.md) has **Run automatically** on for transcription. The profile can choose a different provider and language from the account defaults used by **Transcribe**.
 
@@ -36,7 +36,7 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 ![A transcript with speakers, topics and Learn's proposals](images/transcript-speakers.png)
 
-A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. **Collapse transcript** folds it away. The footer shows which provider and model made it, its language and its length.
+A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. **Collapse transcript** at the right end of the header folds it away; **Expand transcript** appears in the same place. The footer shows which provider and model made it, its language and its length.
 
 ### Naming speakers
 
@@ -85,6 +85,6 @@ See [Learn](learn.md) for where corrections come from.
 
 ## Copying and downloading
 
-The two icons at the top right of the transcript copy it to the clipboard or download it as a Markdown file, with speaker names and corrections applied. The summary has the same two icons.
+The two icons in the transcript header copy it to the clipboard or download it as a Markdown file, with speaker names and corrections applied. The summary has the same two icons.
 
 Next: [Summaries and tasks](summaries-and-tasks.md)

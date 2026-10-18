@@ -18,7 +18,6 @@ import { getApiErrorMessage } from "@/lib/api-errors";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     isWorkflowWidgetLineVisible,
-    type WorkflowWidgetFrame,
     type WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
 import type { Recording } from "@/types/recording";
@@ -59,7 +58,6 @@ export function MailSummaryCard({
     const [loaded, setLoaded] = useState(false);
     const [running, setRunning] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
-    const [dialogOpen, setDialogOpen] = useState(false);
     const [workflowSummaryExpanded, setWorkflowSummaryExpanded] =
         useState(false);
     const taskState = useRecordingTasks(mail.id, reloadKey);
@@ -132,11 +130,8 @@ export function MailSummaryCard({
         working,
         frame: widgetFrame,
     });
-    let frame: WorkflowWidgetFrame = "inline";
-    if (dialogOpen) frame = "dialog";
     const tone = widget?.tone ?? "quiet";
     const runSummary = () => {
-        setDialogOpen(true);
         void summarize();
     };
 
@@ -267,18 +262,12 @@ export function MailSummaryCard({
                     working ? undefined : () => setWorkflowSummaryExpanded(true)
                 }
                 expandLabel={working ? undefined : i18n("View summary")}
-                onOpen={() => {
-                    if (working && widgetFrame === "dialog") {
-                        setDialogOpen(true);
-                        return;
-                    }
-                    setWorkflowSummaryExpanded(true);
-                }}
+                onOpen={() => setWorkflowSummaryExpanded(true)}
             />
         );
     };
 
-    if (summaryLine && !dialogOpen) {
+    if (summaryLine) {
         return (
             <>
                 {renderCompactLine(widgetId)}
@@ -291,26 +280,13 @@ export function MailSummaryCard({
         <>
             <WorkflowWidget
                 id={widgetId}
-                frame={frame}
+                frame="inline"
                 tone={tone}
-                open={dialogOpen}
-                onOpenChange={setDialogOpen}
                 title={i18n("Summary")}
                 description={i18n(
                     "The main points and tasks found in this message.",
                 )}
                 headerAction={canChange && !working ? runButton : undefined}
-                dialogWidth="xl"
-                dialogLine={
-                    frame === "dialog" && summaryLine
-                        ? renderCompactLine()
-                        : undefined
-                }
-                inlineLine={
-                    frame === "inline" && summaryLine
-                        ? renderCompactLine()
-                        : undefined
-                }
             >
                 {body}
             </WorkflowWidget>

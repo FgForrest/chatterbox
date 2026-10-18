@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { parseApiError } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import {
     type RecordingView,
@@ -107,6 +108,7 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
             id: string,
             attributionSource?: string,
             view: RecordingView = "private",
+            retranscribe = false,
         ) => {
             const key = recordingJobSubject(id, view);
             if (!beginTracking(key)) return;
@@ -116,7 +118,10 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ attributionSource }),
+                        body: JSON.stringify({
+                            attributionSource,
+                            ...(retranscribe ? { retranscribe: true } : {}),
+                        }),
                     },
                 );
                 if (response.ok) {
@@ -129,7 +134,11 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                     await followTranscription(key, data.jobId);
                     return;
                 } else {
-                    const error = await response.json();
+                    const error = await parseApiError(response);
+                    if (error.code === "TRANSCRIPT_ALREADY_EXISTS") {
+                        onTranscribeComplete();
+                        return;
+                    }
                     toast.error(error.error || "Transcription failed");
                 }
             } catch {
@@ -138,7 +147,12 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                 finishTracking(key);
             }
         },
-        [beginTracking, finishTracking, followTranscription],
+        [
+            beginTracking,
+            finishTracking,
+            followTranscription,
+            onTranscribeComplete,
+        ],
     );
 
     const observeTranscriptionById = useCallback(

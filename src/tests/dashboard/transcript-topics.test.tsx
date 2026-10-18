@@ -14,7 +14,6 @@ import {
     renderHook,
     screen,
     waitFor,
-    within,
 } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { IntlProvider } from "use-intl/react";
@@ -272,29 +271,24 @@ describe("transcript topics", () => {
     });
 
     it("detects topics on demand and shows them", async () => {
-        fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
-            url.includes("/topics") && init?.method === "POST"
-                ? new Response(JSON.stringify({ topics: TOPICS }), {
-                      status: 200,
-                  })
-                : new Response(JSON.stringify({ speakers: [] }), {
-                      status: 200,
-                  }),
-        );
+        let finishDetection = (_response: Response) => {};
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes("/topics") && init?.method === "POST") {
+                return new Promise<Response>((resolve) => {
+                    finishDetection = resolve;
+                });
+            }
+            return Promise.resolve(json({ speakers: [] }));
+        });
         renderPanel(PLAUD);
 
         fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
 
         expect(
-            screen.getByRole("dialog", {
-                name: /Detecting topics|Topics detected/,
-            }),
+            screen.getByRole("button", { name: "Detecting topics…" }),
         ).toBeTruthy();
-        const dialog = await screen.findByRole("dialog", {
-            name: "Topics detected",
-        });
-        expect(within(dialog).getByText("Objednání jízdenky")).toBeTruthy();
-        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+        expect(screen.queryByRole("dialog")).toBeNull();
+        finishDetection(json({ topics: TOPICS }));
         await screen.findByRole("button", { name: "Topics (2)" });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/topics?source=plaud",
@@ -302,7 +296,7 @@ describe("transcript topics", () => {
         );
     });
 
-    it("reopens a person-started topic run after reload", async () => {
+    it("keeps a person-started topic run inline after reload", async () => {
         render(
             <TranscriptTopicsMenu
                 widgetId="recording-topics-rec-1"
@@ -311,13 +305,13 @@ describe("transcript topics", () => {
                 detecting
                 onDetect={vi.fn()}
                 onSelect={vi.fn()}
-                personStarted
             />,
         );
 
         expect(
-            await screen.findByRole("dialog", { name: "Detecting topics…" }),
+            await screen.findByRole("button", { name: "Detecting topics…" }),
         ).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("picks up a job already running when the page opens", async () => {
@@ -451,8 +445,7 @@ describe("transcript topics", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
 
-        await screen.findByRole("dialog", { name: "Topic detection" });
-        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+        expect(screen.queryByRole("dialog")).toBeNull();
         await waitFor(() =>
             expect(
                 screen.getByRole("button", { name: "Detect topics" }),

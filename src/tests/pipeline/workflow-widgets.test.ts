@@ -133,7 +133,7 @@ describe("workflow widgets", () => {
         expect(widgets.learn).toMatchObject({
             visible: true,
             active: true,
-            frame: "dialog",
+            frame: "inline",
             action: "run",
         });
         expect(widgets.summary.visible).toBe(false);
@@ -173,7 +173,7 @@ describe("workflow widgets", () => {
         expect(manual.learn.frame).toBe("dialog");
     });
 
-    it("uses durable request origins for rerun summary and task frames", () => {
+    it("keeps person-started work inline and opens only its task review in a dialog", () => {
         const base = presentation({
             outputs: { transcript: true, learn: true, summary: true },
             taskReviewWaiting: 2,
@@ -205,8 +205,8 @@ describe("workflow widgets", () => {
         expect(pipeline.transcript.frame).toBe("inline");
         expect(pipeline.summary.frame).toBe("inline");
         expect(pipeline.taskReview.frame).toBe("inline");
-        expect(person.transcript.frame).toBe("dialog");
-        expect(person.summary.frame).toBe("dialog");
+        expect(person.transcript.frame).toBe("inline");
+        expect(person.summary.frame).toBe("inline");
         expect(person.taskReview.frame).toBe("dialog");
     });
 
@@ -434,6 +434,7 @@ describe.each([
     ] as const)("offers no run action and keeps the working tone while %s", (state) => {
         expect(deriveManualWidget(state)).toMatchObject({
             action: null,
+            frame: "inline",
             tone: "working",
         });
     });
@@ -441,6 +442,7 @@ describe.each([
     it("offers run once settled without output", () => {
         expect(deriveManualWidget("manual")).toMatchObject({
             action: "run",
+            frame: "inline",
             tone: "next",
         });
     });

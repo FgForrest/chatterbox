@@ -855,7 +855,6 @@ export function LearnReview({
     );
 
     const startLearn = () => {
-        setOpen(true);
         void learn();
     };
     let finishedTitle = i18n("Learn complete");
@@ -1090,9 +1089,13 @@ export function LearnReview({
                     {working ? (
                         <p className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                            {i18n(
-                                "It continues in the background; you can close this window.",
-                            )}
+                            {frame === "inline"
+                                ? i18n(
+                                      "It continues in the background; you can leave this page.",
+                                  )
+                                : i18n(
+                                      "It continues in the background; you can close this window.",
+                                  )}
                         </p>
                     ) : (
                         <>
@@ -1555,10 +1558,7 @@ export function LearnReview({
                     describe={(item) => describeResult(item as ItemView)}
                     onRelearn={
                         state?.available
-                            ? (forget) => {
-                                  setOpen(true);
-                                  void learn(forget);
-                              }
+                            ? (forget) => void learn(forget)
                             : undefined
                     }
                 />

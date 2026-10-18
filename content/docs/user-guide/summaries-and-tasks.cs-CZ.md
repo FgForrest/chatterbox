@@ -10,9 +10,9 @@ Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, 
 ![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
 
 1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Klepna si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
-2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**.
+2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**. **Sbalit shrnutí** je na pravém konci záhlaví shrnutí nahrávky; na stejném místě se pak zobrazí **Rozbalit shrnutí**.
 
-Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, otevře se v okně; pruh pracovního postupu toto okno znovu otevře, pokud vyžaduje pozornost. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
+Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, karta zůstane na místě a přepne se do průběhového stavu. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
 
 ![Výběr profilu zpracování pro ruční shrnutí](images/summary-profile-picker.png)
 
@@ -39,7 +39,7 @@ Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i b
 
 Shrnutí hledá věci, které někdo slíbil udělat. Úkol již nepatří jednomu shrnutí: shromažďuje zmínky z nahrávek a pošty zařazených do jeho rozsahu složek. **Kde bylo řečeno** otevře zvukovou pasáž nebo zvýrazní odpovídající text pošty. **Dřívější zmínka** ukazuje starší důkaz bez změny úkolu.
 
-Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, stejná kontrola se otevře v okně.
+Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, kompaktní řádek **Kontrola úkolů** nabídne akci **Zkontrolovat**; teprve toto výslovné kliknutí otevře kontrolu v okně.
 
 ![Kontrola navržených úkolů](images/task-review.png)
 

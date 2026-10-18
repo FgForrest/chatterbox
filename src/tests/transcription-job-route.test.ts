@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     limit: vi.fn(),
     select: vi.fn(),
     access: { exists: true },
+    transcriptRows: [] as Array<{ id: string }>,
 }));
 
 // Ownership lives in the access layer, tested against a real database in
@@ -99,15 +100,17 @@ describe("recording transcription jobs route", () => {
                 where: vi.fn().mockReturnValue({ limit: mocks.limit }),
             }),
         });
-        mocks.limit.mockResolvedValue([{ id: "recording-1" }]);
+        mocks.limit.mockImplementation(async () => mocks.transcriptRows);
         mocks.access.exists = true;
+        mocks.transcriptRows = [];
+        mocks.getActiveJob.mockResolvedValue(null);
         mocks.enqueueTranscriptionJob.mockResolvedValue({
             job: { id: "job-1", status: "pending" },
             created: true,
         });
     });
 
-    it("queues a force-enabled manual job and returns immediately", async () => {
+    it("queues a plain manual job without force and returns immediately", async () => {
         const response = await POST(
             request("POST", {
                 providerId: "provider-1",
@@ -127,16 +130,18 @@ describe("recording transcription jobs route", () => {
             recordingId: "recording-1",
             providerId: "provider-1",
             model: "whisper-large-v3",
-            force: true,
+            force: false,
             trigger: "manual",
             view: "private",
         });
     });
 
-    it("returns the existing job when another trigger already owns the work", async () => {
-        mocks.enqueueTranscriptionJob.mockResolvedValue({
-            job: { id: "job-auto", status: "processing" },
-            created: false,
+    it("returns the active job even when a transcript already exists", async () => {
+        mocks.transcriptRows = [{ id: "transcript-1" }];
+        mocks.getActiveJob.mockResolvedValue({
+            id: "job-auto",
+            userId: "user-1",
+            status: "processing",
         });
 
         const response = await POST(request("POST"), context);
@@ -146,6 +151,40 @@ describe("recording transcription jobs route", () => {
             jobId: "job-auto",
             status: "processing",
             created: false,
+        });
+        expect(mocks.enqueueTranscriptionJob).not.toHaveBeenCalled();
+    });
+
+    it("refuses a plain request when a transcript already exists", async () => {
+        mocks.transcriptRows = [{ id: "transcript-1" }];
+
+        const response = await POST(request("POST"), context);
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+            code: "TRANSCRIPT_ALREADY_EXISTS",
+        });
+        expect(mocks.enqueueTranscriptionJob).not.toHaveBeenCalled();
+    });
+
+    it("queues an explicitly confirmed re-transcription with force", async () => {
+        mocks.transcriptRows = [{ id: "transcript-1" }];
+
+        const response = await POST(
+            request("POST", { retranscribe: true }),
+            context,
+        );
+
+        expect(response.status).toBe(202);
+        expect(mocks.enqueueTranscriptionJob).toHaveBeenCalledWith({
+            userId: "user-1",
+            recordingId: "recording-1",
+            providerId: undefined,
+            model: undefined,
+            attributionSource: undefined,
+            force: true,
+            trigger: "manual",
+            view: "private",
         });
     });
 
