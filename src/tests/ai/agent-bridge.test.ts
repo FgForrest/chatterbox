@@ -7,13 +7,16 @@ import {
     buildPrompt,
     chatCompletion,
     claudeMcpConfig,
+    cliErrorStatus,
     contentToText,
     diagnosticTail,
     extractJson,
     MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseCliError,
     parseCodexUsage,
     parseLearnRequest,
+    protectedDiagnostic,
     redact,
     resolveBackend,
     sanitizeForLog,
@@ -458,6 +461,46 @@ describe("agent-bridge", () => {
                 parseClaudeEnvelope(JSON.stringify({ result: "   " })),
             ).toThrow(/empty result/);
         });
+
+        /** The error a Claude envelope raises, or null when it raised none. */
+        const envelopeError = (envelope: unknown) => {
+            try {
+                parseClaudeEnvelope(JSON.stringify(envelope));
+            } catch (error) {
+                return error as BridgeError;
+            }
+            return null;
+        };
+
+        it("surfaces a Claude error result with its upstream status", () => {
+            const error = envelopeError({
+                is_error: true,
+                result: JSON.stringify({
+                    status: 403,
+                    error: { message: "account is not allowed" },
+                }),
+            });
+            expect(error?.status).toBe(403);
+            expect(error?.message).toContain("account is not allowed");
+        });
+
+        it("reads Claude's API Error line: the status, then the upstream body", () => {
+            const error = envelopeError({
+                is_error: true,
+                subtype: "success",
+                result: `API Error: 400 ${JSON.stringify({
+                    type: "error",
+                    error: {
+                        type: "invalid_request_error",
+                        message: "model: claude-unknown is not available",
+                    },
+                })}`,
+            });
+            expect(error?.status).toBe(400);
+            expect(error?.message).toBe(
+                "claude reported an error: model: claude-unknown is not available",
+            );
+        });
     });
 
     describe("diagnosticTail", () => {
@@ -492,6 +535,175 @@ describe("agent-bridge", () => {
                 "line35; line36; line37; line38; line39",
             );
             expect(diagnosticTail("x".repeat(2000), "")).toHaveLength(600);
+        });
+
+        it("redacts secrets after filtering and keeps the final result bounded", () => {
+            const secret = "lr1.run.signature";
+            const result = protectedDiagnostic(
+                `${secret} ${"x".repeat(1000)}`,
+                "",
+                [secret],
+            );
+            expect(result).not.toContain(secret);
+            expect(result).toContain("[redacted]");
+            expect(result.length).toBeLessThanOrEqual(600);
+
+            const boundarySecret = "SECRET-RUN-TOKEN";
+            const boundary = protectedDiagnostic(
+                `${"x".repeat(595)}${boundarySecret}`,
+                "",
+                [boundarySecret],
+            );
+            expect(boundary).not.toContain("SECRET");
+            expect(boundary.length).toBeLessThanOrEqual(600);
+        });
+    });
+
+    describe("parseCliError", () => {
+        it("unwraps Codex's nested invalid-model response", () => {
+            const upstream = {
+                type: "error",
+                status: 400,
+                error: {
+                    type: "invalid_request_error",
+                    message:
+                        "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.",
+                },
+            };
+            const stdout = JSON.stringify({
+                type: "error",
+                message: JSON.stringify(upstream),
+            });
+
+            expect(parseCliError(stdout)).toEqual({
+                message:
+                    "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.",
+                status: 400,
+            });
+            expect(parseCliError(`ERROR: ${JSON.stringify(upstream)}`)).toEqual(
+                {
+                    message:
+                        "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.",
+                    status: 400,
+                },
+            );
+        });
+
+        it("reads a terminal turn.failed event", () => {
+            expect(
+                parseCliError(
+                    JSON.stringify({
+                        type: "turn.failed",
+                        error: {
+                            message:
+                                "unexpected status 401 Unauthorized: log in again",
+                        },
+                    }),
+                ),
+            ).toEqual({
+                message: "unexpected status 401 Unauthorized: log in again",
+                status: 401,
+            });
+        });
+
+        it("classifies a usage limit and carries its retry delay", () => {
+            expect(
+                parseCliError(
+                    JSON.stringify({
+                        type: "turn.failed",
+                        error: {
+                            message:
+                                "You've hit your usage limit. Try again in 17 seconds.",
+                        },
+                    }),
+                ),
+            ).toEqual({
+                message:
+                    "You've hit your usage limit. Try again in 17 seconds.",
+                status: 429,
+                retryAfter: "17",
+            });
+        });
+
+        it("turns a dated usage-limit reset into Retry-After", () => {
+            const result = parseCliError(
+                JSON.stringify({
+                    type: "error",
+                    message:
+                        "You've hit your usage limit. Try again at Dec 31st, 2099 5:09 PM.",
+                }),
+            );
+            expect(result?.status).toBe(429);
+            expect(Date.parse(result?.retryAfter ?? "")).not.toBeNaN();
+        });
+
+        it("returns null when stdout has no error event", () => {
+            const stdout = [
+                JSON.stringify({ type: "thread.started", thread_id: "t" }),
+                JSON.stringify({ type: "turn.completed", usage: {} }),
+            ].join("\n");
+            expect(parseCliError(stdout)).toBeNull();
+        });
+
+        it("drops prompt text echoed as the error", () => {
+            const prompt = "Transcript: private meeting words";
+            const stdout = JSON.stringify({
+                type: "turn.failed",
+                error: { message: `request failed: ${prompt}` },
+            });
+            const result = parseCliError(stdout, prompt);
+            expect(result).toEqual({ message: "", status: 502 });
+            expect(JSON.stringify(result)).not.toContain("private meeting");
+        });
+
+        it("keeps a JSON error when the prompt has bracket-only lines", () => {
+            // Summary prompts show their JSON shape, one brace per line.
+            const prompt =
+                'Answer in this shape:\n{\n  "summary": "...",\n  "keyPoints": []\n}\n\nTranscript: we agreed.';
+            const stderr = `ERROR: ${JSON.stringify({
+                type: "error",
+                status: 400,
+                error: { message: "model is not supported" },
+            })}`;
+            expect(parseCliError(stderr, prompt)).toEqual({
+                message: "model is not supported",
+                status: 400,
+            });
+            expect(diagnosticTail(stderr, prompt)).toContain(
+                "model is not supported",
+            );
+        });
+
+        it("redacts a run token and caps extracted messages", () => {
+            const token = "lr1.run.signature";
+            const stdout = JSON.stringify({
+                type: "error",
+                message: `failed with ${token}: ${"x".repeat(1000)}`,
+            });
+            const result = parseCliError(stdout, "", [token]);
+            expect(result?.message).not.toContain(token);
+            expect(result?.message).toContain("[redacted]");
+            expect(result?.message.length).toBeLessThanOrEqual(600);
+        });
+    });
+
+    describe("cliErrorStatus", () => {
+        it.each([
+            [400, 400],
+            [404, 400],
+            [422, 400],
+            [401, 401],
+            [403, 403],
+            [429, 429],
+            [500, 502],
+            [undefined, 502],
+        ])("maps upstream status %s to %s", (upstream, expected) => {
+            expect(cliErrorStatus(upstream, "provider failed")).toBe(expected);
+        });
+
+        it("recognizes a usage or rate limit without a status", () => {
+            expect(cliErrorStatus(undefined, "usage limit reached")).toBe(429);
+            expect(cliErrorStatus(undefined, "rate limited")).toBe(429);
         });
     });
 
