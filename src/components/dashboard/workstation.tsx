@@ -62,6 +62,7 @@ import {
     reconcileFilenameOverrides,
 } from "@/lib/recordings/filename-overrides";
 import type { InitialSettings } from "@/lib/settings/initial-settings";
+import { canChangeItem } from "@/lib/sharing/change-permission";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SYNC_CONFIG } from "@/lib/sync-config";
 import { cn } from "@/lib/utils";
@@ -337,10 +338,17 @@ export function Workstation({
         () => sharedRecordingIds(folderOrganization),
         [folderOrganization],
     );
+    const selectedShared = selectedRecording
+        ? sharedIds.has(selectedRecording.id)
+        : false;
     const selectedTranscriptReadOnly = selectedRecording
-        ? currentIsOrgView
-            ? !(isOrgAccount || canCurate)
-            : sharedIds.has(selectedRecording.id)
+        ? !canChangeItem({
+              view: currentIsOrgView ? "org" : "private",
+              isOwn: selectedRecording.isOwn !== false,
+              shared: selectedShared,
+              isOrgAccount,
+              canCurate,
+          })
         : false;
 
     // Keep currentRecording in sync with the recordings prop (updated
@@ -1278,6 +1286,7 @@ export function Workstation({
                         ) : selectedRecording?.kind === "mail" ? (
                             <MailDetailPane
                                 mail={selectedRecording}
+                                shared={selectedShared}
                                 dateTimeFormat={initialSettings.dateTimeFormat}
                                 onBackToList={() => setMobileView("list")}
                                 hiddenOnMobile={mobileView === "list"}
@@ -1330,11 +1339,7 @@ export function Workstation({
                                 onTranscriptStale={refresh}
                                 onFolderCreated={handleFolderCreated}
                                 transcriptReadOnly={selectedTranscriptReadOnly}
-                                recordingShared={
-                                    selectedRecording
-                                        ? sharedIds.has(selectedRecording.id)
-                                        : false
-                                }
+                                recordingShared={selectedShared}
                                 onSelectRecording={selectRecordingByUser}
                                 onRenamed={handleRenamed}
                                 onDelete={handleDelete}

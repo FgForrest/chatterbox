@@ -4,6 +4,7 @@ import { ListChecks, Loader2, Sparkles } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { HelpLink } from "@/components/help/help-button";
 import { Markdown } from "@/components/markdown";
 import {
     WorkflowWidget,
@@ -147,7 +148,7 @@ export function MailSummaryCard({
             ) : (
                 <Sparkles className="size-4" />
             )}
-            {hasSummary ? i18n("Summarize again") : i18n("Summarize")}
+            {hasSummary ? i18n("Re-summarize") : i18n("Summarize")}
         </Button>
     );
 
@@ -210,7 +211,7 @@ export function MailSummaryCard({
                         disabled={running}
                         onClick={runSummary}
                     >
-                        {i18n("Match tasks again")}
+                        {i18n("Re-match tasks")}
                     </button>
                 </p>
             )}
@@ -218,8 +219,27 @@ export function MailSummaryCard({
                 state={taskState}
                 speakers={NO_SPEAKERS}
                 organizationOnly={view === "org"}
-                fallback={null}
-                allowAdd={hasSummary}
+                fallback={
+                    summary?.actionItems &&
+                    summary.actionItems.length > 0 && (
+                        <div>
+                            <h4 className="mb-2 text-sm font-medium">
+                                {i18n("Action Items")}
+                            </h4>
+                            <ul className="space-y-1">
+                                {summary.actionItems.map((item) => (
+                                    <li
+                                        key={`ai-${item.slice(0, 32)}`}
+                                        className="flex items-start gap-2 text-sm text-muted-foreground"
+                                    >
+                                        <ListChecks className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                                        <Markdown inline>{item}</Markdown>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )
+                }
             />
         </div>
     );
@@ -229,7 +249,6 @@ export function MailSummaryCard({
             state={taskState}
             speakers={NO_SPEAKERS}
             organizationOnly={view === "org"}
-            allowAdd={hasSummary}
             frame={taskWidget?.frame ?? "dialog"}
             widgetId={taskWidgetId}
             showTrigger={false}
@@ -283,6 +302,9 @@ export function MailSummaryCard({
                 frame="inline"
                 tone={tone}
                 title={i18n("Summary")}
+                helpLink={
+                    <HelpLink topic="summaries" label={i18n("summaries")} />
+                }
                 description={i18n(
                     "The main points and tasks found in this message.",
                 )}

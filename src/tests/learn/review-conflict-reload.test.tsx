@@ -128,11 +128,8 @@ function finishUrl(variant: Variant): string {
     return "/api/recordings/mail-1/review/finish";
 }
 
-function suggestionCheckbox(variant: Variant): HTMLElement {
-    if (variant === "recording") {
-        return screen.getByRole("checkbox", { name: "Jan — leads — Orion" });
-    }
-    return screen.getByRole("checkbox", { name: "Apply this" });
+function suggestionCheckbox(): HTMLElement {
+    return screen.getByRole("checkbox", { name: "Jan — leads — Orion" });
 }
 
 afterEach(() => {
@@ -176,7 +173,7 @@ describe.each([
         vi.stubGlobal("fetch", fetch);
         await renderReview(variant, frame);
 
-        fireEvent.click(suggestionCheckbox(variant));
+        fireEvent.click(suggestionCheckbox());
         await waitFor(() => expect(reviewLoads).toBe(2));
 
         fireEvent.click(screen.getByRole("button", { name: "Finish review" }));

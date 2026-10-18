@@ -50,6 +50,7 @@ interface FolderActions {
 
 interface ProcessingFolderRowProps extends FolderActions {
     itemId: string;
+    kind: "audio" | "mail";
     processing: ItemProcessingPresentation | null;
     panelData: CategorizationPanelPresentation | null;
     isOwn: boolean;
@@ -66,6 +67,7 @@ const MANUAL_ONLY = "__manual_only__";
 /** Folder placements, intended shares, and profile choice on one header row. */
 export function ProcessingFolderRow({
     itemId,
+    kind,
     processing,
     panelData,
     isOwn,
@@ -94,6 +96,7 @@ export function ProcessingFolderRow({
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 <RecordingFolderTags
                     recordingId={itemId}
+                    kind={kind}
                     folders={folders}
                     assignments={folderAssignments}
                     onSelectFolder={onSelectFolder}
@@ -617,7 +620,11 @@ export function ItemWorkflow({
     return (
         <>
             {enabled && workflow && (
-                <WorkflowStrip workflow={workflow} onAction={handleAction} />
+                <WorkflowStrip
+                    workflow={workflow}
+                    kind={kind}
+                    onAction={handleAction}
+                />
             )}
             {enabled && filingMode ? (
                 <div ref={filingRef}>
@@ -645,6 +652,7 @@ export function ItemWorkflow({
             ) : (
                 <ProcessingFolderRow
                     itemId={itemId}
+                    kind={kind}
                     processing={data}
                     panelData={panelData}
                     isOwn={isOwn}

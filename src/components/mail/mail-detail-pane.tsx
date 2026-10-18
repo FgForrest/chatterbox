@@ -32,6 +32,7 @@ import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
+import { canChangeItem } from "@/lib/sharing/change-permission";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -42,6 +43,8 @@ import type { Recording } from "@/types/recording";
 
 interface Props {
     mail: Recording;
+    /** The private item has been shared into the Organization. */
+    shared?: boolean;
     dateTimeFormat: DateTimeFormat;
     onBackToList: () => void;
     hiddenOnMobile: boolean;
@@ -113,6 +116,7 @@ function evidenceRange(params: URLSearchParams) {
  */
 export function MailDetailPane({
     mail,
+    shared = false,
     dateTimeFormat,
     onBackToList,
     hiddenOnMobile,
@@ -285,11 +289,18 @@ export function MailDetailPane({
         ]),
     );
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
+    const canChange = canChangeItem({
+        view: mail.view === "org" ? "org" : "private",
+        isOwn,
+        shared,
+        isOrgAccount,
+        canCurate,
+    });
 
     return (
         <div
             className={cn(
-                "flex flex-col gap-4 lg:col-span-2 lg:flex lg:self-start",
+                "space-y-6 lg:col-span-2 lg:block lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -303,9 +314,9 @@ export function MailDetailPane({
             </Button>
             <div className="space-y-1">
                 <div className="flex items-start justify-between gap-3">
-                    <h2 className="text-lg font-semibold break-words">
+                    <h1 className="text-lg font-semibold break-words">
                         {mail.filename || i18n("(no subject)")}
-                    </h2>
+                    </h1>
                     {isOwn && (
                         <div className="flex shrink-0 gap-1">
                             {detail?.hasRaw && (
@@ -313,6 +324,7 @@ export function MailDetailPane({
                                     variant="ghost"
                                     size="icon-sm"
                                     aria-label={i18n("Download the message")}
+                                    title={i18n("Download the message")}
                                     asChild
                                 >
                                     <a
@@ -328,6 +340,7 @@ export function MailDetailPane({
                                     variant="ghost"
                                     size="icon-sm"
                                     aria-label={i18n("Delete")}
+                                    title={i18n("Delete")}
                                     onClick={remove}
                                 >
                                     <Trash2 className="size-4" />
@@ -344,31 +357,27 @@ export function MailDetailPane({
                     </p>
                 )}
             </div>
-            {detail && (
-                <ItemWorkflow
-                    itemId={mail.id}
-                    kind="mail"
-                    initialData={processing}
-                    onProcessingChange={setProcessing}
-                    folders={folders}
-                    folderAssignments={folderAssignments}
-                    onSelectFolder={onSelectFolder}
-                    onAddToFolder={onAddToFolder}
-                    onRemoveFromFolder={onRemoveFromFolder}
-                    onMoveBetweenFolders={onMoveBetweenFolders}
-                    isOwn={isOwn}
-                    canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
-                    view={mail.view === "org" ? "org" : "private"}
-                    onLearn={() => openWidget(`mail-learn-${mail.id}`)}
-                    onSummary={() => openWidget(`mail-summary-${mail.id}`)}
-                    onReviewLearn={() => openWidget(`mail-learn-${mail.id}`)}
-                    onReviewTasks={() =>
-                        openWidget(`mail-task-review-${mail.id}`)
-                    }
-                    onChanged={onChanged}
-                    onFolderCreated={onFolderCreated}
-                />
-            )}
+            <ItemWorkflow
+                itemId={mail.id}
+                kind="mail"
+                initialData={processing}
+                onProcessingChange={setProcessing}
+                folders={folders}
+                folderAssignments={folderAssignments}
+                onSelectFolder={onSelectFolder}
+                onAddToFolder={onAddToFolder}
+                onRemoveFromFolder={onRemoveFromFolder}
+                onMoveBetweenFolders={onMoveBetweenFolders}
+                isOwn={isOwn}
+                canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
+                view={mail.view === "org" ? "org" : "private"}
+                onLearn={() => openWidget(`mail-learn-${mail.id}`)}
+                onSummary={() => openWidget(`mail-summary-${mail.id}`)}
+                onReviewLearn={() => openWidget(`mail-learn-${mail.id}`)}
+                onReviewTasks={() => openWidget(`mail-task-review-${mail.id}`)}
+                onChanged={onChanged}
+                onFolderCreated={onFolderCreated}
+            />
             <div className="space-y-3 border-y px-4 py-3 sm:px-6">
                 {failed && (
                     <p className="text-sm text-destructive">
@@ -542,6 +551,7 @@ export function MailDetailPane({
                                     variant="ghost"
                                     size="sm"
                                     className="h-7 gap-1 px-2 text-xs"
+                                    aria-pressed={showFormatted}
                                     onClick={() => void toggleFormatted()}
                                 >
                                     <FileCode2 className="size-3.5" />
@@ -661,9 +671,7 @@ export function MailDetailPane({
                 <MailLearnCard
                     mail={mail}
                     detail={detail}
-                    canChange={
-                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
-                    }
+                    canChange={canChange}
                     widget={widgets?.learn}
                     widgetId={`mail-learn-${mail.id}`}
                 />
@@ -673,11 +681,7 @@ export function MailDetailPane({
                 (!widgets || widgets.summary.visible) && (
                     <MailSummaryCard
                         mail={mail}
-                        canChange={
-                            mail.view === "org"
-                                ? isOrgAccount || canCurate
-                                : isOwn
-                        }
+                        canChange={canChange}
                         widget={widgets?.summary}
                         taskWidget={widgets?.taskReview}
                         workflowVisible={widgets?.workflowVisible ?? false}

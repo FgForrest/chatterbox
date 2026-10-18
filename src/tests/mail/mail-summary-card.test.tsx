@@ -7,6 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
 import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
@@ -24,16 +25,35 @@ vi.mock("@/components/markdown", () => ({
     Markdown: ({ children }: { children: string }) => <>{children}</>,
 }));
 
+vi.mock("@/components/help/help-button", () => ({
+    HelpLink: ({ label }: { label: string }) => (
+        <button type="button">{label}</button>
+    ),
+}));
+
 vi.mock("@/components/tasks/use-recording-tasks", () => ({
     useRecordingTasks: () => ({}),
 }));
 
 vi.mock("@/components/tasks/recording-tasks", () => ({
-    RecordingTasks: () => <div>Accepted task: send the proposal</div>,
+    RecordingTasks: ({
+        fallback,
+        allowAdd = true,
+    }: {
+        fallback?: ReactNode;
+        allowAdd?: boolean;
+    }) => (
+        <div data-testid="recording-tasks" data-allow-add={allowAdd}>
+            Accepted task: send the proposal
+            {fallback}
+        </div>
+    ),
 }));
 
 vi.mock("@/components/tasks/task-review-dialog", () => ({
-    TaskReviewLink: () => null,
+    TaskReviewLink: ({ allowAdd = true }: { allowAdd?: boolean }) => (
+        <div data-testid="task-review" data-allow-add={allowAdd} />
+    ),
 }));
 
 const mail = {
@@ -60,12 +80,12 @@ function widget(
     };
 }
 
-function stubSummary(summary: string | null) {
+function stubSummary(summary: string | null, actionItems: string[] = []) {
     const fetch = vi.fn(async () =>
         Response.json({
             summary,
             keyPoints: [],
-            actionItems: [],
+            actionItems,
         }),
     );
     vi.stubGlobal("fetch", fetch);
@@ -180,6 +200,34 @@ describe("mail summary workflow presentation", () => {
             }),
         );
         await screen.findByText("Proposal summary");
+    });
+
+    it("uses the shared repeat-action label", async () => {
+        stubSummary("Proposal summary");
+        renderSummary({ state: widget(), workflowVisible: false });
+
+        expect(
+            await screen.findByRole("button", { name: "Re-summarize" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "summaries" })).toBeTruthy();
+        expect(screen.queryByText("Summarize again")).toBeNull();
+    });
+
+    it("falls back to summary action items and keeps task adding enabled", async () => {
+        stubSummary("Proposal summary", ["Send the harbor proposal"]);
+        renderSummary({ state: widget(), workflowVisible: false });
+
+        expect(
+            await screen.findByText("Send the harbor proposal"),
+        ).toBeTruthy();
+        expect(
+            screen
+                .getByTestId("recording-tasks")
+                .getAttribute("data-allow-add"),
+        ).toBe("true");
+        expect(
+            screen.getByTestId("task-review").getAttribute("data-allow-add"),
+        ).toBe("true");
     });
 
     it.each([

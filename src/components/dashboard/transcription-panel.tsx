@@ -1615,7 +1615,7 @@ export function TranscriptionPanel({
                                                                         }
                                                                     >
                                                                         {i18n(
-                                                                            "Match tasks again",
+                                                                            "Re-match tasks",
                                                                         )}
                                                                     </button>
                                                                 )}

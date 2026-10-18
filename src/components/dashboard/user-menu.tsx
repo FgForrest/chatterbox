@@ -149,7 +149,7 @@ export function UserMenu({
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={onOpenOnboarding}>
                         <WandSparkles />
-                        <span>{i18n("Run setup again")}</span>
+                        <span>{i18n("Re-run setup")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                         disabled={isAutoSyncing}

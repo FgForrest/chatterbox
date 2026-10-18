@@ -320,7 +320,7 @@ export function MeetingRecorderSetup({
         return (
             <p className="text-sm text-muted-foreground">
                 {i18n(
-                    "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Run setup again in the menu.",
+                    "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Re-run setup in the menu.",
                 )}
             </p>
         );

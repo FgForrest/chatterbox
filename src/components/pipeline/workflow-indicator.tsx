@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 
 interface WorkflowStripProps {
     workflow: WorkflowStatus;
+    kind?: "audio" | "mail";
     onAction?: (action: WorkflowActionCode) => void;
 }
 
@@ -206,7 +207,11 @@ function StepCircle({
 }
 
 /** A one-row workflow stepper with its current actor and next action. */
-export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
+export function WorkflowStrip({
+    workflow,
+    kind = "audio",
+    onAction,
+}: WorkflowStripProps) {
     const i18n = useExtracted();
     const stripRef = useRef<HTMLElement>(null);
     const copyMeasureRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -289,9 +294,13 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
             case "audio_reaped":
                 return i18n("The source content is no longer available.");
             case "shared":
-                return i18n(
-                    "This recording is shared; the Organization processes it.",
-                );
+                return kind === "mail"
+                    ? i18n(
+                          "This mail is shared; the Organization processes it.",
+                      )
+                    : i18n(
+                          "This recording is shared; the Organization processes it.",
+                      );
             case "machine_sent":
                 return i18n("Machine-sent mail is kept but not processed.");
             case "unreadable":
@@ -353,9 +362,11 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
             case "learnQueued":
                 return i18n("Queued. Learn starts shortly.");
             case "learnRunning":
-                return i18n(
-                    "Learn is reading the transcript with your Almanac.",
-                );
+                return kind === "mail"
+                    ? i18n("Learn is reading the message with your Almanac.")
+                    : i18n(
+                          "Learn is reading the transcript with your Almanac.",
+                      );
             case "learnReview":
                 return i18n(
                     "Learn found {count, plural, one {# suggestion} other {# suggestions}}. The summary waits for your review, at most 3 days.",
@@ -373,7 +384,9 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
             case "summaryQueued":
                 return i18n("Queued. Writing starts shortly.");
             case "summaryRunning":
-                return i18n("Writing the summary, title and topics.");
+                return kind === "mail"
+                    ? i18n("Writing the summary and title.")
+                    : i18n("Writing the summary, title and topics.");
             case "taskReviewQueued":
                 return i18n("Queued. Task review starts shortly.");
             case "taskReview":
@@ -455,7 +468,7 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
             case "retry":
                 return i18n("Try again");
             case "processAgain":
-                return i18n("Process again");
+                return i18n("Re-process");
         }
     };
     const labels = workflow.steps.map((step) => ({

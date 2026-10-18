@@ -152,6 +152,48 @@ describe("recording folder tags", () => {
         vi.unstubAllGlobals();
     });
 
+    it("uses mail withdrawal copy and omits audio and transcript retention", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json({
+                    due: [
+                        { kind: "audio", days: 30 },
+                        { kind: "transcript", days: 14 },
+                        { kind: "summary", days: 7 },
+                    ],
+                }),
+            ),
+        );
+        render(
+            <RecordingFolderTags
+                recordingId="mail-1"
+                kind="mail"
+                folders={[folder, orgRoot, sales]}
+                assignments={[{ recordingId: "mail-1", folderId: "sales" }]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={vi.fn()}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Remove from Sales" }),
+        );
+
+        expect(
+            await screen.findByRole("heading", {
+                name: "Take this mail out of the Organization?",
+            }),
+        ).toBeTruthy();
+        const warning = await screen.findByRole("alert");
+        expect(warning.textContent).toContain("this mail's summary");
+        expect(warning.textContent).not.toContain("audio");
+        expect(warning.textContent).not.toContain("transcript");
+        expect(warning.textContent).not.toContain("recording");
+        vi.unstubAllGlobals();
+    });
+
     it("lets the organization account withdraw a shared recording, once it confirmed what the owner's retention will delete", async () => {
         const onRemove = vi.fn().mockResolvedValue(undefined);
         const fetchMock = vi.fn(async () =>

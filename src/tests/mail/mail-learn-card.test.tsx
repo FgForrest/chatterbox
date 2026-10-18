@@ -7,6 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import type { MailDetail } from "@/lib/mail/detail";
@@ -17,11 +18,34 @@ import type {
 import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
-    useExtracted: () => (message: string) => message,
+    useExtracted: () => (message: string, values?: Record<string, unknown>) => {
+        const count = Number(values?.count ?? 0);
+        if (
+            message ===
+            "{count, plural, one {# change applied} other {# changes applied}}"
+        ) {
+            return `${count} ${count === 1 ? "change" : "changes"} applied`;
+        }
+        if (
+            message ===
+            "Review finished: {count, plural, one {# change} other {# changes}} made"
+        ) {
+            return `Review finished: ${count} ${count === 1 ? "change" : "changes"} made`;
+        }
+        return message.replace(/\{(\w+)\}/g, (_match, key: string) =>
+            String(values?.[key] ?? ""),
+        );
+    },
 }));
 
 vi.mock("sonner", () => ({
     toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+vi.mock("@/components/help/help-button", () => ({
+    HelpLink: ({ label }: { label: string }) => (
+        <button type="button">{label}</button>
+    ),
 }));
 
 const mail = {
@@ -130,7 +154,7 @@ async function renderReview(frame: WorkflowWidgetFrame) {
     if (frame === "dialog") {
         fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     }
-    await screen.findByRole("heading", { name: "Review what Learn found" });
+    await screen.findByRole("heading", { name: /Review what Learn found/ });
 }
 
 afterEach(() => {
@@ -149,7 +173,19 @@ describe.each([
         expect(
             document.querySelector('[data-shared-learn-row="new_record"]'),
         ).toBeTruthy();
-        const rows = screen.getAllByRole("checkbox", { name: "Apply this" });
+        expect(
+            screen.getByRole("button", {
+                name: "reviewing what Learn found",
+            }),
+        ).toBeTruthy();
+        const rows = [
+            screen.getByRole("checkbox", {
+                name: "Add Eva to the Almanac",
+            }),
+            screen.getByRole("checkbox", {
+                name: "Jan — leads — Orion",
+            }),
+        ];
         fireEvent.click(rows[0]);
         await waitFor(() =>
             expect((rows[0] as HTMLInputElement).checked).toBe(true),
@@ -168,6 +204,9 @@ describe.each([
                 "/api/recordings/mail-1/review/finish",
                 expect.objectContaining({ method: "POST" }),
             ),
+        );
+        expect(toast.success).toHaveBeenCalledWith(
+            "Review finished: 2 changes made",
         );
     });
 });
@@ -244,4 +283,94 @@ it("shows the Learn icon on its collapsed result line", async () => {
             .closest("[data-workflow-widget-line]")
             ?.querySelector(".lucide-graduation-cap"),
     ).toBeTruthy();
+});
+
+it("hides Learn when the review endpoint says it is unavailable", async () => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json({
+                ...ready,
+                available: false,
+                run: null,
+                items: [],
+            }),
+        ),
+    );
+
+    const { container } = render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-unavailable"
+        />,
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(container.innerHTML).toBe("");
+});
+
+it.each([
+    [
+        "AI_PROVIDER_NOT_CONFIGURED",
+        "Learn needs a chat provider. Add one in Settings → Providers.",
+    ],
+    [
+        "AI_PROVIDER_API_ERROR",
+        "The provider's answer was not one Learn could use. Try again, or pick another model for Learn in Settings → Providers.",
+    ],
+    ["INTERNAL_ERROR", "Learn stopped on an error. Try again."],
+])("shows the shared failure message for %s", async (errorCode, message) => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json({
+                ...ready,
+                run: { id: "run-failed", status: "failed", errorCode },
+                items: [],
+            }),
+        ),
+    );
+
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId={`mail-learn-failed-${errorCode}`}
+        />,
+    );
+
+    expect(await screen.findByText(message)).toBeTruthy();
+});
+
+it.each([
+    [[], "Nothing was applied"],
+    [[{ ...ready.items[1], outcome: "applied" }], "1 change applied"],
+])("describes finished results from their applied count", async (items, line) => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json({
+                ...ready,
+                run: { id: "run-finished", status: "finished" },
+                items,
+            }),
+        ),
+    );
+
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-finished-count"
+        />,
+    );
+
+    expect(await screen.findByText(line)).toBeTruthy();
 });
