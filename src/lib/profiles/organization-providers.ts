@@ -13,6 +13,7 @@ import {
     type ProviderRole,
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
+import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -275,6 +276,17 @@ export async function createOrganizationProvider(
     context: OrganizationProviderContext,
     input: OrganizationProviderInput,
 ) {
+    if (
+        !isTranscriptionOnlyProvider(input.provider) &&
+        !input.defaultModel?.trim()
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            enhancementModelRequiredMessage(input.provider),
+            400,
+            { field: "defaultModel" },
+        );
+    }
     validateOrganizationDefaults(input.provider, input.defaults, false);
     const provider = await db.transaction(async (tx) => {
         let encryptedApiKey = input.encryptedApiKey;
@@ -380,10 +392,27 @@ export async function updateOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        const effectiveDefaultModel =
+            input.defaultModel === undefined
+                ? before.defaultModel
+                : input.defaultModel;
+        const effectiveDisabled = input.disabled ?? before.disabledAt !== null;
+        if (
+            !effectiveDisabled &&
+            !isTranscriptionOnlyProvider(before.provider) &&
+            !effectiveDefaultModel?.trim()
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                enhancementModelRequiredMessage(before.provider),
+                400,
+                { field: "defaultModel" },
+            );
+        }
         validateOrganizationDefaults(
             before.provider,
             input.defaults,
-            input.disabled ?? before.disabledAt !== null,
+            effectiveDisabled,
         );
         const update: Partial<typeof apiCredentials.$inferInsert> = {
             updatedAt: new Date(),

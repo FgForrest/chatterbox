@@ -191,6 +191,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "manager-secret",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             expect(manager.status).toBe(200);
@@ -229,6 +230,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "manager-secret",
+                    defaultModel: "gpt-4o-mini",
                     isDefaultTranscription: true,
                     isDefaultEnhancement: true,
                     isDefaultLearn: true,
@@ -276,6 +278,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "manager-secret",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             const created = await createdResponse.json();
@@ -309,12 +312,14 @@ describeWithDatabase(
                         userId: "manager",
                         provider: "OpenAI",
                         apiKey: "encrypted:stale",
+                        defaultModel: "gpt-4o-mini",
                     },
                     {
                         id: "current-provider",
                         userId: "manager",
                         provider: "OpenAI",
                         apiKey: "encrypted:current",
+                        defaultModel: "gpt-4o-mini",
                         isDefaultEnhancement: true,
                     },
                 ]);
@@ -349,6 +354,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "manager-secret",
+                    defaultModel: "gpt-4o-mini",
                     isDefaultEnhancement: true,
                     isDefaultTitle: true,
                 }),
@@ -388,6 +394,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "personal-secret",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             const personal = await personalResponse.json();
@@ -426,6 +433,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "organization-secret",
+                    defaultModel: "gpt-4o-mini",
                     isDefaultTranscription: true,
                     isDefaultEnhancement: true,
                     isDefaultLearn: true,
@@ -472,6 +480,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "default-secret",
+                    defaultModel: "gpt-4o-mini",
                     isDefaultEnhancement: true,
                 }),
             );
@@ -479,6 +488,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "alternate-secret",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             const organizationDefault = await defaultResponse.json();
@@ -521,6 +531,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     apiKey: "source-secret",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             const source = await sourceResponse.json();
@@ -573,6 +584,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     copyKeyFrom: "personal-source",
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             expect(response.status).toBe(404);
@@ -580,13 +592,18 @@ describeWithDatabase(
 
         it("refuses to duplicate an Organization key across providers", async () => {
             const sourceResponse = await createOrganizationProvider(
-                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "secret",
+                    defaultModel: "gpt-4o-mini",
+                }),
             );
             const source = await sourceResponse.json();
             const response = await createOrganizationProvider(
                 request("POST", {
                     provider: "Groq",
                     copyKeyFrom: source.provider.id,
+                    defaultModel: "whisper-large-v3-turbo",
                 }),
             );
             expect(response.status).toBe(400);
@@ -597,7 +614,11 @@ describeWithDatabase(
 
         it("refuses Organization duplication by a non-manager", async () => {
             const sourceResponse = await createOrganizationProvider(
-                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "secret",
+                    defaultModel: "gpt-4o-mini",
+                }),
             );
             const source = await sourceResponse.json();
             state.actorId = "member";
@@ -607,6 +628,7 @@ describeWithDatabase(
                 request("POST", {
                     provider: "OpenAI",
                     copyKeyFrom: source.provider.id,
+                    defaultModel: "gpt-4o-mini",
                 }),
             );
             expect(response.status).toBe(403);
@@ -631,14 +653,22 @@ describeWithDatabase(
             state.actorId = "org-user";
             state.email = "org@example.test";
             const response = await createOrganizationProvider(
-                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "secret",
+                    defaultModel: "gpt-4o-mini",
+                }),
             );
             expect(response.status).toBe(200);
         });
 
         it("lets a member read the write-only list and returns 404 when scope is disabled", async () => {
             await createOrganizationProvider(
-                request("POST", { provider: "OpenAI", apiKey: "read-secret" }),
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "read-secret",
+                    defaultModel: "gpt-4o-mini",
+                }),
             );
             state.actorId = "member";
             state.email = "member@example.test";
@@ -711,7 +741,11 @@ describeWithDatabase(
             state.actorId = "org-user";
             state.email = "org@example.test";
             const createdResponse = await createPersonalProvider(
-                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "secret",
+                    defaultModel: "gpt-4o-mini",
+                }),
             );
             const created = await createdResponse.json();
             const id = created.provider.id as string;
@@ -743,6 +777,7 @@ describeWithDatabase(
                 userId: "manager",
                 provider: "OpenAI",
                 apiKey: "encrypted:secret",
+                defaultModel: "gpt-4o-mini",
             });
 
             const disabled = await updatePersonalProvider(

@@ -6,6 +6,7 @@ import {
     loadDefaultProviderPointers,
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
+import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
 import { listUserProviders } from "@/lib/ai/list-providers";
 import {
     isEnhancementOnlyProvider,
@@ -59,6 +60,18 @@ export const POST = apiHandler(async (request: Request) => {
             ErrorCode.MISSING_REQUIRED_FIELD,
             "Provider and API key are required",
             400,
+        );
+    }
+
+    if (
+        !isTranscriptionOnlyProvider(provider) &&
+        (typeof defaultModel !== "string" || !defaultModel.trim())
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            enhancementModelRequiredMessage(provider),
+            400,
+            { field: "defaultModel" },
         );
     }
 
