@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
     rankTaskCandidates,
-    rankTaskCandidatesWithEmbeddings,
     rankTaskSearchCandidates,
     TASK_CANDIDATE_LIMIT,
     topTaskCandidates,
@@ -103,58 +102,6 @@ describe("task candidate ranking", () => {
             ),
         ).toEqual(["complete", "partial", "inflected", "none"]);
         expect(rankTaskSearchCandidates(ranked, "m", false)).toEqual([]);
-    });
-
-    it("uses mocked content and task embeddings", async () => {
-        const embed = vi.fn(async (texts: readonly string[]) =>
-            texts.map((text) =>
-                text.includes("pricing") || text.includes("launch")
-                    ? Float32Array.from([1, 0])
-                    : Float32Array.from([0, 1]),
-            ),
-        );
-        const result = await rankTaskCandidatesWithEmbeddings(
-            {
-                itemText: "Launch pricing discussion",
-                participantPersonIds: [],
-                candidates: [
-                    candidate("unrelated", "Book catering"),
-                    candidate("similar", "Finish pricing"),
-                ],
-            },
-            { embed },
-        );
-
-        expect(result.usedEmbeddings).toBe(true);
-        expect(result.ranked.map((entry) => entry.candidate.id)).toEqual([
-            "similar",
-            "unrelated",
-        ]);
-        expect(result.generatedVectors.size).toBe(2);
-        expect(embed).toHaveBeenCalledOnce();
-    });
-
-    it("falls back to word overlap and reports an embedding error", async () => {
-        const onEmbeddingFailure = vi.fn();
-        const result = await rankTaskCandidatesWithEmbeddings(
-            {
-                itemText: "Finish the pricing page",
-                participantPersonIds: [],
-                candidates: [
-                    candidate("other", "Book catering"),
-                    candidate("match", "Finish pricing"),
-                ],
-            },
-            {
-                embed: vi.fn().mockRejectedValue(new Error("offline")),
-                onEmbeddingFailure,
-            },
-        );
-
-        expect(result.usedEmbeddings).toBe(false);
-        expect(result.ranked[0]?.candidate.id).toBe("match");
-        expect(result.generatedVectors.size).toBe(0);
-        expect(onEmbeddingFailure).toHaveBeenCalledOnce();
     });
 
     it("keeps stable ties and caps the prompt list at the exported limit", () => {

@@ -123,6 +123,7 @@ export class EmbeddingClient {
             onBatch,
         }: {
             signal?: AbortSignal;
+            /** Called and awaited once per completed sub-batch before resolution. */
             onBatch?: (batch: EmbeddingBatch) => void | Promise<void>;
         } = {},
     ): Promise<Float32Array[]> {
