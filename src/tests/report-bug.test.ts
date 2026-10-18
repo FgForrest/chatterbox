@@ -12,7 +12,7 @@ describe("buildReportBugUrl", () => {
                 isHosted: false,
                 errorId: "err-1",
                 page: "/dashboard",
-                locale: "en",
+                name: "Chatterbox",
             }),
         );
 
@@ -28,7 +28,6 @@ describe("buildReportBugUrl", () => {
             buildReportBugUrl({
                 isHosted: true,
                 errorId: "err-2",
-                locale: "cs-CZ",
                 name: "Riffado",
             }),
         );
@@ -37,9 +36,9 @@ describe("buildReportBugUrl", () => {
         expect(params.get("body")).toContain("Mode: Hosted (riffado.com)");
     });
 
-    it("names the product in the interface language", () => {
+    it("uses the product name it is given", () => {
         const params = query(
-            buildReportBugUrl({ isHosted: false, locale: "cs-CZ" }),
+            buildReportBugUrl({ isHosted: false, name: "Klepna" }),
         );
 
         expect(params.get("title")).toBe("Klepna bug report");
@@ -48,16 +47,15 @@ describe("buildReportBugUrl", () => {
 
 describe("buildReportBugMailto", () => {
     it("leaves the recipient empty on self-host", () => {
-        expect(buildReportBugMailto({ isHosted: false, locale: "en" })).toMatch(
-            /^mailto:\?subject=Chatterbox%20bug%20report&body=/,
-        );
+        expect(
+            buildReportBugMailto({ isHosted: false, name: "Chatterbox" }),
+        ).toMatch(/^mailto:\?subject=Chatterbox%20bug%20report&body=/);
     });
 
     it("addresses support on hosted", () => {
         expect(
             buildReportBugMailto({
                 isHosted: true,
-                locale: "en",
                 name: "Riffado",
             }),
         ).toMatch(

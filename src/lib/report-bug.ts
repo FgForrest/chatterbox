@@ -1,4 +1,3 @@
-import { productName } from "@/lib/brand";
 import { APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 
 export const SUPPORT_EMAIL = "support@riffado.com";
@@ -10,8 +9,8 @@ export interface ReportBugOptions {
     errorContext?: string;
     page?: string;
     isHosted?: boolean;
-    locale?: string;
-    name?: string;
+    /** Product name as this deployment shows it, for the subject line. */
+    name: string;
 }
 
 /** A blank GitHub issue with the report as title and body; no issue template. */
@@ -37,10 +36,9 @@ export function buildReportBugBodyPreview(opts: ReportBugOptions): string {
 }
 
 function buildSubject(opts: ReportBugOptions): string {
-    const name = opts.name ?? productName(opts.locale ?? "en");
     return opts.errorId
-        ? `${name} bug report (${opts.errorId})`
-        : `${name} bug report`;
+        ? `${opts.name} bug report (${opts.errorId})`
+        : `${opts.name} bug report`;
 }
 
 function buildBody(opts: ReportBugOptions): string {

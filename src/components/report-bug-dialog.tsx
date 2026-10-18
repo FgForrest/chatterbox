@@ -1,7 +1,7 @@
 "use client";
 
 import { Mail } from "lucide-react";
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { Github } from "@/components/icons/icons";
 import { useProductName } from "@/components/product-name-provider";
@@ -39,11 +39,10 @@ export function ReportBugDialog({
     onOpenChange,
 }: ReportBugDialogProps) {
     const i18n = useExtracted();
-    const locale = useLocale();
     const name = useProductName();
     const page =
         typeof window !== "undefined" ? window.location.pathname : undefined;
-    const opts = { isHosted, errorId, errorContext, page, locale, name };
+    const opts = { isHosted, errorId, errorContext, page, name };
     const githubUrl = buildReportBugUrl(opts);
     const mailtoUrl = buildReportBugMailto(opts);
     const preview = buildReportBugBodyPreview(opts);
