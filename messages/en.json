@@ -1736,7 +1736,7 @@
   "iNfGUj": "Your retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",
   "7rlgUT": "Pick how you'd like to report this. Your version and deployment mode are pre-filled to save you typing.",
   "vkKyOM": "Something went wrong. The details below will be pre-filled — add what you were doing and we'll take a look.",
-  "Jdy_7o": "Report this on GitHub, or send the details below to your instance administrator.",
+  "nEr6zv": "Report this on GitHub. The details below are filled in for you.",
   "ETaoih": "Report a bug",
   "mJwivO": "Email us",
   "zy5cLr": "Report on GitHub",

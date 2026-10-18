@@ -174,7 +174,7 @@ Chatterbox ships in **two production modes from the same codebase**:
 Both surfaces are user contracts. The **deploy surface** — DB schema, env vars, `docker-compose.yml` structure, the release assets (`docker-compose.yml`, `env.example`) — is a contract for self-host. The **hosted surface** — the external API at `/api/v1/*` (introduced by issue #79 / PR #80; not yet on `main`), webhook payloads, token format, and API behavior under load — will be a contract for hosted customers once those surfaces land. Internal code is not a contract for either.
 
 - **Schema changes are additive by default.** Dropping columns or tables requires a user-impact assessment and a migration plan. See the **Database Migrations** block below.
-- **Env var renames need deprecation.** Keep the old name working for at least one release cycle, log a deprecation warning, document both in the PR description (see Release notes).
+- **Env var renames need deprecation.** Keep the old name working for at least one release cycle, log a deprecation warning, document both in the PR description (see Release notes). A variable only `docker-compose.yml` interpolates (an image tag pin such as `CHATTERBOX_VERSION`) never reaches the app, so there is nothing to log from: the migration note in the PR description and release is its deprecation warning.
 - **`docker-compose.yml` is a user contract.** Breaking structural changes need a migration note in the PR description.
 - **Test sync against a real Plaud account** before shipping anything touching `src/lib/sync/` or `src/lib/plaud/`. Sync regressions destroy user trust fastest.
 - **Breaking changes ship with loud logging + Sentry context + a migration note in the release.** Never silently.

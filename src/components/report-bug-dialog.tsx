@@ -54,7 +54,7 @@ export function ReportBugDialog({
         );
     } else if (!isHosted) {
         description = i18n(
-            "Report this on GitHub, or send the details below to your instance administrator.",
+            "Report this on GitHub. The details below are filled in for you.",
         );
     }
 
