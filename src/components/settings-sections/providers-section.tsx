@@ -1,425 +1,396 @@
 "use client";
 
-import {
-    Bot,
-    Copy,
-    FileText,
-    GraduationCap,
-    ListChecks,
-    ListTree,
-    type LucideIcon,
-    Pencil,
-    Plus,
-    Trash2,
-} from "lucide-react";
-import { useExtracted } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { Bot } from "lucide-react";
+import { useExtracted, useLocale } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
-import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
-import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
-import { OrganizationProvidersCard } from "@/components/settings/organization-providers-card";
-import { ProviderPriceLine } from "@/components/settings/provider-pricing-fields";
+import {
+    ProviderCard,
+    type ProviderCardItem,
+    type ProviderMemberUsage,
+    type ProviderScope,
+} from "@/components/settings/provider-card";
+import {
+    ProviderFormDialog,
+    type ProviderFormMode,
+} from "@/components/settings/provider-form-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
-import { Button } from "@/components/ui/button";
-import type { AiRate } from "@/lib/ai/published-rates";
-
-interface Provider {
-    id: string;
-    provider: string;
-    baseUrl: string | null;
-    defaultModel: string | null;
-    isDefaultTranscription: boolean;
-    isDefaultEnhancement: boolean;
-    isDefaultTopics?: boolean;
-    /** Present only where this instance has Learn. */
-    isDefaultLearn?: boolean;
-    rate?: AiRate | null;
-    createdAt: Date;
-    managed?: boolean;
-    includedSeconds?: number;
-    available?: boolean;
-}
-
-const EMPTY_PROVIDERS: Provider[] = [];
-
-/**
- * One line that tells two rows of the same provider apart: duplicates of
- * Claude Code or Codex differ only by model.
- */
-function providerLabel(provider: Provider): string {
-    return provider.defaultModel
-        ? `${provider.provider} · ${provider.defaultModel}`
-        : provider.provider;
-}
 
 interface ProvidersSectionProps {
-    initialProviders?: Provider[];
+    initialProviders?: ProviderCardItem[];
     isHosted?: boolean;
 }
 
-/**
- * AI Providers settings section.
- *
- * Configured providers with duplicate, edit, and delete actions. Each AI
- * feature selects its provider in its own settings section.
- *
- * Note: `initialProviders` is the server-rendered seed only. The local
- * `providers` state diverges from it after add/edit/delete actions; we do
- * NOT re-sync from the prop on changes (would clobber local edits). If the
- * parent ever needs to force a reset, pass a `key` prop instead.
- */
+interface DialogState {
+    scope: ProviderScope;
+    mode: ProviderFormMode;
+    provider: ProviderCardItem | null;
+}
+
+function errorMessage(body: unknown, fallback: string): string {
+    if (
+        body &&
+        typeof body === "object" &&
+        "error" in body &&
+        typeof body.error === "string"
+    ) {
+        return body.error;
+    }
+    return fallback;
+}
+
+function providerRoles(
+    provider: ProviderCardItem,
+    i18n: (message: string) => string,
+): string[] {
+    const roles: string[] = [];
+    if (provider.isDefaultTranscription) roles.push(i18n("Transcription"));
+    if (provider.isDefaultEnhancement) roles.push(i18n("Summaries"));
+    if (provider.isDefaultLearn) roles.push(i18n("Learn"));
+    if (provider.isDefaultTopics) roles.push(i18n("Topics"));
+    if (provider.isDefaultTitle) roles.push(i18n("Titles"));
+    return roles;
+}
+
+function providerEndpoint(scope: ProviderScope, id: string): string {
+    const collection =
+        scope === "personal"
+            ? "/api/settings/ai/providers"
+            : "/api/settings/ai/organization-providers";
+    return `${collection}/${encodeURIComponent(id)}`;
+}
+
+/** AI provider settings for personal and Organization credentials. */
 export function ProvidersSection({
-    initialProviders = EMPTY_PROVIDERS,
+    initialProviders = [],
     isHosted = false,
 }: ProvidersSectionProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
     const confirm = useConfirm();
-    const [providers, setProviders] = useState<Provider[]>(initialProviders);
-    /**
-     * `initialProviders` can arrive *after* mount. The dashboard fetches
-     * the list when the settings dialog opens (`workstation.tsx`), but
-     * `<Dialog open>` mounts this section in that same render, so the seed
-     * is `[]` for the first moment and `useState` ignores every later prop
-     * value. That left the list permanently empty on a fresh page load --
-     * until an add or delete replaced the state from a response, which is
-     * why re-adding appeared to "find" the missing providers.
-     *
-     * So adopt the prop until this component starts managing the list
-     * itself; from then on local state wins, which is the invariant the
-     * note above is protecting.
-     */
     const selfManaged = useRef(false);
-    useEffect(() => {
-        if (!selfManaged.current) setProviders(initialProviders);
-    }, [initialProviders]);
-    const [isAddProviderOpen, setIsAddProviderOpen] = useState(false);
-    const [isEditProviderOpen, setIsEditProviderOpen] = useState(false);
-    const [editingProvider, setEditingProvider] = useState<Provider | null>(
-        null,
-    );
-    const [editMode, setEditMode] = useState<"edit" | "duplicate">("edit");
-    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [personalProviders, setPersonalProviders] =
+        useState<ProviderCardItem[]>(initialProviders);
+    const [organizationProviders, setOrganizationProviders] = useState<
+        ProviderCardItem[]
+    >([]);
+    const [organizationUsage, setOrganizationUsage] = useState<
+        ProviderMemberUsage[]
+    >([]);
+    const [organizationAvailable, setOrganizationAvailable] = useState(false);
+    const [canManageOrganization, setCanManageOrganization] = useState(false);
+    const [dialog, setDialog] = useState<DialogState | null>(null);
+    const [busy, setBusy] = useState<{
+        scope: ProviderScope;
+        id: string;
+    } | null>(null);
 
-    const refreshProviders = async () => {
-        try {
-            const response = await fetch("/api/settings/ai/providers");
-            if (!response.ok) throw new Error("Failed to fetch");
-            const data = (await response.json()) as { providers: Provider[] };
-            selfManaged.current = true;
-            setProviders(data.providers);
-        } catch {
+    useEffect(() => {
+        if (!selfManaged.current) setPersonalProviders(initialProviders);
+    }, [initialProviders]);
+
+    const loadPersonal = useCallback(async () => {
+        const response = await fetch(
+            "/api/settings/ai/providers?includeDisabled=true",
+        );
+        if (!response.ok) throw new Error("Failed to fetch providers");
+        const body = (await response.json()) as {
+            providers: ProviderCardItem[];
+        };
+        selfManaged.current = true;
+        setPersonalProviders(body.providers);
+    }, []);
+
+    const loadOrganization = useCallback(async () => {
+        const listResponse = await fetch(
+            "/api/settings/ai/organization-providers",
+        ).catch(() => null);
+        if (!listResponse?.ok) {
+            setOrganizationAvailable(false);
+            return;
+        }
+        const list = (await listResponse.json()) as {
+            providers: ProviderCardItem[];
+        };
+        setOrganizationProviders(list.providers);
+        setOrganizationAvailable(true);
+
+        const usageResponse = await fetch(
+            "/api/settings/ai/organization-providers/usage",
+        ).catch(() => null);
+        if (!usageResponse?.ok) {
+            setCanManageOrganization(false);
+            setOrganizationUsage([]);
+            return;
+        }
+        const usage = (await usageResponse.json()) as {
+            members: ProviderMemberUsage[];
+        };
+        setCanManageOrganization(true);
+        setOrganizationUsage(usage.members);
+    }, []);
+
+    useEffect(() => {
+        void loadPersonal().catch(() => {
             toast.error(i18n("Failed to refresh providers"));
+        });
+        void loadOrganization();
+    }, [i18n, loadOrganization, loadPersonal]);
+
+    const reload = async (scope: ProviderScope) => {
+        if (scope === "personal") {
+            await loadPersonal();
+            return;
+        }
+        await loadOrganization();
+    };
+
+    const mutateDisabled = async (
+        scope: ProviderScope,
+        provider: ProviderCardItem,
+    ) => {
+        setBusy({ scope, id: provider.id });
+        try {
+            const response = await fetch(providerEndpoint(scope, provider.id), {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ disabled: provider.disabledAt == null }),
+            });
+            const body: unknown = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(
+                    errorMessage(body, i18n("Could not update the provider.")),
+                );
+            }
+            await reload(scope);
+        } finally {
+            setBusy(null);
         }
     };
 
-    const handleEdit = (provider: Provider) => {
-        setEditMode("edit");
-        setEditingProvider(provider);
-        setIsEditProviderOpen(true);
+    const memberDefaultCount = async (
+        provider: ProviderCardItem,
+    ): Promise<number> => {
+        const response = await fetch(
+            providerEndpoint("organization", provider.id),
+        );
+        const body = (await response.json().catch(() => null)) as {
+            memberDefaultCount?: number;
+            error?: string;
+        } | null;
+        if (!response.ok || typeof body?.memberDefaultCount !== "number") {
+            throw new Error(
+                body?.error ?? i18n("Could not load provider impact."),
+            );
+        }
+        return body.memberDefaultCount;
     };
 
-    /** Same form as edit, saved as a new row that reuses this one's key. */
-    const handleDuplicate = (provider: Provider) => {
-        setEditMode("duplicate");
-        setEditingProvider(provider);
-        setIsEditProviderOpen(true);
-    };
+    const toggleDisabled = async (
+        scope: ProviderScope,
+        provider: ProviderCardItem,
+    ): Promise<void> => {
+        if (provider.disabledAt != null) {
+            void mutateDisabled(scope, provider).catch((error: unknown) => {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Could not update the provider."),
+                );
+            });
+            return;
+        }
 
-    const handleDelete = (id: string) => {
+        let description = i18n(
+            "Profiles that use it stop with an error until it is enabled again.",
+        );
+        const roles = providerRoles(provider, i18n);
+        const names = new Intl.ListFormat(locale, {
+            style: "long",
+            type: "conjunction",
+        }).format(roles);
+        let selectedByMembers = 0;
+        if (scope === "organization") {
+            try {
+                selectedByMembers = await memberDefaultCount(provider);
+            } catch (error) {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Could not load provider impact."),
+                );
+                return;
+            }
+        }
+        if (scope === "personal") {
+            description = i18n(
+                "Nothing uses it now. It stays saved but is not offered until you enable it again.",
+            );
+            if (roles.length > 0) {
+                description = i18n(
+                    "{roles} use this provider. They stop with an error until you enable it again or choose another provider.",
+                    { roles: names },
+                );
+            }
+        } else if (roles.length > 0) {
+            description = i18n(
+                "This provider is the Organization default for {roles}. Members following those defaults will stop until it is enabled or another default is chosen. Members who chose it as their own default: {count, number}. Their runs will also stop until they choose another provider.",
+                { roles: names, count: selectedByMembers },
+            );
+        } else if (scope === "organization") {
+            description = i18n(
+                "Profiles that use it stop with an error until it is enabled again. Members who chose it as their own default: {count, number}. Their runs will also stop until they choose another provider.",
+                { count: selectedByMembers },
+            );
+        }
+
         void confirm({
-            title: i18n("Delete this provider?"),
-            description: i18n(
-                "Its API key will be removed from this account. Recordings transcribed or summarized through it keep their data, but you'll need to re-add the provider to use it again.",
-            ),
+            title: i18n("Disable {provider}?", {
+                provider: provider.provider,
+            }),
+            description,
+            confirmLabel: i18n("Disable"),
+            pendingLabel: i18n("Disabling…"),
+            onConfirm: () => mutateDisabled(scope, provider),
+            errorMessage: i18n("Could not disable the provider."),
+        });
+    };
+
+    const remove = async (
+        scope: ProviderScope,
+        provider: ProviderCardItem,
+    ): Promise<void> => {
+        const organization = scope === "organization";
+        const title = organization
+            ? i18n("Delete this Organization provider?")
+            : i18n("Delete this provider?");
+        let description = i18n(
+            "Its API key will be removed from this account. Recordings transcribed or summarized through it keep their data, but you'll need to re-add the provider to use it again.",
+        );
+        if (organization) {
+            let selectedByMembers: number;
+            try {
+                selectedByMembers = await memberDefaultCount(provider);
+            } catch (error) {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Could not load provider impact."),
+                );
+                return;
+            }
+            description = i18n(
+                "Profiles that pin it will stop with an error until another provider is selected. Members who chose it as their own default: {count, number}. Their runs will stop until they choose another provider.",
+                { count: selectedByMembers },
+            );
+        }
+        void confirm({
+            title,
+            description,
             confirmLabel: i18n("Delete"),
             pendingLabel: i18n("Deleting…"),
             destructive: true,
             onConfirm: async () => {
-                setDeletingId(id);
+                setBusy({ scope, id: provider.id });
                 try {
                     const response = await fetch(
-                        `/api/settings/ai/providers/${id}`,
+                        providerEndpoint(scope, provider.id),
                         { method: "DELETE" },
                     );
+                    const body: unknown = await response
+                        .json()
+                        .catch(() => null);
                     if (!response.ok) {
-                        const error = (await response
-                            .json()
-                            .catch(() => ({}))) as {
-                            error?: string;
-                        };
-                        throw new Error(error.error || "Failed to delete");
+                        throw new Error(
+                            errorMessage(
+                                body,
+                                i18n("Could not delete the provider."),
+                            ),
+                        );
                     }
-                    toast.success(i18n("Provider deleted successfully"));
-                    await refreshProviders();
+                    await reload(scope);
                 } finally {
-                    setDeletingId(null);
+                    setBusy(null);
                 }
             },
+            errorMessage: i18n("Could not delete the provider."),
         });
     };
+
+    const openDialog = (
+        scope: ProviderScope,
+        mode: ProviderFormMode,
+        provider: ProviderCardItem | null,
+    ) => setDialog({ scope, mode, provider });
 
     return (
         <>
             <div className="space-y-6">
                 <SettingsSectionHeader
-                    title={i18n("AI Providers")}
+                    title={i18n("AI providers")}
                     description={i18n(
                         "Connect providers for transcription, topics, learning, and summaries.",
                     )}
                     icon={Bot}
-                    action={
-                        <Button
-                            onClick={() => setIsAddProviderOpen(true)}
-                            size="sm"
-                        >
-                            <Plus className="size-4" /> {i18n("Add Provider")}
-                        </Button>
+                />
+                <ProviderCard
+                    scope="personal"
+                    providers={personalProviders}
+                    canManage
+                    busyId={busy?.scope === "personal" ? busy.id : null}
+                    locale={locale}
+                    onAdd={() => openDialog("personal", "add", null)}
+                    onDuplicate={(provider) =>
+                        openDialog("personal", "duplicate", provider)
                     }
+                    onEdit={(provider) =>
+                        openDialog("personal", "edit", provider)
+                    }
+                    onToggleDisabled={(provider) =>
+                        void toggleDisabled("personal", provider)
+                    }
+                    onDelete={(provider) => void remove("personal", provider)}
                 />
-
-                <ProvidersList
-                    providers={providers}
-                    deletingId={deletingId}
-                    onAdd={() => setIsAddProviderOpen(true)}
-                    onEdit={handleEdit}
-                    onDuplicate={handleDuplicate}
-                    onDelete={handleDelete}
-                />
-                <OrganizationProvidersCard isHosted={isHosted} />
+                {organizationAvailable && (
+                    <ProviderCard
+                        scope="organization"
+                        providers={organizationProviders}
+                        canManage={canManageOrganization}
+                        busyId={busy?.scope === "organization" ? busy.id : null}
+                        usage={organizationUsage}
+                        locale={locale}
+                        onAdd={() => openDialog("organization", "add", null)}
+                        onDuplicate={(provider) =>
+                            openDialog("organization", "duplicate", provider)
+                        }
+                        onEdit={(provider) =>
+                            openDialog("organization", "edit", provider)
+                        }
+                        onToggleDisabled={(provider) =>
+                            void toggleDisabled("organization", provider)
+                        }
+                        onDelete={(provider) =>
+                            void remove("organization", provider)
+                        }
+                    />
+                )}
             </div>
-
-            <AddProviderDialog
-                open={isAddProviderOpen}
-                onOpenChange={setIsAddProviderOpen}
-                isHosted={isHosted}
-                onSuccess={() => {
-                    setIsAddProviderOpen(false);
-                    refreshProviders();
-                }}
-            />
-
-            <EditProviderDialog
-                open={isEditProviderOpen}
-                onOpenChange={(open) => {
-                    setIsEditProviderOpen(open);
-                    if (!open) {
-                        setEditingProvider(null);
-                    }
-                }}
-                provider={editingProvider}
-                mode={editMode}
-                isHosted={isHosted}
-                onSuccess={() => {
-                    setIsEditProviderOpen(false);
-                    setEditingProvider(null);
-                    refreshProviders();
-                }}
-            />
+            {dialog && (
+                <ProviderFormDialog
+                    scope={dialog.scope}
+                    mode={dialog.mode}
+                    provider={dialog.provider}
+                    open
+                    isHosted={isHosted}
+                    onOpenChange={(open) => {
+                        if (!open) setDialog(null);
+                    }}
+                    onSuccess={() => {
+                        void reload(dialog.scope);
+                    }}
+                />
+            )}
         </>
-    );
-}
-
-/** A role a provider currently holds, as a quiet status chip. */
-function RoleChip({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
-    return (
-        <span className="inline-flex items-center gap-1 rounded-full border bg-muted/60 px-2 py-0.5 text-xs text-foreground">
-            <Icon className="size-3 text-muted-foreground" aria-hidden="true" />
-            {label}
-        </span>
-    );
-}
-
-/**
- * Configured-providers list with duplicate/edit/delete row actions. Pure
- * presentation -- the parent owns the data + dialog state.
- */
-function ProvidersList({
-    providers,
-    deletingId,
-    onAdd,
-    onEdit,
-    onDuplicate,
-    onDelete,
-}: {
-    providers: Provider[];
-    deletingId: string | null;
-    onAdd: () => void;
-    onEdit: (provider: Provider) => void;
-    onDuplicate: (provider: Provider) => void;
-    onDelete: (id: string) => void;
-}) {
-    const i18n = useExtracted();
-    if (providers.length === 0) {
-        return (
-            <div className="text-center py-12">
-                <Bot className="size-16 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="font-semibold mb-2">
-                    {i18n("No providers configured")}
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                    {i18n("Add an AI provider to enable transcription")}
-                </p>
-                <Button onClick={onAdd} size="sm">
-                    <Plus className="size-4" /> {i18n("Add Provider")}
-                </Button>
-            </div>
-        );
-    }
-    return (
-        <ul className="space-y-2">
-            {providers.map((provider) => {
-                const roles = (
-                    <>
-                        {provider.isDefaultTranscription && (
-                            <RoleChip
-                                icon={FileText}
-                                label={i18n("Transcription")}
-                            />
-                        )}
-                        {provider.isDefaultEnhancement && (
-                            <RoleChip
-                                icon={ListChecks}
-                                label={i18n("Summaries")}
-                            />
-                        )}
-                        {provider.isDefaultLearn && (
-                            <RoleChip
-                                icon={GraduationCap}
-                                label={i18n("Learn")}
-                            />
-                        )}
-                        {provider.isDefaultTopics && (
-                            <RoleChip icon={ListTree} label={i18n("Topics")} />
-                        )}
-                    </>
-                );
-
-                if (provider.managed === true) {
-                    return (
-                        <li
-                            key={provider.id}
-                            className="rounded-lg border px-4 py-3"
-                        >
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                <h3 className="font-semibold">
-                                    {provider.provider}
-                                </h3>
-                                <span className="text-xs text-muted-foreground">
-                                    {provider.available === false
-                                        ? i18n(
-                                              "Not in your current plan. Resubscribe to use it.",
-                                          )
-                                        : provider.includedSeconds
-                                          ? i18n(
-                                                "Up to {hours}h of transcription per month",
-                                                {
-                                                    hours: String(
-                                                        Math.round(
-                                                            provider.includedSeconds /
-                                                                3600,
-                                                        ),
-                                                    ),
-                                                },
-                                            )
-                                          : i18n(
-                                                "Included with your subscription",
-                                            )}
-                                </span>
-                            </div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                <span className="inline-flex items-center rounded-full border bg-muted/60 px-2 py-0.5 text-xs text-foreground">
-                                    {i18n("Included with your plan")}
-                                </span>
-                                {roles}
-                            </div>
-                        </li>
-                    );
-                }
-
-                const deleting = deletingId === provider.id;
-                return (
-                    <li
-                        key={provider.id}
-                        className="flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-start"
-                    >
-                        <div className="min-w-0 flex-1 space-y-1.5">
-                            <h3 className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                <span className="font-semibold">
-                                    {provider.provider}
-                                </span>
-                                {provider.defaultModel && (
-                                    <span className="min-w-0 break-all font-mono text-sm text-muted-foreground">
-                                        {provider.defaultModel}
-                                    </span>
-                                )}
-                            </h3>
-                            {provider.baseUrl && (
-                                <p className="truncate font-mono text-xs text-muted-foreground">
-                                    {provider.baseUrl}
-                                </p>
-                            )}
-                            <ProviderPriceLine
-                                provider={provider.provider}
-                                model={provider.defaultModel}
-                                baseUrl={provider.baseUrl}
-                                rate={provider.rate}
-                            />
-                            {(provider.isDefaultTranscription ||
-                                provider.isDefaultEnhancement ||
-                                provider.isDefaultLearn ||
-                                provider.isDefaultTopics) && (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {roles}
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
-                            <Button
-                                onClick={() => onDuplicate(provider)}
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={i18n("Duplicate {name}", {
-                                    name: providerLabel(provider),
-                                })}
-                                title={i18n(
-                                    "Duplicate: another model on the same key",
-                                )}
-                            >
-                                <Copy className="size-4" />
-                            </Button>
-                            <Button
-                                onClick={() => onEdit(provider)}
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={i18n("Edit {name}", {
-                                    name: providerLabel(provider),
-                                })}
-                                title={i18n("Edit")}
-                            >
-                                <Pencil className="size-4" />
-                            </Button>
-                            <Button
-                                onClick={() => onDelete(provider.id)}
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={deleting}
-                                aria-label={i18n("Delete {name}", {
-                                    name: providerLabel(provider),
-                                })}
-                                title={i18n("Delete")}
-                                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
-                            >
-                                {deleting ? (
-                                    <div className="animate-spin size-4 border-2 border-destructive border-t-transparent rounded-full" />
-                                ) : (
-                                    <Trash2 className="size-4" />
-                                )}
-                            </Button>
-                        </div>
-                    </li>
-                );
-            })}
-        </ul>
     );
 }

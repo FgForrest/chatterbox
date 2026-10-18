@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // The route says whether automatic Learn is offered here.
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
+    isLearnDeploymentAvailable: () => true,
 }));
 
 vi.mock("@/lib/posthog-server", () => ({

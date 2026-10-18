@@ -9,6 +9,7 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     deleteOrganizationProvider,
     organizationProviderManageContext,
+    organizationProviderMemberDefaultCount,
     updateOrganizationProvider,
 } from "@/lib/profiles/organization-providers";
 
@@ -23,6 +24,11 @@ const updateSchema = z
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
         audioUsdPerHour: z.unknown().optional(),
+        isDefaultTranscription: z.boolean().optional(),
+        isDefaultEnhancement: z.boolean().optional(),
+        isDefaultLearn: z.boolean().optional(),
+        isDefaultTopics: z.boolean().optional(),
+        isDefaultTitle: z.boolean().optional(),
     })
     .strict()
     .refine((value) => Object.keys(value).length > 0, {
@@ -37,6 +43,17 @@ async function contextFor(request: Request) {
         email: session.user.email,
     });
 }
+
+export const GET = apiHandler<IdContext>(async (request, routeContext) => {
+    const context = await contextFor(request);
+    const { id } = await (routeContext as IdContext).params;
+    return NextResponse.json({
+        memberDefaultCount: await organizationProviderMemberDefaultCount(
+            context,
+            id,
+        ),
+    });
+});
 
 export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
     const context = await contextFor(request);
@@ -81,6 +98,13 @@ export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
             : {}),
         ...(body.disabled !== undefined ? { disabled: body.disabled } : {}),
         ...(hasRates ? { rates: parseProviderRates(body) } : {}),
+        defaults: {
+            transcription: body.isDefaultTranscription,
+            summary: body.isDefaultEnhancement,
+            learn: body.isDefaultLearn,
+            topics: body.isDefaultTopics,
+            title: body.isDefaultTitle,
+        },
     });
     return NextResponse.json({ success: true });
 });

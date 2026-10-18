@@ -89,6 +89,8 @@ export function TranscriptionSection({
     const [preferredTranscriptSource, setPreferredTranscriptSource] =
         useState("plaud");
     const [autoLearnOffered, setAutoLearnOffered] = useState(false);
+    const [learnDeploymentAvailable, setLearnDeploymentAvailable] =
+        useState(true);
     const [titleTemplates, setTitleTemplates] = useState(() =>
         normalizeTitlePromptConfig(null),
     );
@@ -122,6 +124,9 @@ export function TranscriptionSection({
                         : "plaud",
                 );
                 setAutoLearnOffered(data.autoLearnOffered === true);
+                setLearnDeploymentAvailable(
+                    data.learnDeploymentAvailable !== false,
+                );
                 setTitleTemplates(
                     normalizeTitlePromptConfig(data.titleGenerationPrompt),
                 );
@@ -258,11 +263,24 @@ export function TranscriptionSection({
                     description={i18n("Learn from corrected transcripts.")}
                     icon={GraduationCap}
                 />
-                {autoLearnOffered ? (
+                {learnDeploymentAvailable ? (
                     <ProviderRoleSelect purpose="learning" />
                 ) : (
                     <p className="text-sm text-muted-foreground">
                         {i18n("Learning is not available on this instance.")}
+                    </p>
+                )}
+                {learnDeploymentAvailable && !autoLearnOffered && (
+                    <p className="text-sm text-muted-foreground">
+                        {i18n(
+                            "Learning is available, but no provider can run it yet.",
+                        )}{" "}
+                        <a
+                            className="underline"
+                            href="/settings?section=providers"
+                        >
+                            {i18n("Open Providers")}
+                        </a>
                     </p>
                 )}
                 <ProfilesSettingsLink />

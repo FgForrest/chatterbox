@@ -52,9 +52,9 @@ Profily Organizace jsou sdílené recepty zpracování pro složky Organizace. �
 
 ## Poskytovatelé Organizace
 
-**Nastavení → Poskytovatelé → Poskytovatelé organizace** uvádí sdílené přihlašovací údaje AI, které mohou používat profily Organizace. Členové vidí poskytovatele, model, adresu, cenu a stav zakázání jen pro čtení; API klíče se nikdy nezobrazují.
+**Nastavení → Poskytovatelé → Poskytovatelé organizace** uvádí sdílené přihlašovací údaje AI, které může používat každý člen. Členové vidí poskytovatele, model, adresu, cenu, výchozí role a stav zakázání jen pro čtení; API klíče se nikdy nezobrazují. Povoleného poskytovatele Organizace mohou zvolit ve vlastním nastavení přepisu, shrnutí, témat, názvů nebo Učení.
 
-Pouze osoby s oprávněním `access.manage` mohou poskytovatele Organizace přidávat, upravovat, povolovat, zakazovat nebo mazat. Vidí také **Využití podle členů**, včetně počtu volání a odhadované ceny. Každá správcovská změna se zapíše do auditního protokolu administrátora.
+Pouze osoby s oprávněním `access.manage` mohou poskytovatele Organizace přidávat, upravovat, povolovat, zakazovat nebo mazat a nastavit výchozího poskytovatele Organizace pro každou roli. Člen, který si poskytovatele nezvolil, používá tento výchozí, a to i u soukromých položek. Správci vidí také **Využití podle členů**, včetně počtu volání a odhadované ceny. Tyto požadavky hradí účet Organizace. Každá správcovská změna se zapíše do auditního protokolu administrátora.
 
 Ve výchozím nastavení může každý člen provést 60 volání za hodinu u každého poskytovatele Organizace. Po dosažení limitu se další volání daného člena odmítne až do obnovení hodinového okna, aniž by využilo limit jiného člena. Administrátor může limit instance změnit.
 

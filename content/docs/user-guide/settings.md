@@ -13,25 +13,28 @@ Open Settings from the account menu (the round button with your initial), or pre
 
 **Settings → Profiles** is where you choose how recordings and mail are transcribed, learned from, titled, summarized, and turned into tasks. Profiles replace the old per-account automation switches and the template picker beside **Summarize**.
 
-Use **New profile for recordings** or **New profile for mail**, or duplicate an existing profile. Each step has one **Run automatically** switch. The editor also holds its provider, model, language, instructions, output format, and multi-pass choices. You can set one default for recordings and one for mail, archive profiles you no longer use, and restore them later.
+Use **New profile for recordings** or **New profile for mail**, or duplicate an existing profile. Each step has one **Run automatically** switch. The editor also holds its provider, model, language, instructions, output format, and multi-pass choices. At the top, set separate defaults for recordings and mail. You can follow the Organization default, select a specific Organization profile, or select one of your profiles. Delete personal profiles you no longer need; profiles referenced by processing history move to **Archived** and can be restored.
 
-If the Organization is enabled, members see Organization profiles and can duplicate them into personal ones. Curators can edit the shared versions. See [Processing and profiles](processing-and-profiles.md).
+If the Organization is enabled, new members follow its defaults and start without personal profiles. Members can use Organization profiles for private items and duplicate them into personal ones. Curators can edit the shared versions. See [Processing and profiles](processing-and-profiles.md).
 
 ## AI providers
 
 ![AI providers](images/settings-providers.png)
 
-**Settings → Providers** lists the services that do the AI work. Click **Add Provider**, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
+**Settings → Providers** separates **Your providers** from **Organization providers**. Use the **Add provider** button in the card where the key belongs, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
 
 ![Editing a provider](images/settings-provider-edit.png)
 
 - **Price.** Chatterbox knows the published prices of common models. For any other model, or if you pay a different price, enter it here. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
-- **Duplicate** makes a second provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
+- **Duplicate** makes a second personal or Organization provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
+- **Disable** keeps the key saved but removes the provider from new selections. A profile or account role that explicitly points to it stops with an error until you enable it or choose another provider.
 - **Claude Code** and **Codex** run on a Claude or ChatGPT subscription instead of an API key, through a bridge your administrator sets up. See [For administrators](administrators.md#claude-code-and-codex-subscriptions).
 
 Some providers only transcribe (ElevenLabs, Speechmatics). Summary steps then need a second provider.
 
-When configured, **Organization providers** appears below the personal list. Members can inspect them as **Read-only**; people with `access.manage` manage them and see usage. See [Organization providers](organization.md#organization-providers).
+Members inspect **Organization providers** as **Read-only** and may choose any enabled one as an account default. People with `access.manage` can add, duplicate, edit, disable, enable, and delete them, choose Organization defaults, and see usage per member in the same card. An Organization default applies to every member, including private items, until that member chooses a provider for the same role. See [Organization providers](organization.md#organization-providers).
+
+If a provider you chose is disabled or deleted, the selector keeps that choice visible as unavailable. Processing for that role stops until you choose another provider. Before an Organization provider is disabled or deleted, the confirmation shows how many members selected it as their own default.
 
 ## Transcription
 
@@ -42,12 +45,14 @@ When configured, **Organization providers** appears below the personal list. Mem
 - **Primary transcript** when both Plaud and your provider have made one,
 - **Default transcription language**, used when you transcribe now.
 
-Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
+Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Without a profile pin, titles use your title choice, your summary choice, the Organization title default, the Organization summary default, then your first enabled chat provider. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
 
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that
-does not pin a topics provider uses it. Automatic topic detection is set under
+does not pin a topics provider uses your topics choice, your summary choice,
+the Organization topics default, the Organization summary default, then your
+first enabled chat provider. Automatic topic detection is set under
 **Profiles**. Topic templates you created or edited before profiles remain
 read-only under **Templates from before profiles**; use **Copy into a profile**
 to keep editing one.
@@ -55,13 +60,16 @@ to keep editing one.
 ## Learning
 
 This section keeps the account-level Learn provider default. A profile that
-does not pin a Learn provider uses it. Automatic Learn and transcript
+does not pin a Learn provider uses your Learn choice, your summary choice, the
+Organization Learn default, the Organization summary default, then your first
+enabled chat provider. Automatic Learn and transcript
 correction are set under **Profiles**.
 
 ## Summary
 
 This section keeps the account-level summary provider and multi-pass defaults.
-A profile without a pinned summary provider uses them. Automatic titles and
+A profile without a pinned summary provider uses your summary choice, the
+Organization summary default, then your first enabled chat provider. Automatic titles and
 summaries, output language and format, and profile-specific multi-pass behavior
 are set under **Profiles**. Summary templates you created or edited before
 profiles remain read-only under **Templates from before profiles**; use **Copy

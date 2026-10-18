@@ -198,10 +198,20 @@ describe("issue #101 — transcribeRecording sends chunking_strategy for diarize
         };
         const credsRow = {
             id: "creds-1",
+            userId,
             provider: "OpenAI",
             apiKey: "encrypted-key",
             baseUrl: null,
             defaultModel: opts.defaultModel,
+            isDefaultTranscription: true,
+            isDefaultEnhancement: false,
+            isDefaultLearn: false,
+            inputUsdPerMillion: null,
+            outputUsdPerMillion: null,
+            audioUsdPerHour: null,
+            disabledAt: null,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            updatedAt: new Date("2026-01-01T00:00:00.000Z"),
         };
 
         (db.select as Mock)

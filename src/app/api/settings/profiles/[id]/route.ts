@@ -5,7 +5,10 @@ import { validateProfileProviderPins } from "@/lib/profiles/providers";
 import {
     archiveProfile,
     DefaultProfileArchiveError,
+    deletePersonalProfile,
     ProfileVersionConflictError,
+    profileDeleteDisposition,
+    profileMemberDefaultCount,
     updateProfile,
 } from "@/lib/profiles/store";
 import {
@@ -33,9 +36,32 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const routeActor = await profileRouteActor(request);
     const { id } = await (context as IdContext).params;
     const { profile } = await availableProfile(id, routeActor);
+    const includeDeleteImpact =
+        new URL(request.url).searchParams.get("deleteImpact") === "true";
+    let deleteImpact:
+        | { disposition: "delete" | "archive" }
+        | { memberDefaultCount: number }
+        | undefined;
+    if (includeDeleteImpact && profile.scope === "personal") {
+        const disposition = await profileDeleteDisposition(
+            profile.ownerUserId,
+            profile.id,
+        );
+        if (disposition) deleteImpact = { disposition };
+    }
+    if (includeDeleteImpact && profile.scope === "organization") {
+        const memberDefaultCount = await profileMemberDefaultCount(
+            profile.ownerUserId,
+            profile.id,
+        );
+        if (memberDefaultCount !== null) {
+            deleteImpact = { memberDefaultCount };
+        }
+    }
     return NextResponse.json({
         profile: await profileDetail(profile, routeActor.actor),
         ...builtinPromptTexts(profile),
+        ...(deleteImpact ? { deleteImpact } : {}),
     });
 });
 
@@ -91,6 +117,24 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const current = await editableProfile(id, routeActor);
     try {
+        if (current.profile.scope === "personal") {
+            const result = await deletePersonalProfile({
+                ownerUserId: current.profile.ownerUserId,
+                profileId: id,
+                actor: routeActor.actor,
+            });
+            if (!result) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+            return NextResponse.json({
+                success: true,
+                disposition: result.disposition,
+            });
+        }
         const archived = await archiveProfile({
             ownerUserId: current.profile.ownerUserId,
             profileId: id,
@@ -99,7 +143,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         if (!archived) {
             throw new AppError(ErrorCode.NOT_FOUND, "Profile not found", 404);
         }
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, disposition: "archive" });
     } catch (error) {
         if (error instanceof DefaultProfileArchiveError) {
             throw new AppError(ErrorCode.CONFLICT, error.message, 409);

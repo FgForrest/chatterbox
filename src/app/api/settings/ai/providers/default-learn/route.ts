@@ -1,11 +1,9 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/db";
-import { apiCredentials, users } from "@/db/schema";
-import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
+import { setDefaultProvider } from "@/lib/ai/default-provider";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { validateDefaultProviderSelection } from "@/lib/profiles/providers";
 import {
     isRiffadoIncludedProviderId,
     RIFFADO_INCLUDED_PROVIDER_LABEL,
@@ -46,61 +44,12 @@ export const PUT = apiHandler(async (request: Request) => {
         );
     }
 
-    const [provider] = await db
-        .select({
-            id: apiCredentials.id,
-            provider: apiCredentials.provider,
-        })
-        .from(apiCredentials)
-        .where(
-            and(
-                eq(apiCredentials.id, providerId),
-                eq(apiCredentials.userId, session.user.id),
-            ),
-        )
-        .limit(1);
-
-    if (!provider) {
-        throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
-    }
-
-    if (isTranscriptionOnlyProvider(provider.provider)) {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            `${provider.provider} transcribes only. Learn needs an OpenAI-compatible provider.`,
-            400,
-            { field: "providerId" },
-        );
-    }
-
-    await db.transaction(async (tx) => {
-        // One at a time per user: two requests at once would each clear
-        // nothing and mark their own (the unique index would refuse the
-        // second instead of letting the last one win).
-        await tx
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.id, session.user.id))
-            .for("update");
-        await tx
-            .update(apiCredentials)
-            .set({ isDefaultLearn: false })
-            .where(
-                and(
-                    eq(apiCredentials.userId, session.user.id),
-                    eq(apiCredentials.isDefaultLearn, true),
-                ),
-            );
-        await tx
-            .update(apiCredentials)
-            .set({ isDefaultLearn: true, updatedAt: new Date() })
-            .where(
-                and(
-                    eq(apiCredentials.id, providerId),
-                    eq(apiCredentials.userId, session.user.id),
-                ),
-            );
+    await validateDefaultProviderSelection({
+        actorUserId: session.user.id,
+        role: "learn",
+        providerId,
     });
+    await setDefaultProvider(session.user.id, "learn", providerId);
 
     return NextResponse.json({ success: true });
 });
@@ -108,14 +57,6 @@ export const PUT = apiHandler(async (request: Request) => {
 /** Unmark it: Learn follows the enhancement default again. */
 export const DELETE = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
-    await db
-        .update(apiCredentials)
-        .set({ isDefaultLearn: false })
-        .where(
-            and(
-                eq(apiCredentials.userId, session.user.id),
-                eq(apiCredentials.isDefaultLearn, true),
-            ),
-        );
+    await setDefaultProvider(session.user.id, "learn", null);
     return NextResponse.json({ success: true });
 });

@@ -13,6 +13,7 @@ import {
     processingProfileRevisions,
     processingProfiles,
     recordingFolders,
+    userSettings,
     users,
 } from "@/db/schema";
 import type { ActorContext } from "@/lib/authz/model";
@@ -237,6 +238,7 @@ describeWithDatabase("folder default profile routes", () => {
         await db().delete(folderDefaultProfiles);
         await db().delete(recordingFolders);
         await db().delete(processingProfiles);
+        await db().delete(userSettings);
         await addFolder({
             id: "personal-root",
             ownerUserId: OWNER,
@@ -482,5 +484,54 @@ describeWithDatabase("folder default profile routes", () => {
             context("personal-child"),
         );
         expect(response.status).toBe(200);
+    });
+
+    it("reports an archived explicit Organization account default as unavailable", async () => {
+        await db().insert(userSettings).values({
+            userId: OWNER,
+            defaultAudioProfileId: "org-audio",
+        });
+        await db()
+            .update(processingProfiles)
+            .set({ archivedAt: new Date() })
+            .where(eq(processingProfiles.id, "org-audio"));
+
+        const response = await GET(
+            request("GET", "personal-child"),
+            context("personal-child"),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            defaults: {
+                audio: {
+                    accountDefault: null,
+                    accountDefaultUnavailable: true,
+                },
+            },
+        });
+    });
+
+    it("reports an explicit Organization account default as unavailable after access is revoked", async () => {
+        await db().insert(userSettings).values({
+            userId: OWNER,
+            defaultAudioProfileId: "org-audio",
+        });
+        state.holderMayUse = false;
+
+        const response = await GET(
+            request("GET", "personal-child"),
+            context("personal-child"),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            defaults: {
+                audio: {
+                    accountDefault: null,
+                    accountDefaultUnavailable: true,
+                },
+            },
+        });
     });
 });

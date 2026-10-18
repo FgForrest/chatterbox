@@ -16,7 +16,11 @@ import {
     type ProfileSettings,
     parseProfileSettings,
 } from "@/lib/profiles/settings";
-import { getProfile, type ProfileRecord } from "@/lib/profiles/store";
+import {
+    getDefaultProfile,
+    getProfile,
+    type ProfileRecord,
+} from "@/lib/profiles/store";
 import type { RecordingView } from "@/lib/sharing/view";
 
 type StoredProfile = typeof processingProfiles.$inferSelect;
@@ -237,25 +241,19 @@ async function defaultProfile(input: {
     ownerUserId: string;
     actorUserId: string;
     channel: ProfileChannel;
-    scope: "personal" | "organization";
 }): Promise<ResolvedItemProfile | null> {
-    await ensureProfiles(input.ownerUserId);
-    const [profile] = await db
-        .select({ id: processingProfiles.id })
-        .from(processingProfiles)
-        .where(
-            and(
-                eq(processingProfiles.ownerUserId, input.ownerUserId),
-                eq(processingProfiles.channel, input.channel),
-                eq(processingProfiles.scope, input.scope),
-                eq(processingProfiles.isDefault, true),
-                isNull(processingProfiles.archivedAt),
-            ),
-        )
-        .limit(1);
-    return profile
-        ? readProfileRevision({ ...input, profileId: profile.id })
-        : null;
+    const profile = await getDefaultProfile(
+        input.ownerUserId,
+        input.channel,
+        input.actorUserId,
+    );
+    if (!profile) return null;
+    if (!profile.currentRevisionId) return null;
+    return {
+        profile,
+        revisionId: profile.currentRevisionId,
+        settings: profile.settings,
+    };
 }
 
 /** Resolve the owner's current default profile when no item exists yet. */
@@ -268,7 +266,6 @@ export async function resolveDefaultProfile(
         ownerUserId,
         actorUserId,
         channel,
-        scope: "personal",
     });
     if (resolved) return resolved;
     throw new AppError(
@@ -375,7 +372,6 @@ export async function resolveItemProfile(
             ownerUserId,
             actorUserId,
             channel,
-            scope: "personal",
         });
         if (resolved) return resolved;
         throw new AppError(
@@ -390,7 +386,6 @@ export async function resolveItemProfile(
             ownerUserId: orgUserId,
             actorUserId,
             channel,
-            scope: "organization",
         });
         if (resolved) return resolved;
     }

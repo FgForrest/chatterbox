@@ -13,6 +13,7 @@ import {
     aiUsageEvents,
     apiCredentials,
     chatterItems,
+    userSettings,
     users,
 } from "@/db/schema";
 import type { ActorContext } from "@/lib/authz/model";
@@ -62,6 +63,13 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 vi.mock("@/lib/encryption", () => ({
     encrypt: (value: string) => `encrypted:${value}`,
+    decrypt: (value: string) => value.replace(/^encrypted:/, ""),
+}));
+vi.mock("@/lib/authz/access-state", () => ({
+    holderAccess: async () => ({
+        ok: state.capabilities.has("use"),
+        capabilities: state.capabilities,
+    }),
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "org-user",
@@ -75,12 +83,10 @@ vi.mock("@/lib/auth-server", () => ({
         user: { id: state.actorId, email: state.email },
     }),
     requireApiSessionActor: async () => {
+        let kind: ActorContext["kind"] = "user";
+        if (!state.idp && state.actorId === "org-user") kind = "local-org";
         const actor: ActorContext = {
-            kind: state.idp
-                ? "user"
-                : state.actorId === "org-user"
-                  ? "local-org"
-                  : "user",
+            kind,
             actorId: state.actorId,
             issuer: null,
             subject: null,
@@ -113,6 +119,7 @@ import {
     DELETE as deletePersonalProvider,
     PUT as updatePersonalProvider,
 } from "@/app/api/settings/ai/providers/[id]/route";
+import { PUT as setDefaultEnhancement } from "@/app/api/settings/ai/providers/default-enhancement/route";
 import { POST as createPersonalProvider } from "@/app/api/settings/ai/providers/route";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -175,6 +182,7 @@ describeWithDatabase(
             await databaseClient().delete(aiUsageEvents);
             await databaseClient().delete(chatterItems);
             await databaseClient().delete(adminActionLog);
+            await databaseClient().delete(userSettings);
             await databaseClient().delete(apiCredentials);
         });
 
@@ -214,6 +222,394 @@ describeWithDatabase(
                     )
                 ).status,
             ).toBe(403);
+        });
+
+        it("lets a manager set Organization defaults and rejects a member", async () => {
+            const createdResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "manager-secret",
+                    isDefaultTranscription: true,
+                    isDefaultEnhancement: true,
+                    isDefaultLearn: true,
+                    isDefaultTopics: true,
+                    isDefaultTitle: true,
+                }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+            const [settings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            expect(settings?.defaultTranscriptionProviderId).toBe(id);
+            expect(settings?.defaultProviders).toMatchObject({
+                summary: id,
+                learn: id,
+                topics: id,
+                title: id,
+            });
+
+            const listed = await listOrganizationProviders(request("GET"));
+            const body = await listed.json();
+            expect(body.providers[0]).toMatchObject({
+                id,
+                isDefaultTranscription: true,
+                isDefaultEnhancement: true,
+                isDefaultLearn: true,
+                isDefaultTopics: true,
+                isDefaultTitle: true,
+            });
+
+            state.actorId = "member";
+            state.email = "member@example.test";
+            state.capabilities = new Set(["use"]);
+            const response = await updateOrganizationProvider(
+                request("PUT", { isDefaultEnhancement: false }, `/${id}`),
+                context(id),
+            );
+            expect(response.status).toBe(403);
+        });
+
+        it("refuses to assign an Organization role to a disabled provider", async () => {
+            const createdResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "manager-secret",
+                }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+            expect(
+                (
+                    await updateOrganizationProvider(
+                        request("PUT", { disabled: true }, `/${id}`),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(200);
+
+            const response = await updateOrganizationProvider(
+                request("PUT", { isDefaultEnhancement: true }, `/${id}`),
+                context(id),
+            );
+
+            expect(response.status).toBe(400);
+            expect(await response.json()).toMatchObject({
+                error: "A disabled provider cannot be an Organization default",
+            });
+        });
+
+        it("does not clear a newer personal default from a stale provider edit", async () => {
+            await databaseClient()
+                .insert(apiCredentials)
+                .values([
+                    {
+                        id: "stale-provider",
+                        userId: "manager",
+                        provider: "OpenAI",
+                        apiKey: "encrypted:stale",
+                    },
+                    {
+                        id: "current-provider",
+                        userId: "manager",
+                        provider: "OpenAI",
+                        apiKey: "encrypted:current",
+                        isDefaultEnhancement: true,
+                    },
+                ]);
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "manager",
+                    defaultProviders: { summary: "current-provider" },
+                });
+
+            const response = await updatePersonalProvider(
+                request(
+                    "PUT",
+                    { isDefaultEnhancement: false },
+                    "/stale-provider",
+                ),
+                context("stale-provider"),
+            );
+            expect(response.status).toBe(200);
+
+            const [settings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "manager"));
+            expect(settings?.defaultProviders).toMatchObject({
+                summary: "current-provider",
+            });
+        });
+
+        it("records Organization default changes in the provider audit snapshot", async () => {
+            const createdResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "manager-secret",
+                    isDefaultEnhancement: true,
+                    isDefaultTitle: true,
+                }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+            await updateOrganizationProvider(
+                request(
+                    "PUT",
+                    {
+                        isDefaultEnhancement: false,
+                        isDefaultLearn: true,
+                    },
+                    `/${id}`,
+                ),
+                context(id),
+            );
+
+            const audit = await databaseClient()
+                .select()
+                .from(adminActionLog)
+                .where(eq(adminActionLog.targetResourceId, id))
+                .orderBy(adminActionLog.createdAt);
+            expect(audit[0]?.after).toMatchObject({
+                defaults: ["summary", "title"],
+            });
+            expect(audit[1]?.before).toMatchObject({
+                defaults: ["summary", "title"],
+            });
+            expect(audit[1]?.after).toMatchObject({
+                defaults: ["learn", "title"],
+            });
+        });
+
+        it("preserves explicit default pointers when their provider is deleted", async () => {
+            const personalResponse = await createPersonalProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "personal-secret",
+                }),
+            );
+            const personal = await personalResponse.json();
+            const personalId = personal.provider.id as string;
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "manager",
+                    defaultTranscriptionProviderId: personalId,
+                    defaultProviders: {
+                        summary: personalId,
+                        learn: personalId,
+                        topics: personalId,
+                        title: personalId,
+                    },
+                });
+            await deletePersonalProvider(
+                request("DELETE", undefined, `/${personalId}`),
+                context(personalId),
+            );
+            const [personalSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "manager"));
+            expect(personalSettings?.defaultTranscriptionProviderId).toBe(
+                personalId,
+            );
+            expect(personalSettings?.defaultProviders).toEqual({
+                summary: personalId,
+                learn: personalId,
+                topics: personalId,
+                title: personalId,
+            });
+
+            const organizationResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "organization-secret",
+                    isDefaultTranscription: true,
+                    isDefaultEnhancement: true,
+                    isDefaultLearn: true,
+                    isDefaultTopics: true,
+                    isDefaultTitle: true,
+                }),
+            );
+            const organization = await organizationResponse.json();
+            const organizationId = organization.provider.id as string;
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "member",
+                    defaultProviders: { summary: organizationId },
+                });
+            await deleteOrganizationProvider(
+                request("DELETE", undefined, `/${organizationId}`),
+                context(organizationId),
+            );
+            const [organizationSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            const [memberSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "member"));
+            expect(organizationSettings?.defaultTranscriptionProviderId).toBe(
+                organizationId,
+            );
+            expect(organizationSettings?.defaultProviders).toEqual({
+                summary: organizationId,
+                learn: organizationId,
+                topics: organizationId,
+                title: organizationId,
+            });
+            expect(memberSettings?.defaultProviders).toEqual({
+                summary: organizationId,
+            });
+        });
+
+        it("lets a member select a non-default Organization provider", async () => {
+            const defaultResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "default-secret",
+                    isDefaultEnhancement: true,
+                }),
+            );
+            const alternateResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "alternate-secret",
+                }),
+            );
+            const organizationDefault = await defaultResponse.json();
+            const alternate = await alternateResponse.json();
+            state.actorId = "member";
+            state.email = "member@example.test";
+            state.capabilities = new Set(["use"]);
+
+            const response = await setDefaultEnhancement(
+                new Request(
+                    "https://app.example.test/api/settings/ai/providers/default-enhancement",
+                    {
+                        method: "PUT",
+                        body: JSON.stringify({
+                            providerId: alternate.provider.id,
+                        }),
+                    },
+                ),
+            );
+            expect(response.status).toBe(200);
+
+            const [memberSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "member"));
+            expect(memberSettings?.defaultProviders).toMatchObject({
+                summary: alternate.provider.id,
+            });
+            const [organizationSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            expect(organizationSettings?.defaultProviders).toMatchObject({
+                summary: organizationDefault.provider.id,
+            });
+        });
+
+        it("duplicates an Organization provider without decrypting its key", async () => {
+            const sourceResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "source-secret",
+                }),
+            );
+            const source = await sourceResponse.json();
+            const response = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    copyKeyFrom: source.provider.id,
+                    defaultModel: "gpt-4o",
+                    isDefaultEnhancement: true,
+                }),
+            );
+            const duplicate = await response.json();
+            expect(response.status).toBe(200);
+
+            const [sourceRow] = await databaseClient()
+                .select()
+                .from(apiCredentials)
+                .where(eq(apiCredentials.id, source.provider.id));
+            const [duplicateRow] = await databaseClient()
+                .select()
+                .from(apiCredentials)
+                .where(eq(apiCredentials.id, duplicate.provider.id));
+            expect(duplicateRow?.apiKey).toBe(sourceRow?.apiKey);
+            expect(duplicateRow?.userId).toBe("org-user");
+            const [settings] = await databaseClient()
+                .select({ defaults: userSettings.defaultProviders })
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            expect(settings?.defaults).toMatchObject({
+                summary: duplicate.provider.id,
+            });
+
+            const [audit] = await databaseClient()
+                .select()
+                .from(adminActionLog)
+                .where(
+                    eq(adminActionLog.targetResourceId, duplicate.provider.id),
+                );
+            expect(audit?.action).toBe("org_provider.create");
+        });
+
+        it("refuses to duplicate a personal provider into the Organization", async () => {
+            await databaseClient().insert(apiCredentials).values({
+                id: "personal-source",
+                userId: "manager",
+                provider: "OpenAI",
+                apiKey: "encrypted:personal-secret",
+            });
+            const response = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    copyKeyFrom: "personal-source",
+                }),
+            );
+            expect(response.status).toBe(404);
+        });
+
+        it("refuses to duplicate an Organization key across providers", async () => {
+            const sourceResponse = await createOrganizationProvider(
+                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+            );
+            const source = await sourceResponse.json();
+            const response = await createOrganizationProvider(
+                request("POST", {
+                    provider: "Groq",
+                    copyKeyFrom: source.provider.id,
+                }),
+            );
+            expect(response.status).toBe(400);
+            expect((await response.json()).details).toEqual({
+                field: "provider",
+            });
+        });
+
+        it("refuses Organization duplication by a non-manager", async () => {
+            const sourceResponse = await createOrganizationProvider(
+                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+            );
+            const source = await sourceResponse.json();
+            state.actorId = "member";
+            state.email = "member@example.test";
+            state.capabilities = new Set(["use"]);
+            const response = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    copyKeyFrom: source.provider.id,
+                }),
+            );
+            expect(response.status).toBe(403);
         });
 
         it("allows only the organization account to mutate in local mode", async () => {
@@ -339,6 +735,45 @@ describeWithDatabase(
                 "org_provider.update",
                 "org_provider.delete",
             ]);
+        });
+
+        it("disables and enables only the signed-in user's personal provider", async () => {
+            await databaseClient().insert(apiCredentials).values({
+                id: "personal-toggle",
+                userId: "manager",
+                provider: "OpenAI",
+                apiKey: "encrypted:secret",
+            });
+
+            const disabled = await updatePersonalProvider(
+                request("PUT", { disabled: true }, "/personal-toggle"),
+                context("personal-toggle"),
+            );
+            expect(disabled.status).toBe(200);
+            const [disabledRow] = await databaseClient()
+                .select()
+                .from(apiCredentials)
+                .where(eq(apiCredentials.id, "personal-toggle"));
+            expect(disabledRow?.disabledAt).toBeInstanceOf(Date);
+
+            const enabled = await updatePersonalProvider(
+                request("PUT", { disabled: false }, "/personal-toggle"),
+                context("personal-toggle"),
+            );
+            expect(enabled.status).toBe(200);
+            const [enabledRow] = await databaseClient()
+                .select()
+                .from(apiCredentials)
+                .where(eq(apiCredentials.id, "personal-toggle"));
+            expect(enabledRow?.disabledAt).toBeNull();
+
+            state.actorId = "member";
+            state.email = "member@example.test";
+            const foreign = await updatePersonalProvider(
+                request("PUT", { disabled: true }, "/personal-toggle"),
+                context("personal-toggle"),
+            );
+            expect(foreign.status).toBe(404);
         });
 
         it("summarizes organization-paid usage per member", async () => {

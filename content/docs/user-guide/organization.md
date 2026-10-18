@@ -52,9 +52,9 @@ Organization profiles are shared processing recipes for Organization folders. Me
 
 ## Organization providers
 
-**Settings → Providers → Organization providers** lists shared AI credentials that Organization profiles may use. Members see each provider, model, address, price, and disabled state as **Read-only**; API keys are never shown.
+**Settings → Providers → Organization providers** lists shared AI credentials that every member may use. Members see each provider, model, address, price, role defaults, and disabled state as **Read-only**; API keys are never shown. They may choose an enabled Organization provider in their own transcription, summary, topics, title, or Learn settings.
 
-Only people with `access.manage` can add, edit, enable, disable, or delete an Organization provider. They also see **Usage per member**, including calls and estimated cost. Every management change is written to the administrator audit log.
+Only people with `access.manage` can add, edit, enable, disable, or delete an Organization provider and set the Organization default for each role. A member who has not made a choice uses that Organization default, including for private items. They also see **Usage per member**, including calls and estimated cost. The Organization account pays for these requests. Every management change is written to the administrator audit log.
 
 Each member may make 60 calls per hour to each Organization provider by default. When the limit is reached, that member's next call is refused until the hourly window resets, without using another member's allowance. The administrator can change the limit for the instance.
 

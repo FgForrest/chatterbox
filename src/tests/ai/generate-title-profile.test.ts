@@ -80,4 +80,23 @@ describe("profile-backed title generation", () => {
         );
         expect(request.messages[1].content).toContain("Jste generátor názvů");
     });
+
+    it("fails loudly when an explicit account title provider is disabled", async () => {
+        selectRows([{ detectedLanguage: "cs" }]);
+        selectRows([{ uiLocale: "cs-CZ" }]);
+        const error = new Error(
+            "The provider OpenAI is disabled. Enable it or choose another provider.",
+        );
+        mocks.resolveStepProvider.mockRejectedValueOnce(error);
+
+        await expect(
+            generateTitleFromTranscription(
+                "actor-1",
+                "recording-1",
+                "Přepis nahrávky",
+                "transcript",
+                "owner-1",
+            ),
+        ).rejects.toBe(error);
+    });
 });

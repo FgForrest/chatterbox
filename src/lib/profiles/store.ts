@@ -1,11 +1,29 @@
-import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
-import { processingProfileRevisions, processingProfiles } from "@/db/schema";
+import {
+    aiEnhancements,
+    asyncJobs,
+    folderDefaultProfiles,
+    itemProcessing,
+    learnRuns,
+    processingProfileRevisions,
+    processingProfiles,
+    recordingFolders,
+    transcriptions,
+    userSettings,
+} from "@/db/schema";
 import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
-import { getOrgUserId } from "@/lib/org/config";
-import { mayEditProfile, mayUseProfile } from "@/lib/profiles/access";
+import { AppError, ErrorCode } from "@/lib/errors";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import {
+    mayEditProfile,
+    mayUseOrganizationProfiles,
+    mayUseProfile,
+} from "@/lib/profiles/access";
+import { defaultProfileRule } from "@/lib/profiles/default-rule";
+import { ensureProfiles } from "@/lib/profiles/seed";
 import {
     type ProfileChannel,
     type ProfileScope,
@@ -49,8 +67,20 @@ export class ProfilePermissionError extends Error {
 
 export class DefaultProfileArchiveError extends Error {
     constructor() {
-        super("Choose another default profile before archiving this one");
+        super("Choose another default profile before removing this one");
         this.name = "DefaultProfileArchiveError";
+    }
+}
+
+/** An explicitly selected Organization profile can no longer be used. */
+export class ExplicitDefaultProfileUnavailableError extends AppError {
+    constructor() {
+        super(
+            ErrorCode.CONFLICT,
+            "Your selected Organization profile is unavailable. Choose another default in Settings → Profiles.",
+            409,
+        );
+        this.name = "ExplicitDefaultProfileUnavailableError";
     }
 }
 
@@ -289,8 +319,7 @@ export async function getProfile(
     return (await mayUseProfile(actorUserId, profile)) ? profile : null;
 }
 
-/** Read one owner's live default profile for a channel. */
-export async function getDefaultProfile(
+async function getOwnedDefaultProfile(
     ownerUserId: string,
     channel: ProfileChannel,
     actorUserId: string,
@@ -323,6 +352,175 @@ export async function getDefaultProfile(
     if (!row) return null;
     const profile = present(row);
     return (await mayUseProfile(actorUserId, profile)) ? profile : null;
+}
+
+export interface DefaultProfileState {
+    channel: ProfileChannel;
+    pointerId: string | null;
+    personalDefault: ProfileRecord | null;
+    organizationDefault: ProfileRecord | null;
+    effective: ProfileRecord | null;
+    source: "pointer" | "personal" | "organization" | "missing";
+    explicitUnavailable: boolean;
+}
+
+function pointerFromSettings(
+    settings: Pick<
+        typeof userSettings.$inferSelect,
+        "defaultAudioProfileId" | "defaultMailProfileId"
+    > | null,
+    channel: ProfileChannel,
+): string | null {
+    if (!settings) return null;
+    return channel === "audio"
+        ? settings.defaultAudioProfileId
+        : settings.defaultMailProfileId;
+}
+
+async function pointedProfile(input: {
+    ownerUserId: string;
+    actorUserId: string;
+    organizationUserId: string | null;
+    channel: ProfileChannel;
+    pointerId: string | null;
+}): Promise<ProfileRecord | null> {
+    if (!input.pointerId) return null;
+    const personal = await getProfile(
+        input.ownerUserId,
+        input.pointerId,
+        input.actorUserId,
+    );
+    if (personal?.channel === input.channel) return personal;
+    if (!input.organizationUserId) return null;
+    const organization = await getProfile(
+        input.organizationUserId,
+        input.pointerId,
+        input.actorUserId,
+    );
+    return organization?.channel === input.channel ? organization : null;
+}
+
+/** Read the inputs and result of the authoritative member-default rule. */
+export async function getDefaultProfileState(
+    ownerUserId: string,
+    channel: ProfileChannel,
+    actorUserId = ownerUserId,
+): Promise<DefaultProfileState> {
+    await ensureProfiles(ownerUserId);
+    const organizationUserId = await getOrgUserId();
+    const organizationAccount = organizationUserId === ownerUserId;
+    if (organizationAccount) {
+        const organizationDefault = await getOwnedDefaultProfile(
+            ownerUserId,
+            channel,
+            actorUserId,
+        );
+        return {
+            channel,
+            pointerId: null,
+            personalDefault: null,
+            organizationDefault,
+            effective: organizationDefault,
+            source: organizationDefault ? "organization" : "missing",
+            explicitUnavailable: false,
+        };
+    }
+
+    const [settings] = await db
+        .select({
+            defaultAudioProfileId: userSettings.defaultAudioProfileId,
+            defaultMailProfileId: userSettings.defaultMailProfileId,
+        })
+        .from(userSettings)
+        .where(eq(userSettings.userId, ownerUserId))
+        .limit(1);
+    const pointerId = pointerFromSettings(settings ?? null, channel);
+    const personalDefault = await getOwnedDefaultProfile(
+        ownerUserId,
+        channel,
+        actorUserId,
+    );
+    const organizationAvailable =
+        organizationUserId !== null &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(actorUserId));
+    if (organizationAvailable && organizationUserId) {
+        await ensureProfiles(organizationUserId);
+    }
+    const organizationDefault =
+        organizationAvailable && organizationUserId
+            ? await getOwnedDefaultProfile(
+                  organizationUserId,
+                  channel,
+                  actorUserId,
+              )
+            : null;
+    const pointerProfile = await pointedProfile({
+        ownerUserId,
+        actorUserId,
+        organizationUserId: organizationAvailable ? organizationUserId : null,
+        channel,
+        pointerId,
+    });
+    const rule = defaultProfileRule({
+        pointerId,
+        pointerProfileId: pointerProfile?.id ?? null,
+        personalDefaultId: personalDefault?.id ?? null,
+        organizationDefaultId: organizationDefault?.id ?? null,
+    });
+    if (rule.kind === "explicit_unavailable") {
+        return {
+            channel,
+            pointerId,
+            personalDefault,
+            organizationDefault,
+            effective: null,
+            source: "missing",
+            explicitUnavailable: true,
+        };
+    }
+    if (rule.kind === "missing") {
+        return {
+            channel,
+            pointerId,
+            personalDefault,
+            organizationDefault,
+            effective: null,
+            source: "missing",
+            explicitUnavailable: false,
+        };
+    }
+    const byId = new Map(
+        [pointerProfile, personalDefault, organizationDefault]
+            .filter((profile): profile is ProfileRecord => profile !== null)
+            .map((profile) => [profile.id, profile]),
+    );
+    return {
+        channel,
+        pointerId,
+        personalDefault,
+        organizationDefault,
+        effective: byId.get(rule.profileId) ?? null,
+        source: rule.source,
+        explicitUnavailable: false,
+    };
+}
+
+/** Resolve the owner's live default profile using the member-default rule. */
+export async function getDefaultProfile(
+    ownerUserId: string,
+    channel: ProfileChannel,
+    actorUserId: string,
+): Promise<ProfileRecord | null> {
+    const state = await getDefaultProfileState(
+        ownerUserId,
+        channel,
+        actorUserId,
+    );
+    if (state.explicitUnavailable) {
+        throw new ExplicitDefaultProfileUnavailableError();
+    }
+    return state.effective;
 }
 
 export interface CreateProfileInput {
@@ -526,6 +724,397 @@ export interface ArchiveProfileInput {
     actor: ActorContext;
 }
 
+export type ProfileDeleteDisposition = "delete" | "archive";
+
+type ProfileQueryExecutor = Pick<typeof db, "select">;
+
+type ProfileRemovalExecutor = Pick<typeof db, "select" | "update">;
+
+interface ProfileRemovalFallbackInput {
+    ownerUserId: string;
+    profileId: string;
+    actorUserId: string;
+    organizationUserId: string | null;
+    organizationAvailable: boolean;
+    settings: Pick<
+        typeof userSettings.$inferSelect,
+        "defaultAudioProfileId" | "defaultMailProfileId"
+    > | null;
+    profile: Pick<
+        StoredProfile,
+        "channel" | "ownerUserId" | "scope" | "isDefault"
+    >;
+}
+
+async function applyOrganizationFallbackForProfileRemoval(
+    executor: ProfileRemovalExecutor,
+    input: ProfileRemovalFallbackInput,
+): Promise<void> {
+    if (input.profile.scope === "organization" && input.profile.isDefault) {
+        throw new DefaultProfileArchiveError();
+    }
+    const pointerId = pointerFromSettings(
+        input.settings,
+        input.profile.channel,
+    );
+    const switchesToOrganization =
+        input.profile.scope === "personal" &&
+        (pointerId === input.profileId ||
+            (pointerId === null && input.profile.isDefault));
+    if (!switchesToOrganization) return;
+
+    let organizationDefault:
+        | Pick<StoredProfile, "id" | "ownerUserId" | "scope">
+        | undefined;
+    if (input.organizationAvailable && input.organizationUserId) {
+        [organizationDefault] = await executor
+            .select({
+                id: processingProfiles.id,
+                ownerUserId: processingProfiles.ownerUserId,
+                scope: processingProfiles.scope,
+            })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(
+                        processingProfiles.ownerUserId,
+                        input.organizationUserId,
+                    ),
+                    eq(processingProfiles.scope, "organization"),
+                    eq(processingProfiles.channel, input.profile.channel),
+                    eq(processingProfiles.isDefault, true),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            )
+            .for("update")
+            .limit(1);
+    }
+    if (
+        !organizationDefault ||
+        !(await mayUseProfile(input.actorUserId, organizationDefault))
+    ) {
+        throw new DefaultProfileArchiveError();
+    }
+    await executor
+        .update(processingProfiles)
+        .set({ isDefault: false })
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.channel, input.profile.channel),
+                eq(processingProfiles.scope, "personal"),
+                eq(processingProfiles.isDefault, true),
+            ),
+        );
+    if (input.profile.channel === "audio") {
+        await executor
+            .update(userSettings)
+            .set({
+                defaultAudioProfileId: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(userSettings.userId, input.ownerUserId),
+                    eq(userSettings.defaultAudioProfileId, input.profileId),
+                ),
+            );
+        return;
+    }
+    await executor
+        .update(userSettings)
+        .set({
+            defaultMailProfileId: null,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(userSettings.userId, input.ownerUserId),
+                eq(userSettings.defaultMailProfileId, input.profileId),
+            ),
+        );
+}
+
+async function profileHistoryReferences(
+    executor: ProfileQueryExecutor,
+    ownerUserId: string,
+    profileId: string,
+): Promise<boolean> {
+    const revisions = await executor
+        .select({ id: processingProfileRevisions.id })
+        .from(processingProfileRevisions)
+        .innerJoin(
+            processingProfiles,
+            and(
+                eq(processingProfiles.id, processingProfileRevisions.profileId),
+                eq(processingProfiles.ownerUserId, ownerUserId),
+            ),
+        )
+        .where(eq(processingProfileRevisions.profileId, profileId));
+    const revisionIds = revisions.map(({ id }) => id);
+    const itemProfileReference =
+        revisionIds.length > 0
+            ? or(
+                  eq(itemProcessing.profileId, profileId),
+                  inArray(itemProcessing.profileRevisionId, revisionIds),
+              )
+            : eq(itemProcessing.profileId, profileId);
+    const item = await executor
+        .select({ id: itemProcessing.itemId })
+        .from(itemProcessing)
+        .where(itemProfileReference)
+        .limit(1);
+    if (item.length > 0) return true;
+    if (revisionIds.length === 0) return false;
+    const [transcription, learn, enhancement, job] = await Promise.all([
+        executor
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(inArray(transcriptions.profileRevisionId, revisionIds))
+            .limit(1),
+        executor
+            .select({ id: learnRuns.id })
+            .from(learnRuns)
+            .where(inArray(learnRuns.profileRevisionId, revisionIds))
+            .limit(1),
+        executor
+            .select({ id: aiEnhancements.id })
+            .from(aiEnhancements)
+            .where(inArray(aiEnhancements.profileRevisionId, revisionIds))
+            .limit(1),
+        executor
+            .select({ id: asyncJobs.id })
+            .from(asyncJobs)
+            .where(
+                and(
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                    inArray(
+                        sql<string>`${asyncJobs.payload} ->> 'profileRevisionId'`,
+                        revisionIds,
+                    ),
+                ),
+            )
+            .limit(1),
+    ]);
+    return (
+        transcription.length > 0 ||
+        learn.length > 0 ||
+        enhancement.length > 0 ||
+        job.length > 0
+    );
+}
+
+/**
+ * Report whether deleting an owner-scoped personal profile preserves it as
+ * archived history. Once ownership establishes its opaque profile and revision
+ * IDs, references are checked across every history owner without reading data.
+ */
+export async function profileDeleteDisposition(
+    ownerUserId: string,
+    profileId: string,
+): Promise<ProfileDeleteDisposition | null> {
+    const [profile] = await db
+        .select({ id: processingProfiles.id, scope: processingProfiles.scope })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, ownerUserId),
+                eq(processingProfiles.id, profileId),
+                isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!profile || profile.scope !== "personal") return null;
+    const [allProfiles, referenced] = await Promise.all([
+        db
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, ownerUserId)),
+        profileHistoryReferences(db, ownerUserId, profileId),
+    ]);
+    return referenced || allProfiles.length === 1 ? "archive" : "delete";
+}
+
+/** Count member default pointers that refer to one Organization profile. */
+export async function profileMemberDefaultCount(
+    ownerUserId: string,
+    profileId: string,
+): Promise<number | null> {
+    const [profile] = await db
+        .select({ id: processingProfiles.id })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, ownerUserId),
+                eq(processingProfiles.id, profileId),
+                eq(processingProfiles.scope, "organization"),
+                isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!profile) return null;
+    const [result] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(userSettings)
+        .where(
+            and(
+                sql`${userSettings.userId} <> ${ownerUserId}`,
+                or(
+                    eq(userSettings.defaultAudioProfileId, profileId),
+                    eq(userSettings.defaultMailProfileId, profileId),
+                ),
+            ),
+        );
+    return Number(result?.count ?? 0);
+}
+
+export interface DeletePersonalProfileResult {
+    disposition: ProfileDeleteDisposition;
+}
+
+/** Delete an unused personal profile or archive it when history must survive. */
+export async function deletePersonalProfile(
+    input: ArchiveProfileInput,
+): Promise<DeletePersonalProfileResult | null> {
+    const [current] = await db
+        .select({
+            ownerUserId: processingProfiles.ownerUserId,
+            scope: processingProfiles.scope,
+        })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.id, input.profileId),
+                isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!current) return null;
+    await assertEditAccess(input.actor, current);
+    if (current.scope !== "personal") throw new ProfilePermissionError();
+    const organizationUserId = await getOrgUserId();
+    const organizationAvailable =
+        organizationUserId !== null &&
+        organizationUserId !== input.ownerUserId &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(input.actor.actorId));
+    if (organizationAvailable && organizationUserId) {
+        await ensureProfiles(organizationUserId);
+    }
+
+    return db.transaction(async (tx) => {
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId })
+            .onConflictDoNothing({ target: userSettings.userId });
+        const [settings] = await tx
+            .select({
+                id: userSettings.id,
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+                defaultMailProfileId: userSettings.defaultMailProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, input.ownerUserId))
+            .for("update")
+            .limit(1);
+        const [locked] = await tx
+            .select({
+                channel: processingProfiles.channel,
+                ownerUserId: processingProfiles.ownerUserId,
+                scope: processingProfiles.scope,
+                isDefault: processingProfiles.isDefault,
+            })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    eq(processingProfiles.id, input.profileId),
+                    eq(processingProfiles.scope, "personal"),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!locked) return null;
+        await assertEditAccess(input.actor, locked);
+        await applyOrganizationFallbackForProfileRemoval(tx, {
+            ownerUserId: input.ownerUserId,
+            profileId: input.profileId,
+            actorUserId: input.actor.actorId,
+            organizationUserId,
+            organizationAvailable,
+            settings: settings ?? null,
+            profile: locked,
+        });
+        const actualDisposition = await profileHistoryReferences(
+            tx,
+            input.ownerUserId,
+            input.profileId,
+        );
+        const [allProfiles] = await tx
+            .select({ count: sql<number>`count(*)` })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, input.ownerUserId));
+        const lockedDisposition =
+            actualDisposition || Number(allProfiles?.count ?? 0) === 1
+                ? "archive"
+                : "delete";
+        const folders = await tx
+            .select({ id: folderDefaultProfiles.folderId })
+            .from(folderDefaultProfiles)
+            .innerJoin(
+                recordingFolders,
+                and(
+                    eq(recordingFolders.id, folderDefaultProfiles.folderId),
+                    eq(recordingFolders.userId, input.ownerUserId),
+                ),
+            )
+            .where(eq(folderDefaultProfiles.profileId, input.profileId));
+        if (folders.length > 0) {
+            await tx
+                .update(folderDefaultProfiles)
+                .set({ profileId: null, manualOnly: false })
+                .where(
+                    and(
+                        inArray(
+                            folderDefaultProfiles.folderId,
+                            folders.map(({ id }) => id),
+                        ),
+                        eq(folderDefaultProfiles.profileId, input.profileId),
+                    ),
+                );
+        }
+        if (lockedDisposition === "archive") {
+            await tx
+                .update(processingProfiles)
+                .set({
+                    archivedAt: new Date(),
+                    isDefault: false,
+                    version: sql`${processingProfiles.version} + 1`,
+                    updatedBy: input.actor.actorId,
+                    updatedAt: new Date(),
+                })
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.id, input.profileId),
+                    ),
+                );
+        } else {
+            await tx
+                .delete(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.id, input.profileId),
+                    ),
+                );
+        }
+        return { disposition: lockedDisposition };
+    });
+}
+
 export interface RestoreProfileInput {
     ownerUserId: string;
     profileId: string;
@@ -534,34 +1123,186 @@ export interface RestoreProfileInput {
 
 export interface SetDefaultProfileInput {
     ownerUserId: string;
-    profileId: string;
+    profileId: string | null;
+    channel?: ProfileChannel;
     actor: ActorContext;
 }
 
-/** Atomically replace an owner's default profile for one channel. */
+/** Atomically write a member or Organization channel default and its legacy mirror. */
 export async function setDefaultProfile(
     input: SetDefaultProfileInput,
 ): Promise<boolean> {
+    if (input.actor.kind !== "user") throw new ProfilePermissionError();
+    const organizationUserId = await getOrgUserId();
     return db.transaction(async (tx) => {
-        const profiles = await tx
-            .select()
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId })
+            .onConflictDoNothing({ target: userSettings.userId });
+        await tx
+            .select({ id: userSettings.id })
+            .from(userSettings)
+            .where(eq(userSettings.userId, input.ownerUserId))
+            .for("update");
+
+        let channel: ProfileChannel;
+        let lockedTarget:
+            | Pick<StoredProfile, "id" | "ownerUserId" | "scope" | "channel">
+            | undefined;
+        if (input.profileId) {
+            const ownerCondition = organizationUserId
+                ? or(
+                      eq(processingProfiles.ownerUserId, input.ownerUserId),
+                      eq(processingProfiles.ownerUserId, organizationUserId),
+                  )
+                : eq(processingProfiles.ownerUserId, input.ownerUserId);
+            [lockedTarget] = await tx
+                .select({
+                    id: processingProfiles.id,
+                    ownerUserId: processingProfiles.ownerUserId,
+                    scope: processingProfiles.scope,
+                    channel: processingProfiles.channel,
+                })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        ownerCondition,
+                        eq(processingProfiles.id, input.profileId),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!lockedTarget) {
+                throw new ProfilePermissionError();
+            }
+            const isOwned = lockedTarget.ownerUserId === input.ownerUserId;
+            const isOrganization =
+                lockedTarget.ownerUserId === organizationUserId &&
+                lockedTarget.scope === "organization";
+            if (!isOwned && !isOrganization) {
+                throw new ProfilePermissionError();
+            }
+            if (input.actor.actorId !== input.ownerUserId) {
+                if (
+                    organizationUserId !== input.ownerUserId ||
+                    lockedTarget.scope !== "organization"
+                ) {
+                    throw new ProfilePermissionError();
+                }
+                await assertEditAccess(input.actor, lockedTarget);
+            }
+            if (!(await mayUseProfile(input.actor.actorId, lockedTarget))) {
+                throw new ProfilePermissionError();
+            }
+            if (input.channel && input.channel !== lockedTarget.channel) {
+                throw new ProfilePermissionError();
+            }
+            channel = lockedTarget.channel;
+        } else {
+            if (
+                input.actor.actorId !== input.ownerUserId ||
+                !input.channel ||
+                !organizationUserId ||
+                organizationUserId === input.ownerUserId
+            ) {
+                throw new ProfilePermissionError();
+            }
+            channel = input.channel;
+            const [organizationDefault] = await tx
+                .select({
+                    id: processingProfiles.id,
+                    ownerUserId: processingProfiles.ownerUserId,
+                    scope: processingProfiles.scope,
+                    channel: processingProfiles.channel,
+                })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, organizationUserId),
+                        eq(processingProfiles.scope, "organization"),
+                        eq(processingProfiles.channel, channel),
+                        eq(processingProfiles.isDefault, true),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (
+                !organizationDefault ||
+                !(await mayUseProfile(input.actor.actorId, organizationDefault))
+            ) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Organization default profile is unavailable",
+                    404,
+                );
+            }
+        }
+        await tx
+            .select({ id: processingProfiles.id })
             .from(processingProfiles)
             .where(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
-                    isNull(processingProfiles.archivedAt),
+                    eq(processingProfiles.channel, channel),
                 ),
             )
             .orderBy(processingProfiles.id)
             .for("update");
-        const target = profiles.find(
-            (profile) => profile.id === input.profileId,
-        );
-        if (!target) return false;
-        await assertEditAccess(input.actor, target);
-        if (target.isDefault) return true;
-
         const now = new Date();
+        const organizationAccount = organizationUserId === input.ownerUserId;
+        if (organizationAccount) {
+            if (
+                !lockedTarget ||
+                lockedTarget.ownerUserId !== input.ownerUserId ||
+                lockedTarget.scope !== "organization"
+            ) {
+                throw new ProfilePermissionError();
+            }
+            await assertEditAccess(input.actor, lockedTarget);
+            await tx
+                .update(processingProfiles)
+                .set({
+                    isDefault: false,
+                    version: sql`${processingProfiles.version} + 1`,
+                    updatedBy: input.actor.actorId,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.channel, channel),
+                        eq(processingProfiles.isDefault, true),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                );
+            const changed = await tx
+                .update(processingProfiles)
+                .set({
+                    isDefault: true,
+                    version: sql`${processingProfiles.version} + 1`,
+                    updatedBy: input.actor.actorId,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.id, lockedTarget.id),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .returning({ id: processingProfiles.id });
+            if (changed.length === 0) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+            return true;
+        }
+
         await tx
             .update(processingProfiles)
             .set({
@@ -573,28 +1314,55 @@ export async function setDefaultProfile(
             .where(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
-                    eq(processingProfiles.channel, target.channel),
+                    eq(processingProfiles.scope, "personal"),
+                    eq(processingProfiles.channel, channel),
                     eq(processingProfiles.isDefault, true),
                     isNull(processingProfiles.archivedAt),
                 ),
             );
-        const changed = await tx
-            .update(processingProfiles)
-            .set({
-                isDefault: true,
-                version: sql`${processingProfiles.version} + 1`,
-                updatedBy: input.actor.actorId,
-                updatedAt: now,
-            })
-            .where(
-                and(
-                    eq(processingProfiles.ownerUserId, input.ownerUserId),
-                    eq(processingProfiles.id, input.profileId),
-                    isNull(processingProfiles.archivedAt),
-                ),
-            )
-            .returning({ id: processingProfiles.id });
-        return changed.length > 0;
+
+        let pointerId: string | null = null;
+        if (lockedTarget?.scope === "personal") {
+            const changed = await tx
+                .update(processingProfiles)
+                .set({
+                    isDefault: true,
+                    version: sql`${processingProfiles.version} + 1`,
+                    updatedBy: input.actor.actorId,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.id, lockedTarget.id),
+                        eq(processingProfiles.channel, channel),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .returning({ id: processingProfiles.id });
+            if (changed.length === 0) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+        } else if (lockedTarget) {
+            pointerId = lockedTarget.id;
+        }
+
+        const pointerUpdate =
+            channel === "audio"
+                ? { defaultAudioProfileId: pointerId, updatedAt: now }
+                : { defaultMailProfileId: pointerId, updatedAt: now };
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId, ...pointerUpdate })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: pointerUpdate,
+            });
+        return true;
     });
 }
 
@@ -602,9 +1370,51 @@ export async function setDefaultProfile(
 export async function archiveProfile(
     input: ArchiveProfileInput,
 ): Promise<boolean> {
+    const [candidate] = await db
+        .select({
+            ownerUserId: processingProfiles.ownerUserId,
+            scope: processingProfiles.scope,
+        })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.id, input.profileId),
+                isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!candidate) return false;
+    await assertEditAccess(input.actor, candidate);
+    const organizationUserId = await getOrgUserId();
+    const organizationAvailable =
+        candidate.scope === "personal" &&
+        organizationUserId !== null &&
+        organizationUserId !== input.ownerUserId &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(input.actor.actorId));
+    if (organizationAvailable && organizationUserId) {
+        await ensureProfiles(organizationUserId);
+    }
+
     return db.transaction(async (tx) => {
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId })
+            .onConflictDoNothing({ target: userSettings.userId });
+        const [settings] = await tx
+            .select({
+                id: userSettings.id,
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+                defaultMailProfileId: userSettings.defaultMailProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, input.ownerUserId))
+            .for("update")
+            .limit(1);
         const [current] = await tx
             .select({
+                channel: processingProfiles.channel,
                 ownerUserId: processingProfiles.ownerUserId,
                 scope: processingProfiles.scope,
                 isDefault: processingProfiles.isDefault,
@@ -621,7 +1431,15 @@ export async function archiveProfile(
             .limit(1);
         if (!current) return false;
         await assertEditAccess(input.actor, current);
-        if (current.isDefault) throw new DefaultProfileArchiveError();
+        await applyOrganizationFallbackForProfileRemoval(tx, {
+            ownerUserId: input.ownerUserId,
+            profileId: input.profileId,
+            actorUserId: input.actor.actorId,
+            organizationUserId,
+            organizationAvailable,
+            settings: settings ?? null,
+            profile: current,
+        });
         const archived = await tx
             .update(processingProfiles)
             .set({

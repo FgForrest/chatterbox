@@ -44,7 +44,9 @@ function queueTransaction(preferences: Record<string, unknown> | null) {
     const readSettings = vi.fn().mockReturnValue({
         limit: vi
             .fn()
-            .mockResolvedValue(preferences === null ? [] : [{ preferences }]),
+            .mockResolvedValue(
+                preferences === null ? [] : [{ defaults: preferences }],
+            ),
     });
     const values = vi.fn().mockReturnValue({
         onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
@@ -130,12 +132,12 @@ describe("Topics provider preference route", () => {
 
         expect(response.status).toBe(200);
         expect(tx.lock).toHaveBeenCalledWith("update");
-        expect(tx.set).toHaveBeenCalledWith({
+        expect(tx.values).toHaveBeenCalledWith({
+            userId: "user-1",
             defaultProviders: {
                 summary: "cred-summary",
                 learn: "cred-learn",
             },
-            updatedAt: expect.any(Date),
         });
     });
 });

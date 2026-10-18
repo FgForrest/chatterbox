@@ -243,15 +243,24 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ]),
             )
             .mockReturnValueOnce(selectRows([]))
-            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {
                         id: "creds-1",
+                        userId,
                         provider: "openai",
                         apiKey: "encrypted-key",
                         baseUrl: null,
                         defaultModel: "whisper-1",
+                        isDefaultTranscription: true,
+                        isDefaultEnhancement: false,
+                        isDefaultLearn: false,
+                        inputUsdPerMillion: null,
+                        outputUsdPerMillion: null,
+                        audioUsdPerHour: null,
+                        disabledAt: null,
+                        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                     },
                 ]),
             )
@@ -335,14 +344,24 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 selectRows([
                     {
                         id: "creds-1",
+                        userId,
                         provider: "openai",
                         apiKey: "encrypted-key",
                         baseUrl: null,
                         defaultModel: "gpt-4o-mini",
+                        isDefaultTranscription: false,
                         isDefaultEnhancement: true,
+                        isDefaultLearn: false,
+                        inputUsdPerMillion: null,
+                        outputUsdPerMillion: null,
+                        audioUsdPerHour: null,
+                        disabledAt: null,
+                        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                     },
                 ]),
-            );
+            )
+            .mockReturnValueOnce(selectRows([]));
 
         const txInsertValues = vi.fn().mockResolvedValue(undefined);
         const recordingBumpSet = vi.fn().mockReturnValue({
@@ -407,14 +426,24 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 selectRows([
                     {
                         id: "creds-1",
+                        userId,
                         provider: "openai",
                         apiKey: "encrypted-key",
                         baseUrl: null,
                         defaultModel: "gpt-4o-mini",
+                        isDefaultTranscription: false,
                         isDefaultEnhancement: true,
+                        isDefaultLearn: false,
+                        inputUsdPerMillion: null,
+                        outputUsdPerMillion: null,
+                        audioUsdPerHour: null,
+                        disabledAt: null,
+                        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                     },
                 ]),
-            );
+            )
+            .mockReturnValueOnce(selectRows([]));
 
         let enhancementUpdateWhere: unknown;
         const enhancementUpdateSet = vi.fn().mockReturnValue({

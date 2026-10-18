@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+const { setDefaultProvider, loadDefaultProviderPointers } = vi.hoisted(() => ({
+    setDefaultProvider: vi.fn().mockResolvedValue(undefined),
+    loadDefaultProviderPointers: vi.fn().mockResolvedValue({
+        transcription: null,
+        summary: null,
+        learn: null,
+        topics: null,
+        title: null,
+    }),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false },
 }));
@@ -30,6 +41,10 @@ vi.mock("@/lib/ai/list-providers", () => ({
 
 vi.mock("@/lib/ai/set-default-transcription", () => ({
     setDefaultTranscriptionProvider: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/ai/default-provider", () => ({
+    setDefaultProvider,
+    loadDefaultProviderPointers,
 }));
 
 // Pulled in transitively by `included-provider`; both reach the DB.
@@ -163,6 +178,31 @@ describe("enhancement-only providers cannot become the transcription default", (
             expect(body.details).toEqual({ field: "isDefaultTranscription" });
             expect(db.transaction).not.toHaveBeenCalled();
         });
+
+        it("refuses disabling and assigning a role in the same request", async () => {
+            queueSelect([
+                {
+                    id: "cred-1",
+                    userId: "user-1",
+                    provider: "OpenAI",
+                    disabledAt: null,
+                    isDefaultTranscription: false,
+                    isDefaultEnhancement: false,
+                },
+            ]);
+
+            const response = await updateProvider(
+                jsonRequest(
+                    { disabled: true, isDefaultTranscription: true },
+                    "PUT",
+                ),
+                idParams(),
+            );
+
+            expect(response.status).toBe(409);
+            expect(db.transaction).not.toHaveBeenCalled();
+            expect(setDefaultTranscriptionProvider).not.toHaveBeenCalled();
+        });
     });
 
     describe("PUT /api/settings/ai/providers/default-transcription", () => {
@@ -234,32 +274,19 @@ describe("enhancement-only providers cannot become the transcription default", (
             expect(response.status).toBe(404);
         });
 
-        it("clears the previous default and sets the new one in one transaction", async () => {
+        it("writes the summary pointer through the shared helper", async () => {
             queueSelect([{ id: "cred-1", provider: "Claude Code" }]);
-
-            const updates: unknown[] = [];
-            const tx = {
-                update: vi.fn().mockReturnValue({
-                    set: vi.fn((values: unknown) => {
-                        updates.push(values);
-                        return { where: vi.fn().mockResolvedValue(undefined) };
-                    }),
-                }),
-            };
-            (db.transaction as Mock).mockImplementationOnce(
-                async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
-            );
 
             const response = await setDefaultEnhancement(
                 jsonRequest({ providerId: "cred-1" }, "PUT"),
             );
 
             expect(response.status).toBe(200);
-            // Clear-then-set, and both inside the same transaction: a
-            // failure between them would leave no default at all.
-            expect(updates).toHaveLength(2);
-            expect(updates[0]).toMatchObject({ isDefaultEnhancement: false });
-            expect(updates[1]).toMatchObject({ isDefaultEnhancement: true });
+            expect(setDefaultProvider).toHaveBeenCalledWith(
+                "user-1",
+                "summary",
+                "cred-1",
+            );
         });
     });
 });
@@ -300,46 +327,22 @@ describe("PUT / DELETE /providers/default-learn", () => {
         expect(response.status).toBe(404);
     });
 
-    it("clears the previous one and marks the new one in one transaction", async () => {
+    it("writes the Learn pointer through the shared helper", async () => {
         queueSelect([{ id: "cred-1", provider: "Claude Code" }]);
-        const updates: unknown[] = [];
-        const locked = vi.fn().mockResolvedValue([{ id: "user-1" }]);
-        const tx = {
-            select: vi.fn().mockReturnValue({
-                from: vi.fn().mockReturnValue({
-                    where: vi.fn().mockReturnValue({ for: locked }),
-                }),
-            }),
-            update: vi.fn().mockReturnValue({
-                set: vi.fn((values: unknown) => {
-                    updates.push(values);
-                    return { where: vi.fn().mockResolvedValue(undefined) };
-                }),
-            }),
-        };
-        (db.transaction as Mock).mockImplementationOnce(
-            async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
-        );
 
         const response = await setDefaultLearn(
             jsonRequest({ providerId: "cred-1" }, "PUT"),
         );
 
         expect(response.status).toBe(200);
-        // Serialized per user before anything is cleared.
-        expect(locked).toHaveBeenCalledWith("update");
-        expect(updates).toEqual([
-            { isDefaultLearn: false },
-            expect.objectContaining({ isDefaultLearn: true }),
-        ]);
+        expect(setDefaultProvider).toHaveBeenCalledWith(
+            "user-1",
+            "learn",
+            "cred-1",
+        );
     });
 
     it("unmarks it, so Learn follows the enhancement default again", async () => {
-        const set = vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue(undefined),
-        });
-        (db.update as Mock).mockReturnValueOnce({ set });
-
         const response = await clearDefaultLearn(
             new Request(
                 "https://app.example.com/api/settings/ai/providers/default-learn",
@@ -348,6 +351,10 @@ describe("PUT / DELETE /providers/default-learn", () => {
         );
 
         expect(response.status).toBe(200);
-        expect(set).toHaveBeenCalledWith({ isDefaultLearn: false });
+        expect(setDefaultProvider).toHaveBeenCalledWith(
+            "user-1",
+            "learn",
+            null,
+        );
     });
 });

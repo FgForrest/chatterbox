@@ -10,6 +10,16 @@ export interface ProfileAccessSubject {
     scope: ProfileScope;
 }
 
+/** Whether a user may use profiles from the Organization scope. */
+export async function mayUseOrganizationProfiles(
+    userId: string,
+): Promise<boolean> {
+    if (!isOrgScopeEnabled()) return false;
+    if (!isIdpAuthorization()) return true;
+    const access = await holderAccess(userId);
+    return access.ok && access.capabilities.has("use");
+}
+
 /** Whether a request actor may edit a profile. */
 export async function mayEditProfile(
     actor: ActorContext,
@@ -29,8 +39,5 @@ export async function mayUseProfile(
     if (profile.scope === "personal") {
         return actorUserId === profile.ownerUserId;
     }
-    if (!isOrgScopeEnabled()) return false;
-    if (!isIdpAuthorization()) return true;
-    const access = await holderAccess(actorUserId);
-    return access.ok && access.capabilities.has("use");
+    return mayUseOrganizationProfiles(actorUserId);
 }

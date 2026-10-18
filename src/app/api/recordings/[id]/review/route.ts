@@ -5,6 +5,7 @@ import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { loadReview, requestedReviewSource } from "@/lib/learn/review";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -20,11 +21,26 @@ type IdContext = { params: Promise<{ id: string }> };
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { access, actorUserId } = await authorizeLearn(request, id);
+    let available = false;
+    let availabilityReason: "profile_unavailable" | undefined;
+    try {
+        const profile = await resolveItemProfile(
+            id,
+            access.view,
+            access.ownerUserId,
+            actorUserId,
+        );
+        available = await isLearnAvailableFor(
+            actorUserId,
+            profile.settings.steps.learn.provider,
+        );
+    } catch {
+        availabilityReason = "profile_unavailable";
+    }
     return NextResponse.json({
         ...(await loadReview(access, requestedReviewSource(request))),
-        // Whether this actor can run Learn at all (self-hosted, with a chat
-        // provider): the page offers it only then.
-        available: await isLearnAvailableFor(actorUserId),
+        available,
+        ...(availabilityReason ? { availabilityReason } : {}),
     });
 });
 
