@@ -47,7 +47,7 @@ export const CATALOG_SCHEMA_VERSION = 1;
 
 /** Human-readable purpose of each grant, for the export and the admin UI. */
 export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
-    use: "Use Chatterbox",
+    use: "Use the application",
     "org.curate": "Curate the Organization's content",
     "access.manage": "Manage who has access",
     "knowledge:read": "MCP: read knowledge",

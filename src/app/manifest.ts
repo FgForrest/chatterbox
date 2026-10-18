@@ -1,9 +1,12 @@
 import type { MetadataRoute } from "next";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { defaultLocale } from "@/lib/i18n/config";
 
 export default function manifest(): MetadataRoute.Manifest {
+    const name = deploymentProductName(defaultLocale);
     return {
-        name: "Chatterbox (Klepna)",
-        short_name: "Chatterbox",
+        name,
+        short_name: name,
         description:
             "Open-source AI transcription for the voice recorder you already own.",
         start_url: "/",

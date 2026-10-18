@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,6 +51,7 @@ export function PlaudAccountSection({
     onReconnected,
 }: PlaudAccountSectionProps = {}) {
     const i18n = useExtracted();
+    const name = useProductName();
     const localizedRegionLabel = (
         server: PlaudServerKey | undefined,
         apiBase?: string,
@@ -181,7 +183,8 @@ export function PlaudAccountSection({
                 />
                 <p className="text-sm text-muted-foreground mt-1">
                     {i18n(
-                        "The Plaud account Chatterbox pulls recordings from. Switching accounts keeps your existing recordings; only future syncs change.",
+                        "The Plaud account {name} pulls recordings from. Switching accounts keeps your existing recordings; only future syncs change.",
+                        { name },
                     )}
                 </p>
             </div>

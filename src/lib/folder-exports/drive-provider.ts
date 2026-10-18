@@ -1,5 +1,7 @@
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { productName } from "@/lib/brand";
+import { defaultLocale } from "@/lib/i18n/config";
 import {
     DRIVE_FOLDER_MIME,
     type DriveClient,
@@ -18,8 +20,14 @@ import type {
 } from "./types";
 
 /** Drive description of every folder an export creates. */
-export const MANAGED_FOLDER_DESCRIPTION =
-    "Managed by Chatterbox. Content you add here may be removed.";
+export function managedFolderDescription(name: string): string {
+    return `Managed by ${name}. Content you add here may be removed.`;
+}
+
+/** Drive description of every folder an export creates. */
+export const MANAGED_FOLDER_DESCRIPTION = managedFolderDescription(
+    productName(defaultLocale),
+);
 /** `appProperties` key naming the export that created an item. */
 export const EXPORT_PROPERTY = "riffadoExport";
 /** `appProperties` key holding the digest of a file's content. */
@@ -79,6 +87,7 @@ export interface DriveExportProviderOptions {
     rootFolderId: string;
     client: DriveClient;
     nodes: DriveNodeStore;
+    managedFolderDescription?: string;
 }
 
 /**
@@ -97,6 +106,7 @@ export class DriveExportProvider implements ExportProvider {
     private readonly rootId: string;
     private readonly client: DriveClient;
     private readonly nodes: DriveNodeStore;
+    private readonly managedFolderDescription: string;
     private rootVerified = false;
     /** Everything tagged with the export; loaded once a plan starts. */
     private snapshot: Map<string, DriveItem> | null = null;
@@ -108,6 +118,8 @@ export class DriveExportProvider implements ExportProvider {
         this.rootId = options.rootFolderId;
         this.client = options.client;
         this.nodes = options.nodes;
+        this.managedFolderDescription =
+            options.managedFolderDescription ?? MANAGED_FOLDER_DESCRIPTION;
     }
 
     private get tag() {
@@ -241,7 +253,7 @@ export class DriveExportProvider implements ExportProvider {
             item = await this.client.createFolder({
                 name,
                 parentId: parent.id,
-                description: MANAGED_FOLDER_DESCRIPTION,
+                description: this.managedFolderDescription,
                 appProperties: { [EXPORT_PROPERTY]: this.exportId },
             });
             created = true;

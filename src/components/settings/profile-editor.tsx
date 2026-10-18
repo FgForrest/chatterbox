@@ -3,6 +3,7 @@
 import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useHostedDeployment } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -818,6 +819,7 @@ function BasicEditor({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const isHosted = useHostedDeployment();
     const stepLabels = useStepLabels();
     const settings = profile.settings;
     const textSteps: CommonStepName[] = [
@@ -867,9 +869,13 @@ function BasicEditor({
                         }
                     />
                     <p className="text-xs text-muted-foreground">
-                        {i18n(
-                            "Default uses your default transcription provider, then the Organization default, then an included provider when available.",
-                        )}
+                        {isHosted
+                            ? i18n(
+                                  "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+                              )
+                            : i18n(
+                                  "Default uses your default transcription provider, then the Organization default.",
+                              )}
                     </p>
                 </div>
             )}

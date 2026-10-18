@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { deploymentProductName } from "@/lib/deployment-brand";
+import { defaultLocale } from "@/lib/i18n/config";
 import { isOgCardSlug } from "@/lib/seo/og-cards";
 
-const SITE_NAME = "Riffado";
+const SITE_NAME = deploymentProductName(defaultLocale);
 const TWITTER_HANDLE = "@riffadohq";
 const HOME_CARD = "/og-home.png";
 

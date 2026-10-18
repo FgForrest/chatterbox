@@ -4,6 +4,7 @@ import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
+import { useProductName } from "@/components/product-name-provider";
 import { signIn } from "@/lib/auth-client";
 import {
     SSO_ACCESS_DENIED_ERROR,
@@ -28,26 +29,31 @@ interface SsoLoginProps {
  */
 export function SsoLogin({ providerName, error }: SsoLoginProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [isLoading, setIsLoading] = useState(false);
 
     const errorMessage = (code: string): string => {
         switch (code) {
             case "account_not_linked":
                 return i18n(
-                    "A Chatterbox account with this email already exists, but your identity provider has not verified the address. Ask your administrator to verify it.",
+                    "A {name} account with this email already exists, but your identity provider has not verified the address. Ask your administrator to verify it.",
+                    { name },
                 );
             case "unable_to_link_account":
             case SSO_ORG_ACCOUNT_ERROR:
                 return i18n(
-                    "This identity cannot sign in to Chatterbox. Ask your administrator.",
+                    "This identity cannot sign in to {name}. Ask your administrator.",
+                    { name },
                 );
             case "signup_disabled":
                 return i18n(
-                    "This Chatterbox instance does not accept new accounts. Ask your administrator.",
+                    "This {name} instance does not accept new accounts. Ask your administrator.",
+                    { name },
                 );
             case "email_is_missing":
                 return i18n(
-                    "Your identity provider did not share an email address. Ask your administrator to release it to Chatterbox.",
+                    "Your identity provider did not share an email address. Ask your administrator to release it to {name}.",
+                    { name },
                 );
             case "access_denied":
                 return i18n("Sign-in was cancelled at the identity provider.");

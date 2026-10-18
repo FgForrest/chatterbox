@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { LearnOutcomeLine } from "@/components/learn/review-parts";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -120,6 +121,7 @@ export function LearnResults({
     onRelearn?: (forget: boolean) => void;
 }) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [forget, setForget] = useState(false);
     const skipReason = useSkipReason();
     const failure = useLearnFailure();
@@ -183,8 +185,9 @@ export function LearnResults({
                     <div className="space-y-2 text-sm">
                         <p>
                             {i18n(
-                                "Learn names speakers, corrects misheard names and proposes facts about the people and things Chatterbox already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                "Learn names speakers, corrects misheard names and proposes facts about the people and things {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
                                 {
+                                    name,
                                     people: known.people,
                                     things: known.things,
                                 },

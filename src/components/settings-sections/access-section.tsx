@@ -5,6 +5,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,7 @@ function personLabel(
 export function AccessSection() {
     const i18n = useExtracted();
     const locale = useLocale();
+    const name = useProductName();
     const confirm = useConfirm();
     const [search, setSearch] = useState("");
     const [query, setQuery] = useState("");
@@ -97,7 +99,7 @@ export function AccessSection() {
     const capabilityName = (capability: Capability) => {
         switch (capability) {
             case "use":
-                return i18n("Access to Chatterbox");
+                return i18n("Access to {name}", { name });
             case "org.curate":
                 return i18n("Curates the Organization");
             case "access.manage":
@@ -150,7 +152,8 @@ export function AccessSection() {
             switch (body.code) {
                 case "CAPABILITY_REQUIRED":
                     return i18n(
-                        "You are not an administrator of access to Chatterbox.",
+                        "You are not an administrator of access to {name}.",
+                        { name },
                     );
                 case "PROVIDER_DENIED":
                     return i18n(
@@ -179,7 +182,7 @@ export function AccessSection() {
                     return body.error;
             }
         },
-        [i18n],
+        [i18n, name],
     );
 
     const loadList = useCallback(async () => {
@@ -314,7 +317,7 @@ export function AccessSection() {
     ) => {
         if (!grant && capability === "use") {
             await confirm({
-                title: i18n("Take away access to Chatterbox?"),
+                title: i18n("Take away access to {name}?", { name }),
                 description: i18n(
                     "{person} is signed out everywhere at once, and their API keys and recorder stop working until access is given back.",
                     { person: personLabel(current) },
@@ -374,7 +377,8 @@ export function AccessSection() {
                 title={i18n("Access")}
                 icon={ShieldCheck}
                 description={i18n(
-                    "Who may use Chatterbox, curate the Organization and manage access. The identity provider keeps these rights; changes here take effect there.",
+                    "Who may use {name}, curate the Organization and manage access. The identity provider keeps these rights; changes here take effect there.",
+                    { name },
                 )}
             />
 
@@ -565,7 +569,8 @@ export function AccessSection() {
                             detail.effective.length > 0 && (
                                 <p className="text-sm text-muted-foreground">
                                     {i18n(
-                                        "Without access to Chatterbox the other rights are kept but cannot be used.",
+                                        "Without access to {name} the other rights are kept but cannot be used.",
+                                        { name },
                                     )}
                                 </p>
                             )}
@@ -637,7 +642,8 @@ export function AccessSection() {
                                           : i18n("never"),
                                   })
                                 : i18n(
-                                      "Has not signed in to Chatterbox yet; the rights apply from the first sign-in.",
+                                      "Has not signed in to {name} yet; the rights apply from the first sign-in.",
+                                      { name },
                                   )}
                         </p>
                         {pendingRevocation && !detail.self && (

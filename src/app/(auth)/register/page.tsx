@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getExtracted } from "next-intl/server";
+import { getExtracted, getLocale } from "next-intl/server";
 import {
     HostedAuthChrome,
     SelfHostAuthChrome,
@@ -7,11 +7,13 @@ import {
 import { RegisterForm } from "@/components/auth/register-form";
 import { emailVerificationRequired } from "@/lib/auth";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import { isSsoEnabled } from "@/lib/sso/config";
 
 export default async function RegisterPage() {
-    const i18n = await getExtracted();
+    const [i18n, locale] = await Promise.all([getExtracted(), getLocale()]);
+    const name = deploymentProductName(locale);
     await redirectIfAuthenticated();
 
     // Per product decision: when registration is disabled, redirect to
@@ -41,7 +43,8 @@ export default async function RegisterPage() {
         <SelfHostAuthChrome
             title={i18n("Create your account")}
             subtitle={i18n(
-                "The first account on a new Chatterbox instance becomes the admin.",
+                "The first account on a new {name} instance becomes the admin.",
+                { name },
             )}
         >
             <RegisterForm

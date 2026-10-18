@@ -1,4 +1,6 @@
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
+import { defaultLocale } from "@/lib/i18n/config";
 import { DEFAULT_RECORDER_EXTENSION_ID } from "@/lib/recorder-extension/extension-id";
 import {
     isRecorderPlatformId,
@@ -9,8 +11,7 @@ import {
 
 export { DEFAULT_RECORDER_EXTENSION_ID };
 
-export const DEFAULT_RECORDER_NOTICE_TEXT =
-    "Meetings I record with Chatterbox are transcribed and summarized. I will inform the other participants before recording.";
+export const DEFAULT_RECORDER_NOTICE_TEXT = `Meetings I record with ${deploymentProductName(defaultLocale)} are transcribed and summarized. I will inform the other participants before recording.`;
 
 export interface RecorderServerConfig {
     extensionId: string;

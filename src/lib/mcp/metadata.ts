@@ -1,5 +1,7 @@
 import { MCP_PERMISSIONS } from "@/lib/authz/catalog";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
+import { defaultLocale } from "@/lib/i18n/config";
 import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
 
 const RESOURCE_PATH = "/api/mcp";
@@ -37,7 +39,7 @@ export async function protectedResourceMetadata(): Promise<Response> {
                 authorization_servers: [issuer],
                 scopes_supported: SUPPORTED_SCOPES,
                 bearer_methods_supported: ["header"],
-                resource_name: "Chatterbox",
+                resource_name: deploymentProductName(defaultLocale),
             },
             { headers: { "Cache-Control": "public, max-age=300" } },
         );

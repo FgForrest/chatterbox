@@ -3,6 +3,7 @@
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import {
     currentLocation,
@@ -25,6 +26,7 @@ export function GoogleConnectionPanel({
     returnTo = currentLocation,
 }: GoogleConnectionPanelProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [confirming, setConfirming] = useState(false);
     const [busy, setBusy] = useState(false);
 
@@ -88,8 +90,8 @@ export function GoogleConnectionPanel({
             {connection.status === "needs_reconnect" ? (
                 <p className="text-sm text-destructive">
                     {i18n(
-                        "Google no longer accepts Chatterbox's access to {email}. Exports to Google Drive are paused until you reconnect.",
-                        { email: connection.email },
+                        "Google no longer accepts {name}'s access to {email}. Exports to Google Drive are paused until you reconnect.",
+                        { name, email: connection.email },
                     )}
                 </p>
             ) : (

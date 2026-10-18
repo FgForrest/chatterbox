@@ -4,6 +4,7 @@ import { Check, Copy } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -145,6 +146,7 @@ function ConnectorPane({
     onUseToken,
 }: ConnectorPaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [isLoading, setIsLoading] = useState(false);
 
     const handleConnect = useCallback(async () => {
@@ -169,6 +171,7 @@ function ConnectorPane({
                 await toastApiError(res, {
                     fallback: "Failed to connect Plaud",
                     errorContext: "connect Plaud via connector extension",
+                    productName: name,
                 });
                 return;
             }
@@ -181,7 +184,7 @@ function ConnectorPane({
         } finally {
             setIsLoading(false);
         }
-    }, [onConnected, i18n]);
+    }, [onConnected, i18n, name]);
 
     if (!hasConnector) {
         return (
@@ -206,7 +209,8 @@ function ConnectorPane({
                 </Button>
                 <p className="text-xs text-muted-foreground/80 leading-relaxed">
                     {i18n(
-                        "Already installed? Reload this page so Chatterbox can detect it. Or use the",
+                        "Already installed? Reload this page so {name} can detect it. Or use the",
+                        { name },
                     )}{" "}
                     <button
                         type="button"
@@ -277,6 +281,7 @@ interface EmailCodePaneProps {
 
 function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [step, setStep] = useState<EmailStep>("email");
     const [email, setEmail] = useState("");
     const [code, setCode] = useState("");
@@ -315,6 +320,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
                 await toastApiError(res, {
                     fallback: "Failed to send code",
                     errorContext: "send Plaud verification code",
+                    productName: name,
                 });
                 return;
             }
@@ -333,7 +339,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [email, lastSentAt, i18n]);
+    }, [email, lastSentAt, i18n, name]);
 
     const handleVerify = useCallback(async () => {
         const trimmed = code.trim();
@@ -357,6 +363,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
                 await toastApiError(res, {
                     fallback: "Verification failed",
                     errorContext: "verify Plaud OTP code",
+                    productName: name,
                 });
                 return;
             }
@@ -371,7 +378,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [code, otpToken, apiBase, email, onConnected, i18n]);
+    }, [code, otpToken, apiBase, email, onConnected, i18n, name]);
 
     if (step === "email") {
         return (
@@ -579,6 +586,7 @@ interface PasteTokenPaneProps {
 
 function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const [token, setToken] = useState("");
     const [serverKey, setServerKey] =
         useState<PlaudServerKey>(DEFAULT_SERVER_KEY);
@@ -615,6 +623,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                 await toastApiError(res, {
                     fallback: "Failed to connect Plaud",
                     errorContext: "connect Plaud via pasted access token",
+                    productName: name,
                 });
                 return;
             }
@@ -629,7 +638,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
         } finally {
             setIsLoading(false);
         }
-    }, [token, apiBase, serverKey, onConnected, i18n]);
+    }, [token, apiBase, serverKey, onConnected, i18n, name]);
 
     return (
         <div className="space-y-4">

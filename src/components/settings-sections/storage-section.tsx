@@ -4,6 +4,7 @@ import { HardDrive } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { BreakdownBar } from "@/components/settings-sections/storage/breakdown-bar";
@@ -102,6 +103,7 @@ interface StorageUsage {
 
 export function StorageSection({ isHosted = false }: StorageSectionProps) {
     const i18n = useExtracted();
+    const name = useProductName();
     const retentionCopy = {
         remoteOriginal: {
             label: i18n("Remote original"),
@@ -112,13 +114,15 @@ export function StorageSection({ isHosted = false }: StorageSectionProps) {
         localAudio: {
             label: i18n("Local audio"),
             hint: i18n(
-                "Chatterbox's stored audio copy. It cannot be re-transcribed once both local and remote copies are gone.",
+                "The audio copy stored by {name}. It cannot be re-transcribed once both local and remote copies are gone.",
+                { name },
             ),
         },
         localTranscript: {
             label: i18n("Local transcript"),
             hint: i18n(
-                "Deleted from Chatterbox's database. It can be regenerated if audio is still available.",
+                "Deleted from the {name} database. It can be regenerated if audio is still available.",
+                { name },
             ),
         },
         localSummary: {
@@ -395,7 +399,8 @@ export function StorageSection({ isHosted = false }: StorageSectionProps) {
             <SettingsSectionHeader
                 title={i18n("Storage")}
                 description={i18n(
-                    "Where Chatterbox keeps the audio files behind your recordings.",
+                    "Where {name} keeps the audio files behind your recordings.",
+                    { name },
                 )}
                 icon={HardDrive}
             />

@@ -5,11 +5,12 @@ import { getExtracted, getLocale, getMessages } from "next-intl/server";
 import { AppProgress } from "@/components/app-progress";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { PostHogAnalytics } from "@/components/posthog-analytics";
+import { ProductNameProvider } from "@/components/product-name-provider";
 import { RybbitAnalytics } from "@/components/rybbit-analytics";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import "./globals.css";
 
@@ -25,7 +26,7 @@ const geistMono = Geist_Mono({
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getExtracted();
-    const name = productName(await getLocale());
+    const name = deploymentProductName(await getLocale());
     const title = t(
         "{name} — Open-source AI transcription for voice recorders",
         { name },
@@ -97,22 +98,23 @@ export default async function RootLayout({
                 className={`${geistSans.variable} ${geistMono.variable} antialiased`}
             >
                 <NextIntlClientProvider locale={locale} messages={messages}>
-                    <AppProgress>
-                        <ThemeProvider
-                            attribute="class"
-                            defaultTheme="system"
-                            enableSystem
-                            disableTransitionOnChange
-                        >
-                            {/*
+                    <ProductNameProvider isHosted={env.IS_HOSTED}>
+                        <AppProgress>
+                            <ThemeProvider
+                                attribute="class"
+                                defaultTheme="system"
+                                enableSystem
+                                disableTransitionOnChange
+                            >
+                                {/*
                           Tooltip provider wraps the app so any descendant
                           `<Tooltip>` works without a local provider. 200ms
                           delay is the shadcn default-ish: short enough to
                           feel responsive, long enough to avoid firing on
                           incidental mouseovers.
                         */}
-                            <TooltipProvider delayDuration={200}>
-                                {/*
+                                <TooltipProvider delayDuration={200}>
+                                    {/*
                               App-wide imperative confirm dialog. Any
                               client component can `useConfirm()` to get
                               a Promise-returning function for destructive
@@ -121,15 +123,16 @@ export default async function RootLayout({
                               One instance, one dialog node, consistent
                               look + pending-state handling.
                             */}
-                                <ConfirmDialogProvider>
-                                    {children}
-                                    <Toaster />
-                                </ConfirmDialogProvider>
-                            </TooltipProvider>
-                        </ThemeProvider>
-                        <RybbitAnalytics />
-                        <PostHogAnalytics />
-                    </AppProgress>
+                                    <ConfirmDialogProvider>
+                                        {children}
+                                        <Toaster />
+                                    </ConfirmDialogProvider>
+                                </TooltipProvider>
+                            </ThemeProvider>
+                            <RybbitAnalytics />
+                            <PostHogAnalytics />
+                        </AppProgress>
+                    </ProductNameProvider>
                 </NextIntlClientProvider>
             </body>
         </html>

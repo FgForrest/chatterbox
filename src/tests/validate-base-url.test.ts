@@ -1,8 +1,10 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
     HOSTED_LOCAL_BASE_URL_MESSAGE,
     validateAiBaseUrl,
 } from "@/lib/ai/validate-base-url";
+
+vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: true } }));
 
 describe("validateAiBaseUrl", () => {
     describe("self-host (isHosted=false)", () => {

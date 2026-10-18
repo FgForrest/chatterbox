@@ -29,6 +29,7 @@ describe("buildReportBugUrl", () => {
                 isHosted: true,
                 errorId: "err-2",
                 locale: "cs-CZ",
+                name: "Riffado",
             }),
         );
 
@@ -53,7 +54,13 @@ describe("buildReportBugMailto", () => {
     });
 
     it("addresses support on hosted", () => {
-        expect(buildReportBugMailto({ isHosted: true, locale: "en" })).toMatch(
+        expect(
+            buildReportBugMailto({
+                isHosted: true,
+                locale: "en",
+                name: "Riffado",
+            }),
+        ).toMatch(
             /^mailto:support@riffado\.com\?subject=Riffado%20bug%20report&body=/,
         );
     });

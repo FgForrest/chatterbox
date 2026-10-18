@@ -14,14 +14,14 @@ import {
     Sparkles,
     Video,
 } from "lucide-react";
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { MeetingRecorderSetup } from "@/components/meeting-recorder-setup";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useGoogleConnection } from "@/hooks/use-google-connection";
-import { productName } from "@/lib/brand";
 import type { MailSettingsView } from "@/lib/mail/views";
 
 function StepHeading({
@@ -56,7 +56,7 @@ function ConnectedLine({ children }: { children: React.ReactNode }) {
 /** Welcome step for the setup wizard. */
 export function OnboardingStepWelcome() {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     return (
         <StepHeading
             icon={Sparkles}
@@ -79,6 +79,7 @@ export function OnboardingStepPlaud({
     onConnected: () => void;
 }) {
     const i18n = useExtracted();
+    const name = useProductName();
     return (
         <div className="space-y-4">
             <StepHeading
@@ -86,7 +87,7 @@ export function OnboardingStepPlaud({
                 title={i18n("Connect your Plaud account")}
                 description={i18n(
                     "Bring recordings from your voice recorder into {name} automatically.",
-                    { name: productName(useLocale()) },
+                    { name },
                 )}
             />
             {hasPlaudConnection ? (
@@ -228,7 +229,7 @@ export function OnboardingStepRecorder({
     onConnected?: () => void;
 }) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     return (
         <div className="space-y-4">
             <StepHeading
@@ -257,7 +258,7 @@ export function OnboardingStepMail({
     onReady: (ready: boolean) => void;
 }) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     const [address, setAddress] = useState<string | null>(null);
     const [hasFolderAddresses, setHasFolderAddresses] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -360,7 +361,7 @@ export function OnboardingStepClaude({
     connectorUrl: string;
 }) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     const [copied, setCopied] = useState<"url" | "command" | null>(null);
     const command = `claude mcp add --transport http --client-id claude-code chatterbox ${connectorUrl}`;
     const copy = async (kind: "url" | "command", value: string) => {

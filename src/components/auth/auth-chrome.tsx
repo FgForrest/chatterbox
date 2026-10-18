@@ -3,7 +3,7 @@ import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
 import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { Panel } from "@/components/panel";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 
 interface AuthChromeProps {
     /** Headline above the form. e.g. "Sign in" / "Create account". */
@@ -30,7 +30,7 @@ export function HostedAuthChrome({
     children,
 }: AuthChromeProps) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     const bullets = [
         {
             label: i18n("Choose your AI"),
@@ -184,7 +184,7 @@ export function SelfHostAuthChrome({
     subtitle,
     children,
 }: AuthChromeProps) {
-    const name = productName(useLocale());
+    const name = deploymentProductName(useLocale());
     return (
         <div className="relative flex min-h-screen items-center justify-center px-4 py-12">
             <div className="relative z-10 w-full max-w-md space-y-6">

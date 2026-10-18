@@ -1,10 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import csMessages from "../../../messages/cs-CZ.json";
 import enMessages from "../../../messages/en.json";
 
-const forbiddenBrand = /Riffado|Mynah/i;
+const forbiddenMessageBrand = /Chatterbox|Klepna|Klepn|Riffado|Mynah/i;
+const forbiddenDocsBrand = /Riffado|Mynah/i;
+const forbiddenSourceBrand = /Chatterbox|Klepna|Riffado/;
 
 const messageAllowlist = [
     {
@@ -100,6 +103,10 @@ const messageAllowlist = [
         reason: "hosted billing and campaign emails",
         ids: ["AdL9vO", "4VEbO2", "XLg0Vn", "iNHGDh", "4b41j2", "QI1DuW"],
     },
+    {
+        reason: "hosted-only transcription fallback in the profile editor",
+        ids: ["lGtM5k"],
+    },
 ] as const;
 
 const docsAllowlist = [
@@ -140,6 +147,67 @@ const docsAllowlist = [
     },
 ] as const;
 
+const sourceExclusions = [
+    { reason: "tests may name every expected brand", files: /^src\/tests\// },
+    {
+        reason: "self-host locale mapping",
+        files: /^src\/lib\/brand\.ts$/,
+    },
+    {
+        reason: "server deployment mapping",
+        files: /^src\/lib\/deployment-brand\.ts$/,
+    },
+    {
+        reason: "hosted-only implementation modules",
+        files: /^src\/lib\/hosted\//,
+    },
+    {
+        reason: "hosted-only app route group",
+        files: /^src\/app\/\(hosted\)\//,
+    },
+    {
+        reason: "hosted-only marketing routes",
+        files: /^src\/app\/(page\.tsx|for-professionals\/|rebrand\/|updates\/|changelog\/|\(legal\)\/)/,
+    },
+    {
+        reason: "hosted-only Stripe routes",
+        files: /^src\/app\/api\/stripe\//,
+    },
+] as const;
+
+const sourceAllowlist = [
+    {
+        reason: "single client deployment-brand mapping",
+        files: /^src\/components\/product-name-provider\.tsx$/,
+        value: /^Riffado$/,
+    },
+    {
+        reason: "hosted-only marketing components",
+        files: /^src\/components\/(landing\/|landing-footer\.tsx$)/,
+        value: forbiddenSourceBrand,
+    },
+    {
+        reason: "hosted historical rebrand notices",
+        files: /^src\/components\/rebrand-(announcement-bar|banner)\.tsx$/,
+        value: /OpenPlaud is now Riffado\./,
+    },
+    {
+        reason: "public webhook API header names",
+        files: /^src\/lib\/webhooks\/worker\.ts$/,
+        value: /Riffado/,
+    },
+    {
+        reason: "historical rebrand copy",
+        files: /^src\/lib\/(public-changelog|seo\/og-cards)\.ts$/,
+        value: /Riffado/,
+    },
+    {
+        reason: "hosted billing plan default",
+        files: /^src\/lib\/env\.ts$/,
+        value: /^Riffado Hosted Pro$/,
+    },
+] as const;
+
 function walkFiles(directory: string): string[] {
     const files: string[] = [];
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -159,7 +227,7 @@ describe("self-host branding", () => {
             messageAllowlist.flatMap((group) => group.ids),
         );
         const matches = Object.entries(messages)
-            .filter(([, value]) => forbiddenBrand.test(value))
+            .filter(([, value]) => forbiddenMessageBrand.test(value))
             .map(([id]) => id);
 
         expect(matches.filter((id) => !allowed.has(id))).toEqual([]);
@@ -175,7 +243,7 @@ describe("self-host branding", () => {
             const path = relative(docsRoot, file);
             const lines = readFileSync(file, "utf8").split("\n");
             lines.forEach((line, index) => {
-                if (!forbiddenBrand.test(line)) return;
+                if (!forbiddenDocsBrand.test(line)) return;
                 const ruleIndex = docsAllowlist.findIndex(
                     (rule) =>
                         rule.files.some((pattern) => pattern.test(path)) &&
@@ -189,6 +257,61 @@ describe("self-host branding", () => {
         expect(unexpected).toEqual([]);
         expect(
             [...docsAllowlist.keys()].filter((i) => !matchedRules.has(i)),
+        ).toEqual([]);
+    });
+
+    it("keeps hardcoded product names out of shared source strings", () => {
+        const sourceRoot = process.cwd();
+        const unexpected: string[] = [];
+        const matchedRules = new Set<number>();
+        const sourceFiles = walkFiles(join(sourceRoot, "src")).filter((file) =>
+            /\.tsx?$/.test(file),
+        );
+
+        for (const file of sourceFiles) {
+            const path = relative(sourceRoot, file);
+            if (sourceExclusions.some((rule) => rule.files.test(path))) {
+                continue;
+            }
+            const sourceFile = ts.createSourceFile(
+                path,
+                readFileSync(file, "utf8"),
+                ts.ScriptTarget.Latest,
+                true,
+                path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+            );
+            const inspect = (node: ts.Node): void => {
+                const text =
+                    ts.isStringLiteralLike(node) ||
+                    ts.isTemplateHead(node) ||
+                    ts.isTemplateMiddle(node) ||
+                    ts.isTemplateTail(node) ||
+                    ts.isJsxText(node)
+                        ? node.text
+                        : null;
+                if (text && forbiddenSourceBrand.test(text)) {
+                    const ruleIndex = sourceAllowlist.findIndex(
+                        (rule) =>
+                            rule.files.test(path) && rule.value.test(text),
+                    );
+                    if (ruleIndex === -1) {
+                        const line =
+                            sourceFile.getLineAndCharacterOfPosition(
+                                node.getStart(sourceFile),
+                            ).line + 1;
+                        unexpected.push(`${path}:${line}`);
+                    } else {
+                        matchedRules.add(ruleIndex);
+                    }
+                }
+                ts.forEachChild(node, inspect);
+            };
+            inspect(sourceFile);
+        }
+
+        expect(unexpected).toEqual([]);
+        expect(
+            [...sourceAllowlist.keys()].filter((i) => !matchedRules.has(i)),
         ).toEqual([]);
     });
 });

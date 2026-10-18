@@ -5,14 +5,14 @@ import { getExtracted, getLocale } from "next-intl/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getSession } from "@/lib/auth-server";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 
 export async function generateMetadata(): Promise<Metadata> {
     const [i18n, locale] = await Promise.all([getExtracted(), getLocale()]);
     return {
         title: i18n("Account suspended | {name}", {
-            name: productName(locale),
+            name: deploymentProductName(locale),
         }),
         robots: { index: false, follow: false },
     };

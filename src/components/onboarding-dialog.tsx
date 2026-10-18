@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -24,8 +24,8 @@ import {
     OnboardingStepWelcome,
     type OnboardingSummaryItem,
 } from "@/components/onboarding-steps";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
-import { productName } from "@/lib/brand";
 import type { OnboardingCapabilities } from "@/lib/onboarding/capabilities";
 
 /** Identifies a step that can be selected when opening onboarding. */
@@ -197,7 +197,7 @@ export function OnboardingDialog({
     initialStep = "welcome",
 }: OnboardingDialogProps) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     const { refresh } = useRouter();
     const visibleSteps = useMemo(
         () => STEPS.filter((definition) => definition.visible(capabilities)),

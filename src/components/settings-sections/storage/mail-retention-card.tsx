@@ -3,6 +3,7 @@
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,6 +67,7 @@ function save(policy: MailPolicy): Promise<Response> {
  */
 export function MailRetentionCard({ initial }: { initial: MailPolicy }) {
     const i18n = useExtracted();
+    const name = useProductName();
     const copy = {
         raw: {
             label: i18n("Mail as it arrived"),
@@ -76,7 +78,8 @@ export function MailRetentionCard({ initial }: { initial: MailPolicy }) {
         content: {
             label: i18n("Mail text"),
             hint: i18n(
-                "The text Chatterbox read. Facts learned only from it go with it; who wrote to whom stays.",
+                "The text {name} read. Facts learned only from it go with it; who wrote to whom stays.",
+                { name },
             ),
         },
         summary: {

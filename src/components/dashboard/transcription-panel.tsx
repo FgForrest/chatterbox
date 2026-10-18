@@ -10,7 +10,7 @@ import {
     RefreshCw,
     Sparkles,
 } from "lucide-react";
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
@@ -34,6 +34,7 @@ import {
     WorkflowWidgetLine,
     workflowWidgetHeadingProps,
 } from "@/components/pipeline/workflow-widget";
+import { useProductName } from "@/components/product-name-provider";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -55,7 +56,6 @@ import {
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
-import { productName } from "@/lib/brand";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import {
     speakerKey,
@@ -260,7 +260,7 @@ export function TranscriptionPanel({
     processing = null,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
-    const name = productName(useLocale());
+    const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its

@@ -11,6 +11,7 @@ export interface ReportBugOptions {
     page?: string;
     isHosted?: boolean;
     locale?: string;
+    name?: string;
 }
 
 /** A blank GitHub issue with the report as title and body; no issue template. */
@@ -36,7 +37,7 @@ export function buildReportBugBodyPreview(opts: ReportBugOptions): string {
 }
 
 function buildSubject(opts: ReportBugOptions): string {
-    const name = opts.isHosted ? "Riffado" : productName(opts.locale ?? "en");
+    const name = opts.name ?? productName(opts.locale ?? "en");
     return opts.errorId
         ? `${name} bug report (${opts.errorId})`
         : `${name} bug report`;

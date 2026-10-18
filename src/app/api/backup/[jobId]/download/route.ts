@@ -2,7 +2,9 @@ import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { getExportJobForUser } from "@/db/queries/export-jobs";
 import { requireApiSession } from "@/lib/auth-server";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { defaultLocale } from "@/lib/i18n/config";
 import {
     backupStorageType,
     createBackupStorageProvider,
@@ -46,7 +48,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
 
     const storage = createBackupStorageProvider();
-    const filename = `chatterbox-export-${job.id}.zip`;
+    const filename = `${deploymentProductName(defaultLocale).toLowerCase()}-export-${job.id}.zip`;
 
     // Ask where the ARCHIVE lives, not where recordings live. With
     // BACKUP_STORAGE_PATH set the two differ, and redirecting to a

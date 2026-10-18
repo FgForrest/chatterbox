@@ -2,6 +2,7 @@
 
 import { useExtracted } from "next-intl";
 import { GoogleConnectionPanel } from "@/components/integrations/google-connection-panel";
+import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import {
 
 export function GoogleAccountSection() {
     const i18n = useExtracted();
+    const name = useProductName();
     const { state, refresh } = useGoogleConnection();
     useGoogleConnectOutcome(refresh);
     const calendarGranted = state?.connection?.calendarGranted === true;
@@ -51,7 +53,8 @@ export function GoogleAccountSection() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "Allow Chatterbox to read events on your primary calendar when you choose a meeting for Learn. Invitees are possible speaker names, not confirmed voice identities.",
+                                "Allow {name} to read events on your primary calendar when you choose a meeting for Learn. Invitees are possible speaker names, not confirmed voice identities.",
+                                { name },
                             )}
                         </p>
                         <Button
@@ -80,7 +83,8 @@ export function GoogleAccountSection() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "Allow Chatterbox to read who attended a selected Google Meet call. Attendees are possible speaker names, not confirmed voice identities. This uses your connected Google account.",
+                                "Allow {name} to read who attended a selected Google Meet call. Attendees are possible speaker names, not confirmed voice identities. This uses your connected Google account.",
+                                { name },
                             )}
                         </p>
                         <Button
