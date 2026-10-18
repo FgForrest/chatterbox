@@ -6,12 +6,14 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 export interface PlaybackState {
     ms: number;
     playing: boolean;
+    /** The control that started this playback, or null for ordinary playback. */
+    owner?: string | null;
 }
 
 /** The player, as a transcript drives and follows it. */
 export interface TranscriptPlayback {
-    /** Seek to `ms` and play. */
-    play: (ms: number) => void;
+    /** Seek to `ms` and play, optionally owned by one playback control. */
+    play: (ms: number, owner?: string) => void;
     pause: () => void;
     /** Seek to `ms`, playing or not as before. */
     seek: (ms: number) => void;

@@ -51,15 +51,54 @@ const POSITION_EVENTS = [
     "loadedmetadata",
 ] as const;
 
+interface PlaybackOwner {
+    id: string | null;
+    pending: boolean;
+}
+
+const ownerByPlayer = new WeakMap<
+    RefObject<RecordingPlayerHandle | null>,
+    PlaybackOwner
+>();
+
+function playbackOwner(
+    ref: RefObject<RecordingPlayerHandle | null>,
+): PlaybackOwner {
+    let owner = ownerByPlayer.get(ref);
+    if (!owner) {
+        owner = { id: null, pending: false };
+        ownerByPlayer.set(ref, owner);
+    }
+    return owner;
+}
+
 /** A transcript's view of the player behind `ref`, read when it is used. */
 export function transcriptPlayback(
     ref: RefObject<RecordingPlayerHandle | null>,
 ): TranscriptPlayback {
+    const owner = playbackOwner(ref);
     return {
-        play: (ms) => ref.current?.playFrom(ms / 1000),
-        pause: () => ref.current?.pause(),
-        seek: (ms) => ref.current?.seekTo(ms / 1000),
-        subscribe: (listener) => ref.current?.subscribe(listener) ?? (() => {}),
+        play: (ms, nextOwner) => {
+            owner.id = nextOwner ?? null;
+            owner.pending = owner.id !== null;
+            ref.current?.playFrom(ms / 1000);
+        },
+        pause: () => {
+            owner.id = null;
+            owner.pending = false;
+            ref.current?.pause();
+        },
+        seek: (ms) => {
+            owner.id = null;
+            owner.pending = false;
+            ref.current?.seekTo(ms / 1000);
+        },
+        subscribe: (listener) =>
+            ref.current?.subscribe((state) => {
+                if (!state.playing && !owner.pending) owner.id = null;
+                listener({ ...state, owner: owner.id });
+                if (state.playing) owner.pending = false;
+            }) ?? (() => {}),
     };
 }
 

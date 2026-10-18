@@ -69,7 +69,7 @@ export interface RecordingTasksState {
         change: Omit<TaskChange, "version">,
         optimistic: Partial<TaskView>,
     ) => void;
-    add: (status: "proposed" | "open") => Promise<void>;
+    add: (status: "proposed" | "open") => Promise<TaskView | null>;
     merge: (ids: readonly string[]) => Promise<boolean>;
     tickUpdate: (update: TaskUpdateView, ticked: boolean) => void;
     tickMatch: (match: TaskMatchView, ticked: boolean) => void;
@@ -210,8 +210,10 @@ export function useRecordingTasks(
                 }
                 return { ...current, tasks: [...current.tasks, task] };
             });
+            return task;
         } catch (error) {
             await failure(error);
+            return null;
         }
     };
 

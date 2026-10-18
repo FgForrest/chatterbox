@@ -1734,6 +1734,7 @@ export function TranscriptionPanel({
                         speakers={taskSpeakers}
                         organizationOnly={orgView}
                         onPlay={playTask}
+                        playback={playback}
                         frame={widgets?.taskReview.frame ?? "dialog"}
                         widgetId={`recording-task-review-${recording.id}`}
                         showTrigger={false}

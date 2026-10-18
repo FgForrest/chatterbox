@@ -28,6 +28,7 @@ import type {
     TaskRowChange,
 } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type {
     TaskMatchView,
@@ -66,6 +67,7 @@ export function TaskReviewLink({
     organizationOnly,
     allowAdd = true,
     onPlay,
+    playback,
     frame = "dialog",
     widgetId,
     showTrigger = true,
@@ -78,6 +80,7 @@ export function TaskReviewLink({
     /** Offer adding tasks by hand; not without a summary they would die with. */
     allowAdd?: boolean;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     frame?: WorkflowWidgetFrame;
     widgetId?: string;
     showTrigger?: boolean;
@@ -85,6 +88,7 @@ export function TaskReviewLink({
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
     const [merging, setMerging] = useState<string[] | null>(null);
+    const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
     const { data, reviewing, waiting } = state;
     const resolvedWidgetId = widgetId ?? `task-review-${state.itemId}`;
 
@@ -95,6 +99,22 @@ export function TaskReviewLink({
             setMerging(null);
         }
     }, [reviewing]);
+
+    useEffect(() => {
+        if (!focusTaskId) return;
+        const card = [
+            ...document.querySelectorAll<HTMLElement>(
+                "[data-task-review-card]",
+            ),
+        ].find((element) => element.dataset.taskReviewCard === focusTaskId);
+        const input = card?.querySelector<HTMLInputElement>(
+            'input:not([type]), input[type="text"]',
+        );
+        if (!card || !input) return;
+        card.scrollIntoView?.({ block: "nearest" });
+        input.focus({ preventScroll: true });
+        setFocusTaskId(null);
+    }, [focusTaskId]);
 
     if (!data || !reviewing) return null;
 
@@ -109,6 +129,11 @@ export function TaskReviewLink({
 
     const merge = async () => {
         if (merging && (await state.merge(merging))) setMerging(null);
+    };
+
+    const addTask = async () => {
+        const added = await state.add("proposed");
+        if (added) setFocusTaskId(added.id);
     };
 
     const actionableUpdateTaskIds = new Set(
@@ -237,34 +262,33 @@ export function TaskReviewLink({
                               "What the summary found to do. Untick what is not a task, correct who and when, then apply the selected changes. Unticked ones are not proposed again.",
                           )
                 }
-                headerAction={
-                    allowAdd &&
-                    !merging && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void state.add("proposed")}
-                        >
-                            <Plus className="mr-1 size-3.5" />
-                            {i18n("Add task")}
-                        </Button>
-                    )
-                }
                 footer={{
                     status: i18n("{ticked} of {count} will be applied", {
                         ticked: String(ticked),
                         count: String(waiting),
                     }),
                     actions: (
-                        <Button
-                            disabled={state.accepting || merging !== null}
-                            onClick={() => void state.accept()}
-                        >
-                            {state.accepting && (
-                                <Loader2 className="size-4 animate-spin" />
+                        <>
+                            {allowAdd && !merging && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => void addTask()}
+                                >
+                                    <Plus className="mr-1 size-3.5" />
+                                    {i18n("Add task")}
+                                </Button>
                             )}
-                            {i18n("Apply selected changes")}
-                        </Button>
+                            <Button
+                                disabled={state.accepting || merging !== null}
+                                onClick={() => void state.accept()}
+                            >
+                                {state.accepting && (
+                                    <Loader2 className="size-4 animate-spin" />
+                                )}
+                                {i18n("Apply selected changes")}
+                            </Button>
+                        </>
                     ),
                 }}
                 closeLabel={i18n("Save and continue later")}
@@ -311,6 +335,7 @@ export function TaskReviewLink({
                                             }
                                             itemId={state.itemId}
                                             onPlay={onPlay}
+                                            playback={playback}
                                             onNavigate={() => setOpen(false)}
                                             onToggle={(ticked) => {
                                                 state.tickMatch(match, ticked);
@@ -354,6 +379,7 @@ export function TaskReviewLink({
                                             proposal={group.proposal}
                                             itemId={state.itemId}
                                             onPlay={onPlay}
+                                            playback={playback}
                                             onNavigate={() => setOpen(false)}
                                             updatesByTaskId={updatesByTaskId}
                                             onChoose={(selected) => {
@@ -467,6 +493,7 @@ export function TaskReviewLink({
                                         speakers={speakers}
                                         organizationOnly={organizationOnly}
                                         onPlay={onPlay}
+                                        playback={playback}
                                         onNavigate={() => setOpen(false)}
                                         onMerge={(targetTaskId) =>
                                             state.mergeInto(
@@ -519,6 +546,7 @@ export function TaskReviewLink({
                                                 update={update}
                                                 itemId={state.itemId}
                                                 onPlay={onPlay}
+                                                playback={playback}
                                                 onNavigate={() =>
                                                     setOpen(false)
                                                 }
@@ -558,6 +586,7 @@ function ProposalRow({
     speakers,
     organizationOnly,
     onPlay,
+    playback,
     onNavigate,
     selection,
     onChange,
@@ -567,6 +596,7 @@ function ProposalRow({
     speakers: readonly SpeakerChoice[];
     organizationOnly: boolean;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     onNavigate: () => void;
     selection: { selected: boolean; onToggle: () => void } | null;
     onChange: TaskRowChange;
@@ -576,6 +606,7 @@ function ProposalRow({
 
     return (
         <li
+            data-task-review-card={task.id}
             className={cn(
                 "-mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50",
                 !task.ticked && !selection && "opacity-60",
@@ -657,13 +688,17 @@ function ProposalRow({
                         }}
                         quote={task.quote}
                         onPlay={onPlay}
+                        currentItemId={task.recordingId}
+                        playback={playback}
                         onNavigate={onNavigate}
                     />
-                    {task.quote && (
-                        <span className="min-w-0 truncate text-xs italic text-muted-foreground">
-                            “{task.quote}”
-                        </span>
-                    )}
+                    {task.quote &&
+                        (task.evidenceStartMs !== null ||
+                            task.evidenceText !== null) && (
+                            <span className="min-w-0 truncate text-xs italic text-muted-foreground">
+                                “{task.quote}”
+                            </span>
+                        )}
                     <ProvenanceNote provenance={task.evidenceProvenance} />
                     {!selection && task.canEdit && (
                         <MergeTaskPicker
@@ -701,15 +736,28 @@ function ProvenanceNote({
 
 function CandidateDetails({ match }: { match: TaskMatchView }) {
     const i18n = useExtracted();
+    const status =
+        match.candidate.status === "open"
+            ? i18n("Open")
+            : match.candidate.status === "done"
+              ? i18n("Done")
+              : match.candidate.status === "dropped"
+                ? i18n("No longer needed")
+                : i18n("Proposed");
     return (
-        <div>
+        <div className="space-y-1">
             <p className="font-medium">{match.candidate.text}</p>
             <p className="text-xs text-muted-foreground">
                 {match.candidate.assignee?.name ?? i18n("Unassigned")} ·{" "}
                 {match.candidate.dueDate ??
                     match.candidate.duePhrase ??
                     i18n("No due date")}{" "}
-                · {match.candidate.homeItem.title}
+                · {status}
+            </p>
+            <p className="text-xs text-muted-foreground">
+                {i18n("From {recording}", {
+                    recording: match.candidate.homeItem.title,
+                })}
             </p>
         </div>
     );
@@ -719,12 +767,16 @@ function MatchEvidence({
     match,
     itemId,
     onPlay,
+    playback,
     onNavigate,
+    showQuote = false,
 }: {
     match: TaskMatchView;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     onNavigate?: () => void;
+    showQuote?: boolean;
 }) {
     return (
         <TaskEvidenceLink
@@ -736,7 +788,10 @@ function MatchEvidence({
             }}
             quote={match.quote}
             onPlay={onPlay}
+            currentItemId={itemId}
+            playback={playback}
             onNavigate={onNavigate}
+            showQuote={showQuote}
         />
     );
 }
@@ -746,6 +801,7 @@ function SuggestedMatchRow({
     updates,
     itemId,
     onPlay,
+    playback,
     onNavigate,
     onToggle,
     onToggleUpdate,
@@ -754,6 +810,7 @@ function SuggestedMatchRow({
     updates: readonly TaskUpdateView[];
     itemId: string;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
     onToggleUpdate: (update: TaskUpdateView, ticked: boolean) => void;
@@ -765,47 +822,80 @@ function SuggestedMatchRow({
     return (
         <li
             data-task-review-card={match.candidate.id}
-            className="-mx-2 flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+            className="-mx-2 space-y-3 rounded-md border px-3 py-3 text-sm"
         >
             {actionable && (
-                <input
-                    type="checkbox"
-                    className="mt-1 size-4 shrink-0"
-                    checked={match.ticked}
-                    onChange={(event) => onToggle(event.target.checked)}
-                    aria-label={i18n("Apply suggested match to {task}", {
-                        task: match.candidate.text,
-                    })}
-                />
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={match.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Apply suggested match to {task}", {
+                            task: match.candidate.text,
+                        })}
+                    />
+                    <span>
+                        <span className="block font-medium">
+                            {i18n("Same task: attach this mention")}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                            {i18n(
+                                "Accepting this match changes nothing else on the task.",
+                            )}
+                        </span>
+                    </span>
+                </label>
             )}
-            <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-xs font-semibold text-primary">
-                    {i18n("Suggested match")}
-                </p>
-                <CandidateDetails match={match} />
-                <MatchEvidence
-                    match={match}
-                    itemId={itemId}
-                    onPlay={onPlay}
-                    onNavigate={onNavigate}
-                />
-                {updates.length > 0 && (
-                    <div className="mt-2 space-y-2 border-t pt-2">
-                        {updates.map((update) => (
-                            <UpdateRow
-                                key={update.id}
-                                update={update}
-                                itemId={itemId}
-                                onPlay={onPlay}
-                                onNavigate={onNavigate}
-                                onToggle={(ticked) =>
-                                    onToggleUpdate(update, ticked)
-                                }
-                            />
-                        ))}
-                    </div>
-                )}
+            <div className="grid gap-3 sm:grid-cols-2">
+                <section className="min-w-0 space-y-2 rounded-md bg-muted/40 p-3">
+                    <h4 className="text-xs font-semibold text-primary">
+                        {i18n("Earlier task")}
+                    </h4>
+                    <CandidateDetails match={match} />
+                    <TaskEvidenceLink
+                        evidence={{
+                            itemId: match.candidate.homeItem.id,
+                            itemKind: match.candidate.homeItem.kind,
+                            startMs: match.candidate.evidenceStartMs,
+                            text: match.candidate.evidenceText,
+                        }}
+                        quote={match.candidate.quote}
+                        onNavigate={onNavigate}
+                        showQuote
+                    />
+                </section>
+                <section className="min-w-0 space-y-2 rounded-md bg-muted/40 p-3">
+                    <h4 className="text-xs font-semibold text-primary">
+                        {i18n("Said now")}
+                    </h4>
+                    <MatchEvidence
+                        match={match}
+                        itemId={itemId}
+                        onPlay={onPlay}
+                        playback={playback}
+                        onNavigate={onNavigate}
+                        showQuote
+                    />
+                </section>
             </div>
+            {updates.length > 0 && (
+                <div className="space-y-2 border-t pt-3">
+                    {updates.map((update) => (
+                        <UpdateRow
+                            key={update.id}
+                            update={update}
+                            itemId={itemId}
+                            onPlay={onPlay}
+                            playback={playback}
+                            onNavigate={onNavigate}
+                            onToggle={(ticked) =>
+                                onToggleUpdate(update, ticked)
+                            }
+                        />
+                    ))}
+                </div>
+            )}
         </li>
     );
 }
@@ -815,6 +905,7 @@ function AmbiguousMatchRow({
     proposal,
     itemId,
     onPlay,
+    playback,
     onNavigate,
     updatesByTaskId,
     onChoose,
@@ -825,6 +916,7 @@ function AmbiguousMatchRow({
     proposal: TaskView | null;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     onNavigate: () => void;
     updatesByTaskId: ReadonlyMap<string, readonly TaskUpdateView[]>;
     onChoose: (selected: string | "new") => void;
@@ -875,6 +967,7 @@ function AmbiguousMatchRow({
                                             update={update}
                                             itemId={itemId}
                                             onPlay={onPlay}
+                                            playback={playback}
                                             onNavigate={onNavigate}
                                             onToggle={(ticked) =>
                                                 onToggleUpdate(
@@ -908,7 +1001,9 @@ function AmbiguousMatchRow({
                         match={matches[0]}
                         itemId={itemId}
                         onPlay={onPlay}
+                        playback={playback}
                         onNavigate={onNavigate}
+                        showQuote
                     />
                 )}
                 {proposal?.canEdit && (
@@ -931,12 +1026,14 @@ function UpdateRow({
     update,
     itemId,
     onPlay,
+    playback,
     onNavigate,
     onToggle,
 }: {
     update: TaskUpdateView;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
     onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
 }) {
@@ -951,6 +1048,8 @@ function UpdateRow({
             }}
             quote={update.quote}
             onPlay={onPlay}
+            currentItemId={itemId}
+            playback={playback}
             onNavigate={onNavigate}
         />
     );

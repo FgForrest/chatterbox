@@ -966,8 +966,11 @@ export async function resolveTaskProposals({
         participantOf(ref)?.displayName ?? null;
     const evidence = (quote: string | null) =>
         mail
-            ? mailEvidence(mail, quote)
-            : { evidenceStartMs: locateQuote(turns, quote), quotedAt: null };
+            ? mailEvidence(mail, quote, language)
+            : {
+                  evidenceStartMs: locateQuote(turns, quote, language),
+                  quotedAt: null,
+              };
     const speakers = transcriptionId
         ? await confirmedSpeakers(ownerUserId, transcriptionId, orgView)
         : new Map<string, { label: string; personId: string; name: string }>();
@@ -1152,6 +1155,7 @@ export async function resolveTaskProposals({
 function mailEvidence(
     mail: ItemContent,
     quote: string | null,
+    language: string | null,
 ): Pick<
     ProposedTask,
     "evidenceStartMs" | "evidenceText" | "evidenceProvenance" | "quotedAt"
@@ -1159,7 +1163,7 @@ function mailEvidence(
     const readable = mail.segments.filter(
         (segment) => !segment.knownItemId && segment.role !== "disclaimer",
     );
-    const range = locateTextQuote(readable, quote);
+    const range = locateTextQuote(readable, quote, language);
     const segment = range
         ? mail.segments.find((item) => item.index === range.segmentIndex)
         : undefined;
