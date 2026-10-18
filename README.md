@@ -87,12 +87,12 @@ Setting these up on a self-hosted instance: [For administrators](content/docs/us
 
 You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionally) an OpenAI-compatible API key.
 
-Every release attaches `docker-compose.yml` and `env.example`. Replace `<owner>/<repository>` with this repository's GitHub path:
+Every release attaches `docker-compose.yml` and `env.example`.
 
 ```bash
 mkdir chatterbox && cd chatterbox
-curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
-curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
+curl -fLO https://github.com/FgForrest/chatterbox/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/FgForrest/chatterbox/releases/latest/download/env.example -o .env
 
 # Generate secrets, paste into .env
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
@@ -116,7 +116,7 @@ Full install guide, version pinning, image tags, and Windows/WSL notes: [Self-ho
 
 Chatterbox signs into Plaud using your email — the same OTP flow as the official app. The verification code is forwarded directly to Plaud and never stored. Your access token is encrypted with AES-256-GCM before hitting the database. Region (Global, EU, APAC) is auto-detected.
 
-If you signed up to Plaud with **Continue with Google** or **Continue with Apple**, the email-code flow won't return any recordings — that's a different identity on Plaud's side. Use the [Riffado Connector browser extension](https://github.com/riffado/connector), or paste a token manually. Full instructions: [Connect your Plaud account](content/docs/guides/connect-plaud-account.mdx).
+If you signed up to Plaud with **Continue with Google** or **Continue with Apple**, the email-code flow won't return any recordings — that's a different identity on Plaud's side. Use the [connector browser extension](https://github.com/riffado/connector), or paste a token manually. Full instructions: [Connect your Plaud account](content/docs/guides/connect-plaud-account.mdx).
 
 > Every line that handles your credentials is open source — [send-code route](src/app/api/plaud/auth/send-code/route.ts) · [verify route](src/app/api/plaud/auth/verify/route.ts) · [encryption](src/lib/encryption.ts).
 

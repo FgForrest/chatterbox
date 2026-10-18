@@ -413,7 +413,7 @@ export async function eraseLocalArtifact(
         );
         throw new AppError(
             ErrorCode.STORAGE_ERROR,
-            `The ${scope} was erased from Riffado, but an exported file could not be removed. Retry to finish cleanup.`,
+            `The ${scope} was erased from Chatterbox, but an exported file could not be removed. Retry to finish cleanup.`,
             500,
         );
     }

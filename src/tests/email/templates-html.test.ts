@@ -6,7 +6,12 @@
 
 import path from "node:path";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/env", () => ({
+    env: { APP_URL: "https://app.example.test", IS_HOSTED: true },
+}));
+
 import { AccountDeletedEmail } from "@/lib/notifications/email-templates/account-deleted";
 import { EmailChangeConfirmEmail } from "@/lib/notifications/email-templates/email-change-confirm";
 import { ExportReadyEmail } from "@/lib/notifications/email-templates/export-ready";

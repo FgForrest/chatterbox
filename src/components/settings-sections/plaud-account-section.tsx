@@ -181,7 +181,7 @@ export function PlaudAccountSection({
                 />
                 <p className="text-sm text-muted-foreground mt-1">
                     {i18n(
-                        "The Plaud account Riffado pulls recordings from. Switching accounts keeps your existing recordings; only future syncs change.",
+                        "The Plaud account Chatterbox pulls recordings from. Switching accounts keeps your existing recordings; only future syncs change.",
                     )}
                 </p>
             </div>

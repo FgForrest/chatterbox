@@ -18,7 +18,7 @@ import {
 const CONNECTOR_CHROME_URL =
     "https://github.com/riffado/connector#installation";
 
-// API contract for the Riffado Connector extension; bump `version` on both sides.
+// API contract for the connector extension; bump `version` on both sides.
 interface ConnectorBridge {
     version: number;
     connect(): Promise<{
@@ -189,7 +189,7 @@ function ConnectorPane({
                 <p className="text-sm text-muted-foreground leading-relaxed">
                     {i18n("Easiest path: install the")}{" "}
                     <span className="font-medium">
-                        {i18n("Riffado Connector")}
+                        {i18n("connector extension")}
                     </span>{" "}
                     {i18n(
                         "browser extension. Sign in to Plaud the way you normally do (Google, Apple, or email) and the connector hands the session back here, no copy-pasting.",
@@ -201,12 +201,12 @@ function ConnectorPane({
                         target="_blank"
                         rel="noopener noreferrer"
                     >
-                        {i18n("Install Riffado Connector")}
+                        {i18n("Install connector extension")}
                     </a>
                 </Button>
                 <p className="text-xs text-muted-foreground/80 leading-relaxed">
                     {i18n(
-                        "Already installed? Reload this page so Riffado can detect it. Or use the",
+                        "Already installed? Reload this page so Chatterbox can detect it. Or use the",
                     )}{" "}
                     <button
                         type="button"
@@ -639,7 +639,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                     {i18n(
-                        "The Riffado Connector signs you in and captures the right long-lived token automatically — no copying, and it won't stop working after a day.",
+                        "The connector extension signs you in and captures the right long-lived token automatically — no copying, and it won't stop working after a day.",
                     )}{" "}
                     <button
                         type="button"
@@ -746,7 +746,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                                 onClick={onUseConnector}
                                 className="underline decoration-dotted underline-offset-2 hover:text-foreground transition-colors"
                             >
-                                {i18n("Use the Riffado Connector")}
+                                {i18n("Use the connector extension")}
                             </button>{" "}
                             {i18n("and it captures the right token for you.")}
                         </p>

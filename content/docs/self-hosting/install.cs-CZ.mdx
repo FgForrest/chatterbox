@@ -1,6 +1,6 @@
 ---
 title: Instalace
-description: Nainstalujte Chatterbox na vlastní infrastrukturu pomocí Docker Compose.
+description: Nainstalujte Klepna na vlastní infrastrukturu pomocí Docker Compose.
 ---
 
 <span id="prerequisites" />
@@ -18,13 +18,12 @@ description: Nainstalujte Chatterbox na vlastní infrastrukturu pomocí Docker C
 ## Instalace
 
 Každé vydání na GitHubu má přiložený `docker-compose.yml` a `env.example`,
-se kterými bylo sestaveno. Místo `<owner>/<repository>` doplňte repozitář,
-který provozujete:
+se kterými bylo sestaveno:
 
 ```bash
 mkdir chatterbox && cd chatterbox
-curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
-curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
+curl -fLO https://github.com/FgForrest/chatterbox/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/FgForrest/chatterbox/releases/latest/download/env.example -o .env
 ```
 
 Vygenerujte tajné klíče a vložte je do `.env`:
@@ -54,7 +53,8 @@ uložené nahrávky, přepisy ani přihlašovací údaje přečíst.
 Vydání se číslují `YYYY.N`: rok a pořadové číslo vydání v daném roce
 (`2026.1`, `2026.2`, ...). Značka image `latest` vždy ukazuje na nejnovější
 vydání; chcete-li zůstat na jednom vydání, stáhněte soubory tohoto vydání
-místo `latest` a nastavte v `.env` `RIFFADO_VERSION` na jeho číslo.
+místo `latest` a nastavte v `.env` `CHATTERBOX_VERSION` na jeho číslo.
+Zastaralá proměnná `RIFFADO_VERSION` zůstává po dobu jednoho vydání jako náhradní.
 
 Aktualizace: `docker compose pull && docker compose up -d`. Migrace databáze
 proběhnou při startu kontejneru aplikace.

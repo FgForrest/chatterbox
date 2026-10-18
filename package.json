@@ -6,12 +6,12 @@
     "license": "AGPL-3.0",
     "repository": {
         "type": "git",
-        "url": "https://github.com/riffado/riffado.git"
+        "url": "https://github.com/FgForrest/chatterbox.git"
     },
     "bugs": {
-        "url": "https://github.com/riffado/riffado/issues"
+        "url": "https://github.com/FgForrest/chatterbox/issues"
     },
-    "homepage": "https://github.com/riffado/riffado#readme",
+    "homepage": "https://github.com/FgForrest/chatterbox#readme",
     "keywords": [
         "plaud",
         "plaud-note",

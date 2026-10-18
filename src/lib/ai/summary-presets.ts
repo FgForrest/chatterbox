@@ -414,7 +414,7 @@ export const SUMMARY_SPEAKER_DIRECTIVE = `SPEAKER REFERENCES:
 
 - Never infer, guess, or invent a speaker's name, identity, or role from context. Do not replace an anonymous speaker label even when the identity seems obvious.
 - Whenever referring to transcript label speaker_N, write exactly [Speaker N](#speaker-N), using the same number. Apply this in summary, keyPoints, and actionItems.
-- Preserve these Markdown references exactly during rewriting or merging. They are stable placeholders that Riffado resolves only after the user confirms an attribution.`;
+- Preserve these Markdown references exactly during rewriting or merging. They are stable placeholders that Chatterbox resolves only after the user confirms an attribution.`;
 
 /** Validate an untrusted `summaryPrompt` payload; see isValidTemplateConfig. */
 export function isValidSummaryPromptConfig(value: unknown): boolean {

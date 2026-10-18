@@ -34,20 +34,20 @@ export function SsoLogin({ providerName, error }: SsoLoginProps) {
         switch (code) {
             case "account_not_linked":
                 return i18n(
-                    "A Riffado account with this email already exists, but your identity provider has not verified the address. Ask your administrator to verify it.",
+                    "A Chatterbox account with this email already exists, but your identity provider has not verified the address. Ask your administrator to verify it.",
                 );
             case "unable_to_link_account":
             case SSO_ORG_ACCOUNT_ERROR:
                 return i18n(
-                    "This identity cannot sign in to Riffado. Ask your administrator.",
+                    "This identity cannot sign in to Chatterbox. Ask your administrator.",
                 );
             case "signup_disabled":
                 return i18n(
-                    "This Riffado instance does not accept new accounts. Ask your administrator.",
+                    "This Chatterbox instance does not accept new accounts. Ask your administrator.",
                 );
             case "email_is_missing":
                 return i18n(
-                    "Your identity provider did not share an email address. Ask your administrator to release it to Riffado.",
+                    "Your identity provider did not share an email address. Ask your administrator to release it to Chatterbox.",
                 );
             case "access_denied":
                 return i18n("Sign-in was cancelled at the identity provider.");

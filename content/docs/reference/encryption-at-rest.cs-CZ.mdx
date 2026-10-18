@@ -3,7 +3,7 @@ title: Šifrování uložených dat
 description: Šifrování obálkou AES-256-GCM pro citlivá pole databáze.
 ---
 
-Chatterbox šifruje uživatelská obsahová pole v databázi algoritmem AES-256-GCM,
+Klepna šifruje uživatelská obsahová pole v databázi algoritmem AES-256-GCM,
 kdy klíč je odvozen z proměnné prostředí `ENCRYPTION_KEY`, kterou již runtime
 vyžaduje.
 
@@ -69,7 +69,7 @@ Mimo rozsah této vrstvy:
 
 Pokud potřebujete, aby se otevřený zvuk a přepisy vůbec nedostaly na infrastrukturu třetích stran,
 provozujte lokálního AI poskytovatele (Ollama nebo LM Studio)
-na stejném stroji jako Váš Chatterbox instance. Server stále drží
+na stejném stroji jako Váš Klepna instance. Server stále drží
 šifrovací klíč, ale žádný otevřený text neopouští Vaše zařízení.
 
 <span id="key-management" />

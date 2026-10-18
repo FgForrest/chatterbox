@@ -10,7 +10,7 @@ import {
     RefreshCw,
     Sparkles,
 } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
@@ -55,6 +55,7 @@ import {
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { productName } from "@/lib/brand";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import {
     speakerKey,
@@ -259,6 +260,7 @@ export function TranscriptionPanel({
     processing = null,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
+    const name = productName(useLocale());
     const transcriptList = toTranscriptList(transcripts, transcription);
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its
@@ -297,7 +299,7 @@ export function TranscriptionPanel({
         transcriptQuiet ||
         Boolean(isTranscribing && widgets?.transcript.frame === "dialog");
     const transcriptWidgetId = `recording-transcription-${recording.id}`;
-    let transcriptSourceLabel = "Riffado";
+    let transcriptSourceLabel = name;
     if (activeTranscript?.source === "plaud") transcriptSourceLabel = "Plaud";
     if (activeTranscript?.source === "mixed") {
         transcriptSourceLabel = i18n("Mix");
@@ -658,7 +660,7 @@ export function TranscriptionPanel({
         summaryProfileOptions.find((profile) => profile.id === summaryProfileId)
             ?.name;
     if (!summaryLineFacts) {
-        summaryLineFacts = summarySource === "plaud" ? "Plaud" : "Riffado";
+        summaryLineFacts = summarySource === "plaud" ? "Plaud" : name;
     }
 
     // The title, summary and topics automatic Learn held back are made by

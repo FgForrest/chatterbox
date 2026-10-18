@@ -51,7 +51,7 @@ export function GoogleAccountSection() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "Allow Riffado to read events on your primary calendar when you choose a meeting for Learn. Invitees are possible speaker names, not confirmed voice identities.",
+                                "Allow Chatterbox to read events on your primary calendar when you choose a meeting for Learn. Invitees are possible speaker names, not confirmed voice identities.",
                             )}
                         </p>
                         <Button
@@ -80,7 +80,7 @@ export function GoogleAccountSection() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "Allow Riffado to read who attended a selected Google Meet call. Attendees are possible speaker names, not confirmed voice identities. This uses your connected Google account.",
+                                "Allow Chatterbox to read who attended a selected Google Meet call. Attendees are possible speaker names, not confirmed voice identities. This uses your connected Google account.",
                             )}
                         </p>
                         <Button

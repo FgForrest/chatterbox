@@ -1,9 +1,9 @@
 ---
 title: Uživatelská příručka
-description: Každá obrazovka aplikace Chatterbox, kapitolu po kapitole, s obrázky.
+description: Každá obrazovka aplikace Klepna, kapitolu po kapitole, s obrázky.
 ---
 
-Chatterbox uchovává Vaše hlasové nahrávky, převádí je na přepisy a shrnutí pomocí AI poskytovatele, kterého si vyberete, a pamatuje si osoby a věci, o kterých se v nich mluví. Tato příručka Vás krok za krokem provede vším, co můžete v aplikaci dělat, a to po jednotlivých obrazovkách.
+Klepna uchovává Vaše hlasové nahrávky, převádí je na přepisy a shrnutí pomocí AI poskytovatele, kterého si vyberete, a pamatuje si osoby a věci, o kterých se v nich mluví. Tato příručka Vás krok za krokem provede vším, co můžete v aplikaci dělat, a to po jednotlivých obrazovkách.
 
 ![Obrazovka Nahrávky](images/dashboard.png)
 
@@ -18,13 +18,13 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 3. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
 4. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
 5. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, profily, Vícenásobné shrnování a úkoly napříč nahrávkami a poštou.
-6. [Almanach](almanac.md): osoby a věci, které Chatterbox zná, jejich přezdívky a fakta.
-7. [Učení](learn.md): nechte Chatterbox navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
+6. [Almanach](almanac.md): osoby a věci, které Klepna zná, jejich přezdívky a fakta.
+7. [Učení](learn.md): nechte Klepna navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
 8. [Organizace](organization.md): sdílení nahrávek s kolegy.
-9. [Pošta](mail.md): posílání pošty do Chatterboxu a její zařazení ke zpracování.
+9. [Pošta](mail.md): posílání pošty do Klepny a její zařazení ke zpracování.
 10. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
 11. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
-12. [Chatterbox v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
+12. [Klepna v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
 13. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
 
 <span id="where-a-feature-comes-from" />
@@ -37,7 +37,7 @@ Některé funkce závisí na tom, jak je Vaše instance nastavena. Pokud kapitol
 - **Organizace** se objeví, pokud správce vytvořil organizační účet.
 - **Export složek** na disk nebo Google Drive je dostupný, pokud je správce povolil.
 - **Jednotné přihlašování (Single sign-on)** nahrazuje přihlašování e-mailem a heslem, pokud správce napojil poskytovatele identity.
-- **Chatterbox v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
+- **Klepna v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
 
 [Pro administrátory](administrators.md) uvádí všechna nastavení.
 

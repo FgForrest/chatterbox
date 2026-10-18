@@ -466,7 +466,7 @@ export function FolderExportActions({
                                     </div>
                                     <p className="text-xs text-muted-foreground">
                                         {i18n(
-                                            "Riffado manages the folders it creates inside this folder. Do not keep your own files in them: a folder Riffado no longer needs goes to the Google Drive trash with everything in it. Google Docs are regenerated when the recording changes, so edits made in them are overwritten.",
+                                            "Chatterbox manages the folders it creates inside this folder. Do not keep your own files in them: a folder Chatterbox no longer needs goes to the Google Drive trash with everything in it. Google Docs are regenerated when the recording changes, so edits made in them are overwritten.",
                                         )}
                                     </p>
                                 </div>

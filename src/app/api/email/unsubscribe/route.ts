@@ -6,10 +6,12 @@ import {
     unsubscribeSubscriber,
 } from "@/db/queries/newsletter-subscriptions";
 import { users } from "@/db/schema";
+import { productName } from "@/lib/brand";
 import {
     type UnsubscribeAudience,
     verifyUnsubscribeToken,
 } from "@/lib/email/unsubscribe-token";
+import { env } from "@/lib/env";
 import {
     type AppLocale,
     localeFromAcceptLanguage,
@@ -183,7 +185,7 @@ function renderPage({
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(title)} -- Riffado</title>
+  <title>${escapeHtml(title)} -- ${escapeHtml(env.IS_HOSTED ? "Riffado" : productName(locale))}</title>
   <meta name="robots" content="noindex" />
   <style>
     :root { color-scheme: light dark; }

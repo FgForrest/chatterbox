@@ -112,13 +112,13 @@ export function StorageSection({ isHosted = false }: StorageSectionProps) {
         localAudio: {
             label: i18n("Local audio"),
             hint: i18n(
-                "Riffado's stored audio copy. It cannot be re-transcribed once both local and remote copies are gone.",
+                "Chatterbox's stored audio copy. It cannot be re-transcribed once both local and remote copies are gone.",
             ),
         },
         localTranscript: {
             label: i18n("Local transcript"),
             hint: i18n(
-                "Deleted from Riffado's database. It can be regenerated if audio is still available.",
+                "Deleted from Chatterbox's database. It can be regenerated if audio is still available.",
             ),
         },
         localSummary: {
@@ -395,7 +395,7 @@ export function StorageSection({ isHosted = false }: StorageSectionProps) {
             <SettingsSectionHeader
                 title={i18n("Storage")}
                 description={i18n(
-                    "Where Riffado keeps the audio files behind your recordings.",
+                    "Where Chatterbox keeps the audio files behind your recordings.",
                 )}
                 icon={HardDrive}
             />

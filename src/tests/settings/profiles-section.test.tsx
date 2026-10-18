@@ -516,7 +516,7 @@ describe("Settings Profiles", () => {
         expect(provider.textContent).toContain("ElevenLabs · scribe_v2");
         expect(
             screen.getByText(
-                "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+                "Default uses your default transcription provider, then the Organization default, then an included provider when available.",
             ),
         ).toBeTruthy();
         expect(

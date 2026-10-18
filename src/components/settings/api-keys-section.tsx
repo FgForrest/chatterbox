@@ -156,7 +156,7 @@ export function ApiKeysSection() {
             <SettingsSectionHeader
                 title={i18n("API Keys")}
                 description={i18n(
-                    "Personal access tokens for the Riffado public API.",
+                    "Personal access tokens for the Chatterbox public API.",
                 )}
                 icon={KeyRound}
                 action={

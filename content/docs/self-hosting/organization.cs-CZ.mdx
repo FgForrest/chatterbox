@@ -3,7 +3,7 @@ title: Organizace
 description: Sdílejte nahrávky se všemi na své instanci prostřednictvím jedné stromové složky Organizace.
 ---
 
-Vlastní hosting Chatterbox může svým uživatelům poskytnout sdílenou **Organizaci** vedle
+Vlastní hosting Klepna může svým uživatelům poskytnout sdílenou **Organizaci** vedle
 jejich soukromé knihovny. Vlastníci při zařazení nahrávky nebo pošty zvolí
 složku Organizace. Položka zůstane soukromá, dokud neprojde zpracováním
 a kontrolami, a potom se nasdílí automaticky. Každý v instanci může sdílenou
@@ -14,7 +14,7 @@ položka a její zdrojová data zůstávají u vlastníka.
 
 ## Zapnutí funkce
 
-Nastavte obě proměnné a restartujte. Při startu Chatterbox vytvoří (nebo aktualizuje)
+Nastavte obě proměnné a restartujte. Při startu Klepna vytvoří (nebo aktualizuje)
 jeden **účet organizace** s těmito údaji.
 
 ```bash
@@ -24,7 +24,7 @@ ORG_ACCOUNT_PASSWORD=...          # 12+ characters, re-applied on every start
 ORG_ACCOUNT_NAME=Acme             # optional, defaults to "Organization"
 ```
 
-E-mail nesmí patřit žádnému existujícímu uživateli; Chatterbox odmítne
+E-mail nesmí patřit žádnému existujícímu uživateli; Klepna odmítne
 proměnit osobní účet na účet organizace a zapíše důvod do logu.
 
 Při použití [jednotného přihlášení](./sso) je `ORG_ACCOUNT_PASSWORD` volitelné:
@@ -97,7 +97,7 @@ Organizace vyžaduje oprávnění `access.manage`, nikoli `org.curate`.
 
 Profil Organizace může připnout poskytovatele Organizace. Jinak ruční spuštění
 použije výchozího poskytovatele kurátora. Chybějící nebo zakázaný připnutý
-poskytovatel krok zastaví; Chatterbox nikdy tiše nepřejde na klíč jiné osoby.
+poskytovatel krok zastaví; Klepna nikdy tiše nepřejde na klíč jiné osoby.
 
 Odebrání nebo smazání položky ji okamžitě odstraní ze zobrazení Organizace
 všem. Odebrání domovské položky úkolu přesune domov na nejnovější zbývající

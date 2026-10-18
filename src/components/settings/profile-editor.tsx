@@ -868,7 +868,7 @@ function BasicEditor({
                     />
                     <p className="text-xs text-muted-foreground">
                         {i18n(
-                            "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+                            "Default uses your default transcription provider, then the Organization default, then an included provider when available.",
                         )}
                     </p>
                 </div>

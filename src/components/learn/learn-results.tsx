@@ -183,7 +183,7 @@ export function LearnResults({
                     <div className="space-y-2 text-sm">
                         <p>
                             {i18n(
-                                "Learn names speakers, corrects misheard names and proposes facts about the people and things Riffado already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                "Learn names speakers, corrects misheard names and proposes facts about the people and things Chatterbox already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
                                 {
                                     people: known.people,
                                     things: known.things,

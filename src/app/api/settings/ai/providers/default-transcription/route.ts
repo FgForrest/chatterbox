@@ -44,7 +44,7 @@ export const PUT = apiHandler(async (request: Request) => {
         if (entitlements.monthlyMynahSeconds <= 0) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
-                "Your current plan does not include Riffado transcription",
+                "Your current plan does not include managed transcription",
                 403,
             );
         }

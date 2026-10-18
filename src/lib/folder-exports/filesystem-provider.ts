@@ -28,7 +28,7 @@ export const MAX_EXPORT_PATH_LENGTH = 1024;
 export class ExportPathTakenError extends Error {
     constructor(relativePath: string) {
         super(
-            `A file Riffado did not create is in the way of the export at ${relativePath}`,
+            `A file Chatterbox did not create is in the way of the export at ${relativePath}`,
         );
         this.name = "ExportPathTakenError";
     }

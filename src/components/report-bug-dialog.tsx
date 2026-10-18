@@ -1,7 +1,7 @@
 "use client";
 
 import { Mail } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useState } from "react";
 import { Github } from "@/components/icons/icons";
 import { Button } from "@/components/ui/button";
@@ -29,17 +29,7 @@ interface ReportBugDialogProps {
     onOpenChange: (open: boolean) => void;
 }
 
-/**
- * Renders the bug-report dialog with two action buttons:
- *   - "Report on GitHub" \u2014 always.
- *   - "Email us" \u2014 hosted only. Self-hosters aren't our customers and
- *     `support@riffado.com` would just confuse them; they should file
- *     on GitHub.
- *
- * The preview is shown so users see exactly what gets sent before
- * clicking. Both buttons open in a new tab via `<a target="_blank">`
- * (the mailto opens the user's mail client; effectively the same UX).
- */
+/** Renders the bug-report dialog and its pre-filled report preview. */
 export function ReportBugDialog({
     isHosted,
     errorId,
@@ -48,27 +38,32 @@ export function ReportBugDialog({
     onOpenChange,
 }: ReportBugDialogProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
     const page =
         typeof window !== "undefined" ? window.location.pathname : undefined;
-    const opts = { isHosted, errorId, errorContext, page };
+    const opts = { isHosted, errorId, errorContext, page, locale };
     const githubUrl = buildReportBugUrl(opts);
     const mailtoUrl = buildReportBugMailto(opts);
     const preview = buildReportBugBodyPreview(opts);
+    let description = i18n(
+        "Pick how you'd like to report this. Your version and deployment mode are pre-filled to save you typing.",
+    );
+    if (errorId) {
+        description = i18n(
+            "Something went wrong. The details below will be pre-filled — add what you were doing and we'll take a look.",
+        );
+    } else if (!isHosted) {
+        description = i18n(
+            "Report this on GitHub, or send the details below to your instance administrator.",
+        );
+    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle>{i18n("Report a bug")}</DialogTitle>
-                    <DialogDescription>
-                        {errorId
-                            ? i18n(
-                                  "Something went wrong. The details below will be pre-filled — add what you were doing and we'll take a look.",
-                              )
-                            : i18n(
-                                  "Pick how you'd like to report this. Your version and deployment mode are pre-filled to save you typing.",
-                              )}
-                    </DialogDescription>
+                    <DialogDescription>{description}</DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-2">

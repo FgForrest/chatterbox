@@ -1,7 +1,7 @@
 {
   "accountDeleted": "Váš účet Riffado byl smazán",
-  "emailChange": "Potvrďte novou e-mailovou adresu pro Riffado",
-  "exportReady": "Váš export z Riffado je připraven",
+  "emailChange": "Potvrďte novou e-mailovou adresu pro Klepnu",
+  "exportReady": "Váš export z Klepny je připraven",
   "graceLastDay": "Riffado: poslední možnost exportu (účet bude smazán do 24 hodin)",
   "graceReminder": "Riffado: na export zbývá {days, plural, one {# den} few {# dny} other {# dní}}",
   "graceStartedPaid": "Vaše předplatné Riffado skončilo: na export máte {days, plural, one {# den} few {# dny} other {# dní}}",
@@ -33,13 +33,13 @@
   "unsubscribedChangedMind": "Změnili jste názor? Marketingové preference najdete v",
   "accountSettings": "nastavení účtu",
   "overCap": "Riffado: překročen limit úložiště tarifu Free",
-  "passwordReset": "Obnovte si heslo k Riffado",
+  "passwordReset": "Obnovte si heslo ke Klepně",
   "paymentFailed": "Riffado: platba se nezdařila",
   "rebrandAnnouncement": "OpenPlaud se mění na Riffado",
-  "test": "Testovací e-mail z Riffado",
+  "test": "Testovací e-mail z Klepny",
   "transitionEnded": "Váš hostovaný účet Riffado je nyní jen pro čtení",
   "transitionReminder": "Riffado: zbývá {days, plural, one {# den} few {# dny} other {# dní}} bezplatného Hosted Pro",
   "transitionStart": "Proč zavádíme Riffado Hosted Pro",
-  "verify": "Potvrďte svůj e-mail pro Riffado",
+  "verify": "Potvrďte svůj e-mail pro Klepnu",
   "welcomeHostedPro": "Používáte Riffado Hosted Pro"
 }

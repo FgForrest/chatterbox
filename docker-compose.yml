@@ -29,8 +29,8 @@ services:
     #   - `latest`  → newest stable release (recommended)
     #   - `0.1.0`   → pin to a specific version
     #   - `dev`     → rolling build from `main` (unstable, opt-in)
-    # Override via RIFFADO_VERSION in .env. For local builds, see docker-compose.dev.yml.
-    image: ghcr.io/riffado/riffado:${RIFFADO_VERSION:-latest}
+    # Override via CHATTERBOX_VERSION in .env. RIFFADO_VERSION is accepted for one release.
+    image: ghcr.io/fgforrest/chatterbox:${CHATTERBOX_VERSION:-${RIFFADO_VERSION:-latest}}
     container_name: riffado-app
     restart: unless-stopped
     ports:
@@ -155,7 +155,7 @@ services:
   # generate summaries instead of a metered API key. See
   # `agent-bridge/README.md`; opt in with `--profile agent-bridge`.
   #
-  # Add it in Riffado under Settings -> AI Providers as the "Claude Code"
+  # Add it in Chatterbox under Settings -> AI Providers as the "Claude Code"
   # or "Codex" preset; both prefill http://agent-bridge:8787/v1 and take
   # BRIDGE_TOKEN as the API key.
   agent-bridge:
@@ -174,7 +174,7 @@ services:
     # Deliberately no `ports:`. The bridge spends your subscription, so
     # it is reachable only from other services on this compose network --
     # publishing it would expose that to the host and anything routed to
-    # it. Riffado reaches it by service name.
+    # it. Chatterbox reaches it by service name.
     environment:
       BRIDGE_TOKEN: ${BRIDGE_TOKEN}
       # From `claude setup-token`. Leave unset if you instead ran
@@ -207,7 +207,7 @@ services:
   # key. Port 25 is the deployment's to publish (an override mapping
   # "25:2525"); the base file binds the container to loopback only.
   # Built from this checkout unless an override sets the published image,
-  # ghcr.io/<owner>/<repository>-mail-receiver (same tags as the app).
+  # ghcr.io/fgforrest/chatterbox-mail-receiver (same tags as the app).
   mail-receiver:
     profiles: ["mail"]
     image: chatterbox-mail-receiver:local

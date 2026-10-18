@@ -27,8 +27,9 @@ export async function generateMetadata(): Promise<Metadata> {
     const t = await getExtracted();
     const name = productName(await getLocale());
     const title = t(
-        "Riffado — Open-source AI transcription for voice recorders",
-    ).replace("Riffado", name);
+        "{name} — Open-source AI transcription for voice recorders",
+        { name },
+    );
     const description = t(
         "Open-source transcription for the voice recorder you already own. Choose your AI, own your transcripts, deploy where you want. Currently supports the Plaud Note family: Note, Note Pro, and NotePin.",
     );
@@ -44,7 +45,7 @@ export async function generateMetadata(): Promise<Metadata> {
         // previews. `APP_URL` is allowed to be unset during `next build`
         // (see `src/lib/env.ts`); the fallback keeps the build green and
         // self-host deployments override it at runtime via env.
-        metadataBase: new URL(env.APP_URL ?? "https://riffado.com"),
+        metadataBase: new URL(env.APP_URL ?? "http://localhost:3000"),
         title: {
             default: title,
             template: `%s · ${name}`,
@@ -61,8 +62,9 @@ export async function generateMetadata(): Promise<Metadata> {
         },
         twitter: {
             card: "summary_large_image",
-            site: "@riffadohq",
-            creator: "@riffadohq",
+            ...(env.IS_HOSTED
+                ? { site: "@riffadohq", creator: "@riffadohq" }
+                : {}),
             title,
             description: socialDescription,
             images: ["/og-home.png"],

@@ -128,13 +128,7 @@ If user instructions conflict with these rules, ask for explicit confirmation be
 
 ### Creating issues
 
-Three templates — pick the right one:
-
-- `bug_report.yml` — user-facing bug
-- `feature_request.yml` — user-facing feature suggestion
-- `task.yml` — internal agent-handoff work item
-
-Task template has three blocks: **Context** (why + current state), **Acceptance Criteria** (concrete verifiable outcomes), **Relevant files** (optional pointers).
+There are no issue templates. An internal work item has three blocks: **Context** (why + current state), **Acceptance Criteria** (concrete verifiable outcomes), **Relevant files** (optional pointers).
 
 Title prefixes match commit prefixes. Labels: `bug`, `enhancement`, `task`, `triage`, `good first issue`, `documentation`, `help wanted`. Don't invent ad-hoc labels.
 

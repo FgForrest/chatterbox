@@ -4,7 +4,7 @@ import { getExtracted } from "next-intl/server";
 export async function extractEmailTemplateMessages(): Promise<void> {
     const i18n = await getExtracted();
     i18n("{version} available", { version: "" });
-    i18n("Riffado. Your recordings, your transcripts.");
+    i18n("{name}. Your recordings, your transcripts.", { name: "" });
     i18n("Your Riffado account has been deleted.");
     i18n("Account deleted.");
     i18n(
@@ -13,17 +13,17 @@ export async function extractEmailTemplateMessages(): Promise<void> {
     i18n("Thanks for trying Riffado. If you change your mind, you can always");
     i18n("start fresh");
     i18n("or self-host the open-source version at");
-    i18n("Confirm the email change on your Riffado account.");
+    i18n("Confirm the email change on your Chatterbox account.");
     i18n("Confirm email change.");
     i18n(
-        "A change request was made to update the email on your Riffado account to {newEmail}. Click below to confirm. The link expires in {hours, plural, one {# hour} other {# hours}}.",
+        "A change request was made to update the email on your Chatterbox account to {newEmail}. Click below to confirm. The link expires in {hours, plural, one {# hour} other {# hours}}.",
         { newEmail: "", hours: 1 },
     );
     i18n("Confirm new email");
     i18n(
         "If you did not request this change, ignore this message and consider rotating your password.",
     );
-    i18n("Your Riffado data export is ready to download.");
+    i18n("Your Chatterbox data export is ready to download.");
     i18n("Download export");
     i18n("Your export is ready");
     i18n(
@@ -115,10 +115,10 @@ export async function extractEmailTemplateMessages(): Promise<void> {
     i18n(
         "objects from Plaud until you either upgrade to Pro (50 GB cap) or delete enough recordings to come back under the limit.",
     );
-    i18n("Reset your Riffado password");
+    i18n("Reset your Chatterbox password");
     i18n("Reset your password");
     i18n(
-        "We received a request to reset the password for your Riffado account. Click the button below to choose a new password. This link expires in 1 hour.",
+        "We received a request to reset the password for your Chatterbox account. Click the button below to choose a new password. This link expires in 1 hour.",
     );
     i18n(
         "If you didn't request a password reset, you can safely ignore this email -- your password will not change.",
@@ -168,7 +168,7 @@ export async function extractEmailTemplateMessages(): Promise<void> {
     i18n(
         "You're receiving this because you have a Riffado (formerly OpenPlaud) account. This is a one-time announcement about the rebrand. You'll still receive transactional email: password resets, sync notifications, and the like.",
     );
-    i18n("Test email from Riffado - Email notifications are working");
+    i18n("Test email from Chatterbox - Email notifications are working");
     i18n("Test email");
     i18n(
         "Your email notifications are configured correctly. You'll receive an email when new recordings are synced from your Plaud device.",
@@ -271,16 +271,16 @@ export async function extractEmailTemplateMessages(): Promise<void> {
     );
     i18n("Kacper, building Riffado");
     i18n(
-        "Confirm your email address to finish setting up your Riffado account.",
+        "Confirm your email address to finish setting up your Chatterbox account.",
     );
     i18n("Confirm your email.");
     i18n(
-        "Click the button below to confirm this is your email address and finish setting up your Riffado account. The link expires in {hours, plural, one {# hour} other {# hours}}.",
+        "Click the button below to confirm this is your email address and finish setting up your Chatterbox account. The link expires in {hours, plural, one {# hour} other {# hours}}.",
         { hours: 1 },
     );
     i18n("Confirm email");
     i18n(
-        "If you didn't sign up for Riffado, you can safely ignore this message.",
+        "If you didn't sign up for Chatterbox, you can safely ignore this message.",
     );
     i18n(
         "You're on Riffado Hosted Pro: 50 GB storage, 15 hours of Mynah transcription, unlimited devices.",

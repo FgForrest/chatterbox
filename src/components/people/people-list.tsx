@@ -137,7 +137,7 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
                         </h1>
                         <p className="mt-3 max-w-md text-pretty text-sm leading-6 text-foreground/70 sm:text-base">
                             {i18n(
-                                "Name a speaker once and Riffado remembers them across recordings, keeping every conversation easier to follow.",
+                                "Name a speaker once and Chatterbox remembers them across recordings, keeping every conversation easier to follow.",
                             )}
                         </p>
                         <div className="mt-7 w-full">

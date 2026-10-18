@@ -46,7 +46,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
 
     const storage = createBackupStorageProvider();
-    const filename = `riffado-export-${job.id}.zip`;
+    const filename = `chatterbox-export-${job.id}.zip`;
 
     // Ask where the ARCHIVE lives, not where recordings live. With
     // BACKUP_STORAGE_PATH set the two differ, and redirecting to a

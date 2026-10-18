@@ -8,7 +8,7 @@ export const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION?.trim() || "dev";
 
 /** The GitHub repository (`owner/name`) this build comes from. */
 export const APP_REPOSITORY =
-    process.env.NEXT_PUBLIC_APP_REPOSITORY?.trim() || "riffado/riffado";
+    process.env.NEXT_PUBLIC_APP_REPOSITORY?.trim() || "FgForrest/chatterbox";
 
 const CALVER_RE = /^(\d{4})\.(\d+)$/;
 

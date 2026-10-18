@@ -147,7 +147,7 @@ export function SyncSection() {
             <SettingsSectionHeader
                 title={i18n("Sync")}
                 description={i18n(
-                    "When and how Riffado pulls new recordings from your Plaud device.",
+                    "When and how Chatterbox pulls new recordings from your Plaud device.",
                 )}
                 icon={RefreshCw}
             />

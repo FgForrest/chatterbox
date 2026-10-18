@@ -76,7 +76,7 @@ export function MailRetentionCard({ initial }: { initial: MailPolicy }) {
         content: {
             label: i18n("Mail text"),
             hint: i18n(
-                "The text Riffado read. Facts learned only from it go with it; who wrote to whom stays.",
+                "The text Chatterbox read. Facts learned only from it go with it; who wrote to whom stays.",
             ),
         },
         summary: {

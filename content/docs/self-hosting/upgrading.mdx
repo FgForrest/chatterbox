@@ -53,7 +53,7 @@ selected folder, the extension drops the folder choice and continues recording.
 change it, update the app service's Compose environment pass-through as
 described under [Environment variables](./environment-variables#optional-knobs).
 
-Upgrading is safe. Before upgrading, take a `pg_dump` of the Riffado database.
+Upgrading is safe. Before upgrading, take a `pg_dump` of the Chatterbox database.
 The supported rollback is to restore that dump and start the previous image.
 Starting the previous image against the upgraded database is not supported: it
 starts without errors but shows settled proposals as pending again. Accepting
@@ -63,8 +63,9 @@ to be started manually after you roll forward.
 
 ## Picking a tag
 
-`RIFFADO_VERSION` in your `.env` controls which image tag Compose
-pulls.
+`CHATTERBOX_VERSION` in your `.env` controls which image tag Compose pulls.
+The deprecated `RIFFADO_VERSION` remains a fallback for one release when
+`CHATTERBOX_VERSION` is unset.
 
 | Tag             | What you get                              | Use when                                |
 | --------------- | ----------------------------------------- | --------------------------------------- |
@@ -91,11 +92,11 @@ shouldn't phone home at all, set `DISABLE_UPDATE_CHECK=true` in your
 ## Rolling back
 
 To roll back safely, restore the `pg_dump` taken before the upgrade, set
-`RIFFADO_VERSION` to the previous tag, and start the stack:
+`CHATTERBOX_VERSION` to the previous tag, and start the stack:
 
 ```bash
 # In .env
-RIFFADO_VERSION=0.4.1
+CHATTERBOX_VERSION=2026.1
 ```
 
 ```bash
@@ -107,7 +108,7 @@ settled proposals as pending and accepting one can apply an obsolete change.
 
 ## Backing up before an upgrade
 
-Before upgrading, create a logical `pg_dump` of the Riffado database. Also back
+Before upgrading, create a logical `pg_dump` of the Chatterbox database. Also back
 up these two data volumes before a major-version upgrade:
 
 1. The Postgres volume (whichever path your compose file binds to

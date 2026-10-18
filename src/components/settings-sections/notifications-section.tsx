@@ -179,7 +179,7 @@ export function NotificationsSection() {
             <SettingsSectionHeader
                 title={i18n("Notifications")}
                 description={i18n(
-                    "Choose how and when Riffado lets you know about new recordings and sync events.",
+                    "Choose how and when Chatterbox lets you know about new recordings and sync events.",
                 )}
                 icon={Bell}
             />

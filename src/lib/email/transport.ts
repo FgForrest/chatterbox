@@ -64,6 +64,18 @@ export function resolveReplyToAddress(): string | undefined {
     return env.SMTP_REPLY_TO;
 }
 
+/** Resolve the fallback sender from the configured application URL. */
+export function resolveFallbackFromAddress(): string {
+    if (!env.APP_URL) return "noreply@localhost";
+
+    try {
+        const hostname = new URL(env.APP_URL).hostname;
+        return hostname ? `noreply@${hostname}` : "noreply@localhost";
+    } catch {
+        return "noreply@localhost";
+    }
+}
+
 /** Resolve the `From:` address for a given campaign kind. */
 export function resolveFromAddress(
     kind: "transactional" | "announcement" | "marketing",
@@ -71,13 +83,13 @@ export function resolveFromAddress(
 ): string {
     if (override) return override;
     if (kind === "transactional") {
-        return env.SMTP_FROM ?? env.SMTP_USER ?? "noreply@riffado.com";
+        return env.SMTP_FROM ?? env.SMTP_USER ?? resolveFallbackFromAddress();
     }
     return (
         env.SMTP_MARKETING_FROM ??
         env.SMTP_FROM ??
         env.SMTP_USER ??
-        "noreply@riffado.com"
+        resolveFallbackFromAddress()
     );
 }
 

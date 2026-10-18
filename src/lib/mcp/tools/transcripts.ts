@@ -126,7 +126,7 @@ const getTranscript = defineTool({
     name: "get_transcript",
     anyOf: ["transcripts:read"],
     title: "Get a transcript",
-    description: `The transcript of one recording (by id or title), as people read it in Riffado: confirmed corrections applied, speakers named where someone confirmed who they are. Turns come in order, about ${PAGE_CHARS.toLocaleString("en")} characters per page (a longer turn comes in several pieces, each with its speaker and timing); pass next_cursor back as cursor for the next page. from_ms and to_ms keep the turns overlapping that window of the audio; an untimed transcript (timed: false) has no turns in any window. A recording without a transcript answers has_transcript: false and no turns. ${DATA_NOT_INSTRUCTIONS}`,
+    description: `The transcript of one recording (by id or title), as people read it in Chatterbox: confirmed corrections applied, speakers named where someone confirmed who they are. Turns come in order, about ${PAGE_CHARS.toLocaleString("en")} characters per page (a longer turn comes in several pieces, each with its speaker and timing); pass next_cursor back as cursor for the next page. from_ms and to_ms keep the turns overlapping that window of the audio; an untimed transcript (timed: false) has no turns in any window. A recording without a transcript answers has_transcript: false and no turns. ${DATA_NOT_INSTRUCTIONS}`,
     annotations: readOnly,
     input: {
         recording: z

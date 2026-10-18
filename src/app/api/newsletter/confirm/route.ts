@@ -4,6 +4,7 @@ import {
     getSubscriberById,
 } from "@/db/queries/newsletter-subscriptions";
 import { verifyUnsubscribeToken } from "@/lib/email/unsubscribe-token";
+import { env } from "@/lib/env";
 import {
     type AppLocale,
     localeFromAcceptLanguage,
@@ -19,6 +20,8 @@ import { createEmailTranslator } from "@/lib/i18n/email-messages";
  * double opt-in without the user's action.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
+    if (!env.IS_HOSTED) return new NextResponse(null, { status: 404 });
+
     const requestLocale = localeFromAcceptLanguage(
         req.headers.get("accept-language"),
     );
@@ -42,6 +45,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+    if (!env.IS_HOSTED) return new NextResponse(null, { status: 404 });
+
     const requestLocale = localeFromAcceptLanguage(
         req.headers.get("accept-language"),
     );

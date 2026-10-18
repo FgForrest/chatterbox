@@ -7,7 +7,7 @@ description: Exporty složek na disk nebo Google Drive, zálohy a automatické m
 
 ## Exporty složek
 
-Export složky uchovává kopii nahrávek složky mimo Chatterbox, na disku nebo v Google Drive, a udržuje ji aktuální. Váš administrátor rozhoduje, kterou z těchto dvou možností vaše instance nabízí.
+Export složky uchovává kopii nahrávek složky mimo Klepna, na disku nebo v Google Drive, a udržuje ji aktuální. Váš administrátor rozhoduje, kterou z těchto dvou možností vaše instance nabízí.
 
 Otevřete složku (viz [Složky](recordings.md#folders)) a klikněte na **Nastavení**:
 
@@ -32,7 +32,7 @@ Klikněte na **Uložit export**. Export zahrnuje složku a všechny složky uvni
 
 ### Do Google Drive
 
-Nejprve propojte svůj Google účet v **Nastavení → Google účet**. Poté klikněte na **Přidat export na Google Drive**, vyberte složku na Drive a u přepisů i souhrnů si zvolte, zda má být exportován soubor ve formátu Markdown, Google Docs, nebo oba. Chatterbox má přístup právě jen k této složce a k souborům, které zde samo vytvoří. Dokumenty Google jsou přepsány vždy, když se nahrávka změní, takže vaše úpravy budou přepsány.
+Nejprve propojte svůj Google účet v **Nastavení → Google účet**. Poté klikněte na **Přidat export na Google Drive**, vyberte složku na Drive a u přepisů i souhrnů si zvolte, zda má být exportován soubor ve formátu Markdown, Google Docs, nebo oba. Klepna má přístup právě jen k této složce a k souborům, které zde samo vytvoří. Dokumenty Google jsou přepsány vždy, když se nahrávka změní, takže vaše úpravy budou přepsány.
 
 <span id="how-an-export-stays-up-to-date" />
 
@@ -42,7 +42,7 @@ Nejprve propojte svůj Google účet v **Nastavení → Google účet**. Poté k
 - Nahrávka, kterou přesunete nebo přejmenujete, způsobí přesun/přejmenování jejích souborů místo nového vytvoření.
 - Soubory smazaných nahrávek, odstraněných přepisů nebo souhrnů, nebo druhů, které jste vypnuli, jsou z exportu vymazány.
 - Nahrávka zařazená do více složek má kopii v každé z nich.
-- Chatterbox se nikdy nedotýká souborů, které samo nevytvořilo. Audio, které [uchovávání](#deleting-old-data-automatically) odstranilo z Chatterbox, zůstává v exportu.
+- Klepna se nikdy nedotýká souborů, které samo nevytvořilo. Audio, které [uchovávání](#deleting-old-data-automatically) odstranilo z Klepna, zůstává v exportu.
 - Export účtu organizace zapisuje u sdíleného e-mailu jen `mail.md` se skrytými tajnými adresami: zpráva tak, jak přišla, zůstává jejímu odesílateli.
 - **Synchronizovat** zkontroluje export a znovu zapíše to, co chybí.
 
@@ -70,16 +70,16 @@ Každý archiv zůstává ke stažení po dobu sedmi dnů. Záloha obsahuje vaš
 
 **Nastavení → Úložiště → Automatické mazání starých dat** maže staré kopie podle plánu. Každý druh má vlastní období, od 1 do 365 dní, a dokud jej nezapnete, je funkce vypnuta:
 
-- **Vzdálený originál**: přesune originální soubor v cloudu vašeho rekordéru do Koše, ale až poté, co má Chatterbox vlastní kopii.
-- **Místní audio**: kopie zvuku uložená v Chatterbox.
+- **Vzdálený originál**: přesune originální soubor v cloudu vašeho rekordéru do Koše, ale až poté, co má Klepna vlastní kopii.
+- **Místní audio**: kopie zvuku uložená v Klepna.
 - **Místní přepis** a **Místní souhrn**: lze je vytvořit znovu, pokud zůstává zvuk.
 
-Nahrávka zůstává ve vaší knihovně s poznámkou o tom, co bylo odstraněno, a Chatterbox ji samo znovu nenastahuje. V horní části stránky Úložiště vidíte, kolik místa vaše nahrávky zabírají a které jsou největší.
+Nahrávka zůstává ve vaší knihovně s poznámkou o tom, co bylo odstraněno, a Klepna ji samo znovu nenastahuje. V horní části stránky Úložiště vidíte, kolik místa vaše nahrávky zabírají a které jsou největší.
 
 Kde vaše instance přijímá poštu, dělá totéž pro e-maily **Automatické mazání staré pošty** pod tím, počítáno od chvíle, kdy e-mail přišel:
 
 - **E-mail tak, jak přišel**: uložená zpráva i s přílohami.
-- **Text e-mailu**: text, který Chatterbox přečetlo. Fakta naučená jen z něj se smažou s ním.
+- **Text e-mailu**: text, který Klepna přečetlo. Fakta naučená jen z něj se smažou s ním.
 - **Souhrn e-mailu**: souhrn a úkoly z něj navržené.
 
 E-mail zůstává ve vaší hromádce s odesílatelem, adresáty a předmětem a říká, co bylo odstraněno. Dokud je e-mail sdílený do Organizace, platí pro něj místo vašich pravidel pravidla Organizace.

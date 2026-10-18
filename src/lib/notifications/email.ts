@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import React from "react";
 import { claimEmailSend, releaseEmailSend } from "@/db/queries/email-log";
+import { resolveFromAddress } from "@/lib/email/transport";
 import { env } from "@/lib/env";
 import {
     type AppLocale,
@@ -77,8 +78,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
             return false;
         }
 
-        const fromEmail =
-            env.SMTP_FROM || env.SMTP_USER || "noreply@riffado.com";
+        const fromEmail = resolveFromAddress("transactional");
 
         await mailer.sendMail({
             from: fromEmail,
@@ -109,7 +109,7 @@ export async function sendEmailWithError(options: EmailOptions): Promise<void> {
         );
     }
 
-    const fromEmail = env.SMTP_FROM || env.SMTP_USER || "noreply@riffado.com";
+    const fromEmail = resolveFromAddress("transactional");
 
     try {
         await mailer.sendMail({

@@ -1,11 +1,15 @@
 import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { getExtracted } from "next-intl/server";
 import { LandingNav } from "@/components/landing/landing-nav";
 import { LandingFooter } from "@/components/landing-footer";
+import { env } from "@/lib/env";
 import { marketingMetadata } from "@/lib/seo/marketing-metadata";
+
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
     const i18n = await getExtracted();
@@ -18,25 +22,10 @@ export async function generateMetadata(): Promise<Metadata> {
     });
 }
 
-/**
- * Public rebrand explainer.
- *
- * Single source of truth for "why the name change" -- linked from the
- * landing announcement bar, the in-app banner, the `/changelog` entry,
- * and (operationally) the `openplaud.com` redirect.
- *
- * Rendered for everyone, including self-host. This is a one-time-event
- * note about an action the project took, not about the state of the
- * hosted service -- a self-host operator visiting `/rebrand` gets the
- * same accurate story as a hosted user.
- *
- * Tone matches `for-professionals.tsx` ("I'll reply personally"): the
- * project speaks with a personal voice from its maintainer, not as a
- * faceless team. Structure leads with rumor-killing ("not a buyout"),
- * then the story (why), then the practical reassurance (what stays).
- * Signed by name to cash the trust check.
- */
+/** Hosted-only upstream rebrand announcement. */
 export default function RebrandPage() {
+    if (!env.IS_HOSTED) notFound();
+
     const i18n = useExtracted();
     return (
         <div className="min-h-screen flex flex-col bg-background text-foreground">

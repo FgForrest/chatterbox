@@ -19,7 +19,7 @@ import type {
 
 /** Drive description of every folder an export creates. */
 export const MANAGED_FOLDER_DESCRIPTION =
-    "Managed by Riffado. Content you add here may be removed.";
+    "Managed by Chatterbox. Content you add here may be removed.";
 /** `appProperties` key naming the export that created an item. */
 export const EXPORT_PROPERTY = "riffadoExport";
 /** `appProperties` key holding the digest of a file's content. */

@@ -41,7 +41,7 @@ export default async function RegisterPage() {
         <SelfHostAuthChrome
             title={i18n("Create your account")}
             subtitle={i18n(
-                "The first account on a new Riffado instance becomes the admin.",
+                "The first account on a new Chatterbox instance becomes the admin.",
             )}
         >
             <RegisterForm

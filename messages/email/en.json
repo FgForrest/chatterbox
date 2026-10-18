@@ -1,7 +1,7 @@
 {
   "accountDeleted": "Your Riffado account has been deleted",
-  "emailChange": "Confirm your new Riffado email",
-  "exportReady": "Your Riffado export is ready",
+  "emailChange": "Confirm your new Chatterbox email",
+  "exportReady": "Your Chatterbox export is ready",
   "graceLastDay": "Riffado: last chance to export (account deleted in 24h)",
   "graceReminder": "Riffado: {days, plural, one {# day} other {# days}} left to export",
   "graceStartedPaid": "Your Riffado subscription ended: {days, plural, one {# day} other {# days}} to export",
@@ -33,13 +33,13 @@
   "unsubscribedChangedMind": "Changed your mind? Marketing preferences live in your",
   "accountSettings": "account settings",
   "overCap": "Riffado: storage over the Free cap",
-  "passwordReset": "Reset your Riffado password",
+  "passwordReset": "Reset your Chatterbox password",
   "paymentFailed": "Riffado: payment failed",
   "rebrandAnnouncement": "OpenPlaud is now Riffado",
-  "test": "Test email from Riffado",
+  "test": "Test email from Chatterbox",
   "transitionEnded": "Your Riffado hosted account is now read-only",
   "transitionReminder": "Riffado: {days, plural, one {# day} other {# days}} of free Hosted Pro left",
   "transitionStart": "Why Riffado Hosted Pro is happening",
-  "verify": "Confirm your Riffado email",
+  "verify": "Confirm your Chatterbox email",
   "welcomeHostedPro": "You're on Riffado Hosted Pro"
 }

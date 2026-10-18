@@ -2,7 +2,7 @@ import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
 export function GET() {
-    const lines: string[] = ["# Riffado docs", ""];
+    const lines: string[] = ["# Chatterbox docs", ""];
 
     for (const page of source.getPages(defaultLocale)) {
         lines.push(`## ${page.data.title}`);

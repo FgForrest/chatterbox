@@ -12,6 +12,7 @@ const { queriesMock, tokenMock } = vi.hoisted(() => ({
 
 vi.mock("@/db/queries/newsletter-subscriptions", () => queriesMock);
 vi.mock("@/lib/email/unsubscribe-token", () => tokenMock);
+vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: true } }));
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/newsletter/confirm/route";

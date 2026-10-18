@@ -1,23 +1,69 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockEnv } = vi.hoisted(() => ({
+    mockEnv: {} as {
+        APP_URL?: string;
+        SMTP_FROM?: string;
+        SMTP_MARKETING_FROM?: string;
+        SMTP_USER?: string;
+    },
+}));
 
 vi.mock("@/lib/env", () => ({
-    env: {},
+    env: mockEnv,
 }));
 vi.mock("@/lib/smtp", () => ({
     isSmtpConfigured: () => false,
 }));
 
-import { htmlToText } from "@/lib/email/transport";
+import {
+    htmlToText,
+    resolveFallbackFromAddress,
+    resolveFromAddress,
+} from "@/lib/email/transport";
+
+beforeEach(() => {
+    for (const key of Object.keys(mockEnv)) {
+        delete mockEnv[key as keyof typeof mockEnv];
+    }
+});
+
+describe("sender address resolution", () => {
+    it("uses the application host for the fallback sender", () => {
+        mockEnv.APP_URL = "https://chat.example.test:8443/dashboard";
+
+        expect(resolveFallbackFromAddress()).toBe("noreply@chat.example.test");
+        expect(resolveFromAddress("transactional")).toBe(
+            "noreply@chat.example.test",
+        );
+    });
+
+    it("uses localhost when the application URL is missing or invalid", () => {
+        expect(resolveFallbackFromAddress()).toBe("noreply@localhost");
+
+        mockEnv.APP_URL = "not a URL";
+        expect(resolveFallbackFromAddress()).toBe("noreply@localhost");
+    });
+
+    it("keeps an explicitly configured sender", () => {
+        mockEnv.APP_URL = "https://chat.example.test";
+        mockEnv.SMTP_FROM = "Instance Mail <mail@example.test>";
+
+        expect(resolveFromAddress("transactional")).toBe(
+            "Instance Mail <mail@example.test>",
+        );
+    });
+});
 
 describe("htmlToText", () => {
     it("strips tags and decodes common entities", () => {
         const html = `
-            <p>Hello &amp; welcome to <strong>Riffado</strong>.</p>
-            <p>Visit at <a href="https://riffado.com/docs">riffado.com/docs</a>.</p>
+            <p>Hello &amp; welcome to <strong>Chatterbox</strong>.</p>
+            <p>Visit at <a href="https://example.com/docs">example.com/docs</a>.</p>
         `;
         const text = htmlToText(html);
-        expect(text).toContain("Hello & welcome to Riffado.");
-        expect(text).toContain("Visit at riffado.com/docs.");
+        expect(text).toContain("Hello & welcome to Chatterbox.");
+        expect(text).toContain("Visit at example.com/docs.");
         // Tags should be gone (decoded entities like `<` from `&lt;`
         // are allowed and intentional -- see the next test).
         expect(text).not.toMatch(/<\w+>/);

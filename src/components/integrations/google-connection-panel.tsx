@@ -88,7 +88,7 @@ export function GoogleConnectionPanel({
             {connection.status === "needs_reconnect" ? (
                 <p className="text-sm text-destructive">
                     {i18n(
-                        "Google no longer accepts Riffado's access to {email}. Exports to Google Drive are paused until you reconnect.",
+                        "Google no longer accepts Chatterbox's access to {email}. Exports to Google Drive are paused until you reconnect.",
                         { email: connection.email },
                     )}
                 </p>
