@@ -21,7 +21,7 @@ export function GraceLastDayEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "Last chance: your Riffado account is deleted in under 24 hours.",
+                "Last chance: your {name} account is deleted in under 24 hours.",
             )}
             footerLink={{
                 href: reactivateUrl,
@@ -33,7 +33,7 @@ export function GraceLastDayEmail({
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Your Riffado account is scheduled for permanent deletion on",
+                    "Your {name} account is scheduled for permanent deletion on",
                 )}{" "}
                 {formatEmailDate(
                     deletionAt,

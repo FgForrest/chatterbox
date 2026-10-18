@@ -35,17 +35,17 @@ export function GraceStartedEmail({
     const lead =
         gracePath === "trial"
             ? i18n(
-                  "Your {trialDays}-day Riffado Pro trial ended without a card on file. You have {graceDays, plural, one {# day} other {# days}} to export your data; after that, your account and all recordings will be permanently deleted on {deletionDate}.",
+                  "Your {trialDays}-day {name} Pro trial ended without a card on file. You have {graceDays, plural, one {# day} other {# days}} to export your data; after that, your account and all recordings will be permanently deleted on {deletionDate}.",
                   { trialDays: String(trialDays), graceDays, deletionDate },
               )
             : i18n(
-                  "Your Riffado Pro subscription ended. You have {graceDays, plural, one {# day} other {# days}} to export your data or reactivate. After {deletionDate} your account and all recordings will be permanently deleted.",
+                  "Your {name} Pro subscription ended. You have {graceDays, plural, one {# day} other {# days}} to export your data or reactivate. After {deletionDate} your account and all recordings will be permanently deleted.",
                   { graceDays, deletionDate },
               );
     return (
         <EmailLayout
             previewText={i18n(
-                "You have {days, plural, one {# day} other {# days}} to export your Riffado data before the account is deleted.",
+                "You have {days, plural, one {# day} other {# days}} to export your {name} data before the account is deleted.",
                 { days: graceDays },
             )}
             footerLink={{
@@ -76,7 +76,7 @@ export function GraceStartedEmail({
                 {i18n(
                     "Questions, or something looks off? Reply to this email. I read every one.",
                 )}{" "}
-                <br /> {i18n("Kacper, Riffado")}
+                <br /> {i18n("Kacper, {name}")}
             </Text>
         </EmailLayout>
     );

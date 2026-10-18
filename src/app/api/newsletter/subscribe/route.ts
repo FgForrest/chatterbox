@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import React from "react";
 import { z } from "zod";
 import { upsertSubscriber } from "@/db/queries/newsletter-subscriptions";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import {
     htmlToText,
     resolveFromAddress,
@@ -134,7 +135,9 @@ async function sendConfirmation(
     await sendEmailWithHeaders({
         to: email,
         from: resolveFromAddress("transactional"),
-        subject: createEmailTranslator(locale)("newsletterConfirm"),
+        subject: createEmailTranslator(locale)("newsletterConfirm", {
+            name: deploymentProductName(locale),
+        }),
         html,
         text: htmlToText(html),
     });

@@ -8,10 +8,16 @@ import path from "node:path";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/env", () => ({
-    env: { APP_URL: "https://app.example.test", IS_HOSTED: true },
+const mockEnv = vi.hoisted(() => ({
+    APP_URL: "https://app.example.test",
+    IS_HOSTED: true,
 }));
 
+vi.mock("@/lib/env", () => ({
+    env: mockEnv,
+}));
+
+import { createEmailTranslator } from "@/lib/i18n/email-messages";
 import { AccountDeletedEmail } from "@/lib/notifications/email-templates/account-deleted";
 import { EmailChangeConfirmEmail } from "@/lib/notifications/email-templates/email-change-confirm";
 import { ExportReadyEmail } from "@/lib/notifications/email-templates/export-ready";
@@ -34,6 +40,30 @@ import { renderEmailHtml } from "@/lib/notifications/render-email";
 
 const at = new Date("2026-08-27T12:00:00Z");
 const app = "https://app.example.test";
+
+function brandedSubjects(locale: "en" | "cs-CZ", name: string): string[] {
+    const t = createEmailTranslator(locale);
+    return [
+        t("accountDeleted", { name }),
+        t("emailChange", { name }),
+        t("exportReady", { name }),
+        t("graceLastDay", { name }),
+        t("graceReminder", { name, days: 3 }),
+        t("graceStartedPaid", { name, days: 30 }),
+        t("graceStartedTrial", { name, days: 7 }),
+        t("newsletterConfirm", { name }),
+        t("overCap", { name }),
+        t("passwordReset", { name }),
+        t("paymentFailed", { name }),
+        t("rebrandAnnouncement", { name }),
+        t("test", { name }),
+        t("transitionEnded", { name }),
+        t("transitionReminder", { name, days: 5 }),
+        t("transitionStart", { name }),
+        t("verify", { name }),
+        t("welcomeHostedPro", { name }),
+    ];
+}
 
 const templates: Record<string, React.ReactElement> = {
     "account-deleted": React.createElement(AccountDeletedEmail, {
@@ -146,9 +176,56 @@ const templates: Record<string, React.ReactElement> = {
 };
 
 describe("email templates' HTML", () => {
+    it.each([
+        {
+            label: "hosted English",
+            isHosted: true,
+            locale: "en" as const,
+            expected: "Riffado",
+            unexpected: ["Chatterbox", "Klepna"],
+        },
+        {
+            label: "hosted Czech",
+            isHosted: true,
+            locale: "cs-CZ" as const,
+            expected: "Riffado",
+            unexpected: ["Chatterbox", "Klepna"],
+        },
+        {
+            label: "self-hosted English",
+            isHosted: false,
+            locale: "en" as const,
+            expected: "Chatterbox",
+            unexpected: ["Riffado", "Klepna"],
+        },
+        {
+            label: "self-hosted Czech",
+            isHosted: false,
+            locale: "cs-CZ" as const,
+            expected: "Klepna",
+            unexpected: ["Riffado", "Chatterbox"],
+        },
+    ])("uses only the deployment brand in $label emails", async (mode) => {
+        mockEnv.IS_HOSTED = mode.isHosted;
+        const rendered = await Promise.all(
+            Object.values(templates).map((element) =>
+                renderEmailHtml(element, mode.locale),
+            ),
+        );
+        const subjects = brandedSubjects(mode.locale, mode.expected);
+
+        for (const value of [...rendered, ...subjects]) {
+            expect(value).toContain(mode.expected);
+            for (const unexpected of mode.unexpected) {
+                expect(value).not.toContain(unexpected);
+            }
+        }
+    });
+
     for (const [name, element] of Object.entries(templates)) {
         for (const locale of ["en", "cs-CZ"] as const) {
             it(`${name} (${locale})`, async () => {
+                mockEnv.IS_HOSTED = true;
                 const html = await renderEmailHtml(element, locale);
                 await expect(html).toMatchFileSnapshot(
                     path.join(

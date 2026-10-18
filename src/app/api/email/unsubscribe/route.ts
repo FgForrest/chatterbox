@@ -6,12 +6,11 @@ import {
     unsubscribeSubscriber,
 } from "@/db/queries/newsletter-subscriptions";
 import { users } from "@/db/schema";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import {
     type UnsubscribeAudience,
     verifyUnsubscribeToken,
 } from "@/lib/email/unsubscribe-token";
-import { env } from "@/lib/env";
 import {
     type AppLocale,
     localeFromAcceptLanguage,
@@ -116,6 +115,7 @@ async function recipientLocale(
 
 function confirmPage(params: ParsedParams, locale: AppLocale): NextResponse {
     const t = createEmailTranslator(locale);
+    const name = deploymentProductName(locale);
     const idParam = params.audience === "user" ? "u" : "s";
     const action = `/api/email/unsubscribe?${idParam}=${encodeURIComponent(params.id)}&t=${encodeURIComponent(params.token)}`;
     return new NextResponse(
@@ -123,7 +123,7 @@ function confirmPage(params: ParsedParams, locale: AppLocale): NextResponse {
             locale,
             title: t("unsubscribeTitle"),
             body: `
-                <p>${escapeHtml(t("unsubscribeBody"))}</p>
+                <p>${escapeHtml(t("unsubscribeBody", { name }))}</p>
                 <p>${escapeHtml(t("unsubscribeTransactional"))}</p>
                 <form method="POST" action="${escapeAttr(action)}" style="margin-top:1.5rem;">
                   <button type="submit" style="appearance:none;border:0;border-radius:6px;padding:0.7rem 1.2rem;background:#111;color:#fff;font:inherit;cursor:pointer;">${escapeHtml(t("unsubscribeButton"))}</button>
@@ -154,12 +154,13 @@ function badRequest(locale: AppLocale): NextResponse {
 
 function successPage(locale: AppLocale): NextResponse {
     const t = createEmailTranslator(locale);
+    const name = deploymentProductName(locale);
     return new NextResponse(
         renderPage({
             locale,
             title: t("unsubscribedTitle"),
             body: `
-                <p>${escapeHtml(t("unsubscribedBody"))}</p>
+                <p>${escapeHtml(t("unsubscribedBody", { name }))}</p>
                 <p>${escapeHtml(t("unsubscribeTransactional"))}</p>
                 <p>${escapeHtml(t("unsubscribedChangedMind"))} <a href="/settings">${escapeHtml(t("accountSettings"))}</a>.</p>
             `,
@@ -185,7 +186,7 @@ function renderPage({
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(title)} -- ${escapeHtml(env.IS_HOSTED ? "Riffado" : productName(locale))}</title>
+  <title>${escapeHtml(title)} -- ${escapeHtml(deploymentProductName(locale))}</title>
   <meta name="robots" content="noindex" />
   <style>
     :root { color-scheme: light dark; }

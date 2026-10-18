@@ -13,7 +13,7 @@ export function TestEmail({ dashboardUrl, settingsUrl }: TestEmailProps) {
     return (
         <EmailLayout
             previewText={i18n(
-                "Test email from Chatterbox - Email notifications are working",
+                "Test email from {name} - Email notifications are working",
             )}
             footerLink={{
                 href: settingsUrl,

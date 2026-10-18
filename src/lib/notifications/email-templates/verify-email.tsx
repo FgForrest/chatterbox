@@ -14,7 +14,7 @@ export function VerifyEmailEmail({ verificationUrl, expiresInHours }: Props) {
     return (
         <EmailLayout
             previewText={i18n(
-                "Confirm your email address to finish setting up your Chatterbox account.",
+                "Confirm your email address to finish setting up your {name} account.",
             )}
         >
             <Heading style={emailStyles.h1}>
@@ -22,7 +22,7 @@ export function VerifyEmailEmail({ verificationUrl, expiresInHours }: Props) {
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Click the button below to confirm this is your email address and finish setting up your Chatterbox account. The link expires in {hours, plural, one {# hour} other {# hours}}.",
+                    "Click the button below to confirm this is your email address and finish setting up your {name} account. The link expires in {hours, plural, one {# hour} other {# hours}}.",
                     { hours: expiresInHours },
                 )}
             </Text>
@@ -33,7 +33,7 @@ export function VerifyEmailEmail({ verificationUrl, expiresInHours }: Props) {
             </Section>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "If you didn't sign up for Chatterbox, you can safely ignore this message.",
+                    "If you didn't sign up for {name}, you can safely ignore this message.",
                 )}
             </Text>
         </EmailLayout>

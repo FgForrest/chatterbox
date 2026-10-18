@@ -10,13 +10,13 @@ interface PasswordResetEmailProps {
 export function PasswordResetEmail({ resetUrl }: PasswordResetEmailProps) {
     const i18n = getEmailTranslator();
     return (
-        <EmailLayout previewText={i18n("Reset your Chatterbox password")}>
+        <EmailLayout previewText={i18n("Reset your {name} password")}>
             <Heading style={emailStyles.h1}>
                 {i18n("Reset your password")}
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "We received a request to reset the password for your Chatterbox account. Click the button below to choose a new password. This link expires in 1 hour.",
+                    "We received a request to reset the password for your {name} account. Click the button below to choose a new password. This link expires in 1 hour.",
                 )}
             </Text>
             <Section style={emailStyles.buttonSection}>

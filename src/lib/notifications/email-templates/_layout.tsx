@@ -1,5 +1,5 @@
 import type React from "react";
-import { productName } from "@/lib/brand";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import {
     Body,
@@ -31,7 +31,7 @@ export function EmailLayout({
     children,
 }: EmailLayoutProps) {
     const i18n = getEmailTranslator();
-    const name = env.IS_HOSTED ? "Riffado" : productName(getEmailLocale());
+    const name = deploymentProductName(getEmailLocale());
     const logoUrl = new URL(
         "/logo.png",
         env.APP_URL ?? "http://localhost:3000",

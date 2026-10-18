@@ -24,7 +24,7 @@ export function RebrandAnnouncementEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "OpenPlaud is now Riffado. Same code, same team, new name.",
+                "OpenPlaud is now {name}. Same code, same team, new name.",
             )}
             footerLink={{
                 href: unsubscribeUrl,
@@ -32,14 +32,14 @@ export function RebrandAnnouncementEmail({
             }}
         >
             <Heading style={emailStyles.h1}>
-                {i18n("OpenPlaud is now Riffado.")}
+                {i18n("OpenPlaud is now {name}.")}
             </Heading>
 
             <Text style={emailStyles.text}>{opener}</Text>
 
             <Text style={emailStyles.text}>
                 {i18n(
-                    "Quick note: the project you signed up for as OpenPlaud is now called Riffado. Same code, same team, same AGPL license. We changed the name because the roadmap is broader than one recorder, and the old name kept boxing us in. That's it.",
+                    "Quick note: the project you signed up for as OpenPlaud is now called {name}. Same code, same team, same AGPL license. We changed the name because the roadmap is broader than one recorder, and the old name kept boxing us in. That's it.",
                 )}
             </Text>
 
@@ -84,12 +84,12 @@ export function RebrandAnnouncementEmail({
                 {i18n(
                     "If anything broke for you, hit reply. I read this inbox.",
                 )}{" "}
-                <br /> {i18n("Kacper, from Riffado")}
+                <br /> {i18n("Kacper, from {name}")}
             </Text>
 
             <Text style={emailStyles.text}>
                 {i18n(
-                    "You're receiving this because you have a Riffado (formerly OpenPlaud) account. This is a one-time announcement about the rebrand. You'll still receive transactional email: password resets, sync notifications, and the like.",
+                    "You're receiving this because you have a {name} (formerly OpenPlaud) account. This is a one-time announcement about the rebrand. You'll still receive transactional email: password resets, sync notifications, and the like.",
                 )}
             </Text>
         </EmailLayout>

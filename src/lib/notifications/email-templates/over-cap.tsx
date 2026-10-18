@@ -26,7 +26,7 @@ export function OverCapEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "Your Riffado account is over the Free storage limit. Sync of new objects is paused until you upgrade or free up space.",
+                "Your {name} account is over the Free storage limit. Sync of new objects is paused until you upgrade or free up space.",
             )}
             footerLink={{ href: settingsUrl, label: i18n("Open settings") }}
         >

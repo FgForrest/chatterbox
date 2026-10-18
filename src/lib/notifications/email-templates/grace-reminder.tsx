@@ -24,7 +24,7 @@ export function GraceReminderEmail({
     return (
         <EmailLayout
             previewText={i18n(
-                "{days, plural, one {# day} other {# days}} left to export your Riffado data before the account is deleted.",
+                "{days, plural, one {# day} other {# days}} left to export your {name} data before the account is deleted.",
                 { days: daysLeft },
             )}
             footerLink={{
@@ -40,7 +40,7 @@ export function GraceReminderEmail({
             </Heading>
             <Text style={emailStyles.text}>
                 {i18n(
-                    "A reminder: your Riffado account and every recording in it will be permanently deleted on",
+                    "A reminder: your {name} account and every recording in it will be permanently deleted on",
                 )}{" "}
                 {formatEmailDate(deletionAt, undefined, locale)}
                 {i18n(

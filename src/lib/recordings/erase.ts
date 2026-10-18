@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { sniffAudio } from "@/lib/audio/sniff";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
+import { deploymentProductName } from "@/lib/deployment-brand";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     lockOrgTree,
@@ -413,7 +414,7 @@ export async function eraseLocalArtifact(
         );
         throw new AppError(
             ErrorCode.STORAGE_ERROR,
-            `The ${scope} was erased from Chatterbox, but an exported file could not be removed. Retry to finish cleanup.`,
+            `The ${scope} was erased from ${deploymentProductName("en")}, but an exported file could not be removed. Retry to finish cleanup.`,
             500,
         );
     }
