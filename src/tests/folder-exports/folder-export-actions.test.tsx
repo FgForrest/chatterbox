@@ -117,10 +117,10 @@ describe("folder export dialog with Google Drive", () => {
         const requests = mockServer({ connection: "active" });
         pickDriveFolder.mockResolvedValue({
             id: "drivefolder1",
-            name: "Company exports",
+            name: "Team exports",
         });
         renderActions();
-        fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Export/ }));
         fireEvent.click(
             await screen.findByRole("button", {
                 name: /Add Google Drive export/,
@@ -137,7 +137,7 @@ describe("folder export dialog with Google Drive", () => {
         ).toBe("false");
 
         fireEvent.click(screen.getByRole("button", { name: /Choose folder/ }));
-        await screen.findByText("Company exports");
+        await screen.findByText("Team exports");
         expect(pickDriveFolder).toHaveBeenCalledWith(
             {
                 accessToken: "access",
@@ -171,7 +171,7 @@ describe("folder export dialog with Google Drive", () => {
     it("asks to connect before a folder can be chosen", async () => {
         mockServer({ connection: null });
         renderActions();
-        fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Export/ }));
         fireEvent.click(
             await screen.findByRole("button", {
                 name: /Add Google Drive export/,
@@ -186,7 +186,7 @@ describe("folder export dialog with Google Drive", () => {
     it("says when the account must be reconnected", async () => {
         mockServer({ connection: "needs_reconnect" });
         renderActions();
-        fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Export/ }));
         fireEvent.click(
             await screen.findByRole("button", {
                 name: /Add Google Drive export/,
@@ -229,7 +229,7 @@ describe("folder export dialog with Google Drive", () => {
                     lastErrorAt: "2026-09-23T10:00:00.000Z",
                     googleDrive: {
                         rootFolderId: "drivefolder1",
-                        rootFolderName: "Company exports",
+                        rootFolderName: "Team exports",
                         driveId: null,
                         transcriptFormat: "markdown",
                         summaryFormat: "both",
@@ -238,8 +238,8 @@ describe("folder export dialog with Google Drive", () => {
             ],
         });
         renderActions();
-        fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
-        await screen.findByText("Google Drive: Company exports");
+        fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+        await screen.findByText("Google Drive: Team exports");
         expect(screen.getByText("Audio, Summary")).toBeTruthy();
         expect(
             screen.getByText(/no longer exists or is in the trash/),
@@ -264,7 +264,7 @@ describe("folder export dialog with Google Drive", () => {
                     lastErrorAt: null,
                     googleDrive: {
                         rootFolderId: "drivefolder1",
-                        rootFolderName: "Company exports",
+                        rootFolderName: "Team exports",
                         driveId: null,
                         transcriptFormat: "markdown",
                         summaryFormat: "markdown",
@@ -273,8 +273,8 @@ describe("folder export dialog with Google Drive", () => {
             ],
         });
         renderActions();
-        fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+        fireEvent.click(screen.getByRole("button", { name: /Export/ }));
         await screen.findByRole("button", { name: "Reconnect" });
-        expect(screen.getByText("Google Drive: Company exports")).toBeTruthy();
+        expect(screen.getByText("Google Drive: Team exports")).toBeTruthy();
     });
 });

@@ -43,6 +43,11 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { recordingIdsVisibleInFolder } from "@/lib/folders/hierarchy";
 import { formatBytes } from "@/lib/format-bytes";
@@ -274,7 +279,7 @@ export function FolderRecordingPane({
                         <span className="mx-1">·</span>
                         <span>
                             {i18n(
-                                "{count, plural, one {# recording} other {# recordings}}",
+                                "{count, plural, one {# item} other {# items}}",
                                 { count: folderRecordings.length },
                             )}
                         </span>
@@ -300,56 +305,77 @@ export function FolderRecordingPane({
                     />
                     {folder.kind === "custom" && canManageFolder && (
                         <>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-9"
-                                onClick={() => {
-                                    setDraft(folder.name);
-                                    setRenameOpen(true);
-                                }}
-                            >
-                                <Pencil /> {i18n("Rename")}
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-9 text-destructive hover:text-destructive"
-                                onClick={() => {
-                                    void confirm({
-                                        title: i18n("Delete “{name}”?", {
-                                            name: folder.name,
-                                        }),
-                                        description: (
-                                            <>
-                                                <p>
-                                                    {folder.scope === "org"
-                                                        ? i18n(
-                                                              "This folder and all its subfolders will be deleted for everyone. Their recordings stay shared and move to the Organization folder.",
-                                                          )
-                                                        : i18n(
-                                                              "This folder and all its subfolders will be deleted. Recordings stay intact; only their folder assignments are removed.",
-                                                          )}
-                                                </p>
-                                                {mailEnabled && (
-                                                    <FolderDeletionAddresses
-                                                        folderId={folder.id}
-                                                    />
-                                                )}
-                                            </>
-                                        ),
-                                        confirmLabel: i18n("Delete folder"),
-                                        pendingLabel: i18n("Deleting…"),
-                                        destructive: true,
-                                        onConfirm: () =>
-                                            onDeleteFolder(folder.id),
-                                    });
-                                }}
-                            >
-                                <Trash2 /> {i18n("Delete")}
-                            </Button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="size-9"
+                                        aria-label={i18n("Rename")}
+                                        onClick={() => {
+                                            setDraft(folder.name);
+                                            setRenameOpen(true);
+                                        }}
+                                    >
+                                        <Pencil />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {i18n("Rename")}
+                                </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="size-9 text-destructive hover:text-destructive"
+                                        aria-label={i18n("Delete")}
+                                        onClick={() => {
+                                            void confirm({
+                                                title: i18n(
+                                                    "Delete “{name}”?",
+                                                    { name: folder.name },
+                                                ),
+                                                description: (
+                                                    <>
+                                                        <p>
+                                                            {folder.scope ===
+                                                            "org"
+                                                                ? i18n(
+                                                                      "This folder and all its subfolders will be deleted for everyone. Their recordings stay shared and move to the Organization folder.",
+                                                                  )
+                                                                : i18n(
+                                                                      "This folder and all its subfolders will be deleted. Recordings stay intact; only their folder assignments are removed.",
+                                                                  )}
+                                                        </p>
+                                                        {mailEnabled && (
+                                                            <FolderDeletionAddresses
+                                                                folderId={
+                                                                    folder.id
+                                                                }
+                                                            />
+                                                        )}
+                                                    </>
+                                                ),
+                                                confirmLabel:
+                                                    i18n("Delete folder"),
+                                                pendingLabel: i18n("Deleting…"),
+                                                destructive: true,
+                                                onConfirm: () =>
+                                                    onDeleteFolder(folder.id),
+                                            });
+                                        }}
+                                    >
+                                        <Trash2 />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {i18n("Delete")}
+                                </TooltipContent>
+                            </Tooltip>
                         </>
                     )}
                 </div>
@@ -395,15 +421,13 @@ export function FolderRecordingPane({
                                     })}
                                     className="flex min-w-0 cursor-grab items-center gap-3 text-left active:cursor-grabbing"
                                 >
-                                    {recording.kind === "mail" ? (
-                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                                        {recording.kind === "mail" ? (
                                             <Mail className="size-4" />
-                                        </span>
-                                    ) : (
-                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                                        ) : (
                                             <Play className="ml-0.5 size-4 fill-current" />
-                                        </span>
-                                    )}
+                                        )}
+                                    </span>
                                     <span className="min-w-0">
                                         <span className="block truncate text-sm font-medium">
                                             {recording.filename}

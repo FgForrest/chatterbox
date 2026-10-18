@@ -169,7 +169,6 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
                         <Pencil className="size-3.5" />
                     </Button>
                 )}
-                <span className="text-xs">· {lastReceived(current)}</span>
             </div>
             {older.map((address) => (
                 <div

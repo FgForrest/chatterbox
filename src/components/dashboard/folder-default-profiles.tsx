@@ -1,6 +1,6 @@
 "use client";
 
-import { SlidersHorizontal } from "lucide-react";
+import { Workflow } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -269,9 +269,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     variant="outline"
                     size="sm"
                     className="h-9"
-                    aria-label={i18n("Default profiles")}
+                    aria-label={i18n("Processing")}
                 >
-                    <SlidersHorizontal /> {i18n("Default profiles")}
+                    <Workflow /> {i18n("Processing")}
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-72">

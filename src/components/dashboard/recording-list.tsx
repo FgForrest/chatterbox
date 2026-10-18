@@ -18,6 +18,7 @@ import {
 import {
     type KindFilter,
     RecordingListToolbar,
+    type SearchScope,
     type SortOrder,
 } from "@/components/dashboard/recording-list-toolbar";
 import { RecordingRow } from "@/components/dashboard/recording-row";
@@ -29,6 +30,7 @@ import type { Recording } from "@/types/recording";
 export type { PendingUpload } from "@/components/dashboard/pending-upload-row";
 export type {
     KindFilter,
+    SearchScope,
     SortOrder,
 } from "@/components/dashboard/recording-list-toolbar";
 
@@ -41,6 +43,8 @@ interface TranscriptionData {
 
 interface RecordingListProps {
     recordings: Recording[];
+    /** Offers the Mail channel; it also shows once the pile holds mail. */
+    mailEnabled?: boolean;
     transcriptions: Map<string, TranscriptionData>;
     currentRecording: Recording | null;
     pendingUploads: PendingUpload[];
@@ -89,6 +93,7 @@ function transcriptSnippet(
 
 export function RecordingList({
     recordings,
+    mailEnabled = false,
     transcriptions,
     currentRecording,
     pendingUploads,
@@ -110,16 +115,27 @@ export function RecordingList({
     const [dateTimeFormat] = useState<DateTimeFormat>(initialDateTimeFormat);
     const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
     const [kindFilter, setKindFilter] = useState<KindFilter>(initialKindFilter);
-    // The filter shows once the pile holds more than recordings.
-    const hasMail = useMemo(
-        () => recordings.some((r) => r.kind === "mail"),
+    const [searchScopes, setSearchScopes] = useState<Set<SearchScope>>(
+        () => new Set(["title", "content", "summary"]),
+    );
+    const searchScopeKey = [...searchScopes].sort().join(",");
+    const channelCounts = useMemo(
+        () => ({
+            audio: recordings.filter((recording) => recording.kind !== "mail")
+                .length,
+            mail: recordings.filter((recording) => recording.kind === "mail")
+                .length,
+        }),
         [recordings],
     );
+    const showMail = mailEnabled || channelCounts.mail > 0;
+    const kindShown = showMail ? kindFilter : "all";
     const [query, setQuery] = useState("");
     // What the server found for the query in what this page does not
     // hold (a mail's text), with the words around each match.
     const [serverHits, setServerHits] = useState<{
         query: string;
+        scopeKey: string;
         hits: Map<string, string | null>;
     } | null>(null);
     useEffect(() => {
@@ -134,7 +150,11 @@ export function RecordingList({
             let before: string | null = null;
             // A few bounded pages reach well back; a narrower query, further.
             for (let page = 0; page < 5; page++) {
-                const params = new URLSearchParams({ q, view: searchView });
+                const params = new URLSearchParams({
+                    q,
+                    view: searchView,
+                    scope: searchScopeKey,
+                });
                 if (before) params.set("before", before);
                 const response = await fetch(`/api/items/search?${params}`, {
                     signal: controller.signal,
@@ -146,7 +166,11 @@ export function RecordingList({
                     continueBefore: string | null;
                 };
                 for (const hit of data.hits) hits.set(hit.id, hit.snippet);
-                setServerHits({ query: q, hits: new Map(hits) });
+                setServerHits({
+                    query: q,
+                    scopeKey: searchScopeKey,
+                    hits: new Map(hits),
+                });
                 if (data.complete || !data.continueBefore) return;
                 before = data.continueBefore;
             }
@@ -155,7 +179,7 @@ export function RecordingList({
             clearTimeout(timer);
             controller.abort();
         };
-    }, [query, searchView]);
+    }, [query, searchScopeKey, searchView]);
     // Only the recordings a Learn review waits on.
     const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
     const reviewCount = useMemo(
@@ -187,23 +211,35 @@ export function RecordingList({
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         const ofKind =
-            !hasMail || kindFilter === "all"
+            kindShown === "all"
                 ? recordings
-                : recordings.filter((r) => (r.kind ?? "audio") === kindFilter);
+                : recordings.filter((r) => (r.kind ?? "audio") === kindShown);
         const pool =
             needsReviewOnly && reviewCount > 0
                 ? ofKind.filter((r) => r.needsReview)
                 : ofKind;
         const found =
-            serverHits && serverHits.query.toLowerCase() === q
+            serverHits &&
+            serverHits.query.toLowerCase() === q &&
+            serverHits.scopeKey === searchScopeKey
                 ? serverHits.hits
                 : null;
         const base = q
             ? pool.filter((r) => {
                   if (found?.has(r.id)) return true;
-                  if (r.filename.toLowerCase().includes(q)) return true;
-                  if (r.mail?.from?.toLowerCase().includes(q)) return true;
-                  // What people read, and the words as heard, both.
+                  if (
+                      searchScopes.has("title") &&
+                      r.filename.toLowerCase().includes(q)
+                  ) {
+                      return true;
+                  }
+                  if (
+                      searchScopes.has("content") &&
+                      r.mail?.from?.toLowerCase().includes(q)
+                  ) {
+                      return true;
+                  }
+                  if (!searchScopes.has("content")) return false;
                   const t = transcriptions.get(r.id);
                   return [t?.readText, t?.text].some(
                       (text) => !!text && text.toLowerCase().includes(q),
@@ -240,8 +276,9 @@ export function RecordingList({
         sortOrder,
         needsReviewOnly,
         reviewCount,
-        hasMail,
-        kindFilter,
+        kindShown,
+        searchScopeKey,
+        searchScopes,
     ]);
 
     const visible = filtered.slice(0, visibleCount);
@@ -283,6 +320,7 @@ export function RecordingList({
         setServerHits(null);
         setSortOrder("newest");
         setKindFilter("all");
+        setSearchScopes(new Set(["title", "content", "summary"]));
         setNeedsReviewOnly(false);
         setVisibleCount(initialChunkSize);
     }, [initialChunkSize, resetToRecentKey]);
@@ -364,15 +402,18 @@ export function RecordingList({
                     }}
                     searchRef={searchRef}
                     filteredCount={filtered.length}
-                    totalCount={recordings.length}
+                    channelCounts={channelCounts}
                     sortOrder={sortOrder}
                     onSortOrderChange={setSortOrderPersisted}
                     onOrganize={onOrganize}
                     reviewCount={reviewCount}
                     needsReviewOnly={needsReviewOnly && reviewCount > 0}
                     onNeedsReviewOnlyChange={setNeedsReviewOnly}
-                    kindFilter={hasMail ? kindFilter : undefined}
+                    showMail={showMail}
+                    kindFilter={kindShown}
                     onKindFilterChange={setKindFilterPersisted}
+                    searchScopes={searchScopes}
+                    onSearchScopesChange={setSearchScopes}
                 />
 
                 {pendingUploads.length > 0 && (

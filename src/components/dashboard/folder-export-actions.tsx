@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
+import { CloudUpload, FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -363,7 +363,7 @@ export function FolderExportActions({
                 className="h-9"
                 onClick={() => setOpen(true)}
             >
-                <Settings /> {i18n("Settings")}
+                <CloudUpload /> {i18n("Export")}
             </Button>
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="max-w-xl">
