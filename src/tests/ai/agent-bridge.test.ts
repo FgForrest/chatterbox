@@ -37,11 +37,13 @@ describe("agent-bridge", () => {
             expect(resolveBackend("claude-haiku-4-5-20251001")).toBe("claude");
         });
 
-        it("routes registered Codex models and existing generic ids", () => {
+        it("routes Codex ids and every GPT model id", () => {
             expect(resolveBackend("codex")).toBe("codex");
             expect(resolveBackend("gpt-5-codex")).toBe("codex");
             expect(resolveBackend("gpt-6-sol")).toBe("codex");
-            expect(resolveBackend("gpt-6-unlisted")).toBeNull();
+            expect(resolveBackend("gpt-6.1-sol")).toBe("codex");
+            expect(resolveBackend("gpt-4o-mini")).toBe("codex");
+            expect(resolveBackend("gpt-oss-120b")).toBe("codex");
         });
 
         it("refuses ids carrying whitespace or control characters", () => {
@@ -64,12 +66,10 @@ describe("agent-bridge", () => {
             expect(resolveBackend("codex/gpt-5")).toBe("codex");
         });
 
-        it("refuses Riffado's gpt-4o-mini fallback rather than guessing", () => {
-            // `generate-summary.ts` substitutes "gpt-4o-mini" when a
-            // credential has no defaultModel. Routing that to Codex would
-            // be a confusing way to discover the field was left blank, so
-            // the bridge returns no backend and the caller 400s.
-            expect(resolveBackend("gpt-4o-mini")).toBeNull();
+        it("refuses unrelated and unsafe ids", () => {
+            expect(resolveBackend("llama3")).toBeNull();
+            expect(resolveBackend("mistral-large")).toBeNull();
+            expect(resolveBackend("gpt-6 ; rm")).toBeNull();
             expect(resolveBackend("")).toBeNull();
             expect(resolveBackend(undefined)).toBeNull();
         });
@@ -586,6 +586,20 @@ describe("agent-bridge", () => {
                 total_tokens: 15,
             });
             expect(parseCodexUsage(stdout, "gpt-6-sol")).toEqual({
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+            });
+            const completeUsage = JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                    input_tokens: 10,
+                    cached_input_tokens: 0,
+                    cache_write_input_tokens: 0,
+                    output_tokens: 5,
+                },
+            });
+            expect(parseCodexUsage(completeUsage, "gpt-6.1-sol")).toEqual({
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,

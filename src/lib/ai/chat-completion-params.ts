@@ -1,24 +1,22 @@
 import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 
-/**
- * OpenAI deprecated `max_tokens` for newer model families and replaced it
- * with `max_completion_tokens`. Sending `max_tokens` to one of these models
- * is rejected at the API boundary with HTTP 400:
- *   `Unsupported parameter: 'max_tokens' is not supported with this model.
- *    Use 'max_completion_tokens' instead.`
- *
- * The affected families share a stable prefix in their model names:
- *   - `gpt-5*` (gpt-5, gpt-5-mini, gpt-5-nano, ...)
- *   - `o1*`, `o3*`, `o4*` reasoning models
- *
- * Non-OpenAI providers reached through the OpenAI-compatible chat API
- * (Groq, Together, OpenRouter, ...) keep accepting `max_tokens`, so the
- * switch is opt-in by model name rather than blanket.
- */
-const MAX_COMPLETION_TOKENS_PREFIXES = ["gpt-5", "o1", "o3", "o4"] as const;
+const GPT_MODEL_PATTERN = /^gpt-(\d+)/;
+const MAX_COMPLETION_TOKENS_PREFIXES = ["o1", "o3", "o4"] as const;
 
+/**
+ * Whether an OpenAI model requires `max_completion_tokens` instead of
+ * `max_tokens`. This applies to:
+ * - GPT models with a numeric major version of 5 or newer (`gpt-5`,
+ *   `gpt-6.1-sol`, `gpt-10-x`, ...)
+ * - `o1*`, `o3*`, and `o4*` reasoning models
+ *
+ * Other OpenAI-compatible providers keep `max_tokens`, so detection is
+ * opt-in by model name rather than blanket.
+ */
 export function usesMaxCompletionTokens(model: string): boolean {
     const m = model.toLowerCase();
+    const gptModel = m.match(GPT_MODEL_PATTERN);
+    if (gptModel && Number(gptModel[1]) >= 5) return true;
     return MAX_COMPLETION_TOKENS_PREFIXES.some((p) => m.startsWith(p));
 }
 

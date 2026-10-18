@@ -391,8 +391,9 @@ async function handleChatCompletions(req, res) {
             400,
             `unknown model "${sanitizeForLog(model, 64)}". This bridge routes ` +
                 `ids starting with "claude" to the Claude Code CLI and ` +
-                `"codex"/"gpt-5" to the Codex CLI. Set a Default Model on ` +
-                `the provider in Riffado.`,
+                `ids starting with "codex" or "gpt-" (any GPT model id, ` +
+                `for example "gpt-6.1-sol") ` +
+                `to the Codex CLI. Set a Default Model on the provider in Chatterbox.`,
         );
     }
 
