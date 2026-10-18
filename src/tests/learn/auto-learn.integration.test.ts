@@ -86,19 +86,12 @@ vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/ai/generate-title", () => ({
-    generateTitleFromTranscription: vi.fn().mockResolvedValue("Held title"),
-}));
 vi.mock("@/lib/export/document-sidecars", () => ({
     refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { encrypt } from "@/lib/encryption";
-import {
-    decryptText,
-    encryptJsonField,
-    encryptText,
-} from "@/lib/encryption/fields";
+import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import {
     AUTO_LEARN_HOLD_MS,
@@ -121,15 +114,12 @@ import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { eraseLearnResults } from "@/lib/recordings/erase";
-import * as titleQueue from "@/lib/recordings/title-job";
-import { titleJobHandler } from "@/lib/recordings/title-job-handler";
 import { requireRecordingView } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import * as autoSummary from "@/lib/summary/auto-summary";
 import * as topicsQueue from "@/lib/topics/topics-job";
 import { enqueueTopicsJob } from "@/lib/topics/topics-job";
 import { upsertTranscription } from "@/lib/transcription/persist";
-import { emitEvent } from "@/lib/webhooks/emit";
 import { insertRecordings } from "@/tests/integration/items";
 import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 
@@ -736,7 +726,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual(["pipeline.advance"]);
 
         await runAdvance();
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        expect(await kinds()).toEqual(["summary", "topics"]);
     });
 
     it("tells the page what waits and which of its jobs are still to finish", async () => {
@@ -757,15 +747,14 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await runAdvance();
         expect(await recordingFollowUps(OWNER, REC)).toEqual({
             held: false,
-            pending: ["summary", "title.generate", "topics"],
+            pending: ["summary", "topics"],
         });
 
         await db()
             .update(asyncJobs)
             .set({ status: "completed" })
-            .where(eq(asyncJobs.kind, "title.generate"));
+            .where(eq(asyncJobs.kind, "summary"));
         expect((await recordingFollowUps(OWNER, REC))?.pending).toEqual([
-            "summary",
             "topics",
         ]);
         // Someone else's recording is not found, whatever it waits for.
@@ -1140,7 +1129,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await releaseAutoLearnHold(REC)).toBe(true);
         await runAdvance();
 
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        expect(await kinds()).toEqual(["summary", "topics"]);
     });
 
     it("queues what waited for when the hourly limit opens again, rather than dropping it", async () => {
@@ -1181,7 +1170,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await db().delete(asyncJobs).where(eq(asyncJobs.kind, "topics"));
         await runAdvance();
 
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        expect(await kinds()).toEqual(["summary", "topics"]);
         const [topics] = await db()
             .select({ payload: asyncJobs.payload })
             .from(asyncJobs)
@@ -1213,7 +1202,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await releaseAutoLearnHold(REC)).toBe(true);
         await runAdvance();
 
-        expect(await kinds()).toEqual(["title.generate", "topics"]);
+        expect(await kinds()).toEqual(["topics"]);
         const summaries = await db()
             .select({ id: aiEnhancements.id })
             .from(aiEnhancements)
@@ -1234,7 +1223,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         });
         const summary = vi.spyOn(autoSummary, "queueAutoSummary");
         const topics = vi.spyOn(topicsQueue, "queueAutoTopics");
-        const title = vi.spyOn(titleQueue, "enqueueTitleJob");
 
         expect(
             await startAutomaticLearn({
@@ -1257,8 +1245,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(topics).toHaveBeenCalledWith(OWNER, REC, "riffado", {
             strict: true,
         });
-        expect(title).toHaveBeenCalledOnce();
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        expect(await kinds()).toEqual(["summary", "topics"]);
     });
 
     it("drains a learn.release job queued before the pipeline deploy", async () => {
@@ -1276,63 +1263,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual(["pipeline.advance"]);
 
         await runAdvance();
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
-    });
-
-    describe("the title job", () => {
-        const runTitle = () =>
-            titleJobHandler.run({
-                jobId: "job-1",
-                userId: OWNER,
-                payload: { recordingId: REC },
-                attempt: 1,
-                maxAttempts: 3,
-                signal: new AbortController().signal,
-                reportProgress: vi.fn(),
-            } as unknown as Parameters<typeof titleJobHandler.run>[0]);
-        const title = async () =>
-            decryptText(
-                (
-                    await db()
-                        .select({ filename: chatterItems.title })
-                        .from(chatterItems)
-                        .where(eq(chatterItems.id, REC))
-                )[0]?.filename ?? "",
-            );
-
-        it("names the recording from its transcript and says so with recording.updated", async () => {
-            vi.mocked(emitEvent).mockClear();
-
-            expect(await runTitle()).toEqual({ retitled: true });
-
-            expect(await title()).toBe("Held title");
-            expect(emitEvent).toHaveBeenCalledWith(
-                "recording.updated",
-                OWNER,
-                REC,
-            );
-        });
-
-        it("waits while a newer hold is on the recording", async () => {
-            await hold();
-            expect(await runTitle()).toEqual({ skipped: "held" });
-            expect(await title()).toBe("Weekly");
-        });
-
-        it("keeps a title the person set while it waited", async () => {
-            await db()
-                .update(chatterItems)
-                .set({
-                    title: encryptText("Their name"),
-                    titleEditedAt: new Date(),
-                })
-                .where(eq(chatterItems.id, REC));
-            vi.mocked(emitEvent).mockClear();
-
-            expect(await runTitle()).toEqual({ retitled: false });
-
-            expect(await title()).toBe("Their name");
-            expect(emitEvent).not.toHaveBeenCalled();
-        });
+        expect(await kinds()).toEqual(["summary", "topics"]);
     });
 });

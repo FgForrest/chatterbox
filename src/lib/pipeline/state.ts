@@ -11,6 +11,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
+import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type {
     ContentRevisionInput,
@@ -79,8 +80,7 @@ function stepUsesInput(
     );
 }
 
-/** Mark a pipeline-queued Summary step done in its output transaction. */
-export async function markSummaryStepDoneInTx(
+async function settleSummaryStepInTx(
     tx: Tx,
     input: {
         itemId: string;
@@ -90,6 +90,8 @@ export async function markSummaryStepDoneInTx(
         content: ContentRevisionInput;
         generation?: number;
     },
+    state: "done" | "skipped",
+    reason: string,
 ): Promise<boolean> {
     const [processing] = await tx
         .select({ phases: itemProcessing.phases })
@@ -103,13 +105,25 @@ export async function markSummaryStepDoneInTx(
         )
         .for("update")
         .limit(1);
-    const summary = processing?.phases.summary;
+    const storedSummary = processing?.phases.summary;
+    const summary =
+        storedSummary ??
+        (input.step === "title"
+            ? {
+                  state: "pending" as const,
+                  reason: "title-after-summary",
+                  generation: input.generation ?? 0,
+                  inputs: input.content,
+                  at: new Date().toISOString(),
+              }
+            : undefined);
     const step = summary?.steps?.[input.step];
     if (
         !summary ||
         summary.state === "outdated" ||
-        !stepUsesInput(step, summary, input.content) ||
-        step?.state === "outdated"
+        (input.step !== "title" &&
+            (!stepUsesInput(step, summary, input.content) ||
+                step?.state === "outdated"))
     ) {
         return false;
     }
@@ -130,14 +144,17 @@ export async function markSummaryStepDoneInTx(
         ...summary.steps,
         [input.step]: {
             ...step,
+            contentId: input.content.contentId,
             contentSourceId: input.content.contentSourceId,
+            contentRevision: input.content.contentRevision,
             generation,
-            state: "done" as const,
-            reason: "generated",
+            state,
+            reason,
         },
     };
+    const summaryForInput = { ...summary, inputs: input.content };
     const currentSteps = Object.values(steps).filter((candidate) =>
-        stepUsesInput(candidate, summary, input.content),
+        stepUsesInput(candidate, summaryForInput, input.content),
     );
     const done =
         currentSteps.length > 0 &&
@@ -156,11 +173,75 @@ export async function markSummaryStepDoneInTx(
             state: done ? "done" : "pending",
             reason: done ? "completed" : summary.reason,
             generation,
-            inputs: summary.inputs ?? input.content,
+            inputs:
+                input.step === "title"
+                    ? input.content
+                    : (summary.inputs ?? input.content),
             at: new Date().toISOString(),
             steps,
         },
     );
+}
+
+/** Mark a pipeline-queued Summary step done in its output transaction. */
+export function markSummaryStepDoneInTx(
+    tx: Tx,
+    input: {
+        itemId: string;
+        userId: string;
+        view: PipelineView;
+        step: SummaryStepName;
+        content: ContentRevisionInput;
+        generation?: number;
+    },
+): Promise<boolean> {
+    return settleSummaryStepInTx(tx, input, "done", "generated");
+}
+
+/**
+ * Skip automatic title generation after a summary: for good when titles are
+ * off or the title was edited, until the next summary when the attempt failed.
+ */
+export async function markAutomaticTitleSkipped(input: {
+    itemId: string;
+    userId: string;
+    content: ContentRevisionInput;
+    reason:
+        | "first_summary_title_disabled"
+        | "first_summary_title_edited"
+        | "first_summary_title_failed";
+}): Promise<boolean> {
+    const marked = await db.transaction(async (tx) => {
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, input.itemId),
+                    eq(itemProcessing.userId, input.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (processing && automaticTitleSettled(processing.phases)) {
+            return false;
+        }
+        return settleSummaryStepInTx(
+            tx,
+            {
+                itemId: input.itemId,
+                userId: input.userId,
+                view: "private",
+                step: "title",
+                content: input.content,
+            },
+            "skipped",
+            input.reason,
+        );
+    });
+    if (marked) nudge();
+    return marked;
 }
 
 /** Mark a pipeline-queued Summary step terminal and request the next decision. */

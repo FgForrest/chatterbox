@@ -28,12 +28,14 @@ export async function applyGeneratedTitle(input: {
     syncTitleToPlaud: boolean;
     kind?: "audio" | "mail";
     source?: "summary" | "transcript";
+    contentLanguage?: string | null;
     expectedTitleEditedAt?: Date | null;
     actorUserId?: string;
     view?: RecordingView;
     fence?: TitleInputFence;
     skipIfTitleStepDoneForFence?: boolean;
     actsForOrganization?: boolean;
+    skipIfAutomaticTitleSettled?: boolean;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -44,6 +46,7 @@ export async function applyGeneratedTitle(input: {
         input.source ?? "transcript",
         userId,
         input.view ?? "private",
+        input.contentLanguage,
     );
 
     // Not stored when a person has set a title, and then nothing below runs.
@@ -59,6 +62,8 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                       ...(input.actsForOrganization === undefined
                           ? {}
                           : {
@@ -76,6 +81,8 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                       ...(input.actsForOrganization === undefined
                           ? {}
                           : {

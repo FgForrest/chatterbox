@@ -16,7 +16,6 @@ import type {
     PipelineAction,
     PipelineView,
 } from "@/lib/pipeline/types";
-import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { applyPlaudActionItemProposals } from "@/lib/tasks/plaud-proposals";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
@@ -87,9 +86,6 @@ export async function executePipelineAction(
                 view,
             });
             return;
-        case "queueTitleJob":
-            await enqueueTitleJob(userId, itemId);
-            return;
         case "startAutoLearn": {
             await db.transaction((tx) =>
                 updatePhaseInTx(tx, itemId, view, userId, "learn", {
@@ -134,6 +130,9 @@ export async function executePipelineAction(
             if (requested) nudge();
             return;
         }
+        case "releaseLearnHold":
+            await releaseAutoLearnHold(itemId);
+            return;
         case "releaseLearnTimeout":
             await releaseAutoLearnHold(itemId, { expired: true });
             return;

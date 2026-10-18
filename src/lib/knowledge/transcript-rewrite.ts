@@ -26,6 +26,7 @@ import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import { supersedeCorrectionPassesInTx } from "@/lib/learn/correction-pass-queue";
 import {
     clearAutoLearnHoldInTx,
     riffadoRecordingOfInTx,
@@ -73,6 +74,7 @@ export async function transcriptRewrittenInTx(
                 inArray(learnRuns.status, ["queued", "running", "ready"]),
             ),
         );
+    await supersedeCorrectionPassesInTx(tx, args.userId, args.transcriptionId);
     const held = await riffadoRecordingOfInTx(tx, args.transcriptionId);
     if (held) await clearAutoLearnHoldInTx(tx, held);
     // Once, after both: the knowledge of every scope the rewrite touched.

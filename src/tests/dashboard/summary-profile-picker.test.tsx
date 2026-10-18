@@ -8,6 +8,9 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+
+const followUps = vi.hoisted(() => ({ held: false, correcting: false }));
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
@@ -51,13 +54,96 @@ vi.mock("@/hooks/use-transcript-topics", () => ({
 }));
 vi.mock("@/hooks/use-learn-follow-ups", () => ({
     useLearnFollowUps: () => ({
-        held: false,
-        correcting: false,
+        held: followUps.held,
+        correcting: followUps.correcting,
         follow: vi.fn(),
     }),
 }));
 
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+
+function processing(
+    overrides: Partial<ItemProcessingPresentation> = {},
+): ItemProcessingPresentation {
+    return {
+        itemId: "recording-1",
+        kind: "audio",
+        legacy: false,
+        manualOnly: false,
+        phases: {
+            categorize: {
+                state: "done",
+                generation: 1,
+                at: "2026-10-18T00:00:00.000Z",
+            },
+            transcribe: {
+                state: "done",
+                generation: 1,
+                at: "2026-10-18T00:01:00.000Z",
+            },
+            learn: {
+                state: "done",
+                generation: 1,
+                at: "2026-10-18T00:02:00.000Z",
+            },
+            summary: {
+                state: "pending",
+                generation: 1,
+                at: "2026-10-18T00:03:00.000Z",
+            },
+        },
+        profile: {
+            id: "interview-profile",
+            name: "Interviews",
+            scope: "personal",
+            revisionId: "revision-1",
+            automatic: {
+                transcribe: true,
+                learn: true,
+                summary: false,
+                taskReview: false,
+            },
+        },
+        placements: [],
+        intents: [],
+        outputs: { transcript: true, learn: true, summary: false },
+        processAgain: false,
+        processAgainReason: null,
+        learnFindingsWaiting: 0,
+        latestLearnRun: null,
+        taskReviewWaiting: 0,
+        jobs: { transcription: null, summary: null },
+        failures: [],
+        ...overrides,
+    };
+}
+
+function renderSummary(processingState: ItemProcessingPresentation) {
+    return render(
+        <TranscriptionPanel
+            recording={{
+                id: "recording-1",
+                filename: "Interview.ogg",
+                duration: 60_000,
+                filesize: 1024,
+                startTime: new Date(0).toISOString(),
+                deviceSn: "local",
+                kind: "audio",
+            }}
+            transcripts={[
+                {
+                    source: "riffado",
+                    text: "Interview transcript",
+                    provider: "OpenAI",
+                    model: "whisper-1",
+                },
+            ]}
+            isTranscribing={false}
+            onTranscribe={vi.fn()}
+            processing={processingState}
+        />,
+    );
+}
 
 describe("per-run summary profile picker", () => {
     let requests: Array<{ url: string; method: string; body: unknown }>;
@@ -66,6 +152,8 @@ describe("per-run summary profile picker", () => {
 
     beforeEach(() => {
         requests = [];
+        followUps.held = false;
+        followUps.correcting = false;
         itemProfileId = "interview-profile";
         profiles = [
             {
@@ -251,5 +339,97 @@ describe("per-run summary profile picker", () => {
             name: "Processing profile",
         });
         expect(picker.textContent).toContain("Member's interviews");
+    });
+
+    it("says a held summary starts after Learn finishes running", async () => {
+        followUps.held = true;
+
+        renderSummary(
+            processing({
+                latestLearnRun: {
+                    status: "running",
+                    errorCode: null,
+                    updatedAt: "2026-10-18T00:04:00.000Z",
+                },
+            }),
+        );
+
+        expect(
+            await screen.findByText(
+                /The summary waits while Learn checks the transcript, then starts by itself/,
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByText(/waits for your Learn review/)).toBeNull();
+    });
+
+    it("says a held summary starts after transcript correction", async () => {
+        followUps.held = true;
+        followUps.correcting = true;
+
+        renderSummary(
+            processing({
+                phases: {
+                    ...processing().phases,
+                    learn: {
+                        state: "running",
+                        reason: "correcting",
+                        generation: 1,
+                        at: "2026-10-18T00:04:00.000Z",
+                    },
+                },
+            }),
+        );
+
+        expect(
+            await screen.findByText(
+                /The summary waits while Learn corrects the transcript, then starts by itself/,
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByText(/waits for your Learn review/)).toBeNull();
+        expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
+    });
+
+    it("says a held summary waits for findings to be reviewed", async () => {
+        followUps.held = true;
+
+        renderSummary(
+            processing({
+                phases: {
+                    ...processing().phases,
+                    learn: {
+                        state: "waiting",
+                        reason: "review_pending",
+                        generation: 1,
+                        at: "2026-10-18T00:04:00.000Z",
+                    },
+                },
+                learnFindingsWaiting: 2,
+                latestLearnRun: {
+                    status: "ready",
+                    errorCode: null,
+                    updatedAt: "2026-10-18T00:04:00.000Z",
+                },
+            }),
+        );
+
+        expect(
+            await screen.findByText(/waits for your Learn review/),
+        ).toBeTruthy();
+        expect(screen.queryByText(/while Learn checks/)).toBeNull();
+    });
+
+    it("uses the plain empty state for a hold with nothing left to do", async () => {
+        followUps.held = true;
+
+        renderSummary(processing());
+
+        expect(
+            await screen.findByText(
+                'No custom summary yet. Click "Summarize" to generate one.',
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByText(/waits for your Learn review/)).toBeNull();
+        expect(screen.queryByText(/while Learn checks/)).toBeNull();
+        expect(screen.queryByText(/while Learn corrects/)).toBeNull();
     });
 });

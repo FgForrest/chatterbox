@@ -55,7 +55,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
     autoLearnMail: vi.fn(),
-    enqueueTitleJob: vi.fn(),
     queueAutoSummary: vi.fn(),
     queueAutoTopics: vi.fn(),
 }));
@@ -111,7 +110,6 @@ vi.mock("@/lib/mail/auto-process", () => ({
 }));
 vi.mock("@/lib/recordings/title-job", () => ({
     TITLE_JOB_KIND: "title.generate",
-    enqueueTitleJob: mocks.enqueueTitleJob,
 }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
@@ -316,7 +314,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         vi.clearAllMocks();
         mockEnv.IS_HOSTED = false;
         mocks.autoLearnMail.mockResolvedValue({ status: "started" });
-        mocks.enqueueTitleJob.mockResolvedValue(undefined);
         mocks.queueAutoSummary.mockResolvedValue(undefined);
         mocks.queueAutoTopics.mockResolvedValue(undefined);
 
@@ -700,7 +697,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             "riffado",
             { strict: true },
         );
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
     });
 
     it("queues transcript follow-ups again after the content row is replaced", async () => {
@@ -1025,7 +1021,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             learn: { state: "done", reason: "legacy" },
             summary: { state: "done", reason: "legacy" },
         });
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
@@ -1097,7 +1092,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await pipelineAdvanceJobHandler.run(jobContext());
 
-        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
         expect((await processing())?.phases.categorize).toMatchObject({
@@ -1282,7 +1276,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             state: "failed",
             reason: "profile_unavailable",
         });
-        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });

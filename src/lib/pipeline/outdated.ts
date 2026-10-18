@@ -1,3 +1,4 @@
+import { automaticTitleStepSettled } from "@/lib/pipeline/title-step";
 import type {
     ContentRevisionInput,
     PhaseName,
@@ -36,15 +37,20 @@ function outdatedSteps(
 ): PhaseRecord["steps"] {
     if (!steps) return steps;
     return Object.fromEntries(
-        Object.entries(steps).map(([name, step]) => [
-            name as SummaryStepName,
-            {
-                ...step,
-                state: "outdated" as const,
-                reason,
-                generation,
-            },
-        ]),
+        Object.entries(steps).map(([name, step]) => {
+            if (name === "title" && automaticTitleStepSettled(step)) {
+                return [name as SummaryStepName, step];
+            }
+            return [
+                name as SummaryStepName,
+                {
+                    ...step,
+                    state: "outdated" as const,
+                    reason,
+                    generation,
+                },
+            ];
+        }),
     );
 }
 

@@ -227,7 +227,11 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         expect(processing?.phases.summary).toMatchObject({
             state: "done",
             reason: "completed",
-            inputs: fence,
+            inputs: {
+                contentId: fence.contentId,
+                contentSourceId: fence.contentSourceId,
+                contentRevision: fence.contentRevision,
+            },
             steps: {
                 title: {
                     contentId: fence.contentId,
@@ -239,7 +243,7 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         });
     });
 
-    it("keeps the summary title when an automatic recording job reaches its write later", async () => {
+    it("keeps the first summary title after the transcript revision changes", async () => {
         const [transcript] = await db()
             .insert(transcriptions)
             .values({
@@ -280,6 +284,11 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         expect(titleStepDoneForFence(await processingState(REC), fence)).toBe(
             true,
         );
+        await db()
+            .update(transcriptions)
+            .set({ revision: 3 })
+            .where(eq(transcriptions.id, fence.contentId));
+        const newerFence = { ...fence, contentRevision: 3 };
         if (
             await storeGeneratedTitle(
                 ALICE,
@@ -287,8 +296,8 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
                 "Transcript title",
                 undefined,
                 ALICE,
-                fence,
-                { skipIfTitleStepDoneForFence: true },
+                newerFence,
+                { skipIfAutomaticTitleSettled: true },
             )
         ) {
             events.push("recording.updated");
