@@ -304,7 +304,7 @@ export function MailDetailPane({
         ? [
               detail.rawReapedAt
                   ? i18n(
-                        "Retention removed the message as it arrived and its attachments on {date}.",
+                        "The message as it arrived and its attachments were removed on {date}.",
                         {
                             date: formatDateTime(
                                 detail.rawReapedAt,
@@ -315,7 +315,7 @@ export function MailDetailPane({
                     )
                   : null,
               detail.contentReapedAt
-                  ? i18n("Retention removed its text on {date}.", {
+                  ? i18n("Its text was removed on {date}.", {
                         date: formatDateTime(
                             detail.contentReapedAt,
                             "absolute",
@@ -324,7 +324,7 @@ export function MailDetailPane({
                     })
                   : null,
               detail.summaryReapedAt
-                  ? i18n("Retention removed its summary on {date}.", {
+                  ? i18n("Its summary was removed on {date}.", {
                         date: formatDateTime(
                             detail.summaryReapedAt,
                             "absolute",

@@ -49,7 +49,7 @@ export function RecordingPlayerHeader({
     if (recording.deviceSn !== "local") metaParts.push(recording.deviceSn);
     const retentionNotes = [
         recording.audioReapedAt
-            ? i18n("Retention removed the audio on {date}.", {
+            ? i18n("The audio was removed on {date}.", {
                   date: formatDateTime(
                       recording.audioReapedAt,
                       "absolute",
@@ -58,7 +58,7 @@ export function RecordingPlayerHeader({
               })
             : null,
         recording.transcriptReapedAt
-            ? i18n("Retention removed its transcript on {date}.", {
+            ? i18n("Its transcript was removed on {date}.", {
                   date: formatDateTime(
                       recording.transcriptReapedAt,
                       "absolute",
@@ -67,7 +67,7 @@ export function RecordingPlayerHeader({
               })
             : null,
         recording.summaryReapedAt
-            ? i18n("Retention removed its summary on {date}.", {
+            ? i18n("Its summary was removed on {date}.", {
                   date: formatDateTime(
                       recording.summaryReapedAt,
                       "absolute",

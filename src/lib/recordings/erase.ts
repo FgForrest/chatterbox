@@ -5,8 +5,10 @@ import {
     aiEnhancements,
     asyncJobs,
     chatterItems,
+    itemProcessing,
     learnDismissals,
     learnRuns,
+    mailContents,
     plaudConnections,
     recordings,
     transcriptions,
@@ -20,11 +22,15 @@ import {
     orgTreeChanged,
     withdrawRecordingInTx,
 } from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import type { ContentRevisionInput } from "@/lib/pipeline/types";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { sidecarKey } from "@/lib/recordings/storage-files";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -517,7 +523,7 @@ export async function eraseLearnResults(
     options: { withdraw?: boolean } = {},
 ): Promise<void> {
     const [item] = await db
-        .select({ id: chatterItems.id })
+        .select({ id: chatterItems.id, kind: chatterItems.kind })
         .from(chatterItems)
         .where(
             and(
@@ -538,6 +544,7 @@ export async function eraseLearnResults(
 
     const orgUserId = await sharingOrgUserId();
     let withdrew = false;
+    let requestedAdvance = false;
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             const now = new Date();
@@ -573,6 +580,71 @@ export async function eraseLearnResults(
                 }
                 withdrew = true;
             }
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            let learnInput: ContentRevisionInput | undefined =
+                processing?.phases.learn?.inputs;
+            if (processing && !learnInput && item.kind === "mail") {
+                const [content] = await tx
+                    .select({
+                        id: mailContents.id,
+                        revision: mailContents.revision,
+                    })
+                    .from(mailContents)
+                    .where(
+                        and(
+                            eq(mailContents.itemId, itemId),
+                            eq(mailContents.userId, userId),
+                        ),
+                    )
+                    .limit(1);
+                if (content) {
+                    learnInput = {
+                        contentId: content.id,
+                        contentSourceId: "mail",
+                        contentRevision: content.revision,
+                    };
+                }
+            }
+            if (processing && !learnInput && item.kind === "audio") {
+                const transcripts = await tx
+                    .select({
+                        id: transcriptions.id,
+                        revision: transcriptions.revision,
+                        source: transcriptions.source,
+                    })
+                    .from(transcriptions)
+                    .where(
+                        and(
+                            eq(transcriptions.recordingId, itemId),
+                            eq(transcriptions.userId, userId),
+                            inArray(transcriptions.source, [
+                                "riffado",
+                                "plaud",
+                            ]),
+                        ),
+                    );
+                const transcript =
+                    transcripts.find((row) => row.source === "riffado") ??
+                    transcripts.find((row) => row.source === "plaud");
+                if (transcript) {
+                    learnInput = {
+                        contentId: transcript.id,
+                        contentSourceId: transcript.source,
+                        contentRevision: transcript.revision,
+                    };
+                }
+            }
             await cancelArtifactJobs(
                 tx,
                 userId,
@@ -605,9 +677,37 @@ export async function eraseLearnResults(
                         eq(chatterItems.userId, userId),
                     ),
                 );
+            if (learnInput) {
+                const advance = await requestAdvanceInTx(tx, {
+                    itemId,
+                    userId,
+                    view: "private",
+                    reason: "learn-settled",
+                });
+                if (advance) {
+                    await updatePhaseInTx(
+                        tx,
+                        itemId,
+                        "private",
+                        userId,
+                        "learn",
+                        {
+                            state: "skipped",
+                            reason: "erased",
+                            generation: advance.requestedGeneration,
+                            inputs: learnInput,
+                            at: now.toISOString(),
+                            profileRevisionId:
+                                processing?.phases.learn?.profileRevisionId,
+                        },
+                    );
+                    requestedAdvance = true;
+                }
+            }
             await bumpScopeInTx(tx, scopes);
         }),
     );
+    if (requestedAdvance) nudge();
     if (withdrew) await orgTreeChanged();
 }
 

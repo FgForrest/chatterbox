@@ -120,6 +120,7 @@ import { requestAdvance } from "@/lib/pipeline/trigger";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
+import { eraseLearnResults } from "@/lib/recordings/erase";
 import * as titleQueue from "@/lib/recordings/title-job";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
 import { requireRecordingView } from "@/lib/sharing/access";
@@ -666,6 +667,55 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             inputs: input,
         });
         expect(await kinds()).not.toContain("learn.run");
+    });
+
+    it("keeps erased Learn results idle until a person starts Learn again", async () => {
+        await runAdvance();
+        expect(
+            await db()
+                .select({ id: learnRuns.id })
+                .from(learnRuns)
+                .where(eq(learnRuns.itemId, REC)),
+        ).toHaveLength(1);
+
+        await eraseLearnResults(OWNER, REC);
+
+        expect(
+            await db()
+                .select({ id: learnRuns.id })
+                .from(learnRuns)
+                .where(eq(learnRuns.itemId, REC)),
+        ).toHaveLength(0);
+        expect((await processing())?.phases.learn).toMatchObject({
+            state: "skipped",
+            reason: "erased",
+            inputs: {
+                contentId: riffadoId,
+                contentSourceId: "riffado",
+                contentRevision: 0,
+            },
+        });
+        expect(
+            planAdvance(await gatherFacts(REC, "private", OWNER)).actions,
+        ).not.toContainEqual(
+            expect.objectContaining({ type: "startAutoLearn" }),
+        );
+
+        const access = await requireRecordingView(OWNER, REC, "private");
+        await expect(
+            learnJob.startLearnRun({
+                access,
+                actorUserId: OWNER,
+                source: "riffado",
+                trigger: "manual",
+            }),
+        ).resolves.toMatchObject({ created: true });
+        expect(
+            await db()
+                .select({ trigger: learnRuns.trigger })
+                .from(learnRuns)
+                .where(eq(learnRuns.itemId, REC)),
+        ).toEqual([{ trigger: "manual" }]);
     });
 
     it("waits while a run is queued or awaits review, and releases once when the last review is done", async () => {
