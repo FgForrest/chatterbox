@@ -43,7 +43,7 @@ Pokud je konkrétní profil Organizace, který jste zvolili, archivován nebo k 
 
 ## Výchozí profily složky
 
-Otevřete nastavení složky a zvolte **Výchozí profily**. Nahrávky a pošta mají samostatné výchozí hodnoty:
+Otevřete složku a zvolte **Zpracování**. Nahrávky a pošta mají samostatné výchozí hodnoty:
 
 ![Výběr výchozích profilů složky](images/folder-default-profiles.png)
 

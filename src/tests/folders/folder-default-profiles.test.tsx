@@ -121,7 +121,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         expect(
@@ -159,7 +159,7 @@ describe("folder default profile picker", () => {
         });
 
         fireEvent.pointerDown(
-            screen.getByRole("button", { name: "Default profiles" }),
+            screen.getByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         fireEvent.click(screen.getByText("Default profile for mail"));
@@ -229,7 +229,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="org-folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         expect(
@@ -240,6 +240,130 @@ describe("folder default profile picker", () => {
         expect(
             await screen.findByRole("menuitemradio", {
                 name: "Inherit (each person's default)",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("prefers own and inherited folder defaults over an unavailable account default", async () => {
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url.endsWith("/api/folders/folder/default-profiles")) {
+                return Response.json({
+                    scope: "personal",
+                    canEdit: true,
+                    defaults: {
+                        audio: {
+                            own: {
+                                id: "own-audio",
+                                name: "Own recordings",
+                                scope: "personal",
+                            },
+                            ownManualOnly: false,
+                            effective: {
+                                id: "own-audio",
+                                name: "Own recordings",
+                                scope: "personal",
+                            },
+                            effectiveManualOnly: false,
+                            inheritedFromFolderId: null,
+                            inherited: null,
+                            inheritedManualOnly: false,
+                            accountDefault: null,
+                            accountDefaultUnavailable: true,
+                        },
+                        mail: {
+                            own: null,
+                            ownManualOnly: false,
+                            effective: {
+                                id: "parent-mail",
+                                name: "Parent mail",
+                                scope: "organization",
+                            },
+                            effectiveManualOnly: false,
+                            inheritedFromFolderId: "parent",
+                            inheritedFromFolderName: null,
+                            inherited: {
+                                id: "parent-mail",
+                                name: "Parent mail",
+                                scope: "organization",
+                            },
+                            inheritedManualOnly: false,
+                            accountDefault: null,
+                            accountDefaultUnavailable: true,
+                        },
+                    },
+                });
+            }
+            if (url.includes("/api/settings/profiles?channel=")) {
+                return Response.json({ profiles: [] });
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        render(<FolderDefaultProfiles folderId="folder" />);
+        fireEvent.pointerDown(
+            await screen.findByRole("button", { name: "Processing" }),
+            { button: 0, ctrlKey: false },
+        );
+
+        expect(await screen.findByText("Own recordings")).toBeTruthy();
+        expect(
+            screen.getByText("Parent mail · Organization (inherited)"),
+        ).toBeTruthy();
+        expect(
+            screen.queryByText("Your selected default is unavailable"),
+        ).toBeNull();
+        fireEvent.click(screen.getByText("Default profile for mail"));
+        expect(
+            await screen.findByRole("menuitemradio", {
+                name: "Inherit (Parent mail · Organization)",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("shows the unavailable account default when no folder default resolves", async () => {
+        const unavailable = {
+            own: null,
+            ownManualOnly: false,
+            effective: null,
+            effectiveManualOnly: false,
+            inheritedFromFolderId: null,
+            inherited: null,
+            inheritedManualOnly: false,
+            accountDefault: null,
+            accountDefaultUnavailable: true,
+        };
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((input: RequestInfo | URL) => {
+                const url = String(input);
+                if (url.endsWith("/api/folders/folder/default-profiles")) {
+                    return Promise.resolve(
+                        Response.json({
+                            scope: "personal",
+                            canEdit: true,
+                            defaults: { audio: unavailable, mail: unavailable },
+                        }),
+                    );
+                }
+                return Promise.resolve(Response.json({ profiles: [] }));
+            }),
+        );
+
+        render(<FolderDefaultProfiles folderId="folder" />);
+        fireEvent.pointerDown(
+            await screen.findByRole("button", { name: "Processing" }),
+            { button: 0, ctrlKey: false },
+        );
+
+        expect(
+            await screen.findAllByText("Your selected default is unavailable"),
+        ).toHaveLength(2);
+        fireEvent.click(screen.getByText("Default profile for recordings"));
+        expect(
+            await screen.findByRole("menuitemradio", {
+                name: "Inherit (your selected default is unavailable)",
             }),
         ).toBeTruthy();
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { SlidersHorizontal } from "lucide-react";
+import { Workflow } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { accountDefaultUnavailableApplies } from "@/lib/profiles/default-availability";
 import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
 
 interface ProfileOption {
@@ -136,9 +137,10 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     const currentLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
         if (!value) return i18n("None");
-        if (value.accountDefaultUnavailable) {
-            return i18n("Your selected default is unavailable");
-        }
+        const accountDefaultUnavailable = accountDefaultUnavailableApplies(
+            value.accountDefaultUnavailable,
+            value.effectiveManualOnly || value.effective !== null,
+        );
         if (value.effectiveManualOnly) {
             return value.inheritedFromFolderId
                 ? i18n("{setting} (inherited)", {
@@ -146,26 +148,33 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                   })
                 : i18n("Nothing automatic");
         }
-        if (!value.effective) {
-            return (
-                value.accountDefault?.name ??
-                (defaults?.scope === "org"
-                    ? i18n("Each person's default")
-                    : i18n("None"))
-            );
+        if (value.effective) {
+            return value.inheritedFromFolderId
+                ? i18n("{profile} (inherited)", {
+                      profile: profileName(
+                          value.effective,
+                          i18n("Organization"),
+                      ),
+                  })
+                : profileName(value.effective, i18n("Organization"));
         }
-        return value.inheritedFromFolderId
-            ? i18n("{profile} (inherited)", {
-                  profile: profileName(value.effective, i18n("Organization")),
-              })
-            : profileName(value.effective, i18n("Organization"));
+        if (accountDefaultUnavailable) {
+            return i18n("Your selected default is unavailable");
+        }
+        return (
+            value.accountDefault?.name ??
+            (defaults?.scope === "org"
+                ? i18n("Each person's default")
+                : i18n("None"))
+        );
     };
 
     const inheritLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
-        if (value?.accountDefaultUnavailable) {
-            return i18n("Inherit (your selected default is unavailable)");
-        }
+        const accountDefaultUnavailable = accountDefaultUnavailableApplies(
+            value?.accountDefaultUnavailable,
+            value?.inheritedManualOnly === true || Boolean(value?.inherited),
+        );
         if (value?.inheritedManualOnly) {
             return i18n("Inherit ({setting})", {
                 setting: i18n("Nothing automatic"),
@@ -194,6 +203,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     i18n("Organization"),
                 ),
             });
+        }
+        if (accountDefaultUnavailable) {
+            return i18n("Inherit (your selected default is unavailable)");
         }
         if (defaults?.scope === "org") {
             return i18n("Inherit (each person's default)");
@@ -250,13 +262,18 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                         {i18n("Nothing automatic")}
                     </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
-                {defaults?.defaults[channel].accountDefaultUnavailable && (
-                    <p className="max-w-72 px-2 py-1.5 text-xs text-muted-foreground">
-                        {i18n(
-                            "Your selected Organization profile is unavailable. Choose another default in Settings → Profiles.",
-                        )}
-                    </p>
-                )}
+                {defaults &&
+                    accountDefaultUnavailableApplies(
+                        defaults.defaults[channel].accountDefaultUnavailable,
+                        defaults.defaults[channel].effectiveManualOnly ||
+                            defaults.defaults[channel].effective !== null,
+                    ) && (
+                        <p className="max-w-72 px-2 py-1.5 text-xs text-muted-foreground">
+                            {i18n(
+                                "Your selected Organization profile is unavailable. Choose another default in Settings → Profiles.",
+                            )}
+                        </p>
+                    )}
             </DropdownMenuSubContent>
         </DropdownMenuSub>
     );
@@ -269,9 +286,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     variant="outline"
                     size="sm"
                     className="h-9"
-                    aria-label={i18n("Default profiles")}
+                    aria-label={i18n("Processing")}
                 >
-                    <SlidersHorizontal /> {i18n("Default profiles")}
+                    <Workflow /> {i18n("Processing")}
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-72">

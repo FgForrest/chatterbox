@@ -1,6 +1,17 @@
-import { and, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
+import {
+    and,
+    desc,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    lt,
+    or,
+    type SQL,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
+    aiEnhancements,
     type ChatterItemKind,
     chatterItems,
     mailContents,
@@ -21,6 +32,9 @@ const SCAN_LIMIT = 1_000;
 const DEADLINE_MS = 5_000;
 const MAX_RESULTS = 100;
 const SNIPPET_CHARS = 140;
+
+/** A field the bounded item search reads. */
+export type ItemSearchScope = "title" | "content" | "summary";
 
 /** An item a search found, with a few of its words around the match. */
 export interface ItemSearchHit {
@@ -44,8 +58,8 @@ interface LoadedItem {
     kind: ChatterItemKind;
     occurredAt: Date;
     title: string;
-    /** What the item says that a search reads, in reading order. */
-    texts: string[];
+    contentTexts: string[];
+    summaryTexts: string[];
 }
 
 /** Lowercase, without accents: "Příliš" and "prilis" are one word. */
@@ -92,6 +106,7 @@ function snippetOf(texts: readonly string[], word: string): string | null {
 async function loadBatch(
     scope: SQL,
     before: string | null,
+    searchScopes: ReadonlySet<ItemSearchScope>,
 ): Promise<LoadedItem[]> {
     const after = before ? decodeKeyset(before) : null;
     const rows = await db
@@ -122,12 +137,13 @@ async function loadBatch(
         .limit(BATCH);
     if (rows.length === 0) return [];
     const ownerOf = new Map(rows.map((row) => [row.id, row.userId]));
+    const ownerIds = [...new Set(rows.map((row) => row.userId))];
     const mailIds = rows.filter((row) => row.kind === "mail").map((r) => r.id);
     const audioIds = rows
         .filter((row) => row.kind === "audio")
         .map((r) => r.id);
-    const [contents, senders, transcripts] = await Promise.all([
-        mailIds.length > 0
+    const [contents, senders, transcripts, summaries] = await Promise.all([
+        searchScopes.has("content") && mailIds.length > 0
             ? db
                   .select({
                       itemId: mailContents.itemId,
@@ -135,9 +151,14 @@ async function loadBatch(
                       segments: mailContents.segments,
                   })
                   .from(mailContents)
-                  .where(inArray(mailContents.itemId, mailIds))
+                  .where(
+                      and(
+                          inArray(mailContents.itemId, mailIds),
+                          inArray(mailContents.userId, ownerIds),
+                      ),
+                  )
             : [],
-        mailIds.length > 0
+        searchScopes.has("content") && mailIds.length > 0
             ? db
                   .select({
                       itemId: mailParticipants.itemId,
@@ -147,9 +168,14 @@ async function loadBatch(
                       address: mailParticipants.address,
                   })
                   .from(mailParticipants)
-                  .where(inArray(mailParticipants.itemId, mailIds))
+                  .where(
+                      and(
+                          inArray(mailParticipants.itemId, mailIds),
+                          inArray(mailParticipants.userId, ownerIds),
+                      ),
+                  )
             : [],
-        audioIds.length > 0
+        searchScopes.has("content") && audioIds.length > 0
             ? db
                   .select({
                       itemId: transcriptions.recordingId,
@@ -157,31 +183,68 @@ async function loadBatch(
                       text: transcriptions.text,
                   })
                   .from(transcriptions)
-                  .where(inArray(transcriptions.recordingId, audioIds))
+                  .where(
+                      and(
+                          inArray(transcriptions.recordingId, audioIds),
+                          inArray(transcriptions.userId, ownerIds),
+                      ),
+                  )
+            : [],
+        searchScopes.has("summary")
+            ? db
+                  .select({
+                      itemId: aiEnhancements.itemId,
+                      userId: aiEnhancements.userId,
+                      summary: aiEnhancements.summary,
+                  })
+                  .from(aiEnhancements)
+                  .where(
+                      and(
+                          inArray(
+                              aiEnhancements.itemId,
+                              rows.map((row) => row.id),
+                          ),
+                          inArray(aiEnhancements.userId, ownerIds),
+                          isNotNull(aiEnhancements.summary),
+                      ),
+                  )
             : [],
     ]);
-    const texts = new Map<string, string[]>();
-    const add = (itemId: string, userId: string, values: string[]) => {
-        // The owner's rows alone: a shared item is one item.
+    const contentTexts = new Map<string, string[]>();
+    const summaryTexts = new Map<string, string[]>();
+    const add = (
+        destination: Map<string, string[]>,
+        itemId: string,
+        userId: string,
+        values: string[],
+    ) => {
         if (ownerOf.get(itemId) !== userId) return;
-        texts.set(itemId, [...(texts.get(itemId) ?? []), ...values]);
+        destination.set(itemId, [
+            ...(destination.get(itemId) ?? []),
+            ...values,
+        ]);
     };
     for (const row of senders) {
         if (!row.roles.includes("from")) continue;
-        add(row.itemId, row.userId, [
+        add(contentTexts, row.itemId, row.userId, [
             ...(row.name ? [decryptText(row.name)] : []),
             ...(row.address ? [decryptText(row.address)] : []),
         ]);
     }
     for (const row of contents) {
         add(
+            contentTexts,
             row.itemId,
             row.userId,
             ownText(decryptJsonField<ContentSegment[]>(row.segments) ?? []),
         );
     }
     for (const row of transcripts) {
-        add(row.itemId, row.userId, [decryptText(row.text)]);
+        add(contentTexts, row.itemId, row.userId, [decryptText(row.text)]);
+    }
+    for (const row of summaries) {
+        if (!row.summary) continue;
+        add(summaryTexts, row.itemId, row.userId, [decryptText(row.summary)]);
     }
     return rows.map((row) => ({
         id: row.id,
@@ -189,7 +252,8 @@ async function loadBatch(
         kind: row.kind,
         occurredAt: row.occurredAt,
         title: decryptText(row.title),
-        texts: texts.get(row.id) ?? [],
+        contentTexts: contentTexts.get(row.id) ?? [],
+        summaryTexts: summaryTexts.get(row.id) ?? [],
     }));
 }
 
@@ -199,20 +263,24 @@ async function loadBatch(
  * the Organization. Titles, a mail's sender and its own text, and a
  * recording's transcripts are read; everything is encrypted, so the
  * search decrypts newest first and stops at a bound, saying where to go
- * on. A mail of someone else's has its secret addresses masked.
+ * on. `scopes` limits the scan to titles, transcripts/message text, and
+ * summaries. A mail of someone else's has its secret addresses masked.
  */
 export async function searchItems({
     viewerUserId,
     view,
     query,
     before = null,
+    scopes = ["title", "content", "summary"],
 }: {
     viewerUserId: string;
     view: RecordingView;
     query: string;
     before?: string | null;
+    scopes?: readonly ItemSearchScope[];
 }): Promise<ItemSearchResult> {
     const words = foldForSearch(query).split(/\s+/).filter(Boolean);
+    const searchScopes = new Set(scopes);
     // A colleague's mail is searched as it reads to the viewer: matched
     // on its secret addresses, a search would spell out their tokens.
     const masked = async (items: LoadedItem[]): Promise<LoadedItem[]> => {
@@ -221,19 +289,24 @@ export async function searchItems({
         );
         if (foreign.length === 0) return items;
         const mask = await secretAddressMasker(
-            foreign.flatMap((item) => [item.title, ...item.texts]),
+            foreign.flatMap((item) => [
+                item.title,
+                ...item.contentTexts,
+                ...item.summaryTexts,
+            ]),
         );
         return items.map((item) =>
             foreign.includes(item)
                 ? {
                       ...item,
                       title: mask(item.title),
-                      texts: item.texts.map(mask),
+                      contentTexts: item.contentTexts.map(mask),
+                      summaryTexts: item.summaryTexts.map(mask),
                   }
                 : item,
         );
     };
-    if (words.length === 0) {
+    if (words.length === 0 || searchScopes.size === 0) {
         return { hits: [], scanned: 0, complete: true, continueBefore: null };
     }
     let scope: SQL;
@@ -253,15 +326,26 @@ export async function searchItems({
     }
     const found: ItemSearchHit[] = [];
     const scan = await boundedScan({
-        batches: async (stamp) => masked(await loadBatch(scope, stamp)),
+        batches: async (stamp) =>
+            masked(await loadBatch(scope, stamp, searchScopes)),
         stampOf: (item) => encodeKeyset({ at: item.occurredAt, id: item.id }),
         visit: (item) => {
-            const all = [item.title, ...item.texts];
+            const all = [
+                ...(searchScopes.has("title") ? [item.title] : []),
+                ...(searchScopes.has("content") ? item.contentTexts : []),
+                ...(searchScopes.has("summary") ? item.summaryTexts : []),
+            ];
             const folded = foldForSearch(all.join("\n"));
             if (!words.every((word) => folded.includes(word))) return null;
-            const snippet = foldForSearch(item.title).includes(words[0] ?? "")
+            const titleMatched =
+                searchScopes.has("title") &&
+                foldForSearch(item.title).includes(words[0] ?? "");
+            const snippet = titleMatched
                 ? null
-                : snippetOf(item.texts, words[0] ?? "");
+                : snippetOf(
+                      [...item.contentTexts, ...item.summaryTexts],
+                      words[0] ?? "",
+                  );
             found.push({ id: item.id, kind: item.kind, snippet });
             return item.id;
         },

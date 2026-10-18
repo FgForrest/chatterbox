@@ -12,7 +12,6 @@ import {
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
 import { parseProviderRates } from "@/lib/ai/provider-rate-input";
-import { setDefaultTranscriptionProvider } from "@/lib/ai/set-default-transcription";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSession } from "@/lib/auth-server";
 import { encrypt } from "@/lib/encryption";
@@ -170,6 +169,19 @@ export const POST = apiHandler(async (request: Request) => {
                 after: created,
             });
         }
+        if (isDefaultTranscription) {
+            await setDefaultProvider(
+                session.user.id,
+                "transcription",
+                created.id,
+                { transaction: tx },
+            );
+        }
+        if (isDefaultEnhancement) {
+            await setDefaultProvider(session.user.id, "summary", created.id, {
+                transaction: tx,
+            });
+        }
         return {
             id: created.id,
             provider: created.provider,
@@ -179,13 +191,6 @@ export const POST = apiHandler(async (request: Request) => {
             isDefaultEnhancement: Boolean(isDefaultEnhancement),
         };
     });
-
-    if (isDefaultTranscription) {
-        await setDefaultTranscriptionProvider(session.user.id, newProvider.id);
-    }
-    if (isDefaultEnhancement) {
-        await setDefaultProvider(session.user.id, "summary", newProvider.id);
-    }
 
     // Provider label only -- never baseUrl, which can be a private
     // hostname (homelab Ollama, internal LM Studio, etc.).

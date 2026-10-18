@@ -9,7 +9,7 @@ description: Exporty složek na disk nebo Google Drive, zálohy a automatické m
 
 Export složky uchovává kopii nahrávek složky mimo Chatterbox, na disku nebo v Google Drive, a udržuje ji aktuální. Váš administrátor rozhoduje, kterou z těchto dvou možností vaše instance nabízí.
 
-Otevřete složku (viz [Složky](recordings.md#folders)) a klikněte na **Nastavení**:
+Otevřete složku (viz [Složky](recordings.md#folders)) a klikněte na **Export**:
 
 ![Nastavení exportu složek](images/folder-export.png)
 
