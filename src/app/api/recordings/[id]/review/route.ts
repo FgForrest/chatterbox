@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
-import { apiHandler } from "@/lib/errors";
+import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { loadReview, requestedReviewSource } from "@/lib/learn/review";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -23,19 +23,25 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const { access, actorUserId } = await authorizeLearn(request, id);
     let available = false;
     let availabilityReason: "profile_unavailable" | undefined;
+    let profile: Awaited<ReturnType<typeof resolveItemProfile>> | null = null;
     try {
-        const profile = await resolveItemProfile(
+        profile = await resolveItemProfile(
             id,
             access.view,
             access.ownerUserId,
             actorUserId,
         );
+    } catch (error) {
+        if (!(error instanceof AppError) || error.code !== ErrorCode.CONFLICT) {
+            throw error;
+        }
+        availabilityReason = "profile_unavailable";
+    }
+    if (profile) {
         available = await isLearnAvailableFor(
             actorUserId,
             profile.settings.steps.learn.provider,
         );
-    } catch {
-        availabilityReason = "profile_unavailable";
     }
     return NextResponse.json({
         ...(await loadReview(access, requestedReviewSource(request))),
