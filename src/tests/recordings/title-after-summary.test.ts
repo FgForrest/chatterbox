@@ -160,6 +160,22 @@ describe("title after summary", () => {
         });
     });
 
+    it.each([
+        "first_summary_title_disabled",
+        "first_summary_title_edited",
+    ])("does not try again once the title settled as %s", async (reason) => {
+        mocks.readProcessing.mockResolvedValue({
+            phases: {
+                summary: { steps: { title: { state: "skipped", reason } } },
+            },
+        });
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.resolveItemProfile).not.toHaveBeenCalled();
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+    });
+
     it("tries again at the next summary after a failed attempt", async () => {
         mocks.readProcessing.mockResolvedValue({
             phases: {
