@@ -447,6 +447,35 @@ describe("locateQuote", () => {
         expect(locateQuote(turns, "book the venue downtown")).toBeNull();
         expect(locateQuote(null, "anything")).toBeNull();
     });
+
+    it("places Czech inflections and folded diacritics", () => {
+        const czechTurns = [
+            {
+                startMs: 4_000,
+                text: "Připravila jsem podklady pro nový projekt a pošlu je zítra.",
+            },
+            {
+                startMs: 11_000,
+                text: "Rozpočet pro kancelář projednáme až příští měsíc.",
+            },
+        ];
+
+        expect(
+            locateQuote(
+                czechTurns,
+                "Připravím podklady k novému projektu a pošlu je zítra",
+            ),
+        ).toBe(4_000);
+        expect(
+            locateQuote(
+                czechTurns,
+                "Pripravim podklady k novemu projektu a poslu je zitra",
+            ),
+        ).toBe(4_000);
+        expect(
+            locateQuote(czechTurns, "Objednáme občerstvení do zasedačky"),
+        ).toBeNull();
+    });
 });
 
 describe("normalizeTaskText", () => {

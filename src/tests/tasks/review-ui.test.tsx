@@ -6,13 +6,16 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { openWidget } from "@/components/pipeline/workflow-widget";
 import { RecordingTasks as RecordingTasksList } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import type {
     RecordingTasks,
     TaskMatchView,
@@ -82,6 +85,9 @@ function match(overrides: Partial<TaskMatchView> = {}): TaskMatchView {
                 kind: "audio",
                 title: "Contract planning",
             },
+            quote: "I will send the contract",
+            evidenceStartMs: 3_000,
+            evidenceText: null,
         },
         ...overrides,
     };
@@ -125,7 +131,7 @@ function state(data: RecordingTasks): RecordingTasksState {
         waiting: 1,
         accepting: false,
         update: vi.fn(),
-        add: vi.fn(async () => {}),
+        add: vi.fn(async () => null),
         merge: vi.fn(async () => true),
         mergeInto: vi.fn(async () => true),
         undoMatch: vi.fn(async () => {}),
@@ -133,6 +139,41 @@ function state(data: RecordingTasks): RecordingTasksState {
         tickMatch: vi.fn(),
         accept: vi.fn(async () => true),
     };
+}
+
+function AddTaskHarness({ frame }: { frame: "inline" | "dialog" }) {
+    const [data, setData] = useState<RecordingTasks>({
+        canEdit: true,
+        reviewed: false,
+        tasks: [],
+        proposals: [task()],
+        updates: [],
+        matches: [],
+    });
+    const current = state(data);
+    current.add = async () => {
+        const added = task({
+            id: "new-proposal",
+            text: "New task",
+            quote: null,
+            evidenceStartMs: null,
+        });
+        setData((value) => ({
+            ...value,
+            proposals: [...value.proposals, added],
+        }));
+        return added;
+    };
+    return (
+        <TaskReviewLink
+            state={current}
+            speakers={[]}
+            organizationOnly={false}
+            frame={frame}
+            showTrigger={false}
+            widgetId={`add-task-${frame}`}
+        />
+    );
 }
 
 function openReview(data: Partial<RecordingTasks>, organizationOnly = false) {
@@ -339,6 +380,38 @@ describe.each([
             screen.getByDisplayValue("Send the revised contract"),
         ).toBeTruthy();
     });
+
+    it("adds from the footer and focuses the new task", async () => {
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+            configurable: true,
+            value: scrollIntoView,
+        });
+        render(<AddTaskHarness frame={frame} />);
+        if (frame === "dialog") {
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review" }),
+            );
+        }
+
+        const add = await screen.findByRole("button", { name: "Add task" });
+        const apply = screen.getByRole("button", {
+            name: "Apply selected changes",
+        });
+        const footer = apply.closest("footer");
+        expect(footer).toBeTruthy();
+        const footerButtons = within(footer as HTMLElement).getAllByRole(
+            "button",
+        );
+        expect(footerButtons.indexOf(add)).toBeLessThan(
+            footerButtons.indexOf(apply),
+        );
+
+        fireEvent.click(add);
+        const input = await screen.findByDisplayValue("New task");
+        await waitFor(() => expect(document.activeElement).toBe(input));
+        expect(scrollIntoView).toHaveBeenCalled();
+    });
 });
 
 describe("task review rows", () => {
@@ -416,8 +489,23 @@ describe("task review rows", () => {
         expect(screen.queryByText("Private Pat")).toBeNull();
     });
 
-    it("shows an unticked suggested match with its candidate and evidence", () => {
+    it("compares an unticked suggested match and toggles its timed evidence", async () => {
         const onPlay = vi.fn();
+        let listener:
+            | ((state: { ms: number; playing: boolean }) => void)
+            | undefined;
+        const playback: TranscriptPlayback = {
+            play: vi.fn((ms) => listener?.({ ms, playing: true })),
+            pause: vi.fn(() => listener?.({ ms: 12_500, playing: false })),
+            seek: vi.fn(),
+            subscribe: vi.fn((next) => {
+                listener = next;
+                next({ ms: 0, playing: false });
+                return () => {
+                    listener = undefined;
+                };
+            }),
+        };
         const current = state({
             canEdit: true,
             reviewed: false,
@@ -432,22 +520,73 @@ describe("task review rows", () => {
                 speakers={[]}
                 organizationOnly={false}
                 onPlay={onPlay}
+                playback={playback}
             />,
         );
         fireEvent.click(screen.getByRole("button", { name: /Review tasks/ }));
 
-        expect(screen.getByText("Suggested match")).toBeTruthy();
+        expect(screen.getByText("Earlier task")).toBeTruthy();
+        expect(screen.getByText("Said now")).toBeTruthy();
+        expect(screen.getByText("Same task: attach this mention")).toBeTruthy();
+        expect(
+            screen.getByText(
+                "Accepting this match changes nothing else on the task.",
+            ),
+        ).toBeTruthy();
         expect(screen.getByText("Send the contract")).toBeTruthy();
         expect(screen.getByText(/Ada/)).toBeTruthy();
         expect(screen.getByText(/2026-10-20/)).toBeTruthy();
         expect(screen.getByText(/Contract planning/)).toBeTruthy();
         expect(
+            screen.getByText(/I will send the revised contract/),
+        ).toBeTruthy();
+        expect(
+            screen
+                .getByRole("link", { name: "Play evidence at 00:03" })
+                .getAttribute("href"),
+        ).toBe("/dashboard?recording=earlier-item&playFrom=3000");
+        expect(
             screen.getByRole("checkbox", {
                 name: "Apply suggested match to Send the contract",
             }),
         ).toHaveProperty("checked", false);
-        fireEvent.click(screen.getByRole("button", { name: "Play evidence" }));
-        expect(onPlay).toHaveBeenCalledWith(12_500);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+        );
+        expect(playback.play).toHaveBeenCalledWith(12_500);
+        const pause = await screen.findByRole("button", {
+            name: "Pause evidence at 00:12",
+        });
+        expect(pause.getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(pause);
+        expect(playback.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows an unplaced quote as text without a dead link", () => {
+        openReview({
+            matches: [
+                match({
+                    quote: "A completely paraphrased commitment",
+                    evidenceStartMs: null,
+                    evidenceText: null,
+                }),
+            ],
+        });
+
+        const saidNow = screen.getByText("Said now").closest("section");
+        expect(saidNow).toBeTruthy();
+        expect(
+            within(saidNow as HTMLElement).getByText(
+                /A completely paraphrased commitment/,
+            ),
+        ).toBeTruthy();
+        expect(
+            within(saidNow as HTMLElement).getByText(
+                "not found in the transcript",
+            ),
+        ).toBeTruthy();
+        expect(within(saidNow as HTMLElement).queryByRole("link")).toBeNull();
+        expect(within(saidNow as HTMLElement).queryByRole("button")).toBeNull();
     });
 
     it("shows one card for a match, its field changes, and earlier evidence", () => {
@@ -468,7 +607,8 @@ describe("task review rows", () => {
             '[data-task-review-card="existing-1"]',
         );
         expect(cards).toHaveLength(1);
-        expect(screen.getByText("Suggested match")).toBeTruthy();
+        expect(screen.getByText("Earlier task")).toBeTruthy();
+        expect(screen.getByText("Said now")).toBeTruthy();
         expect(screen.getByText("Current deadline")).toBeTruthy();
         expect(screen.getByText("Earlier mention")).toBeTruthy();
         expect(screen.queryByText("Heard about earlier tasks")).toBeNull();

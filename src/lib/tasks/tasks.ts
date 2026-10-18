@@ -179,6 +179,13 @@ export interface TaskMatchView {
             kind: "audio" | "mail";
             title: string;
         };
+        quote: string | null;
+        evidenceStartMs: number | null;
+        evidenceText: {
+            segmentIndex: number;
+            charStart: number;
+            charEnd: number;
+        } | null;
     };
 }
 
@@ -600,6 +607,11 @@ async function listSuggestedMatches(
             homeItemId: matchCandidateHome.id,
             homeItemKind: matchCandidateHome.kind,
             homeItemTitle: matchCandidateHome.title,
+            candidateQuote: recordingTasks.quote,
+            candidateStartMs: recordingTasks.evidenceStartMs,
+            candidateSegmentIndex: recordingTasks.evidenceSegmentIndex,
+            candidateCharStart: recordingTasks.evidenceCharStart,
+            candidateCharEnd: recordingTasks.evidenceCharEnd,
         })
         .from(taskMentions)
         .innerJoin(recordingTasks, eq(recordingTasks.id, taskMentions.taskId))
@@ -659,6 +671,18 @@ async function listSuggestedMatches(
                     kind: row.homeItemKind,
                     title: decryptText(row.homeItemTitle),
                 },
+                quote: decryptOptional(row.candidateQuote),
+                evidenceStartMs: row.candidateStartMs,
+                evidenceText:
+                    row.candidateSegmentIndex !== null &&
+                    row.candidateCharStart !== null &&
+                    row.candidateCharEnd !== null
+                        ? {
+                              segmentIndex: row.candidateSegmentIndex,
+                              charStart: row.candidateCharStart,
+                              charEnd: row.candidateCharEnd,
+                          }
+                        : null,
             },
         }),
     );

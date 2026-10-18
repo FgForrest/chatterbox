@@ -43,13 +43,13 @@ When task changes are ready, the inline **Task review** widget opens after the s
 
 ![Reviewing proposed tasks](images/task-review.png)
 
-- A new action can show **Suggested matches** to earlier open tasks from the same folder scope. Every suggested match starts unticked, regardless of how many candidates were found or where its evidence came from. Tick the match you want to accept. Deadline and completion changes also start unticked.
+- A new action can show **Suggested matches** to earlier open tasks from the same folder scope. Each card compares the **Earlier task** with what was **Said now**, including both quotes and their evidence times. **Same task: attach this mention** links the new mention without otherwise changing the earlier task. Every suggested match starts unticked, regardless of how many candidates were found or where its evidence came from. Deadline and completion changes also start unticked.
 - When several candidates are plausible, choose the right one or **Keep as new**. **Merge into an earlier task** searches all open tasks in the folder scope, not only the suggested candidates.
 - A deadline change shows the **Current deadline** and **Proposed deadline**. A completion is marked **Needs confirmation**. An older statement than the task's latest edit appears as **Earlier mention** and needs no decision.
 - A summary can also propose **No longer needed** or **Handed to someone else**. These are never preselected. An unknown assignee is shown for checking, not silently created.
-- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. **Add task** adds one the summary missed. **Apply selected changes** applies everything still ticked; **Save and continue later** preserves the review without applying it.
+- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. In the footer, **Add task** adds and focuses a task the summary missed, and **Apply selected changes** applies everything still ticked; **Save and continue later** preserves the review without applying it.
 
-The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it.
+The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it. An audio evidence button shows its time and changes to pause while that passage is playing. If the quote cannot be placed in the transcript, the review says so instead of opening an unhelpful link.
 
 ![Task changes and an earlier mention in the review](images/task-review-changes.png)
 

@@ -4,6 +4,8 @@
  * words counts when none holds it whole.
  */
 
+import { stemVariants } from "@/lib/knowledge/stemming";
+
 interface QuoteTurn {
     startMs: number;
     text: string;
@@ -12,9 +14,14 @@ interface QuoteTurn {
 function words(text: string): string[] {
     return text
         .toLocaleLowerCase()
-        .normalize("NFC")
+        .normalize("NFKD")
+        .replace(/\p{M}+/gu, "")
         .split(/[^\p{L}\p{N}]+/u)
         .filter(Boolean);
+}
+
+function czechStems(word: string): readonly string[] {
+    return stemVariants(word, "cs");
 }
 
 /** Below this share of the quote's words in one turn, the quote is not placed. */
@@ -33,9 +40,11 @@ export function locateQuote(
     for (const turn of turns) {
         const turnWords = words(turn.text);
         if (turnWords.join(" ").includes(phrase)) return turn.startMs;
-        const present = new Set(turnWords);
+        const present = new Set(turnWords.flatMap(czechStems));
         const share =
-            wanted.filter((word) => present.has(word)).length / wanted.length;
+            wanted.filter((word) =>
+                czechStems(word).some((stem) => present.has(stem)),
+            ).length / wanted.length;
         if (share >= MIN_OVERLAP && (!best || share > best.share)) {
             best = { startMs: turn.startMs, share };
         }
@@ -59,7 +68,8 @@ function positionedWords(
     text: string,
 ): { word: string; start: number; end: number }[] {
     return [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({
-        word: match[0].toLocaleLowerCase().normalize("NFC"),
+        word:
+            words(match[0])[0] ?? match[0].toLocaleLowerCase().normalize("NFC"),
         start: match.index ?? 0,
         end: (match.index ?? 0) + match[0].length,
     }));
