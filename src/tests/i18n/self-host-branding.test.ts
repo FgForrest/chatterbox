@@ -167,7 +167,7 @@ const docsAllowlist = [
     {
         reason: "historical issue and upstream connector repositories",
         files: [/^guides\/connect-plaud-account(\.cs-CZ)?\.mdx$/],
-        value: /github\.com\/riffado\/(riffado\/issues\/65|connector)/,
+        value: /\]\(https:\/\/github\.com\/riffado\/(riffado\/issues\/65|connector\/releases\/latest)\)/,
     },
 ] as const;
 
