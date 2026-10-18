@@ -623,12 +623,13 @@ export function Workstation({
     }, [inFlightActions, isOrgAccount]);
 
     const handleTranscribe = useCallback(
-        async (attributionSource?: string) => {
+        async (attributionSource?: string, retranscribe = false) => {
             if (!currentRecording) return;
             await transcribeById(
                 currentRecording.id,
                 attributionSource,
                 currentRecording.view,
+                retranscribe,
             );
         },
         [currentRecording, transcribeById],

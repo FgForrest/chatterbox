@@ -39,6 +39,17 @@ import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -118,7 +129,7 @@ interface TranscriptionPanelProps {
      * more than one is present a source switcher is shown. */
     transcripts?: TranscriptOption[];
     isTranscribing: boolean;
-    onTranscribe: (attributionSource?: string) => void;
+    onTranscribe: (attributionSource?: string, retranscribe?: boolean) => void;
     /** Refresh handler called after a browser-side transcription completes. */
     onTranscribeComplete?: () => void;
     /**
@@ -262,6 +273,12 @@ export function TranscriptionPanel({
     const i18n = useExtracted();
     const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
+    const serverTranscriptionJob = processing?.jobs.transcription ?? null;
+    const serverHasTranscript = processing?.outputs.transcript === true;
+    const transcriptionRunning =
+        isTranscribing || serverTranscriptionJob !== null;
+    const knownTranscriptExists =
+        serverHasTranscript || recording.hasTranscript === true;
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its
     // summaries made with the Organization's templates.
@@ -276,14 +293,6 @@ export function TranscriptionPanel({
         useState(false);
     const [transcriptionDialogOpen, setTranscriptionDialogOpen] =
         useState(false);
-    useEffect(() => {
-        if (
-            isTranscribing &&
-            processing?.startedBy?.transcription === "person"
-        ) {
-            setTranscriptionDialogOpen(true);
-        }
-    }, [isTranscribing, processing?.startedBy?.transcription]);
     const activeTranscript =
         transcriptList.find((t) => t.source === activeSource) ??
         transcriptList[0];
@@ -297,7 +306,7 @@ export function TranscriptionPanel({
     );
     const transcriptLine =
         transcriptQuiet ||
-        Boolean(isTranscribing && widgets?.transcript.frame === "dialog");
+        Boolean(transcriptionRunning && widgets?.transcript.frame === "dialog");
     const transcriptWidgetId = `recording-transcription-${recording.id}`;
     let transcriptSourceLabel = name;
     if (activeTranscript?.source === "plaud") transcriptSourceLabel = "Plaud";
@@ -306,10 +315,40 @@ export function TranscriptionPanel({
     }
     const folderName =
         processing?.placements[0]?.name ?? processing?.intents[0]?.name;
-    const startTranscription = (source?: string) => {
-        setTranscriptionDialogOpen(true);
-        onTranscribe(source);
+    const startTranscription = (source?: string, retranscribe = false) => {
+        onTranscribe(source, retranscribe);
     };
+    const previousServerTranscriptionJob = useRef(serverTranscriptionJob);
+    const requestedServerTranscriptReload = useRef(false);
+    const transcriptMissing = !transcriptList.some(
+        (candidate) => candidate.text,
+    );
+    useEffect(() => {
+        const serverJobFinished =
+            previousServerTranscriptionJob.current !== null &&
+            serverTranscriptionJob === null;
+        previousServerTranscriptionJob.current = serverTranscriptionJob;
+        if (serverTranscriptionJob !== null) {
+            requestedServerTranscriptReload.current = false;
+        }
+        const shouldReload =
+            !isTranscribing &&
+            serverTranscriptionJob === null &&
+            (serverJobFinished || (serverHasTranscript && transcriptMissing));
+        if (shouldReload && !requestedServerTranscriptReload.current) {
+            requestedServerTranscriptReload.current = true;
+            onTranscriptStale?.();
+        }
+        if (!transcriptMissing) {
+            requestedServerTranscriptReload.current = false;
+        }
+    }, [
+        isTranscribing,
+        onTranscriptStale,
+        serverHasTranscript,
+        serverTranscriptionJob,
+        transcriptMissing,
+    ]);
     const canHavePlaudSummary =
         !orgView &&
         (recording.deviceSn !== "local" ||
@@ -633,15 +672,9 @@ export function TranscriptionPanel({
         profileChannel: recording.kind ?? "audio",
     });
     const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
-    useEffect(() => {
-        if (isSummarizing && processing?.startedBy?.summary === "person") {
-            setSummaryDialogOpen(true);
-        }
-    }, [isSummarizing, processing?.startedBy?.summary]);
     const [workflowSummaryExpanded, setWorkflowSummaryExpanded] =
         useState(false);
     const startSummary = () => {
-        setSummaryDialogOpen(true);
         handleSummarize();
     };
     const summaryOpen = widgets?.workflowVisible
@@ -838,26 +871,26 @@ export function TranscriptionPanel({
                         id={transcriptWidgetId}
                         title={i18n("Transcription")}
                         facts={
-                            isTranscribing
+                            transcriptionRunning
                                 ? i18n("Transcribing audio…")
                                 : transcriptSourceLabel
                         }
                         icon={<FileText className="size-4" />}
                         tone={widgets?.transcript.tone ?? "quiet"}
-                        working={isTranscribing}
-                        expanded={isTranscribing ? undefined : false}
+                        working={transcriptionRunning}
+                        expanded={transcriptionRunning ? undefined : false}
                         onExpand={
-                            isTranscribing
+                            transcriptionRunning
                                 ? undefined
                                 : () => setWorkflowTranscriptExpanded(true)
                         }
                         expandLabel={
-                            isTranscribing ? undefined : i18n("View transcript")
+                            transcriptionRunning
+                                ? undefined
+                                : i18n("View transcript")
                         }
                         onOpen={() => {
-                            if (isTranscribing)
-                                setTranscriptionDialogOpen(true);
-                            else setWorkflowTranscriptExpanded(true);
+                            setWorkflowTranscriptExpanded(true);
                         }}
                     />
                 ) : (
@@ -890,6 +923,59 @@ export function TranscriptionPanel({
                                     />
                                 </CardTitle>
                                 <div className="flex flex-wrap items-center gap-2">
+                                    {activeTranscript?.text && !readOnly && (
+                                        <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={
+                                                        transcriptionRunning ||
+                                                        recording.audioReaped
+                                                    }
+                                                    title={
+                                                        recording.audioReaped
+                                                            ? i18n(
+                                                                  "Audio was removed by your retention policy",
+                                                              )
+                                                            : undefined
+                                                    }
+                                                >
+                                                    <RefreshCw className="size-4 mr-2" />{" "}
+                                                    {i18n("Re-transcribe")}
+                                                </Button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                    <AlertDialogTitle>
+                                                        {i18n(
+                                                            "Re-transcribe this recording?",
+                                                        )}
+                                                    </AlertDialogTitle>
+                                                    <AlertDialogDescription>
+                                                        {i18n(
+                                                            "This replaces the transcript, then regenerates the summary, title, and topics, and runs Learn again. It also makes a paid call to your transcription provider.",
+                                                        )}
+                                                    </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                    <AlertDialogCancel>
+                                                        {i18n("Cancel")}
+                                                    </AlertDialogCancel>
+                                                    <AlertDialogAction
+                                                        onClick={() =>
+                                                            startTranscription(
+                                                                activeTranscript.source,
+                                                                true,
+                                                            )
+                                                        }
+                                                    >
+                                                        {i18n("Re-transcribe")}
+                                                    </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                        </AlertDialog>
+                                    )}
                                     {transcriptList.length > 1 &&
                                         activeTranscript && (
                                             <SourceSwitcher
@@ -912,36 +998,9 @@ export function TranscriptionPanel({
                                             view={view}
                                         />
                                     )}
-                                    {activeTranscript?.text && !readOnly && (
-                                        <Button
-                                            onClick={() =>
-                                                startTranscription(
-                                                    activeTranscript.source,
-                                                )
-                                            }
-                                            size="sm"
-                                            variant="outline"
-                                            // No audio, nothing to re-transcribe
-                                            // from. Both the server route and the
-                                            // browser one would only fetch a 410.
-                                            disabled={
-                                                isTranscribing ||
-                                                recording.audioReaped
-                                            }
-                                            title={
-                                                recording.audioReaped
-                                                    ? i18n(
-                                                          "Audio was removed by your retention policy",
-                                                      )
-                                                    : undefined
-                                            }
-                                        >
-                                            <RefreshCw className="size-4 mr-2" />{" "}
-                                            {i18n("Re-transcribe")}
-                                        </Button>
-                                    )}
                                     {!activeTranscript?.text &&
-                                        !isTranscribing &&
+                                        !knownTranscriptExists &&
+                                        !transcriptionRunning &&
                                         !readOnly && (
                                             <>
                                                 <Button
@@ -950,7 +1009,7 @@ export function TranscriptionPanel({
                                                     }
                                                     size="sm"
                                                     disabled={
-                                                        isTranscribing ||
+                                                        transcriptionRunning ||
                                                         recording.audioReaped
                                                     }
                                                     title={
@@ -970,7 +1029,7 @@ export function TranscriptionPanel({
                                                             recording.id
                                                         }
                                                         disabled={
-                                                            isTranscribing ||
+                                                            transcriptionRunning ||
                                                             recording.audioReaped
                                                         }
                                                         onComplete={
@@ -989,6 +1048,33 @@ export function TranscriptionPanel({
                                                 )}
                                             </>
                                         )}
+                                    {activeTranscript?.text && (
+                                        <button
+                                            type="button"
+                                            aria-expanded={transcriptOpen}
+                                            onClick={() => {
+                                                if (widgets?.workflowVisible) {
+                                                    setWorkflowTranscriptExpanded(
+                                                        false,
+                                                    );
+                                                } else {
+                                                    setTranscriptExpanded(
+                                                        !transcriptExpanded,
+                                                    );
+                                                }
+                                            }}
+                                            className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                        >
+                                            {transcriptOpen ? (
+                                                <ChevronUp className="size-4" />
+                                            ) : (
+                                                <ChevronDown className="size-4" />
+                                            )}
+                                            {transcriptOpen
+                                                ? i18n("Collapse transcript")
+                                                : i18n("Expand transcript")}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                             {activeTranscript && speakerTags.length > 0 && (
@@ -1023,7 +1109,7 @@ export function TranscriptionPanel({
                             )}
                         </CardHeader>
                         <CardContent>
-                            {isTranscribing ? (
+                            {transcriptionRunning ? (
                                 <div className="flex flex-col items-center justify-center py-12">
                                     <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
                                     <p className="text-sm text-muted-foreground">
@@ -1033,31 +1119,6 @@ export function TranscriptionPanel({
                             ) : activeTranscript?.text ? (
                                 <div className="space-y-4">
                                     <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                                        <button
-                                            type="button"
-                                            aria-expanded={transcriptOpen}
-                                            onClick={() => {
-                                                if (widgets?.workflowVisible) {
-                                                    setWorkflowTranscriptExpanded(
-                                                        false,
-                                                    );
-                                                } else {
-                                                    setTranscriptExpanded(
-                                                        !transcriptExpanded,
-                                                    );
-                                                }
-                                            }}
-                                            className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
-                                        >
-                                            {transcriptOpen ? (
-                                                <ChevronUp className="size-4" />
-                                            ) : (
-                                                <ChevronDown className="size-4" />
-                                            )}
-                                            {transcriptOpen
-                                                ? i18n("Collapse transcript")
-                                                : i18n("Expand transcript")}
-                                        </button>
                                         <TranscriptTopicsMenu
                                             widgetId={`recording-topics-${recording.id}`}
                                             topics={topics}
@@ -1067,10 +1128,6 @@ export function TranscriptionPanel({
                                             onDetect={() => void detectTopics()}
                                             onSelect={handleSelectTopic}
                                             getPlaybackMs={getPlaybackMs}
-                                            personStarted={
-                                                processing?.startedBy
-                                                    ?.topics === "person"
-                                            }
                                         />
                                         {(shownCorrections?.list.length ?? 0) >
                                             0 && (
@@ -1264,8 +1321,7 @@ export function TranscriptionPanel({
                             isSummarizing ? undefined : i18n("View summary")
                         }
                         onOpen={() => {
-                            if (isSummarizing) setSummaryDialogOpen(true);
-                            else setWorkflowSummaryExpanded(true);
+                            setWorkflowSummaryExpanded(true);
                         }}
                     />
                 ) : (
@@ -1296,6 +1352,46 @@ export function TranscriptionPanel({
                                     />
                                 </CardTitle>
                                 <div className="flex flex-wrap items-center gap-2">
+                                    {summarySource === "riffado" &&
+                                        !readOnly && (
+                                            <Button
+                                                onClick={startSummary}
+                                                size="sm"
+                                                variant={
+                                                    summaryData
+                                                        ? "outline"
+                                                        : "default"
+                                                }
+                                                disabled={
+                                                    isSummarizing ||
+                                                    summaryProfilesLoading ||
+                                                    !summaryProfileId ||
+                                                    (!summaryTranscript &&
+                                                        !(
+                                                            orgView &&
+                                                            transcriptList.length >
+                                                                0
+                                                        ))
+                                                }
+                                            >
+                                                {isSummarizing ? (
+                                                    <>
+                                                        <Loader2 className="size-4 mr-2 animate-spin" />{" "}
+                                                        {i18n("Generating…")}
+                                                    </>
+                                                ) : summaryData ? (
+                                                    <>
+                                                        <RefreshCw className="size-4 mr-2" />{" "}
+                                                        {i18n("Re-summarize")}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Sparkles className="size-4 mr-2" />{" "}
+                                                        {i18n("Summarize")}
+                                                    </>
+                                                )}
+                                            </Button>
+                                        )}
                                     {canHavePlaudSummary && (
                                         <SourceSwitcher
                                             ariaLabel={i18n("Summary source")}
@@ -1354,60 +1450,7 @@ export function TranscriptionPanel({
                                                 </SelectContent>
                                             </Select>
                                         )}
-                                    {summarySource === "riffado" &&
-                                        !readOnly && (
-                                            <Button
-                                                onClick={startSummary}
-                                                size="sm"
-                                                variant={
-                                                    summaryData
-                                                        ? "outline"
-                                                        : "default"
-                                                }
-                                                disabled={
-                                                    isSummarizing ||
-                                                    summaryProfilesLoading ||
-                                                    !summaryProfileId ||
-                                                    (!summaryTranscript &&
-                                                        !(
-                                                            orgView &&
-                                                            transcriptList.length >
-                                                                0
-                                                        ))
-                                                }
-                                            >
-                                                {isSummarizing ? (
-                                                    <>
-                                                        <Loader2 className="size-4 mr-2 animate-spin" />{" "}
-                                                        {i18n("Generating…")}
-                                                    </>
-                                                ) : summaryData ? (
-                                                    <>
-                                                        <RefreshCw className="size-4 mr-2" />{" "}
-                                                        {i18n("Re-summarize")}
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Sparkles className="size-4 mr-2" />{" "}
-                                                        {i18n("Summarize")}
-                                                    </>
-                                                )}
-                                            </Button>
-                                        )}
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {isSummarizing ? (
-                                <div className="flex flex-col items-center justify-center py-8">
-                                    <Loader2 className="size-8 animate-spin text-primary mb-4" />
-                                    <p className="text-sm text-muted-foreground">
-                                        {summaryStatus}
-                                    </p>
-                                </div>
-                            ) : summaryData?.summary ? (
-                                <div className="space-y-4">
-                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                    {summaryData?.summary && (
                                         <button
                                             type="button"
                                             aria-expanded={summaryOpen}
@@ -1433,8 +1476,20 @@ export function TranscriptionPanel({
                                                 ? i18n("Collapse summary")
                                                 : i18n("Expand summary")}
                                         </button>
-                                    </div>
-
+                                    )}
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {isSummarizing ? (
+                                <div className="flex flex-col items-center justify-center py-8">
+                                    <Loader2 className="size-8 animate-spin text-primary mb-4" />
+                                    <p className="text-sm text-muted-foreground">
+                                        {summaryStatus}
+                                    </p>
+                                </div>
+                            ) : summaryData?.summary ? (
+                                <div className="space-y-4">
                                     {summaryOpen && (
                                         <section
                                             aria-label={i18n("Summary content")}
@@ -1687,12 +1742,12 @@ export function TranscriptionPanel({
             <WorkflowWidget
                 id={`recording-transcription-dialog-${recording.id}`}
                 frame="dialog"
-                tone={isTranscribing ? "working" : "quiet"}
+                tone={transcriptionRunning ? "working" : "quiet"}
                 open={transcriptionDialogOpen}
                 onOpenChange={setTranscriptionDialogOpen}
                 title={i18n("Transcription")}
                 description={
-                    isTranscribing
+                    transcriptionRunning
                         ? i18n(
                               "Transcribing. It continues in the background; you can close this window.",
                           )
@@ -1700,7 +1755,7 @@ export function TranscriptionPanel({
                 }
                 dialogWidth="xl"
             >
-                {isTranscribing ? (
+                {transcriptionRunning ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                         {i18n("Transcribing audio…")}

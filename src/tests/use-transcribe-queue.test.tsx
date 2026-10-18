@@ -67,6 +67,12 @@ describe("useTranscribeQueue", () => {
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/recording-1/transcribe",
+            expect.objectContaining({
+                body: JSON.stringify({}),
+            }),
+        );
         expect(hook.result.current.inFlightActions.get("recording-1")).toBe(
             "transcribing",
         );
@@ -92,6 +98,69 @@ describe("useTranscribeQueue", () => {
         );
         expect(onTranscribeComplete).toHaveBeenCalledTimes(1);
         expect(toast.success).toHaveBeenCalledWith("Transcription complete");
+    });
+
+    it("sends the explicit flag only for re-transcription", async () => {
+        vi.mocked(followJob).mockResolvedValue(null);
+        const fetchMock = vi.fn().mockResolvedValue(
+            jsonResponse(
+                {
+                    jobId: "job-2",
+                    status: "pending",
+                    created: true,
+                },
+                202,
+            ),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete: vi.fn() }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById(
+                "recording-1",
+                "riffado",
+                "private",
+                true,
+            );
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/recording-1/transcribe",
+            expect.objectContaining({
+                body: JSON.stringify({
+                    attributionSource: "riffado",
+                    retranscribe: true,
+                }),
+            }),
+        );
+    });
+
+    it("reloads transcripts instead of showing an error for an existing transcript", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(
+                jsonResponse(
+                    {
+                        error: "A transcript already exists.",
+                        code: "TRANSCRIPT_ALREADY_EXISTS",
+                    },
+                    409,
+                ),
+            ),
+        );
+        const onTranscribeComplete = vi.fn();
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById("recording-1");
+        });
+
+        expect(onTranscribeComplete).toHaveBeenCalledOnce();
+        expect(toast.error).not.toHaveBeenCalled();
     });
 
     it("reattaches to a job started by sync and exposes its busy state", async () => {

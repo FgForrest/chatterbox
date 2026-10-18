@@ -150,15 +150,12 @@ export function deriveWorkflowWidgets(
     const taskVisible =
         data.taskReviewWaiting > 0 &&
         (hasReached(taskStep) || data.outputs.summary);
-    const manualLearnRun =
-        learnManual ||
-        ["manual", "manual_review_pending", "manual_finished"].includes(
-            data.phases.learn?.reason ?? "",
-        );
+    const manualLearnReview = [
+        "manual_review_pending",
+        "manual_finished",
+    ].includes(data.phases.learn?.reason ?? "");
     const manualSummaryRun =
         data.manualOnly || data.startedBy?.summary === "person";
-    const manualTranscriptionRun =
-        data.manualOnly || data.startedBy?.transcription === "person";
 
     return {
         workflowVisible: workflow.visible,
@@ -172,21 +169,21 @@ export function deriveWorkflowWidgets(
             workflow.visible,
             transcriptStep,
             transcriptVisible,
-            manualTranscriptionRun ? "dialog" : "inline",
+            "inline",
             transcriptStep?.state === "manual" ? "run" : null,
         ),
         learn: stateFor(
             workflow.visible,
             learnStep,
             learnVisible,
-            manualLearnRun ? "dialog" : "inline",
+            manualLearnReview ? "dialog" : "inline",
             learnAction(learnStep, learnManual, data.outputs.learn),
         ),
         summary: stateFor(
             workflow.visible,
             summaryStep,
             summaryVisible,
-            manualSummaryRun ? "dialog" : "inline",
+            "inline",
             manualRunAction(summaryStep, summaryManual, data.outputs.summary),
         ),
         taskReview: stateFor(

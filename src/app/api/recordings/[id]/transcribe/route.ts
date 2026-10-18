@@ -1,5 +1,8 @@
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { db } from "@/db";
 import { getActiveJob } from "@/db/queries/async-jobs";
+import { transcriptions } from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { apiHandler } from "@/lib/errors";
@@ -30,6 +33,7 @@ type IdContext = { params: Promise<{ id: string }> };
  *   - `providerId`: use a specific configured provider instead of the
  *     user's default transcription provider. Looked up user-scoped.
  *   - `model`: override the provider's default model for this call.
+ *   - `retranscribe`: replace an existing transcript when explicitly true.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const { session, actor } = await requireApiSessionActor(request);
@@ -52,6 +56,41 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         body.attributionSource === "mixed"
             ? body.attributionSource
             : undefined;
+    const retranscribe = body.retranscribe === true;
+
+    const active = await getActiveJob(
+        TRANSCRIPTION_JOB_KIND,
+        recordingJobSubject(id, view),
+    );
+    if (active && (view === "org" || active.userId === session.user.id)) {
+        return NextResponse.json(
+            { jobId: active.id, status: active.status, created: false },
+            { status: 202 },
+        );
+    }
+
+    if (!retranscribe) {
+        const [existingTranscript] = await db
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, id),
+                    eq(transcriptions.userId, access.contentUserId),
+                    eq(transcriptions.source, "riffado"),
+                ),
+            )
+            .limit(1);
+        if (existingTranscript) {
+            return NextResponse.json(
+                {
+                    error: "A transcript already exists. Reload it or choose Re-transcribe to replace it.",
+                    code: "TRANSCRIPT_ALREADY_EXISTS",
+                },
+                { status: 409 },
+            );
+        }
+    }
 
     const { job, created } = await enqueueTranscriptionJob({
         userId: session.user.id,
@@ -59,7 +98,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         providerId,
         model,
         attributionSource,
-        force: true,
+        force: retranscribe,
         trigger: "manual",
         view,
     });

@@ -10,9 +10,9 @@ Once a recording has a transcript and the workflow reaches **Summarize**, the **
 ![A summary with tasks waiting for review](images/summary.png)
 
 1. Pick a processing profile in the drop-down next to the button. It starts on the item's profile. If you choose a different one, Chatterbox remembers that choice in this browser for other items with the same assigned profile.
-2. Click **Summarize**, or **Re-summarize** to replace an existing recording summary. Mail says **Summarize again**.
+2. Click **Summarize**, or **Re-summarize** to replace an existing recording summary. Mail says **Summarize again**. **Collapse summary** is at the right end of the recording summary header; **Expand summary** appears in the same place.
 
-The manual picker can use any available profile for that kind of item. Starting a summary yourself opens it in a window; the workflow strip reopens that window if it needs attention. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
+The manual picker can use any available profile for that kind of item. Starting a summary yourself keeps the card in place and changes it to its running state. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
 
 ![Choosing the processing profile for a manual summary](images/summary-profile-picker.png)
 
@@ -39,7 +39,7 @@ A profile can run a summary 2 to 5 times and merge the results, so a point only 
 
 A summary looks for things someone agreed to do. A task no longer belongs to one summary: it collects mentions from recordings and mail filed in its folder scope. **Where it was said** opens the audio passage or highlights the relevant mail text. **Earlier mention** shows older evidence without changing the task.
 
-When task changes are ready, the inline **Task review** widget opens after the summary. The workflow strip says **Review needed** and **Review tasks** jumps to it. If the tasks came from a summary you started yourself after the workflow, the same review opens in a window.
+When task changes are ready, the inline **Task review** widget opens after the summary. The workflow strip says **Review needed** and **Review tasks** jumps to it. If the tasks came from a summary you started yourself after the workflow, a compact **Task review** line offers **Review**; that explicit click opens the review window.
 
 ![Reviewing proposed tasks](images/task-review.png)
 
