@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
     queueAutoTopics: vi.fn(),
     queueAutoSummary: vi.fn(),
     emitEvent: vi.fn(),
-    pickEnhancementCredential: vi.fn(),
     isLearnAvailableFor: vi.fn(),
     resolveRecordingAccess: vi.fn(),
     consumeRateLimitBucket: vi.fn(),
@@ -58,13 +57,11 @@ vi.mock("openai", () => ({
     },
 }));
 
-vi.mock("@/lib/ai/enhancement-provider", () => ({
-    pickEnhancementCredential: mocks.pickEnhancementCredential,
-}));
-
 vi.mock("@/lib/ai/provider-presets", () => ({
     getDefaultTranscriptionModel: vi.fn().mockReturnValue("whisper-1"),
     getTranscriptionStyle: vi.fn().mockReturnValue("whisper"),
+    isEnhancementOnlyProvider: vi.fn().mockReturnValue(false),
+    isTranscriptionOnlyProvider: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/ai/usage-cost", () => ({
@@ -147,6 +144,7 @@ vi.mock("@/lib/mail/auto-process", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: vi.fn().mockResolvedValue(null),
     isOrgScopeEnabled: mocks.isOrgScopeEnabled,
 }));
 
@@ -478,6 +476,15 @@ function mountTranscription({
                     apiKey: "encrypted-key",
                     defaultModel: "whisper-1",
                     baseUrl: null,
+                    isDefaultTranscription: true,
+                    isDefaultEnhancement: false,
+                    isDefaultLearn: false,
+                    inputUsdPerMillion: null,
+                    outputUsdPerMillion: null,
+                    audioUsdPerHour: null,
+                    disabledAt: null,
+                    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                 },
             ]),
         )
@@ -679,9 +686,6 @@ beforeEach(() => {
     mocks.queueAutoTopics.mockResolvedValue(undefined);
     mocks.queueAutoSummary.mockResolvedValue(undefined);
     mocks.emitEvent.mockResolvedValue(undefined);
-    mocks.pickEnhancementCredential.mockImplementation(
-        (credentials: unknown[]) => credentials[0] ?? null,
-    );
     mocks.isLearnAvailableFor.mockResolvedValue(true);
     mocks.resolveRecordingAccess.mockResolvedValue({
         recordingId: ITEM_ID,

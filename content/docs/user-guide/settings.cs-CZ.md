@@ -13,25 +13,28 @@ Otevřete Nastavení z nabídky účtu (kulaté tlačítko s Vaší iniciálou),
 
 V **Nastavení → Profily** volíte, jak se nahrávky a pošta přepisují, učí, pojmenovávají, shrnují a převádějí na úkoly. Profily nahrazují dřívější přepínače automatizace účtu a výběr šablony vedle tlačítka **Shrnout**.
 
-Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a nastavení funkce **Vícenásobné shrnování**. Můžete nastavit jeden výchozí profil pro nahrávky a jeden pro poštu, nepoužívané profily archivovat a později je obnovit.
+Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a nastavení funkce **Vícenásobné shrnování**. Nahoře nastavíte samostatné výchozí profily pro nahrávky a poštu. Můžete sledovat výchozí profil Organizace, zvolit konkrétní profil Organizace nebo jeden z Vašich profilů. Nepotřebné osobní profily smažte; profily, na které odkazuje historie zpracování, se přesunou pod **Archivované** a lze je obnovit.
 
-Je-li Organizace povolena, členové vidí profily Organizace a mohou je duplikovat do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
+Je-li Organizace povolena, noví členové sledují její výchozí profily a začínají bez osobních profilů. Členové mohou profily Organizace používat na soukromé položky a duplikovat je do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
 
 ## Poskytovatelé AI
 
 ![Poskytovatelé AI](images/settings-providers.png)
 
-**Nastavení → Poskytovatelé** uvádí služby, které provádějí práci AI. Klikněte na **Přidat poskytovatele**, vyberte službu, vložte její API klíč a zvolte model. Chatterbox nabízí přednastavení pro OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio a Ollama, přičemž varianta **Vlastní** přijme libovolnou službu s OpenAI-kompatibilní adresou. Klíče jsou ukládány šifrovaně a z bezpečnostních důvodů se již dále nezobrazují.
+**Nastavení → Poskytovatelé** odděluje karty **Vaši poskytovatelé** a **Poskytovatelé organizace**. Použijte tlačítko **Přidat poskytovatele** na kartě, kam klíč patří, vyberte službu, vložte její API klíč a zvolte model. Chatterbox nabízí přednastavení pro OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio a Ollama, přičemž varianta **Vlastní** přijme libovolnou službu s OpenAI-kompatibilní adresou. Klíče jsou ukládány šifrovaně a z bezpečnostních důvodů se již dále nezobrazují.
 
 ![Úprava poskytovatele](images/settings-provider-edit.png)
 
 - **Cena.** Chatterbox zná zveřejněné ceny běžných modelů. Pro jiný model nebo odlišnou cenu ji zadejte zde. [Výdaj za AI](recordings.md#what-the-ai-cost) u nových požadavků použije tuto hodnotu; již zpracované náklady si zachovají původní cenu.
-- **Duplikovat** vytvoří druhého poskytovatele se stejným klíčem, například silnější model pouze pro Učení. Klíč se znovu použije, aniž by se zobrazil.
+- **Duplikovat** vytvoří druhého osobního poskytovatele nebo poskytovatele Organizace se stejným klíčem, například silnější model pouze pro Učení. Klíč se znovu použije, aniž by se zobrazil.
+- **Zakázat** ponechá klíč uložený, ale poskytovatele odebere z nových výběrů. Profil nebo role účtu, která na něj výslovně odkazuje, skončí chybou, dokud poskytovatele znovu nepovolíte nebo nevyberete jiného.
 - **Claude Code** a **Codex** fungují díky předplatnému služby Claude nebo ChatGPT místo API klíče, přes můstek, který nastaví administrátor. Viz [Pro administrátory](administrators.md#claude-code-and-codex-subscriptions).
 
 Někteří poskytovatelé zajišťují pouze přepis (ElevenLabs, Speechmatics). Kroky shrnutí pak potřebují druhého poskytovatele.
 
-Pokud jsou nastaveni, zobrazí se pod osobním seznamem **Poskytovatelé organizace**. Členové je mohou prohlížet jen pro čtení; osoby s oprávněním `access.manage` je spravují a vidí využití. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
+Členové vidí **Poskytovatele organizace** jen pro čtení a mohou kteréhokoli povoleného poskytovatele zvolit jako výchozího pro svůj účet. Osoby s oprávněním `access.manage` je mohou přidávat, duplikovat, upravovat, zakázat, povolit a odstranit, volit výchozí poskytovatele Organizace a na stejné kartě vidí využití podle členů. Výchozí poskytovatel Organizace platí pro všechny členy, včetně soukromých položek, dokud si člen pro stejnou roli nezvolí vlastního poskytovatele. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
+
+Pokud je Vámi zvolený poskytovatel zakázán nebo odstraněn, výběr tuto volbu ponechá viditelnou jako nedostupnou. Zpracování dané role se zastaví, dokud nezvolíte jiného poskytovatele. Před zakázáním nebo odstraněním poskytovatele Organizace potvrzení ukáže, kolik členů si jej zvolilo jako vlastní výchozí možnost.
 
 ## Přepis
 
@@ -42,12 +45,14 @@ Sekce **Přepis** nyní obsahuje výchozí hodnoty účtu pro tlačítko **Přep
 - **Primární přepis**, pokud jej vytvořil Plaud i Váš poskytovatel,
 - **Výchozí jazyk přepisu**, který se použije při okamžitém přepisu.
 
-Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
+Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Názvy bez poskytovatele připnutého v profilu použijí Vaši volbu pro názvy, Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro názvy, výchozího poskytovatele Organizace pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
 
 ## Témata
 
 Tato sekce zachovává výchozího poskytovatele témat účtu. Profil bez
-připnutého poskytovatele témat jej použije. Automatická detekce témat se
+připnutého poskytovatele témat použije Vaši volbu pro témata, Vaši volbu pro
+shrnutí, výchozího poskytovatele Organizace pro témata, výchozího poskytovatele
+Organizace pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatická detekce témat se
 nastavuje v sekci **Profily**. Šablony témat, které jste před zavedením profilů
 vytvořili nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před
 profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
@@ -55,14 +60,17 @@ profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 ## Učení
 
 Tato sekce zachovává výchozího poskytovatele Učení účtu. Profil bez připnutého
-poskytovatele Učení jej použije. Automatické Učení a oprava přepisu se nastavují
+poskytovatele Učení použije Vaši volbu pro Učení, Vaši volbu pro shrnutí,
+výchozího poskytovatele Organizace pro Učení, výchozího poskytovatele Organizace
+pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatické Učení a oprava přepisu se nastavují
 v sekci **Profily**.
 
 ## Shrnutí
 
 Tato sekce zachovává výchozího poskytovatele shrnutí a předvolbu funkce
-**Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí je
-použije. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
+**Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí
+použije Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro shrnutí
+a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
 **Vícenásobné shrnování** v profilu se nastavují v
 sekci **Profily**. Šablony shrnutí, které jste před zavedením profilů vytvořili
 nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před profily**;

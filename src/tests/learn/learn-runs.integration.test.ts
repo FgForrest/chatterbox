@@ -223,6 +223,7 @@ import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { insertRecordings } from "@/tests/integration/items";
+import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -341,6 +342,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
     }: {
         correctAfterLearn?: boolean;
     } = {}): Promise<void> {
+        await seedExistingPersonalProfiles(OWNER, mockEnv);
         const resolved = await resolveDefaultProfile(OWNER, "audio");
         const settings = resolved.settings;
         if (!("transcribe" in settings.steps)) {

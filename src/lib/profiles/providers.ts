@@ -1,12 +1,15 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { apiCredentials, userSettings } from "@/db/schema";
+import { apiCredentials, type userSettings } from "@/db/schema";
+import { loadDefaultProviderState } from "@/lib/ai/default-provider";
 import {
-    pickEnhancementCredential,
-    pickLearnCredential,
-    pickTopicsCredential,
-} from "@/lib/ai/enhancement-provider";
-import { titleProviderId } from "@/lib/ai/title-provider";
+    isEnhancementOnlyProvider,
+    isTranscriptionOnlyProvider,
+} from "@/lib/ai/provider-presets";
+import {
+    type DefaultProviderCandidate,
+    defaultProviderCandidates,
+} from "@/lib/ai/provider-resolution-order";
 import { holderAccess } from "@/lib/authz/access-state";
 import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
@@ -51,25 +54,44 @@ export type ResolvedStepProvider =
           provider: typeof RIFFADO_INCLUDED_PROVIDER_LABEL;
       });
 
+export type ResolvedStepProviderSelection =
+    | (ResolvedProviderBase & {
+          kind: "credential";
+          credential: CredentialRow;
+      })
+    | (ResolvedProviderBase & {
+          kind: "managed";
+          credential: null;
+          provider: typeof RIFFADO_INCLUDED_PROVIDER_LABEL;
+      });
+
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 function noReservation(): Promise<void> {
     return Promise.resolve();
 }
 
-function missingProvider(message: string): AppError {
-    return new AppError(ErrorCode.AI_PROVIDER_NOT_CONFIGURED, message, 400);
+function missingProvider(
+    message: string,
+    details?: Record<string, unknown>,
+): AppError {
+    return new AppError(
+        ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+        message,
+        400,
+        details,
+    );
 }
 
-function resolvedCredential(
+function resolvedCredentialSelection(
     credential: CredentialRow,
     payerUserId: string,
     reserveCall: () => Promise<void>,
     organizationCredential = false,
-): ResolvedStepProvider {
+): ResolvedStepProviderSelection {
     return {
         kind: "credential",
-        credential: { ...credential, apiKey: decrypt(credential.apiKey) },
+        credential,
         payerUserId,
         reserveCall,
         organizationCredential,
@@ -78,7 +100,7 @@ function resolvedCredential(
 
 async function managedProvider(
     actorUserId: string,
-): Promise<ResolvedStepProvider> {
+): Promise<ResolvedStepProviderSelection> {
     return {
         kind: "managed",
         credential: null,
@@ -86,6 +108,19 @@ async function managedProvider(
         payerUserId: actorUserId,
         reserveCall: noReservation,
         organizationCredential: false,
+    };
+}
+
+function decryptResolvedProvider(
+    selection: ResolvedStepProviderSelection,
+): ResolvedStepProvider {
+    if (selection.kind === "managed") return selection;
+    return {
+        ...selection,
+        credential: {
+            ...selection.credential,
+            apiKey: decrypt(selection.credential.apiKey),
+        },
     };
 }
 
@@ -106,14 +141,48 @@ async function credentialByOwner(
     return credential;
 }
 
-function assertEnabled(credential: CredentialRow): void {
+type ProviderChoice =
+    | { kind: "profile-pin"; scope: "personal" | "organization" }
+    | { kind: "member-default"; role: ProcessingStep }
+    | { kind: "organization-default"; role: ProcessingStep }
+    | { kind: "automatic" }
+    | { kind: "selected"; role: ProcessingStep };
+
+function assertEnabled(
+    credential: CredentialRow,
+    choice: ProviderChoice,
+): void {
     if (credential.disabledAt) {
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            `The pinned provider ${credential.provider} is disabled. Ask an administrator to enable it or choose another provider.`,
-            409,
-        );
+        let message = `The provider ${credential.provider} is disabled. Enable it or choose another provider.`;
+        if (choice.kind === "profile-pin") {
+            message = `The profile pin for ${credential.provider} is disabled. Enable it or choose another provider in the profile.`;
+            if (choice.scope === "organization") {
+                message = `The profile pin for ${credential.provider} is disabled. Ask an administrator to enable it or update the profile.`;
+            }
+        } else if (choice.kind === "member-default") {
+            message = `Your default for ${choice.role}, ${credential.provider}, is disabled. Enable it or choose another provider.`;
+        } else if (choice.kind === "organization-default") {
+            message = `The Organization default for ${choice.role}, ${credential.provider}, is disabled. Ask an administrator to enable it or choose another Organization default.`;
+        }
+        throw new AppError(ErrorCode.CONFLICT, message, 409);
     }
+}
+
+function candidateChoice(
+    candidate: DefaultProviderCandidate,
+    step: ProcessingStep,
+): ProviderChoice {
+    if (candidate.source === "organization-role") {
+        return { kind: "organization-default", role: step };
+    }
+    if (candidate.source === "organization-summary") {
+        return { kind: "organization-default", role: "summary" };
+    }
+    if (candidate.source === "member-summary") {
+        return { kind: "member-default", role: "summary" };
+    }
+    if (candidate.source === "member-fallback") return { kind: "automatic" };
+    return { kind: "member-default", role: step };
 }
 
 interface SubmittedPin {
@@ -212,7 +281,7 @@ async function resolvePinnedPersonal(input: {
     step: ProcessingStep;
     pin: ProviderPin;
     actorUserId: string;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     if (isRiffadoIncludedProviderId(input.pin.credentialId)) {
         if (input.step !== "transcription") {
             throw new AppError(
@@ -242,15 +311,22 @@ async function resolvePinnedPersonal(input: {
             404,
         );
     }
-    assertEnabled(credential);
-    return resolvedCredential(credential, input.actorUserId, noReservation);
+    assertEnabled(credential, { kind: "profile-pin", scope: "personal" });
+    assertSupportsStep(credential, input.step);
+    return resolvedCredentialSelection(
+        credential,
+        input.actorUserId,
+        noReservation,
+    );
 }
 
 async function resolvePinnedOrganization(input: {
     step: ProcessingStep;
     pin: ProviderPin;
     actorUserId: string;
-}): Promise<ResolvedStepProvider> {
+    credential?: CredentialRow;
+    choice?: ProviderChoice;
+}): Promise<ResolvedStepProviderSelection> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
         throw new AppError(
@@ -259,10 +335,9 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    const credential = await credentialByOwner(
-        input.pin.credentialId,
-        orgUserId,
-    );
+    const credential =
+        input.credential ??
+        (await credentialByOwner(input.pin.credentialId, orgUserId));
     if (!credential) {
         throw new AppError(
             ErrorCode.NOT_FOUND,
@@ -270,7 +345,11 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    assertEnabled(credential);
+    assertEnabled(
+        credential,
+        input.choice ?? { kind: "profile-pin", scope: "organization" },
+    );
+    assertSupportsStep(credential, input.step);
     if (!isOrgScopeEnabled()) {
         throw new AppError(
             ErrorCode.NOT_FOUND,
@@ -307,169 +386,254 @@ async function resolvePinnedOrganization(input: {
         }
     };
 
-    return resolvedCredential(credential, orgUserId, reserveCall, true);
+    return resolvedCredentialSelection(
+        credential,
+        orgUserId,
+        reserveCall,
+        true,
+    );
 }
 
-async function activeCredentials(
-    actorUserId: string,
-    ordered: boolean,
-): Promise<CredentialRow[]> {
-    const query = db
-        .select()
-        .from(apiCredentials)
-        .where(
-            and(
-                eq(apiCredentials.userId, actorUserId),
-                isNull(apiCredentials.disabledAt),
-            ),
+function assertSupportsStep(
+    credential: CredentialRow,
+    step: ProcessingStep,
+): void {
+    if (
+        step === "transcription" &&
+        isEnhancementOnlyProvider(credential.provider)
+    ) {
+        throw missingProvider(
+            `${credential.provider} cannot transcribe. Choose another provider in Settings.`,
         );
-    return ordered
-        ? query.orderBy(apiCredentials.createdAt, apiCredentials.id)
-        : query;
+    }
+    if (
+        step !== "transcription" &&
+        isTranscriptionOnlyProvider(credential.provider)
+    ) {
+        throw missingProvider(
+            `${credential.provider} cannot run ${step}. Choose a chat provider in Settings.`,
+        );
+    }
 }
 
-async function actorProviderSettings(actorUserId: string) {
-    const [settings] = await db
-        .select({
-            transcription: userSettings.defaultTranscriptionProviderId,
-            defaults: userSettings.defaultProviders,
-        })
-        .from(userSettings)
-        .where(eq(userSettings.userId, actorUserId))
-        .limit(1);
-    return settings;
-}
-
-async function resolveUnpinnedTranscription(
+async function organizationDefaultOwner(
     actorUserId: string,
-): Promise<ResolvedStepProvider> {
-    const [legacyDefault] = await db
-        .select()
-        .from(apiCredentials)
-        .where(
-            and(
-                eq(apiCredentials.userId, actorUserId),
-                eq(apiCredentials.isDefaultTranscription, true),
-                isNull(apiCredentials.disabledAt),
-            ),
-        )
-        .limit(1);
-    const [settings] = await db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, actorUserId))
-        .limit(1);
-    const pointer = settings?.defaultTranscriptionProviderId ?? null;
-    if (isRiffadoIncludedProviderId(pointer)) {
-        if (!isMynahConfigured()) {
+): Promise<string | null> {
+    if (!isOrgScopeEnabled()) return null;
+    const orgUserId = await getOrgUserId();
+    if (!orgUserId) return null;
+    if (!isIdpAuthorization() || actorUserId === orgUserId) return orgUserId;
+    const access = await holderAccess(actorUserId);
+    return access.ok && access.capabilities.has("use") ? orgUserId : null;
+}
+
+async function resolvePointer(input: {
+    step: ProcessingStep;
+    pointer: string;
+    actorUserId: string;
+    choice: ProviderChoice;
+}): Promise<ResolvedStepProviderSelection> {
+    if (isRiffadoIncludedProviderId(input.pointer)) {
+        if (input.step === "transcription" && !isMynahConfigured()) {
             throw new AppError(
                 ErrorCode.NO_TRANSCRIPTION_PROVIDER,
                 `${RIFFADO_INCLUDED_PROVIDER_LABEL} is no longer available on this instance. Choose another provider in Settings.`,
                 400,
             );
         }
-        return {
-            ...(await managedProvider(actorUserId)),
-            actorSettings: settings,
-        };
-    }
-    if (pointer) {
-        const credential = await credentialByOwner(pointer, actorUserId);
-        if (!credential) {
-            throw new AppError(
-                ErrorCode.NO_TRANSCRIPTION_PROVIDER,
-                "The selected transcription provider no longer exists. Choose another provider in Settings.",
-                400,
+        if (input.step !== "transcription") {
+            throw missingProvider(
+                `${RIFFADO_INCLUDED_PROVIDER_LABEL} is no longer available for ${input.step}. Choose another provider in Settings.`,
             );
         }
-        assertEnabled(credential);
-        return {
-            ...resolvedCredential(credential, actorUserId, noReservation),
-            actorSettings: settings,
-        };
+        return managedProvider(input.actorUserId);
     }
-    if (legacyDefault) {
-        return {
-            ...resolvedCredential(legacyDefault, actorUserId, noReservation),
-            actorSettings: settings,
-        };
+    const personal = await credentialByOwner(input.pointer, input.actorUserId);
+    if (personal) {
+        assertEnabled(personal, input.choice);
+        assertSupportsStep(personal, input.step);
+        return resolvedCredentialSelection(
+            personal,
+            input.actorUserId,
+            noReservation,
+        );
     }
-    if (isMynahConfigured()) {
-        return {
-            ...(await managedProvider(actorUserId)),
-            actorSettings: settings,
-        };
+    const orgUserId = await getOrgUserId();
+    const organization = orgUserId
+        ? await credentialByOwner(input.pointer, orgUserId)
+        : undefined;
+    if (organization) {
+        return resolvePinnedOrganization({
+            step: input.step,
+            pin: { scope: "organization", credentialId: input.pointer },
+            actorUserId: input.actorUserId,
+            choice: input.choice,
+        });
     }
-    throw new AppError(
-        ErrorCode.NO_TRANSCRIPTION_PROVIDER,
-        "No transcription API configured",
-        400,
+    if (input.choice.kind === "member-default") {
+        const message = `Your default for ${input.choice.role} no longer exists. Choose another provider in Settings.`;
+        throw input.step === "transcription"
+            ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+            : missingProvider(message);
+    }
+    if (input.choice.kind === "organization-default") {
+        const message = `The Organization default for ${input.choice.role} no longer exists. Ask an administrator to choose another Organization default.`;
+        throw input.step === "transcription"
+            ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+            : missingProvider(message);
+    }
+    const message = `The selected ${input.step} provider no longer exists. Choose another provider in Settings.`;
+    throw input.step === "transcription"
+        ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+        : missingProvider(message);
+}
+
+/** Validate that an actor may select a provider pointer for one role. */
+export async function validateDefaultProviderSelection(input: {
+    actorUserId: string;
+    role: ProcessingStep;
+    providerId: string;
+}): Promise<void> {
+    const personal = await credentialByOwner(
+        input.providerId,
+        input.actorUserId,
     );
-}
-
-async function resolveUnpinnedChat(
-    step: Exclude<ProcessingStep, "transcription">,
-    actorUserId: string,
-): Promise<ResolvedStepProvider> {
-    const ordered = step === "title";
-    const credentials = await activeCredentials(actorUserId, ordered);
-    let picked: CredentialRow | undefined;
-    if (step === "summary") {
-        picked = pickEnhancementCredential(credentials);
-    } else if (step === "learn") {
-        picked = pickLearnCredential(credentials);
-    } else {
-        const settings = await actorProviderSettings(actorUserId);
-        if (step === "topics") {
-            const defaults = settings?.defaults;
-            const topicsId =
-                defaults &&
-                typeof defaults === "object" &&
-                !Array.isArray(defaults)
-                    ? (defaults as Record<string, unknown>).topics
-                    : null;
-            picked = pickTopicsCredential(
-                credentials,
-                typeof topicsId === "string" ? topicsId : null,
+    if (personal) {
+        assertEnabled(personal, { kind: "selected", role: input.role });
+        if (
+            input.role === "transcription" &&
+            isEnhancementOnlyProvider(personal.provider)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                `${personal.provider} cannot transcribe. Choose another provider.`,
+                400,
+                { field: "providerId" },
             );
-        } else {
-            const selectedId = titleProviderId(settings?.defaults);
-            picked =
-                credentials.find((candidate) => candidate.id === selectedId) ??
-                pickEnhancementCredential(credentials);
         }
+        if (
+            input.role !== "transcription" &&
+            isTranscriptionOnlyProvider(personal.provider)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                `${personal.provider} cannot run ${input.role}. Choose a chat provider.`,
+                400,
+                { field: "providerId" },
+            );
+        }
+        return;
     }
-
-    if (!picked) {
-        const configured = credentials.length > 0;
-        const message =
-            step === "summary"
-                ? configured
-                    ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to generate summaries."
-                    : "No AI provider configured"
-                : step === "topics"
-                  ? configured
-                      ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to detect topics."
-                      : "No AI provider configured"
-                  : "No AI provider configured";
-        throw missingProvider(message);
+    const orgUserId = await getOrgUserId();
+    const organization = orgUserId
+        ? await credentialByOwner(input.providerId, orgUserId)
+        : undefined;
+    if (!organization) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
     }
-    return resolvedCredential(picked, actorUserId, noReservation);
+    await resolvePinnedOrganization({
+        step: input.role,
+        pin: { scope: "organization", credentialId: input.providerId },
+        actorUserId: input.actorUserId,
+        choice: { kind: "selected", role: input.role },
+    });
 }
 
-/** Resolve one processing step's provider and payer at the moment it runs. */
-export async function resolveStepProvider(input: {
+async function resolveUnpinned(
+    step: ProcessingStep,
+    actorUserId: string,
+): Promise<ResolvedStepProviderSelection> {
+    const actorState = await loadDefaultProviderState(actorUserId);
+    const orgUserId = await organizationDefaultOwner(actorUserId);
+    const organizationState = orgUserId
+        ? await loadDefaultProviderState(orgUserId)
+        : null;
+    const [candidate] = defaultProviderCandidates(
+        step,
+        actorState.pointers,
+        organizationState?.pointers ?? null,
+        actorState.credentials,
+    );
+    if (candidate) {
+        const choice = candidateChoice(candidate, step);
+        const personal = actorState.credentials.find(
+            (credential) => credential.id === candidate.providerId,
+        );
+        if (personal) {
+            assertEnabled(personal, choice);
+            assertSupportsStep(personal, step);
+            return {
+                ...resolvedCredentialSelection(
+                    personal,
+                    actorUserId,
+                    noReservation,
+                ),
+                actorSettings: actorState.settings,
+            };
+        }
+        const organization = organizationState?.credentials.find(
+            (credential) => credential.id === candidate.providerId,
+        );
+        if (organization) {
+            const resolved = await resolvePinnedOrganization({
+                step,
+                pin: {
+                    scope: "organization",
+                    credentialId: candidate.providerId,
+                },
+                actorUserId,
+                credential: organization,
+                choice,
+            });
+            return { ...resolved, actorSettings: actorState.settings };
+        }
+        const resolved = await resolvePointer({
+            step,
+            pointer: candidate.providerId,
+            actorUserId,
+            choice,
+        });
+        return { ...resolved, actorSettings: actorState.settings };
+    }
+    if (step === "transcription" && isMynahConfigured()) {
+        return {
+            ...(await managedProvider(actorUserId)),
+            actorSettings: actorState.settings,
+        };
+    }
+    if (step === "transcription") {
+        throw new AppError(
+            ErrorCode.NO_TRANSCRIPTION_PROVIDER,
+            "No transcription API configured",
+            400,
+            { providerSelection: "absent" },
+        );
+    }
+    throw missingProvider(`No provider is configured for ${step}`, {
+        providerSelection: "absent",
+    });
+}
+
+/** Choose and authorize one processing provider without decrypting its key. */
+export async function resolveStepProviderSelection(input: {
     step: ProcessingStep;
     pin: ProviderPin | null;
     actorUserId: string;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
     }
     if (input.pin?.scope === "organization") {
         return resolvePinnedOrganization({ ...input, pin: input.pin });
     }
-    return input.step === "transcription"
-        ? resolveUnpinnedTranscription(input.actorUserId)
-        : resolveUnpinnedChat(input.step, input.actorUserId);
+    return resolveUnpinned(input.step, input.actorUserId);
+}
+
+/** Resolve one processing step's provider and decrypt its key for a request. */
+export async function resolveStepProvider(input: {
+    step: ProcessingStep;
+    pin: ProviderPin | null;
+    actorUserId: string;
+}): Promise<ResolvedStepProvider> {
+    return decryptResolvedProvider(await resolveStepProviderSelection(input));
 }

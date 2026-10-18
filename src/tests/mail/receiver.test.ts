@@ -240,6 +240,19 @@ describe("the mail receiver over real SMTP sessions", () => {
             ingest?.body.length,
         );
         expect(ingest?.body.toString()).toContain("Body text.");
+        expect(logs).toContainEqual(
+            expect.objectContaining({
+                event: "data",
+                dkim: [
+                    {
+                        domain: company.domain,
+                        selector: company.selector,
+                        result: "pass",
+                        comment: "",
+                    },
+                ],
+            }),
+        );
         expect(JSON.stringify(logs)).not.toContain("jan@");
     });
 

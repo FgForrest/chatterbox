@@ -113,17 +113,33 @@ afterEach(() => {
 });
 
 describe("useItemProcessing", () => {
-    it("polls every five seconds, refreshes on focus, and stops after work", async () => {
+    it("polls every five seconds, refreshes on focus, and settles after work", async () => {
         const done = processing(null);
+        const settled: ItemProcessingPresentation = {
+            ...done,
+            phases: {
+                ...done.phases,
+                learn: {
+                    state: "skipped",
+                    reason: "profile_off",
+                    generation: 0,
+                    at: "2026-10-16T08:00:01.000Z",
+                },
+            },
+        };
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ processing: processing("running") }),
             })
-            .mockResolvedValue({
+            .mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ processing: done }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                json: async () => ({ processing: settled }),
             });
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing("queued");
@@ -146,14 +162,14 @@ describe("useItemProcessing", () => {
             window.dispatchEvent(new Event("focus"));
             await Promise.resolve();
         });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
         expect(result.current.data?.jobs.transcription).toBeNull();
 
         await act(async () => {
             vi.advanceTimersByTime(15_000);
             await Promise.resolve();
         });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     it("does not poll or focus-refresh a hidden tab", async () => {
@@ -207,11 +223,15 @@ describe("useItemProcessing", () => {
             },
             learnFindingsWaiting: 0,
         };
+        const findingsCleared: ItemProcessingPresentation = {
+            ...review,
+            learnFindingsWaiting: 0,
+        };
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ processing: review }),
+                json: async () => ({ processing: findingsCleared }),
             })
             .mockResolvedValue({
                 ok: true,
@@ -231,6 +251,7 @@ describe("useItemProcessing", () => {
             await Promise.resolve();
         });
         expect(result.current.workflow?.status?.message).toBe("learnReview");
+        expect(result.current.data?.learnFindingsWaiting).toBe(0);
 
         await act(async () => {
             vi.advanceTimersByTime(2_000);
@@ -257,15 +278,16 @@ describe("useItemProcessing", () => {
             },
             outputs: { transcript: false, learn: false, summary: false },
         };
+        const empty: ItemProcessingPresentation = {
+            ...processing(null, itemId),
+            phases: {},
+            outputs: { transcript: false, learn: false, summary: false },
+        };
         const fetchMock = vi
             .fn()
             .mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ processing: null }),
-            })
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: null }),
+                json: async () => ({ processing: empty }),
             })
             .mockResolvedValue({
                 ok: true,
@@ -285,15 +307,75 @@ describe("useItemProcessing", () => {
             await Promise.resolve();
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(result.current.workflow).toBeNull();
+        expect(result.current.workflow?.visible).toBe(false);
 
         await act(async () => {
-            vi.advanceTimersByTime(4_000);
+            vi.advanceTimersByTime(2_000);
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.current.workflow?.visible).toBe(true);
+        expect(result.current.workflow?.status?.message).toBe("notFiled");
+    });
+
+    it("fetches the follow-on phase after active work ends", async () => {
+        const itemId = "follow-on-recording";
+        const running = processing("running", itemId);
+        const done = processing(null, itemId);
+        const summaryQueued: ItemProcessingPresentation = {
+            ...done,
+            phases: {
+                ...done.phases,
+                summary: {
+                    state: "running",
+                    reason: "started",
+                    generation: 1,
+                    at: "2026-10-16T08:01:00.000Z",
+                },
+            },
+            jobs: { transcription: null, summary: "queued" },
+        };
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ processing: done }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ processing: done }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                json: async () => ({ processing: summaryQueued }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId,
+                kind: "audio",
+                initialData: running,
+            }),
+        );
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.current.data?.jobs.summary).toBeNull();
+
+        await act(async () => {
+            vi.advanceTimersByTime(2_000);
             await Promise.resolve();
         });
         expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(result.current.workflow?.visible).toBe(true);
-        expect(result.current.workflow?.status?.message).toBe("notFiled");
+        expect(result.current.data?.jobs.summary).toBe("queued");
+        expect(
+            result.current.workflow?.steps.find((step) => step.id === "summary")
+                ?.state,
+        ).toBe("queued");
     });
 
     it("stops revalidating when the invalidation window expires", async () => {

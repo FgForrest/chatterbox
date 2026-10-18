@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -11,11 +11,14 @@ import {
 import {
     apiCredentials,
     chatterItems,
+    folderDefaultProfiles,
     itemProcessing,
     processingProfiles,
+    recordingFolders,
     userSettings,
     users,
 } from "@/db/schema";
+import type { ActorContext } from "@/lib/authz/model";
 import { encrypt } from "@/lib/encryption";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import {
@@ -61,17 +64,40 @@ vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import {
     AssignedProfileUnavailableError,
+    loadSelectedProfileRevision,
     ProfileSelectionRequiredError,
+    resolveDefaultProfile,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import { ensureProfiles } from "@/lib/profiles/seed";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import {
+    createProfile,
+    deletePersonalProfile,
+    ExplicitDefaultProfileUnavailableError,
+    setDefaultProfile,
+} from "@/lib/profiles/store";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const OWNER = "profile-resolve-owner";
 const ORG = "profile-resolve-org";
 const ITEM = "profile-resolve-item";
+const ORGANIZATION_ITEM = "profile-resolve-organization-item";
+
+function actor(userId: string): ActorContext {
+    return {
+        kind: "user",
+        actorId: userId,
+        issuer: null,
+        subject: null,
+        capabilities: new Set(["use"]),
+        clientId: null,
+        clientPermissions: new Set(),
+        verifiedAt: null,
+    };
+}
 
 describeWithDatabase("item profile resolution", () => {
     let database: TestPostgresDatabase | null = null;
@@ -93,19 +119,33 @@ describeWithDatabase("item profile resolution", () => {
                 { id: OWNER, email: "profile-owner@example.test" },
                 { id: ORG, email: "organization@example.test", role: "org" },
             ]);
-        await db().insert(chatterItems).values({
-            id: ITEM,
-            userId: OWNER,
-            kind: "audio",
-            title: "encrypted-title",
-            occurredAt: new Date(),
-        });
+        await db()
+            .insert(chatterItems)
+            .values([
+                {
+                    id: ITEM,
+                    userId: OWNER,
+                    kind: "audio",
+                    title: "encrypted-title",
+                    occurredAt: new Date(),
+                },
+                {
+                    id: ORGANIZATION_ITEM,
+                    userId: ORG,
+                    kind: "audio",
+                    title: "encrypted-organization-title",
+                    occurredAt: new Date(),
+                },
+            ]);
     }, 120_000);
 
     beforeEach(async () => {
         await db()
+            .delete(recordingFolders)
+            .where(eq(recordingFolders.userId, OWNER));
+        await db()
             .delete(itemProcessing)
-            .where(eq(itemProcessing.itemId, ITEM));
+            .where(inArray(itemProcessing.itemId, [ITEM, ORGANIZATION_ITEM]));
         await db()
             .delete(processingProfiles)
             .where(eq(processingProfiles.ownerUserId, OWNER));
@@ -124,7 +164,48 @@ describeWithDatabase("item profile resolution", () => {
         await database?.dispose();
     }, 30_000);
 
-    it("seeds and resolves the owner's channel default for the private view", async () => {
+    it("gives a new member no personal profiles and resolves the Organization default", async () => {
+        const resolved = await resolveItemProfile(ITEM, "private", OWNER);
+        const personal = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, OWNER));
+
+        expect(personal).toEqual([]);
+        expect(resolved.profile).toMatchObject({
+            ownerUserId: ORG,
+            scope: "organization",
+            channel: "audio",
+            isDefault: true,
+        });
+        expect(resolved.revisionId).toBe(resolved.profile.currentRevisionId);
+        expect(resolved.settings.steps.summary.preset).toBe("general");
+    });
+
+    it("gives a member with default legacy settings no personal profiles", async () => {
+        await db().insert(userSettings).values({ userId: OWNER });
+
+        const resolved = await resolveItemProfile(ITEM, "private", OWNER);
+        const personal = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, OWNER));
+
+        expect(personal).toEqual([]);
+        expect(resolved.profile).toMatchObject({
+            ownerUserId: ORG,
+            scope: "organization",
+            channel: "audio",
+        });
+    });
+
+    it("seeds customized legacy settings for an existing Organization member", async () => {
+        await db().insert(userSettings).values({
+            userId: OWNER,
+            autoTranscribe: true,
+            defaultTranscriptionLanguage: "cs",
+        });
+
         const resolved = await resolveItemProfile(ITEM, "private", OWNER);
 
         expect(resolved.profile).toMatchObject({
@@ -133,8 +214,248 @@ describeWithDatabase("item profile resolution", () => {
             channel: "audio",
             isDefault: true,
         });
-        expect(resolved.revisionId).toBe(resolved.profile.currentRevisionId);
-        expect(resolved.settings.steps.summary.preset).toBe("general");
+        if (!("transcribe" in resolved.settings.steps)) {
+            throw new Error("expected audio profile settings");
+        }
+        expect(resolved.settings.steps.transcribe).toMatchObject({
+            automatic: true,
+            language: "cs",
+        });
+    });
+
+    it("keeps an existing user's personal default after the pointer migration", async () => {
+        const personal = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Existing recordings",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
+
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).resolves.toMatchObject({
+            profile: { id: personal.id, scope: "personal" },
+        });
+    });
+
+    it("resolves an explicit Organization profile, Organization default, then an own profile", async () => {
+        await ensureProfiles(ORG);
+        const [organizationDefault] = await db()
+            .select()
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORG),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!organizationDefault)
+            throw new Error("missing Organization default");
+        const organizationProfile = await createProfile({
+            ownerUserId: ORG,
+            actor: actor(ORG),
+            scope: "organization",
+            channel: "audio",
+            name: "Organization interviews",
+            settings: defaultProfileSettings("audio"),
+        });
+        const personal = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "My interviews",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
+
+        await setDefaultProfile({
+            ownerUserId: OWNER,
+            profileId: organizationProfile.id,
+            actor: actor(OWNER),
+        });
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).resolves.toMatchObject({ profile: { id: organizationProfile.id } });
+
+        await setDefaultProfile({
+            ownerUserId: OWNER,
+            channel: "audio",
+            profileId: null,
+            actor: actor(OWNER),
+        });
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).resolves.toMatchObject({ profile: { id: organizationDefault.id } });
+
+        await setDefaultProfile({
+            ownerUserId: OWNER,
+            profileId: personal.id,
+            actor: actor(OWNER),
+        });
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).resolves.toMatchObject({ profile: { id: personal.id } });
+    });
+
+    it("stops when an explicitly selected Organization profile becomes unusable", async () => {
+        await ensureProfiles(ORG);
+        const organizationProfile = await createProfile({
+            ownerUserId: ORG,
+            actor: actor(ORG),
+            scope: "organization",
+            channel: "audio",
+            name: "Temporary Organization profile",
+            settings: defaultProfileSettings("audio"),
+        });
+        await setDefaultProfile({
+            ownerUserId: OWNER,
+            profileId: organizationProfile.id,
+            actor: actor(OWNER),
+        });
+        await db()
+            .update(processingProfiles)
+            .set({ archivedAt: new Date() })
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORG),
+                    eq(processingProfiles.id, organizationProfile.id),
+                ),
+            );
+
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).rejects.toBeInstanceOf(ExplicitDefaultProfileUnavailableError);
+    });
+
+    it("deletes all personal profiles without losing history or recreating them", async () => {
+        const audio = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Historical recordings",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
+        const mail = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "mail",
+            name: "Temporary mail",
+            settings: defaultProfileSettings("mail"),
+            isDefault: true,
+        });
+        await db().insert(itemProcessing).values({
+            itemId: ITEM,
+            userId: OWNER,
+            view: "private",
+            profileId: audio.id,
+            profileRevisionId: audio.currentRevisionId,
+        });
+        await db().insert(recordingFolders).values({
+            id: "profile-delete-folder",
+            userId: OWNER,
+            name: "encrypted-folder",
+            nameHash: "profile-delete-folder-hash",
+        });
+        await db().insert(folderDefaultProfiles).values({
+            folderId: "profile-delete-folder",
+            channel: "mail",
+            profileId: mail.id,
+        });
+
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: audio.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "archive" });
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: mail.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "delete" });
+        await ensureProfiles(OWNER);
+
+        const livePersonal = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, OWNER),
+                    eq(processingProfiles.scope, "personal"),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            );
+        const [folderDefault] = await db()
+            .select({ profileId: folderDefaultProfiles.profileId })
+            .from(folderDefaultProfiles)
+            .where(eq(folderDefaultProfiles.folderId, "profile-delete-folder"));
+        expect(livePersonal).toEqual([]);
+        expect(folderDefault?.profileId).toBeNull();
+        await expect(
+            resolveItemProfile(ITEM, "private", OWNER),
+        ).resolves.toMatchObject({ profile: { id: audio.id }, assigned: true });
+        await expect(
+            resolveDefaultProfile(OWNER, "audio"),
+        ).resolves.toMatchObject({
+            profile: { ownerUserId: ORG, scope: "organization" },
+        });
+    });
+
+    it("archives a personal profile referenced by another owner's Organization item", async () => {
+        const historical = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Manual Organization run",
+            settings: defaultProfileSettings("audio"),
+        });
+        await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "mail",
+            name: "Remaining profile",
+            settings: defaultProfileSettings("mail"),
+        });
+        await db().insert(itemProcessing).values({
+            itemId: ORGANIZATION_ITEM,
+            userId: ORG,
+            view: "org",
+            profileId: historical.id,
+            profileRevisionId: historical.currentRevisionId,
+        });
+
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: historical.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "archive" });
+        await expect(
+            loadSelectedProfileRevision({
+                revisionId: historical.currentRevisionId ?? "missing",
+                actorUserId: OWNER,
+                channel: "audio",
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            profile: { id: historical.id },
+            revisionId: historical.currentRevisionId,
+        });
     });
 
     it("keeps the organization scope while it is visible but not enabled", async () => {
@@ -179,7 +500,15 @@ describeWithDatabase("item profile resolution", () => {
     });
 
     it("uses the actor's default only for a manual run when the frozen Organization profile is unavailable", async () => {
-        await ensureProfiles(OWNER);
+        await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Personal recordings",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
         await ensureProfiles(ORG);
         const [organization] = await db()
             .select()
@@ -220,18 +549,15 @@ describeWithDatabase("item profile resolution", () => {
     });
 
     it("uses the Organization default instead of an assigned personal profile", async () => {
-        await ensureProfiles(OWNER);
-        const [personal] = await db()
-            .select()
-            .from(processingProfiles)
-            .where(
-                and(
-                    eq(processingProfiles.ownerUserId, OWNER),
-                    eq(processingProfiles.channel, "audio"),
-                    eq(processingProfiles.isDefault, true),
-                ),
-            );
-        if (!personal) throw new Error("personal profile was not seeded");
+        const personal = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Personal recordings",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
         await db().insert(itemProcessing).values({
             itemId: ITEM,
             userId: OWNER,

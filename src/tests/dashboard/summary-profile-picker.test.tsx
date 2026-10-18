@@ -60,9 +60,38 @@ import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 
 describe("per-run summary profile picker", () => {
     let requests: Array<{ url: string; method: string; body: unknown }>;
+    let itemProfileId: string | null;
+    let profiles: Array<Record<string, unknown>>;
 
     beforeEach(() => {
         requests = [];
+        itemProfileId = "interview-profile";
+        profiles = [
+            {
+                id: "default-profile",
+                name: "Everyday recordings",
+                description: null,
+                channel: "audio",
+                scope: "personal",
+                isDefault: true,
+                version: 1,
+                canEdit: true,
+                archivedAt: null,
+                updatedAt: "2026-10-15T00:00:00.000Z",
+            },
+            {
+                id: "interview-profile",
+                name: "Interviews",
+                description: null,
+                channel: "audio",
+                scope: "personal",
+                isDefault: false,
+                version: 1,
+                canEdit: true,
+                archivedAt: null,
+                updatedAt: "2026-10-15T00:00:00.000Z",
+            },
+        ];
         Object.defineProperty(Element.prototype, "scrollIntoView", {
             configurable: true,
             value: vi.fn(),
@@ -78,32 +107,7 @@ describe("per-run summary profile picker", () => {
                     url === "/api/settings/profiles?channel=audio&pageSize=100"
                 ) {
                     return Response.json({
-                        profiles: [
-                            {
-                                id: "default-profile",
-                                name: "Everyday recordings",
-                                description: null,
-                                channel: "audio",
-                                scope: "personal",
-                                isDefault: true,
-                                version: 1,
-                                canEdit: true,
-                                archivedAt: null,
-                                updatedAt: "2026-10-15T00:00:00.000Z",
-                            },
-                            {
-                                id: "interview-profile",
-                                name: "Interviews",
-                                description: null,
-                                channel: "audio",
-                                scope: "personal",
-                                isDefault: false,
-                                version: 1,
-                                canEdit: true,
-                                archivedAt: null,
-                                updatedAt: "2026-10-15T00:00:00.000Z",
-                            },
-                        ],
+                        profiles,
                         pagination: {
                             page: 1,
                             pageSize: 100,
@@ -125,7 +129,7 @@ describe("per-run summary profile picker", () => {
                         summary: null,
                         source: "riffado",
                         availableSources: [],
-                        itemProfileId: "interview-profile",
+                        itemProfileId,
                     });
                 }
                 return Response.json({ speakers: [] });
@@ -133,8 +137,9 @@ describe("per-run summary profile picker", () => {
         );
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         cleanup();
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
         vi.unstubAllGlobals();
     });
 
@@ -184,5 +189,66 @@ describe("per-run summary profile picker", () => {
                 )?.body,
             ).toEqual({ profileId: "default-profile" }),
         );
+    });
+
+    it("preselects the member's effective default profile", async () => {
+        itemProfileId = null;
+        profiles = [
+            {
+                id: "organization-default",
+                name: "Organization recordings",
+                description: null,
+                channel: "audio",
+                scope: "organization",
+                isDefault: true,
+                isYourDefault: false,
+                version: 1,
+                canEdit: false,
+                archivedAt: null,
+                updatedAt: "2026-10-15T00:00:00.000Z",
+            },
+            {
+                id: "member-choice",
+                name: "Member's interviews",
+                description: null,
+                channel: "audio",
+                scope: "organization",
+                isDefault: false,
+                isYourDefault: true,
+                version: 1,
+                canEdit: false,
+                archivedAt: null,
+                updatedAt: "2026-10-15T00:00:00.000Z",
+            },
+        ];
+
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "recording-1",
+                    filename: "Interview.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                    kind: "audio",
+                }}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: "Interview transcript",
+                        provider: "OpenAI",
+                        model: "whisper-1",
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+
+        const picker = await screen.findByRole("combobox", {
+            name: "Processing profile",
+        });
+        expect(picker.textContent).toContain("Member's interviews");
     });
 });

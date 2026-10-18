@@ -183,6 +183,57 @@ describe("CategorizePanel", () => {
         ).toBeTruthy();
     });
 
+    it("offers Organization default and Organization profiles without personal profiles", () => {
+        const organizationProfile = {
+            id: "org-profile",
+            name: "Organization recordings",
+            scope: "organization" as const,
+        };
+        renderPanel({
+            ...base,
+            profiles: [organizationProfile],
+            organizationDefault: organizationProfile,
+            followsOrganizationDefault: true,
+            resolution: {
+                status: "resolved",
+                profile: organizationProfile,
+                manualOnly: false,
+                source: "default",
+            },
+        });
+
+        const profile = screen.getByRole("combobox", { name: "Profile" });
+        expect(profile.textContent).toContain(
+            "Organization default (Organization recordings)",
+        );
+        fireEvent.click(profile);
+        expect(
+            screen.getByText("Organization recordings · Organization"),
+        ).toBeTruthy();
+    });
+
+    it("shows an archived or access-revoked Organization default as unavailable", () => {
+        renderPanel({
+            ...base,
+            defaultProfileUnavailable: true,
+            resolution: { status: "choose", candidates: [] },
+        });
+
+        expect(
+            screen.getByText("Unavailable Organization profile"),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "Your selected Organization profile is unavailable. Choose another default.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen
+                .getByRole("button", { name: "Categorize recording" })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+    });
+
     it("creates a first-level folder without a parent picker", async () => {
         const onFolderCreated = vi.fn();
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

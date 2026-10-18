@@ -1,14 +1,11 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
-import { isEnhancementOnlyProvider } from "@/lib/ai/provider-presets";
 import { setDefaultTranscriptionProvider } from "@/lib/ai/set-default-transcription";
 import { requireApiSession } from "@/lib/auth-server";
 import { getEntitlements } from "@/lib/entitlements";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { isMynahConfigured } from "@/lib/hosted/transcription/mynah";
+import { validateDefaultProviderSelection } from "@/lib/profiles/providers";
 import {
     isRiffadoIncludedProviderId,
     RIFFADO_INCLUDED_PROVIDER_LABEL,
@@ -52,39 +49,20 @@ export const PUT = apiHandler(async (request: Request) => {
             );
         }
     } else {
-        const [provider] = await db
-            .select({
-                id: apiCredentials.id,
-                provider: apiCredentials.provider,
-            })
-            .from(apiCredentials)
-            .where(
-                and(
-                    eq(apiCredentials.id, providerId),
-                    eq(apiCredentials.userId, session.user.id),
-                ),
-            )
-            .limit(1);
-
-        if (!provider) {
-            throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
-        }
-
-        // This route writes the authoritative pointer
-        // (`userSettings.defaultTranscriptionProviderId`) that
-        // `transcribeRecording` reads, so it is the last place an
-        // enhancement-only provider could be aimed at audio.
-        if (isEnhancementOnlyProvider(provider.provider)) {
-            throw new AppError(
-                ErrorCode.INVALID_INPUT,
-                `${provider.provider} writes summaries but cannot transcribe. Pick another provider for transcription.`,
-                400,
-                { field: "providerId" },
-            );
-        }
+        await validateDefaultProviderSelection({
+            actorUserId: session.user.id,
+            role: "transcription",
+            providerId,
+        });
     }
 
     await setDefaultTranscriptionProvider(session.user.id, providerId);
 
+    return NextResponse.json({ success: true });
+});
+
+export const DELETE = apiHandler(async (request: Request) => {
+    const session = await requireApiSession(request);
+    await setDefaultTranscriptionProvider(session.user.id, null);
     return NextResponse.json({ success: true });
 });

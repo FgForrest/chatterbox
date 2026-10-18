@@ -15,7 +15,7 @@ export default async function SettingsPage() {
     await requireCompletedOnboarding(session);
 
     const [providers, orgAccount, actor] = await Promise.all([
-        listUserProviders(session.user.id),
+        listUserProviders(session.user.id, { includeDisabled: true }),
         isOrgAccount(session.user.id),
         getSessionActor(),
     ]);

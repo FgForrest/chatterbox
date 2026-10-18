@@ -13,6 +13,19 @@ import { buildChatCompletionParams } from "./chat-completion-params";
 import { getAiOutputLanguageDirective } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
+function isAbsentProviderSelection(error: unknown): boolean {
+    if (!error || typeof error !== "object" || !("details" in error)) {
+        return false;
+    }
+    const details = error.details;
+    return (
+        details !== null &&
+        typeof details === "object" &&
+        "providerSelection" in details &&
+        details.providerSelection === "absent"
+    );
+}
+
 export async function generateTitleFromTranscription(
     userId: string,
     recordingId: string,
@@ -59,6 +72,7 @@ export async function generateTitleFromTranscription(
         });
     } catch (error) {
         if (settings.steps.title.provider) throw error;
+        if (!isAbsentProviderSelection(error)) throw error;
         console.error("Error resolving title provider:", error);
         return null;
     }

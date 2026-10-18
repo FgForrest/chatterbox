@@ -180,6 +180,62 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
+    it.each([
+        ["queued", "queued", "learnQueued"],
+        ["running", "working", "learnRunning"],
+    ] as const)("follows a newer %s Learn run instead of the settled phase", (runStatus, stepState, message) => {
+        const result = deriveWorkflowStatus(
+            processing({
+                latestLearnRun: {
+                    status: runStatus,
+                    errorCode: null,
+                    updatedAt: "2026-10-16T08:01:00.000Z",
+                },
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe(stepState);
+        expect(result.status).toMatchObject({ message });
+    });
+
+    it("shows a newer failed Learn run as the retryable problem", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                latestLearnRun: {
+                    status: "failed",
+                    errorCode: "SERVICE_UNAVAILABLE",
+                    updatedAt: "2026-10-16T08:01:00.000Z",
+                },
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe("problem");
+        expect(result.status).toEqual({
+            actor: "problem",
+            message: "failureUnavailable",
+            params: { step: "learn" },
+            action: "retry",
+        });
+    });
+
+    it("keeps the phase result when the latest Learn run is older", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                latestLearnRun: {
+                    status: "failed",
+                    errorCode: "SERVICE_UNAVAILABLE",
+                    updatedAt: "2026-10-16T07:59:00.000Z",
+                },
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe("done");
+        expect(result.status).toBeNull();
+    });
+
     it("keeps Learn queued between a finished transcription and its planner tick", () => {
         const result = deriveWorkflowStatus(
             processing({

@@ -1,21 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockEnv, credentials } = vi.hoisted(() => ({
+const { mockEnv, resolution } = vi.hoisted(() => ({
     mockEnv: {
         IS_HOSTED: false,
         EMBEDDING_BASE_URL: undefined as string | undefined,
     },
-    credentials: {
-        rows: [] as { provider: string; isDefaultEnhancement: boolean }[],
-    },
+    resolution: { available: false },
 }));
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
-vi.mock("@/db", () => ({
-    db: {
-        select: () => ({
-            from: () => ({ where: async () => credentials.rows }),
-        }),
+vi.mock("@/lib/profiles/providers", () => ({
+    resolveStepProviderSelection: async () => {
+        if (!resolution.available) throw new Error("no provider");
+        return { kind: "credential" };
     },
 }));
 
@@ -29,11 +26,11 @@ describe("Learn availability", () => {
     beforeEach(() => {
         mockEnv.IS_HOSTED = false;
         mockEnv.EMBEDDING_BASE_URL = undefined;
-        credentials.rows = [];
+        resolution.available = false;
     });
 
     it("exists only on self-hosted instances", async () => {
-        credentials.rows = [{ provider: "openai", isDefaultEnhancement: true }];
+        resolution.available = true;
         expect(isLearnDeploymentAvailable()).toBe(true);
         expect(await isLearnAvailableFor("user-1")).toBe(true);
 
@@ -42,15 +39,9 @@ describe("Learn availability", () => {
         expect(await isLearnAvailableFor("user-1")).toBe(false);
     });
 
-    it("needs a chat provider, not only a transcription one", async () => {
+    it("requires the shared Learn provider resolution to succeed", async () => {
         expect(await isLearnAvailableFor("user-1")).toBe(false);
-        credentials.rows = [
-            { provider: "Speechmatics", isDefaultEnhancement: true },
-        ];
-        expect(await isLearnAvailableFor("user-1")).toBe(false);
-        credentials.rows = [
-            { provider: "openai", isDefaultEnhancement: false },
-        ];
+        resolution.available = true;
         expect(await isLearnAvailableFor("user-1")).toBe(true);
     });
 

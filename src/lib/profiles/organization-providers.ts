@@ -1,11 +1,22 @@
-import { and, count, eq, sql, sum } from "drizzle-orm";
+import { and, count, eq, ne, or, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
     adminActionLog,
     aiUsageEvents,
     apiCredentials,
+    userSettings,
     users,
 } from "@/db/schema";
+import {
+    type DefaultProviderPointers,
+    loadDefaultProviderPointers,
+    type ProviderRole,
+    setDefaultProvider,
+} from "@/lib/ai/default-provider";
+import {
+    isEnhancementOnlyProvider,
+    isTranscriptionOnlyProvider,
+} from "@/lib/ai/provider-presets";
 import { hasRate, storedRate } from "@/lib/ai/published-rates";
 import type { ActorContext } from "@/lib/authz/model";
 import { mayManageAccess, mayUse } from "@/lib/authz/policy";
@@ -25,7 +36,8 @@ export interface OrganizationProviderContext extends OrganizationProviderActor {
 
 export interface OrganizationProviderInput {
     provider: string;
-    encryptedApiKey: string;
+    encryptedApiKey?: string;
+    copyKeyFrom?: string;
     baseUrl: string | null;
     defaultModel: string | null;
     rates: {
@@ -33,6 +45,7 @@ export interface OrganizationProviderInput {
         outputUsdPerMillion: string | null;
         audioUsdPerHour: string | null;
     };
+    defaults?: Partial<Record<ProviderRole, boolean>>;
 }
 
 export interface OrganizationProviderUpdate {
@@ -41,6 +54,7 @@ export interface OrganizationProviderUpdate {
     defaultModel?: string | null;
     rates?: OrganizationProviderInput["rates"];
     disabled?: boolean;
+    defaults?: Partial<Record<ProviderRole, boolean>>;
 }
 
 type CredentialRow = typeof apiCredentials.$inferSelect;
@@ -105,7 +119,10 @@ export async function organizationProviderManageContext(
     return context;
 }
 
-function publicProvider(row: CredentialRow) {
+function publicProvider(
+    row: CredentialRow,
+    pointers?: DefaultProviderPointers,
+) {
     const rate = storedRate(row);
     return {
         id: row.id,
@@ -117,10 +134,87 @@ function publicProvider(row: CredentialRow) {
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
         scope: "organization" as const,
+        isDefaultTranscription: pointers?.transcription === row.id,
+        isDefaultEnhancement: pointers?.summary === row.id,
+        isDefaultLearn: pointers?.learn === row.id,
+        isDefaultTopics: pointers?.topics === row.id,
+        isDefaultTitle: pointers?.title === row.id,
     };
 }
 
-function auditSnapshot(row: CredentialRow | null) {
+async function applyOrganizationDefaults(
+    tx: Tx,
+    orgUserId: string,
+    credential: Pick<CredentialRow, "id" | "provider">,
+    defaults: Partial<Record<ProviderRole, boolean>> | undefined,
+): Promise<{
+    before: DefaultProviderPointers;
+    after: DefaultProviderPointers;
+}> {
+    const current = await loadDefaultProviderPointers(orgUserId, tx);
+    if (!defaults) return { before: current, after: current };
+    const roles: ProviderRole[] = [
+        "transcription",
+        "summary",
+        "learn",
+        "topics",
+        "title",
+    ];
+    for (const role of roles) {
+        const selected = defaults[role];
+        if (selected === true) {
+            await setDefaultProvider(orgUserId, role, credential.id, {
+                transaction: tx,
+            });
+        } else if (selected === false && current[role] === credential.id) {
+            await setDefaultProvider(orgUserId, role, null, {
+                transaction: tx,
+                onlyIf: credential.id,
+            });
+        }
+    }
+    return {
+        before: current,
+        after: await loadDefaultProviderPointers(orgUserId, tx),
+    };
+}
+
+function validateOrganizationDefaults(
+    provider: string,
+    defaults: Partial<Record<ProviderRole, boolean>> | undefined,
+    disabled: boolean,
+): void {
+    if (disabled && Object.values(defaults ?? {}).some(Boolean)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A disabled provider cannot be an Organization default",
+            400,
+        );
+    }
+    if (defaults?.transcription && isEnhancementOnlyProvider(provider)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            `${provider} cannot transcribe`,
+            400,
+        );
+    }
+    const chatRoles: ProviderRole[] = ["summary", "learn", "topics", "title"];
+    if (
+        isTranscriptionOnlyProvider(provider) &&
+        chatRoles.some((role) => defaults?.[role] === true)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            `${provider} cannot be an Organization chat default`,
+            400,
+        );
+    }
+}
+
+function auditSnapshot(
+    row: CredentialRow | null,
+    pointers?: DefaultProviderPointers,
+) {
     if (!row) return null;
     return {
         provider: row.provider,
@@ -128,6 +222,11 @@ function auditSnapshot(row: CredentialRow | null) {
         model: row.defaultModel,
         label: row.provider,
         disabled: row.disabledAt !== null,
+        defaults: pointers
+            ? (Object.entries(pointers) as [ProviderRole, string | null][])
+                  .filter(([, providerId]) => providerId === row.id)
+                  .map(([role]) => role)
+            : [],
     };
 }
 
@@ -140,6 +239,8 @@ export async function writeOrganizationProviderAudit(
         credentialId: string;
         before: CredentialRow | null;
         after: CredentialRow | null;
+        beforeDefaults?: DefaultProviderPointers;
+        afterDefaults?: DefaultProviderPointers;
     },
 ): Promise<void> {
     await tx.insert(adminActionLog).values({
@@ -149,8 +250,8 @@ export async function writeOrganizationProviderAudit(
         targetUserId: input.context.orgUserId,
         targetResourceId: input.credentialId,
         reason: "Organization provider settings change",
-        before: auditSnapshot(input.before),
-        after: auditSnapshot(input.after),
+        before: auditSnapshot(input.before, input.beforeDefaults),
+        after: auditSnapshot(input.after, input.afterDefaults),
     });
 }
 
@@ -158,12 +259,15 @@ export async function writeOrganizationProviderAudit(
 export async function listOrganizationProviders(
     context: OrganizationProviderContext,
 ) {
-    const rows = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, context.orgUserId))
-        .orderBy(apiCredentials.createdAt, apiCredentials.id);
-    return rows.map(publicProvider);
+    const [rows, pointers] = await Promise.all([
+        db
+            .select()
+            .from(apiCredentials)
+            .where(eq(apiCredentials.userId, context.orgUserId))
+            .orderBy(apiCredentials.createdAt, apiCredentials.id),
+        loadDefaultProviderPointers(context.orgUserId),
+    ]);
+    return rows.map((row) => publicProvider(row, pointers));
 }
 
 /** Create one Organization-owned provider and its audit row atomically. */
@@ -171,13 +275,53 @@ export async function createOrganizationProvider(
     context: OrganizationProviderContext,
     input: OrganizationProviderInput,
 ) {
-    return db.transaction(async (tx) => {
+    validateOrganizationDefaults(input.provider, input.defaults, false);
+    const provider = await db.transaction(async (tx) => {
+        let encryptedApiKey = input.encryptedApiKey;
+        if (!encryptedApiKey && input.copyKeyFrom) {
+            const [source] = await tx
+                .select({
+                    provider: apiCredentials.provider,
+                    apiKey: apiCredentials.apiKey,
+                })
+                .from(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.userId, context.orgUserId),
+                        eq(apiCredentials.id, input.copyKeyFrom),
+                    ),
+                )
+                .limit(1);
+            if (!source) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "The provider to duplicate no longer exists",
+                    404,
+                );
+            }
+            if (source.provider !== input.provider) {
+                throw new AppError(
+                    ErrorCode.INVALID_INPUT,
+                    `A duplicate keeps its provider: ${source.provider}'s key cannot be used for ${input.provider}.`,
+                    400,
+                    { field: "provider" },
+                );
+            }
+            encryptedApiKey = source.apiKey;
+        }
+        if (!encryptedApiKey) {
+            throw new AppError(
+                ErrorCode.MISSING_REQUIRED_FIELD,
+                "Provider and API key are required",
+                400,
+            );
+        }
         const [created] = await tx
             .insert(apiCredentials)
             .values({
                 userId: context.orgUserId,
                 provider: input.provider,
-                apiKey: input.encryptedApiKey,
+                apiKey: encryptedApiKey,
                 baseUrl: input.baseUrl,
                 defaultModel: input.defaultModel,
                 ...input.rates,
@@ -190,15 +334,24 @@ export async function createOrganizationProvider(
                 500,
             );
         }
+        const defaults = await applyOrganizationDefaults(
+            tx,
+            context.orgUserId,
+            created,
+            input.defaults,
+        );
         await writeOrganizationProviderAudit(tx, {
             context,
             action: "org_provider.create",
             credentialId: created.id,
             before: null,
             after: created,
+            beforeDefaults: defaults.before,
+            afterDefaults: defaults.after,
         });
-        return publicProvider(created);
+        return publicProvider(created, defaults.after);
     });
+    return provider;
 }
 
 /** Update, disable, or enable one Organization provider with an audit row. */
@@ -207,7 +360,12 @@ export async function updateOrganizationProvider(
     credentialId: string,
     input: OrganizationProviderUpdate,
 ) {
-    return db.transaction(async (tx) => {
+    const provider = await db.transaction(async (tx) => {
+        await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, context.orgUserId))
+            .for("update");
         const [before] = await tx
             .select()
             .from(apiCredentials)
@@ -222,6 +380,11 @@ export async function updateOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        validateOrganizationDefaults(
+            before.provider,
+            input.defaults,
+            input.disabled ?? before.disabledAt !== null,
+        );
         const update: Partial<typeof apiCredentials.$inferInsert> = {
             updatedAt: new Date(),
         };
@@ -249,21 +412,30 @@ export async function updateOrganizationProvider(
         if (!after) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
-        const action =
-            before.disabledAt === null && after.disabledAt !== null
-                ? "org_provider.disable"
-                : before.disabledAt !== null && after.disabledAt === null
-                  ? "org_provider.enable"
-                  : "org_provider.update";
+        let action = "org_provider.update";
+        if (before.disabledAt === null && after.disabledAt !== null) {
+            action = "org_provider.disable";
+        } else if (before.disabledAt !== null && after.disabledAt === null) {
+            action = "org_provider.enable";
+        }
+        const defaults = await applyOrganizationDefaults(
+            tx,
+            context.orgUserId,
+            after,
+            input.defaults,
+        );
         await writeOrganizationProviderAudit(tx, {
             context,
             action,
             credentialId,
             before,
             after,
+            beforeDefaults: defaults.before,
+            afterDefaults: defaults.after,
         });
-        return publicProvider(after);
+        return publicProvider(after, defaults.after);
     });
+    return provider;
 }
 
 /** Delete one Organization provider and retain its non-secret audit snapshot. */
@@ -272,6 +444,11 @@ export async function deleteOrganizationProvider(
     credentialId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, context.orgUserId))
+            .for("update");
         const [before] = await tx
             .select()
             .from(apiCredentials)
@@ -286,6 +463,10 @@ export async function deleteOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        const beforeDefaults = await loadDefaultProviderPointers(
+            context.orgUserId,
+            tx,
+        );
         await tx
             .delete(apiCredentials)
             .where(
@@ -300,8 +481,52 @@ export async function deleteOrganizationProvider(
             credentialId,
             before,
             after: null,
+            beforeDefaults,
+            afterDefaults: await loadDefaultProviderPointers(
+                context.orgUserId,
+                tx,
+            ),
         });
     });
+}
+
+/** Count member-owned default pointers that refer to one Organization provider. */
+export async function organizationProviderMemberDefaultCount(
+    context: OrganizationProviderContext,
+    credentialId: string,
+): Promise<number> {
+    const [credential] = await db
+        .select({ id: apiCredentials.id })
+        .from(apiCredentials)
+        .where(
+            and(
+                eq(apiCredentials.userId, context.orgUserId),
+                eq(apiCredentials.id, credentialId),
+            ),
+        )
+        .limit(1);
+    if (!credential) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
+    }
+    const [result] = await db
+        .select({ count: count(userSettings.userId) })
+        .from(userSettings)
+        .where(
+            and(
+                ne(userSettings.userId, context.orgUserId),
+                or(
+                    eq(
+                        userSettings.defaultTranscriptionProviderId,
+                        credentialId,
+                    ),
+                    sql`${userSettings.defaultProviders} ->> 'summary' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'learn' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'topics' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'title' = ${credentialId}`,
+                ),
+            ),
+        );
+    return Number(result?.count ?? 0);
 }
 
 export interface OrganizationProviderMemberUsage {

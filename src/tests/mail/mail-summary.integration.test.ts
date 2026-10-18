@@ -61,7 +61,7 @@ const { dbProxy, dbRef, mockEnv, createCompletion } = vi.hoisted(() => {
         createCompletion: vi.fn(),
         mockEnv: {
             IS_HOSTED: false,
-            SELF_HOST_MODE: "shared" as const,
+            SELF_HOST_MODE: "shared" as "local" | "shared",
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: undefined,
             ORG_ACCOUNT_NAME: undefined,
@@ -142,6 +142,7 @@ import {
     recordingsAwaitingTaskReview,
 } from "@/lib/tasks/tasks";
 import { insertRecordings } from "@/tests/integration/items";
+import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 import {
     rawMessage,
     signMessage,
@@ -334,6 +335,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             })
         ).id;
         await ensureMailbox("u-jan");
+        await seedExistingPersonalProfiles("u-jan", mockEnv);
         await db()
             .insert(apiCredentials)
             .values({

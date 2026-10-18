@@ -34,6 +34,7 @@ interface ChannelDefault {
     inherited: ProfileOption | null;
     inheritedManualOnly: boolean;
     accountDefault: ProfileOption | null;
+    accountDefaultUnavailable: boolean;
 }
 
 interface DefaultsResponse {
@@ -135,6 +136,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     const currentLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
         if (!value) return i18n("None");
+        if (value.accountDefaultUnavailable) {
+            return i18n("Your selected default is unavailable");
+        }
         if (value.effectiveManualOnly) {
             return value.inheritedFromFolderId
                 ? i18n("{setting} (inherited)", {
@@ -159,6 +163,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
 
     const inheritLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
+        if (value?.accountDefaultUnavailable) {
+            return i18n("Inherit (your selected default is unavailable)");
+        }
         if (value?.inheritedManualOnly) {
             return i18n("Inherit ({setting})", {
                 setting: i18n("Nothing automatic"),
@@ -243,6 +250,13 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                         {i18n("Nothing automatic")}
                     </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
+                {defaults?.defaults[channel].accountDefaultUnavailable && (
+                    <p className="max-w-72 px-2 py-1.5 text-xs text-muted-foreground">
+                        {i18n(
+                            "Your selected Organization profile is unavailable. Choose another default in Settings → Profiles.",
+                        )}
+                    </p>
+                )}
             </DropdownMenuSubContent>
         </DropdownMenuSub>
     );

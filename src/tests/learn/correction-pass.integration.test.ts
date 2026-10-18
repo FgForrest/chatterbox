@@ -111,6 +111,7 @@ import { ensureOrgAccount } from "@/lib/org/account";
 import { requireRecordingView } from "@/lib/sharing/access";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { insertRecordings } from "@/tests/integration/items";
+import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -349,6 +350,7 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
         await db()
             .insert(userSettings)
             .values({ userId: OWNER, correctAfterLearn: false });
+        await seedExistingPersonalProfiles(OWNER, mockEnv);
         const finished = await finish();
         expect(finished.correcting).toBe(false);
         expect(await passJob()).toBeUndefined();

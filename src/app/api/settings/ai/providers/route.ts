@@ -2,6 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { apiCredentials } from "@/db/schema";
+import {
+    loadDefaultProviderPointers,
+    setDefaultProvider,
+} from "@/lib/ai/default-provider";
 import { listUserProviders } from "@/lib/ai/list-providers";
 import {
     isEnhancementOnlyProvider,
@@ -23,10 +27,16 @@ import {
 // GET - List all AI providers for the user
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
+    const includeDisabled =
+        new URL(request.url).searchParams.get("includeDisabled") === "true";
 
-    return NextResponse.json({
-        providers: await listUserProviders(session.user.id),
-    });
+    const [providers, defaults] = await Promise.all([
+        listUserProviders(session.user.id, {
+            includeDisabled,
+        }),
+        loadDefaultProviderPointers(session.user.id),
+    ]);
+    return NextResponse.json({ providers, defaults });
 });
 
 // POST - Add new AI provider
@@ -130,31 +140,6 @@ export const POST = apiHandler(async (request: Request) => {
 
     // Use a transaction to ensure atomic update of default providers
     const newProvider = await db.transaction(async (tx) => {
-        // If setting as default, remove default flag from other providers
-        if (isDefaultTranscription) {
-            await tx
-                .update(apiCredentials)
-                .set({ isDefaultTranscription: false })
-                .where(
-                    and(
-                        eq(apiCredentials.userId, session.user.id),
-                        eq(apiCredentials.isDefaultTranscription, true),
-                    ),
-                );
-        }
-
-        if (isDefaultEnhancement) {
-            await tx
-                .update(apiCredentials)
-                .set({ isDefaultEnhancement: false })
-                .where(
-                    and(
-                        eq(apiCredentials.userId, session.user.id),
-                        eq(apiCredentials.isDefaultEnhancement, true),
-                    ),
-                );
-        }
-
         // Insert new provider
         const [created] = await tx
             .insert(apiCredentials)
@@ -164,8 +149,8 @@ export const POST = apiHandler(async (request: Request) => {
                 apiKey: encryptedKey,
                 baseUrl: baseUrl || null,
                 defaultModel: defaultModel || null,
-                isDefaultTranscription: isDefaultTranscription || false,
-                isDefaultEnhancement: isDefaultEnhancement || false,
+                isDefaultTranscription: false,
+                isDefaultEnhancement: false,
                 ...rates,
             })
             .returning();
@@ -190,13 +175,16 @@ export const POST = apiHandler(async (request: Request) => {
             provider: created.provider,
             baseUrl: created.baseUrl,
             defaultModel: created.defaultModel,
-            isDefaultTranscription: created.isDefaultTranscription,
-            isDefaultEnhancement: created.isDefaultEnhancement,
+            isDefaultTranscription: Boolean(isDefaultTranscription),
+            isDefaultEnhancement: Boolean(isDefaultEnhancement),
         };
     });
 
     if (isDefaultTranscription) {
         await setDefaultTranscriptionProvider(session.user.id, newProvider.id);
+    }
+    if (isDefaultEnhancement) {
+        await setDefaultProvider(session.user.id, "summary", newProvider.id);
     }
 
     // Provider label only -- never baseUrl, which can be a private

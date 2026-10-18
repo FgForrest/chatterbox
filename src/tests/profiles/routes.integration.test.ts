@@ -375,6 +375,31 @@ describeWithDatabase("profile settings routes", () => {
         ).toBe(404);
     });
 
+    it("reports how many members selected an Organization profile before archive", async () => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        const created = await create({
+            name: "Member-selected Organization profile",
+            channel: "audio",
+            scope: "organization",
+        });
+        const id = created.body.profile.id as string;
+        await databaseClient().insert(userSettings).values({
+            userId: "profile-owner",
+            defaultAudioProfileId: id,
+        });
+
+        const response = await getProfile(
+            request("GET", `/${id}?deleteImpact=true`),
+            context(id),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            deleteImpact: { memberDefaultCount: 1 },
+        });
+    });
+
     it("returns validation paths and the current version on conflict", async () => {
         const created = await create({
             name: "Validated",
@@ -582,7 +607,7 @@ describeWithDatabase("profile settings routes", () => {
         ).toBe(400);
     });
 
-    it("duplicates to personal scope and protects the default from archive", async () => {
+    it("deletes unused personal profiles and archives the last default before restoring it", async () => {
         const created = await create({
             name: "Source",
             channel: "audio",
@@ -597,14 +622,14 @@ describeWithDatabase("profile settings routes", () => {
         const duplicated = (await duplicate.json()).profile;
         expect(duplicated.scope).toBe("personal");
 
-        expect(
-            (
-                await deleteProfile(
-                    request("DELETE", `/${duplicated.id}`),
-                    context(duplicated.id),
-                )
-            ).status,
-        ).toBe(200);
+        const deleted = await deleteProfile(
+            request("DELETE", `/${duplicated.id}`),
+            context(duplicated.id),
+        );
+        expect(deleted.status).toBe(200);
+        await expect(deleted.json()).resolves.toMatchObject({
+            disposition: "delete",
+        });
         const archived = await listProfiles(
             request("GET", "?archived=true&page=1&pageSize=20"),
         );
@@ -612,7 +637,7 @@ describeWithDatabase("profile settings routes", () => {
             (await archived.json()).profiles.map(
                 (profile: { id: string }) => profile.id,
             ),
-        ).toContain(duplicated.id);
+        ).not.toContain(duplicated.id);
         expect(
             (
                 await restoreProfile(
@@ -620,15 +645,7 @@ describeWithDatabase("profile settings routes", () => {
                     context(duplicated.id),
                 )
             ).status,
-        ).toBe(200);
-        const [restored] = await databaseClient()
-            .select({
-                archivedAt: processingProfiles.archivedAt,
-                isDefault: processingProfiles.isDefault,
-            })
-            .from(processingProfiles)
-            .where(eq(processingProfiles.id, duplicated.id));
-        expect(restored).toEqual({ archivedAt: null, isDefault: false });
+        ).toBe(404);
 
         expect(
             (
@@ -638,10 +655,14 @@ describeWithDatabase("profile settings routes", () => {
                 )
             ).status,
         ).toBe(200);
-        expect(
-            (await deleteProfile(request("DELETE", `/${id}`), context(id)))
-                .status,
-        ).toBe(409);
+        const removedDefault = await deleteProfile(
+            request("DELETE", `/${id}`),
+            context(id),
+        );
+        expect(removedDefault.status).toBe(200);
+        await expect(removedDefault.json()).resolves.toMatchObject({
+            disposition: "archive",
+        });
 
         const defaults = await databaseClient()
             .select({ id: processingProfiles.id })
@@ -653,6 +674,30 @@ describeWithDatabase("profile settings routes", () => {
                     eq(processingProfiles.isDefault, true),
                 ),
             );
-        expect(defaults).toEqual([{ id }]);
+        expect(defaults).toEqual([]);
+        const archivedDefault = await listProfiles(
+            request("GET", "?archived=true&page=1&pageSize=20"),
+        );
+        expect(
+            (await archivedDefault.json()).profiles.map(
+                (profile: { id: string }) => profile.id,
+            ),
+        ).toContain(id);
+        expect(
+            (
+                await restoreProfile(
+                    request("POST", `/${id}/restore`),
+                    context(id),
+                )
+            ).status,
+        ).toBe(200);
+        const [restored] = await databaseClient()
+            .select({
+                archivedAt: processingProfiles.archivedAt,
+                isDefault: processingProfiles.isDefault,
+            })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, id));
+        expect(restored).toEqual({ archivedAt: null, isDefault: false });
     });
 });

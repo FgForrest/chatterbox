@@ -62,7 +62,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         dbRef: ref,
         mockEnv: {
             IS_HOSTED: false,
-            SELF_HOST_MODE: "shared" as const,
+            SELF_HOST_MODE: "shared" as "local" | "shared",
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: undefined,
             ORG_ACCOUNT_NAME: undefined,
@@ -131,6 +131,7 @@ import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import { LocalStorage } from "@/lib/storage/local-storage";
 import type { StorageProvider } from "@/lib/storage/types";
+import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 import {
     rawMessage,
     signMessage,
@@ -247,7 +248,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             canCurate: true,
         });
         orgWeeklyFolderId = orgWeekly.id;
-        await ensureProfiles("u-jan");
+        await seedExistingPersonalProfiles("u-jan", mockEnv);
         await ensureProfiles(orgUserId);
         const [personalMailProfile] = await db()
             .select({ id: processingProfiles.id })

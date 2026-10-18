@@ -1,24 +1,35 @@
 "use client";
 
 import { useExtracted } from "next-intl";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import type {
+    DefaultProviderPointers,
+    ProviderRole,
+} from "@/lib/ai/default-provider";
 import type { ProviderListItem } from "@/lib/ai/list-providers";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import { defaultProviderCandidates } from "@/lib/ai/provider-resolution-order";
 
 type Role = "transcription" | "topics" | "learning" | "summary" | "title";
+type PickerProvider = ProviderListItem & { scope?: "organization" };
+
 const FOLLOW_SUMMARY = "__follow-summary__";
+const ORGANIZATION_DEFAULT = "__organization-default__";
+const NOT_CHOSEN = "__not-chosen__";
 
 const endpoints: Record<Role, string> = {
     transcription: "/api/settings/ai/providers/default-transcription",
@@ -28,24 +39,108 @@ const endpoints: Record<Role, string> = {
     title: "/api/settings/ai/providers/default-title",
 };
 
+function storageRole(purpose: Role): ProviderRole {
+    return purpose === "learning" ? "learn" : purpose;
+}
+
+function providerLabel(provider: PickerProvider): string {
+    return provider.defaultModel
+        ? `${provider.provider} · ${provider.defaultModel}`
+        : provider.provider;
+}
+
+function supports(provider: PickerProvider, purpose: Role): boolean {
+    if (purpose === "transcription") {
+        return (
+            provider.managed === true ||
+            !isEnhancementOnlyProvider(provider.provider)
+        );
+    }
+    return (
+        provider.managed !== true &&
+        !isTranscriptionOnlyProvider(provider.provider)
+    );
+}
+
+function available(provider: PickerProvider, purpose: Role): boolean {
+    return (
+        supports(provider, purpose) &&
+        provider.disabledAt == null &&
+        provider.available !== false
+    );
+}
+
+interface ProviderResponse {
+    providers: PickerProvider[];
+    defaults?: DefaultProviderPointers;
+}
+
+const EMPTY_DEFAULTS: DefaultProviderPointers = {
+    transcription: null,
+    summary: null,
+    learn: null,
+    topics: null,
+    title: null,
+};
+
+function organizationDefaults(
+    providers: PickerProvider[],
+): DefaultProviderPointers {
+    return {
+        transcription:
+            providers.find((provider) => provider.isDefaultTranscription)?.id ??
+            null,
+        summary:
+            providers.find((provider) => provider.isDefaultEnhancement)?.id ??
+            null,
+        learn:
+            providers.find((provider) => provider.isDefaultLearn === true)
+                ?.id ?? null,
+        topics:
+            providers.find((provider) => provider.isDefaultTopics === true)
+                ?.id ?? null,
+        title:
+            providers.find((provider) => provider.isDefaultTitle === true)
+                ?.id ?? null,
+    };
+}
+
+/** Choose one account default from personal and Organization providers. */
 export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const i18n = useExtracted();
-    const [providers, setProviders] = useState<ProviderListItem[]>([]);
+    const [personal, setPersonal] = useState<PickerProvider[]>([]);
+    const [organization, setOrganization] = useState<PickerProvider[]>([]);
+    const [defaults, setDefaults] = useState<DefaultProviderPointers | null>(
+        null,
+    );
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
+    const load = useCallback(async () => {
+        const personalResponse = await fetch(
+            "/api/settings/ai/providers?includeDisabled=true",
+        );
+        if (!personalResponse.ok) throw new Error("Failed to load providers");
+        const personalBody =
+            (await personalResponse.json()) as ProviderResponse;
+        setPersonal(personalBody.providers);
+        setDefaults(personalBody.defaults ?? null);
+
+        const organizationResponse = await fetch(
+            "/api/settings/ai/organization-providers",
+        ).catch(() => null);
+        if (!organizationResponse?.ok) {
+            setOrganization([]);
+            return;
+        }
+        const organizationBody =
+            (await organizationResponse.json()) as ProviderResponse;
+        setOrganization(organizationBody.providers);
+    }, []);
+
     useEffect(() => {
         let active = true;
-        fetch("/api/settings/ai/providers")
-            .then((response) => {
-                if (!response.ok) throw new Error("Failed to load providers");
-                return response.json() as Promise<{
-                    providers: ProviderListItem[];
-                }>;
-            })
-            .then((data) => {
-                if (active) setProviders(data.providers);
-            })
+        void load()
             .catch(() => {
                 if (active) toast.error(i18n("Failed to refresh providers"));
             })
@@ -55,43 +150,65 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         return () => {
             active = false;
         };
-    }, [i18n]);
+    }, [i18n, load]);
 
-    const options = providers.filter((provider) =>
-        purpose === "transcription"
-            ? provider.managed === true ||
-              !isEnhancementOnlyProvider(provider.provider)
-            : provider.managed !== true &&
-              !isTranscriptionOnlyProvider(provider.provider),
+    const role = storageRole(purpose);
+    const personalOptions = personal.filter((provider) =>
+        available(provider, purpose),
     );
-    const selected = providers.find((provider) =>
-        purpose === "transcription"
-            ? provider.isDefaultTranscription
-            : purpose === "topics"
-              ? provider.isDefaultTopics
-              : purpose === "learning"
-                ? provider.isDefaultLearn
-                : purpose === "title"
-                  ? provider.isDefaultTitle
-                  : provider.isDefaultEnhancement,
+    const organizationOptions = organization.filter((provider) =>
+        available(provider, purpose),
     );
-    const label =
-        purpose === "transcription"
-            ? i18n("Transcription provider")
-            : purpose === "topics"
-              ? i18n("Topics provider")
-              : purpose === "learning"
-                ? i18n("Learning provider")
-                : purpose === "title"
-                  ? i18n("Title provider")
-                  : i18n("Summary provider");
+    const selectedId = defaults?.[role] ?? null;
+    const followsSummary =
+        purpose === "topics" || purpose === "learning" || purpose === "title";
+    const organizationPointers = organizationDefaults(organization);
+    const [candidate] = defaultProviderCandidates(
+        role,
+        defaults ?? EMPTY_DEFAULTS,
+        organizationPointers,
+        personal,
+    );
+    const candidateProvider = candidate
+        ? [...personal, ...organization].find(
+              (provider) => provider.id === candidate.providerId,
+          )
+        : undefined;
+    const candidateUnavailable = Boolean(
+        candidate &&
+            (!candidateProvider || !available(candidateProvider, purpose)),
+    );
+    let value = NOT_CHOSEN;
+    if (candidate?.source === "member-role") value = candidate.providerId;
+    if (candidate?.source === "member-summary") value = FOLLOW_SUMMARY;
+    if (
+        candidate?.source === "organization-role" ||
+        candidate?.source === "organization-summary"
+    ) {
+        value = ORGANIZATION_DEFAULT;
+    }
+    const organizationDefaultId =
+        organizationPointers[role] ??
+        (followsSummary ? organizationPointers.summary : null);
+    const organizationDefault = organization.find(
+        (provider) => provider.id === organizationDefaultId,
+    );
+    const organizationDefaultAvailable = organizationDefault
+        ? available(organizationDefault, purpose)
+        : false;
+    const automaticProvider =
+        candidate?.source === "member-fallback" ? candidateProvider : undefined;
 
     const save = async (id: string) => {
         setSaving(true);
         try {
+            const clear =
+                id === FOLLOW_SUMMARY ||
+                id === ORGANIZATION_DEFAULT ||
+                id === NOT_CHOSEN;
             const response = await fetch(endpoints[purpose], {
-                method: id === FOLLOW_SUMMARY ? "DELETE" : "PUT",
-                ...(id === FOLLOW_SUMMARY
+                method: clear ? "DELETE" : "PUT",
+                ...(clear
                     ? {}
                     : {
                           headers: { "Content-Type": "application/json" },
@@ -104,12 +221,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                 };
                 throw new Error(body.error ?? "Failed to save provider");
             }
-            const refreshed = await fetch("/api/settings/ai/providers");
-            if (!refreshed.ok) throw new Error("Failed to refresh providers");
-            const data = (await refreshed.json()) as {
-                providers: ProviderListItem[];
-            };
-            setProviders(data.providers);
+            await load();
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -121,51 +233,131 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         }
     };
 
+    const noOptions =
+        personalOptions.length === 0 && organizationOptions.length === 0;
+    const selectValue = value;
+    let label = i18n("Summary provider");
+    if (purpose === "transcription") label = i18n("Transcription provider");
+    if (purpose === "topics") label = i18n("Topics provider");
+    if (purpose === "learning") label = i18n("Learning provider");
+    if (purpose === "title") label = i18n("Title provider");
     return (
         <div className="space-y-2">
             <Label htmlFor={`${purpose}-provider`}>{label}</Label>
             <Select
-                value={
-                    selected?.id ??
-                    (purpose === "topics" ||
-                    purpose === "learning" ||
-                    purpose === "title"
-                        ? FOLLOW_SUMMARY
-                        : "")
-                }
+                value={selectValue}
                 onValueChange={(id) => void save(id)}
-                disabled={loading || saving || options.length === 0}
+                disabled={
+                    loading || saving || (noOptions && !candidateUnavailable)
+                }
             >
                 <SelectTrigger id={`${purpose}-provider`} className="w-full">
                     <SelectValue
                         placeholder={
-                            options.length === 0
-                                ? i18n("No provider can do this yet")
+                            noOptions
+                                ? i18n(
+                                      "None of your providers or the Organization's can do this yet.",
+                                  )
                                 : i18n("Not chosen")
                         }
                     />
                 </SelectTrigger>
                 <SelectContent>
-                    {(purpose === "topics" ||
-                        purpose === "learning" ||
-                        purpose === "title") && (
-                        <SelectItem value={FOLLOW_SUMMARY}>
-                            {i18n("Same as summaries")}
+                    {candidateUnavailable && (
+                        <SelectItem value={value} disabled>
+                            {candidateProvider
+                                ? i18n("Unavailable: {provider}", {
+                                      provider:
+                                          providerLabel(candidateProvider),
+                                  })
+                                : i18n("Unavailable: deleted provider")}
                         </SelectItem>
                     )}
-                    {options.map((provider) => (
-                        <SelectItem
-                            key={provider.id}
-                            value={provider.id}
-                            disabled={provider.available === false}
-                        >
-                            {provider.defaultModel
-                                ? `${provider.provider} · ${provider.defaultModel}`
-                                : provider.provider}
-                        </SelectItem>
-                    ))}
+                    {followsSummary &&
+                        defaults?.summary &&
+                        !(candidateUnavailable && value === FOLLOW_SUMMARY) && (
+                            <SelectItem value={FOLLOW_SUMMARY}>
+                                {i18n("Same as summaries")}
+                            </SelectItem>
+                        )}
+                    {organizationDefault &&
+                        organizationDefaultAvailable &&
+                        !(
+                            candidateUnavailable &&
+                            value === ORGANIZATION_DEFAULT
+                        ) && (
+                            <SelectItem value={ORGANIZATION_DEFAULT}>
+                                {i18n("Organization default: {provider}", {
+                                    provider:
+                                        providerLabel(organizationDefault),
+                                })}
+                            </SelectItem>
+                        )}
+                    {!candidateUnavailable &&
+                        !selectedId &&
+                        !organizationDefaultAvailable &&
+                        automaticProvider && (
+                            <SelectItem value={NOT_CHOSEN}>
+                                {i18n("Automatic: {provider}", {
+                                    provider: providerLabel(automaticProvider),
+                                })}
+                            </SelectItem>
+                        )}
+                    {purpose === "transcription" &&
+                        !organizationDefaultAvailable &&
+                        !noOptions && (
+                            <SelectItem value={NOT_CHOSEN}>
+                                {i18n("Not chosen")}
+                            </SelectItem>
+                        )}
+                    {personalOptions.length > 0 && (
+                        <SelectGroup>
+                            <SelectLabel>{i18n("Your providers")}</SelectLabel>
+                            {personalOptions.map((provider) => (
+                                <SelectItem
+                                    key={provider.id}
+                                    value={provider.id}
+                                    disabled={provider.available === false}
+                                >
+                                    {providerLabel(provider)}
+                                </SelectItem>
+                            ))}
+                        </SelectGroup>
+                    )}
+                    {organizationOptions.length > 0 && (
+                        <SelectGroup>
+                            <SelectLabel>
+                                {i18n("Organization providers")}
+                            </SelectLabel>
+                            {organizationOptions.map((provider) => (
+                                <SelectItem
+                                    key={provider.id}
+                                    value={provider.id}
+                                >
+                                    {providerLabel(provider)}
+                                </SelectItem>
+                            ))}
+                        </SelectGroup>
+                    )}
                 </SelectContent>
             </Select>
+            {candidateUnavailable && !loading && (
+                <p className="text-xs text-muted-foreground">
+                    {i18n(
+                        "This default is unavailable. Choose another provider.",
+                    )}
+                </p>
+            )}
+            {noOptions && !loading && (
+                <p className="text-xs text-muted-foreground">
+                    {i18n(
+                        "None of your providers or the Organization's can do this yet.",
+                    )}{" "}
+                    <a className="underline" href="/settings?section=providers">
+                        {i18n("Open Providers")}
+                    </a>
+                </p>
+            )}
         </div>
     );
 }

@@ -868,7 +868,7 @@ function BasicEditor({
                     />
                     <p className="text-xs text-muted-foreground">
                         {i18n(
-                            "Default leaves transcription unpinned, so it uses the account's transcription provider or Mynah when available.",
+                            "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
                         )}
                     </p>
                 </div>
@@ -895,7 +895,7 @@ function BasicEditor({
                 />
                 <p className="text-xs text-muted-foreground">
                     {i18n(
-                        "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role leaves every step unpinned.",
+                        "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role uses your default for that role, then the Organization default, then your first enabled provider.",
                     )}
                 </p>
             </div>

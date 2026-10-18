@@ -24,7 +24,9 @@ const eva: MailUser = {
 function signature(overrides: Partial<DkimSignature> = {}): DkimSignature {
     return {
         domain: "company.example",
+        selector: "mail",
         result: "pass",
+        comment: "",
         signedRecipients: ["jan@klepna.example"],
         signedAt: new Date(NOW.getTime() - 60_000),
         ...overrides,
