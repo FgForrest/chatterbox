@@ -70,13 +70,13 @@ The deprecated `RIFFADO_VERSION` remains a fallback for one release when
 | Tag             | What you get                              | Use when                                |
 | --------------- | ----------------------------------------- | --------------------------------------- |
 | `latest`        | Newest stable release                     | Default; most users                     |
-| `0.4.2`, `0.4`  | Specific version / minor line             | Production; pin for reproducibility     |
-| `dev`           | Rolling build from `main`                 | Bleeding edge; accept occasional breakage |
+| `2026.1`        | One specific release                      | Production; pin for reproducibility     |
+| `dev`           | Rolling build from the `dev` branch       | Bleeding edge; accept occasional breakage |
 
-`main` is a **rolling integration branch** and may be broken at any
-commit. Stable deploys come from tagged releases. Do **not** deploy by
-cloning the repo and building from `main`; use the tagged images
-above. See [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
+`dev` is the **integration branch** and may be broken at any commit.
+Every push to `main` is a release, published as a `YYYY.N` tag and
+`latest`. Do **not** deploy by cloning the repo and building it; use the
+tagged images above. See [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 for the branching model.
 
 ## Update badge

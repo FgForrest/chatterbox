@@ -105,10 +105,25 @@ vi.mock("@/components/dashboard/markdown-actions", () => ({
     MarkdownActions: () => null,
 }));
 
+vi.mock("@/components/integrations/google-connection-panel", () => ({
+    GoogleConnectionPanel: () => null,
+}));
+
+vi.mock("@/hooks/use-google-connection", () => ({
+    useGoogleConnection: () => ({ state: null, refresh: vi.fn() }),
+}));
+
+vi.mock("@/components/help/help-button", () => ({
+    HelpLink: () => null,
+}));
+
 import DocsRootLayout from "@/app/(docs)/layout";
+import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { StorageSection } from "@/components/settings-sections/storage-section";
+import { SyncSection } from "@/components/settings-sections/sync-section";
 import { deploymentProductName } from "@/lib/deployment-brand";
 import { managedFolderDescription } from "@/lib/folder-exports/drive-provider";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -202,6 +217,9 @@ describe.each(
                         quotaBytes: null,
                     });
                 }
+                if (url.endsWith("/exports")) {
+                    return Response.json({ configured: [], applicableIds: [] });
+                }
                 return Response.json({});
             }),
         );
@@ -294,6 +312,51 @@ describe.each(
         expect(screen.getByTestId("docs-title").textContent).toBe(
             `${expectedName} Docs`,
         );
+    });
+
+    it("renders the sync description", () => {
+        renderFor(<SyncSection />, isHosted, locale);
+
+        expect(
+            screen.getAllByText(new RegExp(expectedName)).length,
+        ).toBeGreaterThan(0);
+    });
+
+    it("renders the Plaud connector hint", () => {
+        renderFor(<PlaudConnectTabs onConnected={vi.fn()} />, isHosted, locale);
+
+        expect(
+            screen.getAllByText(new RegExp(expectedName)).length,
+        ).toBeGreaterThan(0);
+    });
+
+    it("renders the Google Drive export hint", async () => {
+        window.history.replaceState(null, "", "/?googleExport=folder-1");
+        renderFor(
+            <FolderExportActions
+                folder={{
+                    id: "folder-1",
+                    parentId: null,
+                    name: "Team",
+                    kind: "custom",
+                    sortOrder: 0,
+                    scope: "personal",
+                    version: 1,
+                }}
+                providers={{
+                    filesystem: false,
+                    googleDrive: true,
+                    mail: false,
+                }}
+                privateTree
+            />,
+            isHosted,
+            locale,
+        );
+
+        expect(
+            await screen.findByText(new RegExp(`^${expectedName} `)),
+        ).toBeTruthy();
     });
 
     it("renders the Drive managed-folder description", () => {

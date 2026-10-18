@@ -2,7 +2,7 @@
 
 import { useLocale } from "next-intl";
 import { createContext, type ReactNode, useContext } from "react";
-import { productName } from "@/lib/brand";
+import { productName, UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
 
 const HostedDeploymentContext = createContext(false);
 
@@ -32,5 +32,5 @@ export function useHostedDeployment(): boolean {
 export function useProductName(): string {
     const isHosted = useHostedDeployment();
     const locale = useLocale();
-    return isHosted ? "Riffado" : productName(locale);
+    return isHosted ? UPSTREAM_PRODUCT_NAME : productName(locale);
 }

@@ -55,7 +55,6 @@ function brandedSubjects(locale: "en" | "cs-CZ", name: string): string[] {
         t("overCap", { name }),
         t("passwordReset", { name }),
         t("paymentFailed", { name }),
-        t("rebrandAnnouncement", { name }),
         t("test", { name }),
         t("transitionEnded", { name }),
         t("transitionReminder", { name, days: 5 }),
@@ -208,9 +207,9 @@ describe("email templates' HTML", () => {
     ])("uses only the deployment brand in $label emails", async (mode) => {
         mockEnv.IS_HOSTED = mode.isHosted;
         const rendered = await Promise.all(
-            Object.values(templates).map((element) =>
-                renderEmailHtml(element, mode.locale),
-            ),
+            Object.entries(templates)
+                .filter(([name]) => name !== "rebrand-announcement")
+                .map(([, element]) => renderEmailHtml(element, mode.locale)),
         );
         const subjects = brandedSubjects(mode.locale, mode.expected);
 
@@ -220,6 +219,37 @@ describe("email templates' HTML", () => {
                 expect(value).not.toContain(unexpected);
             }
         }
+    });
+
+    it.each([
+        [
+            "en",
+            false,
+            "OpenPlaud is now Riffado. Same code, same team, new name.",
+        ],
+        [
+            "cs-CZ",
+            false,
+            "OpenPlaud je nyní Riffado. Stejný kód, stejný tým, nové jméno.",
+        ],
+        [
+            "en",
+            true,
+            "OpenPlaud is now Riffado. Same code, same team, new name.",
+        ],
+        [
+            "cs-CZ",
+            true,
+            "OpenPlaud je nyní Riffado. Stejný kód, stejný tým, nové jméno.",
+        ],
+    ] as const)("names Riffado in the historical rebrand announcement (%s, hosted=%s)", async (locale, isHosted, expected) => {
+        mockEnv.IS_HOSTED = isHosted;
+        const html = await renderEmailHtml(
+            templates["rebrand-announcement"] as React.ReactElement,
+            locale,
+        );
+
+        expect(html).toContain(expected);
     });
 
     for (const [name, element] of Object.entries(templates)) {

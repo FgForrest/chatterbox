@@ -75,12 +75,12 @@ náhradní, pokud `CHATTERBOX_VERSION` není nastavena.
 | Tag             | Co získáte                                | Kdy použít                              |
 | --------------- | ----------------------------------------  | --------------------------------------- |
 | `latest`        | Nejnovější stabilní verze                 | Výchozí; většina uživatelů              |
-| `0.4.2`, `0.4`  | Konkrétní verze / minoritní linie           | Produkční prostředí; zamčení pro opakovatelnost |
-| `dev`           | Průběžné sestavení z `main`                | Nejnovější vývoj; přijměte občasné chyby |
+| `2026.1`        | Jedno konkrétní vydání                    | Produkční prostředí; zamčení pro opakovatelnost |
+| `dev`           | Průběžné sestavení z větve `dev`          | Nejnovější vývoj; přijměte občasné chyby |
 
-`main` je **průběžná integrační větev** a může být rozbitá v libovolném
-commitu. Stabilní nasazení vychází z vydaných tagovaných verzí. Nikdy
-nedeployujte pouhým klonováním repozitáře a sestavením z `main`;
+`dev` je **integrační větev** a může být rozbitá v libovolném commitu.
+Každý push do `main` je vydání, publikované jako tag `YYYY.N` a `latest`.
+Nikdy nenasazujte klonováním repozitáře a vlastním sestavením;
 používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 v sekci o větvení.
 

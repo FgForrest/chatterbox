@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { deploymentProductName } from "@/lib/deployment-brand";
-import { defaultLocale } from "@/lib/i18n/config";
+import { UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
 import { isOgCardSlug } from "@/lib/seo/og-cards";
 
-const SITE_NAME = deploymentProductName(defaultLocale);
+const SITE_NAME = UPSTREAM_PRODUCT_NAME;
 const TWITTER_HANDLE = "@riffadohq";
 const HOME_CARD = "/og-home.png";
 
@@ -23,8 +22,8 @@ interface MarketingMetadataOptions {
 /**
  * Builds consistent metadata for hosted marketing pages: canonical URL,
  * OpenGraph, and Twitter card. Callers supply copy only. Crafted titles
- * are emitted as `absolute` so the root `%s · Riffado` template does not
- * double the brand.
+ * are emitted as `absolute` so the root layout title template does not
+ * double the product name.
  */
 export function marketingMetadata({
     title,

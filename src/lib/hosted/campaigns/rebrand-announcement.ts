@@ -1,5 +1,5 @@
 import React from "react";
-import { deploymentProductName } from "@/lib/deployment-brand";
+import { UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
 import { hostedUserAudience } from "@/lib/email/audience/hosted-users";
 import type { CampaignDefinition, Recipient } from "@/lib/email/types";
 import { env } from "@/lib/env";
@@ -26,11 +26,10 @@ export function buildRebrandCampaign(): CampaignDefinition {
     }
     const rebrandUrl = `${appUrl}/rebrand`;
     const loginUrl = `${appUrl}/login`;
-    const name = deploymentProductName(defaultLocale);
 
     return {
         slug: REBRAND_CAMPAIGN_SLUG,
-        subject: `OpenPlaud is now ${name}`,
+        subject: `OpenPlaud is now ${UPSTREAM_PRODUCT_NAME}`,
         kind: "announcement",
         audience: () =>
             hostedUserAudience({
@@ -56,7 +55,7 @@ export function buildRebrandCampaign(): CampaignDefinition {
             return {
                 html,
                 subject: createEmailTranslator(locale)("rebrandAnnouncement", {
-                    name: deploymentProductName(locale),
+                    name: UPSTREAM_PRODUCT_NAME,
                 }),
             };
         },

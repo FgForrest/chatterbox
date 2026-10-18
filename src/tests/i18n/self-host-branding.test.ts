@@ -150,7 +150,7 @@ const docsAllowlist = [
 const sourceExclusions = [
     { reason: "tests may name every expected brand", files: /^src\/tests\// },
     {
-        reason: "self-host locale mapping",
+        reason: "product name constants and locale mapping",
         files: /^src\/lib\/brand\.ts$/,
     },
     {
@@ -176,11 +176,6 @@ const sourceExclusions = [
 ] as const;
 
 const sourceAllowlist = [
-    {
-        reason: "single client deployment-brand mapping",
-        files: /^src\/components\/product-name-provider\.tsx$/,
-        value: /^Riffado$/,
-    },
     {
         reason: "hosted-only marketing components",
         files: /^src\/components\/(landing\/|landing-footer\.tsx$)/,

@@ -27,8 +27,8 @@ services:
   app:
     # Pull the published image by default.
     #   - `latest`  → newest stable release (recommended)
-    #   - `0.1.0`   → pin to a specific version
-    #   - `dev`     → rolling build from `main` (unstable, opt-in)
+    #   - `2026.1`  → pin to a specific release
+    #   - `dev`     → rolling build from the `dev` branch (unstable, opt-in)
     # Override via CHATTERBOX_VERSION in .env. RIFFADO_VERSION is accepted for one release.
     image: ghcr.io/fgforrest/chatterbox:${CHATTERBOX_VERSION:-${RIFFADO_VERSION:-latest}}
     container_name: riffado-app

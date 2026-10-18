@@ -1,3 +1,4 @@
+import { UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
 import { Heading, Text } from "../email-components";
 import { getEmailTranslator } from "../email-template-i18n";
 import { EmailLayout } from "./_layout";
@@ -17,6 +18,7 @@ export function RebrandAnnouncementEmail({
     unsubscribeUrl,
 }: RebrandAnnouncementEmailProps) {
     const i18n = getEmailTranslator();
+    const upstream = { name: UPSTREAM_PRODUCT_NAME };
     const opener = recipientName
         ? i18n("Hey {name},", { name: recipientName })
         : i18n("Hey,");
@@ -25,6 +27,7 @@ export function RebrandAnnouncementEmail({
         <EmailLayout
             previewText={i18n(
                 "OpenPlaud is now {name}. Same code, same team, new name.",
+                upstream,
             )}
             footerLink={{
                 href: unsubscribeUrl,
@@ -32,7 +35,7 @@ export function RebrandAnnouncementEmail({
             }}
         >
             <Heading style={emailStyles.h1}>
-                {i18n("OpenPlaud is now {name}.")}
+                {i18n("OpenPlaud is now {name}.", upstream)}
             </Heading>
 
             <Text style={emailStyles.text}>{opener}</Text>
@@ -40,6 +43,7 @@ export function RebrandAnnouncementEmail({
             <Text style={emailStyles.text}>
                 {i18n(
                     "Quick note: the project you signed up for as OpenPlaud is now called {name}. Same code, same team, same AGPL license. We changed the name because the roadmap is broader than one recorder, and the old name kept boxing us in. That's it.",
+                    upstream,
                 )}
             </Text>
 
@@ -84,12 +88,13 @@ export function RebrandAnnouncementEmail({
                 {i18n(
                     "If anything broke for you, hit reply. I read this inbox.",
                 )}{" "}
-                <br /> {i18n("Kacper, from {name}")}
+                <br /> {i18n("Kacper, from {name}", upstream)}
             </Text>
 
             <Text style={emailStyles.text}>
                 {i18n(
                     "You're receiving this because you have a {name} (formerly OpenPlaud) account. This is a one-time announcement about the rebrand. You'll still receive transactional email: password resets, sync notifications, and the like.",
+                    upstream,
                 )}
             </Text>
         </EmailLayout>
