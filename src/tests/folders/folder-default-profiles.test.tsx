@@ -121,7 +121,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         expect(
@@ -159,7 +159,7 @@ describe("folder default profile picker", () => {
         });
 
         fireEvent.pointerDown(
-            screen.getByRole("button", { name: "Default profiles" }),
+            screen.getByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         fireEvent.click(screen.getByText("Default profile for mail"));
@@ -229,7 +229,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="org-folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Default profiles" }),
+            await screen.findByRole("button", { name: "Processing" }),
             { button: 0, ctrlKey: false },
         );
         expect(

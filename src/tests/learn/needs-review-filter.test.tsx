@@ -72,8 +72,12 @@ describe("the Needs review filter", () => {
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
         list([recording("r1", "Weekly"), recording("r2", "Budget", true)]);
         expect(screen.getByText("Weekly")).toBeTruthy();
+        fireEvent.pointerDown(screen.getByRole("button", { name: "Newest" }), {
+            button: 0,
+            ctrlKey: false,
+        });
         fireEvent.click(
-            screen.getByRole("button", { name: "Needs review (1)" }),
+            screen.getByRole("menuitemcheckbox", { name: "Needs review (1)" }),
         );
         expect(screen.queryByText("Weekly")).toBeNull();
         expect(screen.getByText("Budget")).toBeTruthy();
@@ -81,8 +85,12 @@ describe("the Needs review filter", () => {
 
     it("is not offered while nothing waits", () => {
         list([recording("r1", "Weekly")]);
+        fireEvent.pointerDown(screen.getByRole("button", { name: "Newest" }), {
+            button: 0,
+            ctrlKey: false,
+        });
         expect(
-            screen.queryByRole("button", { name: /Needs review/ }),
+            screen.queryByRole("menuitemcheckbox", { name: /Needs review/ }),
         ).toBeNull();
     });
 });

@@ -29,18 +29,18 @@ describe("folder mail addresses", () => {
                         {
                             id: "current",
                             kind: "folder",
-                            address: "acme-vendors@example.test",
+                            address: "weekly@example.com",
                             label: null,
                             primary: true,
                             folderId: "folder",
                             baseAddressId: null,
-                            lastReceivedAt: null,
+                            lastReceivedAt: "2026-10-16T10:00:00.000Z",
                             createdAt: "2026-10-16T10:00:00.000Z",
                         },
                         {
                             id: "older",
                             kind: "folder",
-                            address: "acme-suppliers@example.test",
+                            address: "weekly-old@example.com",
                             label: null,
                             primary: false,
                             folderId: "folder",
@@ -70,5 +70,6 @@ describe("folder mail addresses", () => {
                 name: "Stop {address}",
             }),
         ).toBeNull();
+        expect(screen.queryByText(/last mail/)).toBeNull();
     });
 });

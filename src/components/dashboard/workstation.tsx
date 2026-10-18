@@ -35,6 +35,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
+import { useMailRefresh } from "@/hooks/use-mail-refresh";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTheme } from "@/hooks/use-theme";
@@ -242,6 +243,7 @@ export function Workstation({
     }, []);
 
     const { theme, setTheme } = useTheme(initialSettings.theme);
+    useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
     const initialFolderQueryHandled = useRef(false);
 
@@ -1143,6 +1145,7 @@ export function Workstation({
                                         isOrgAccount ? "org" : "private"
                                     }
                                     recordings={visibleRecordings}
+                                    mailEnabled={mailEnabled}
                                     transcriptions={libraryTranscriptions}
                                     currentRecording={currentRecording}
                                     pendingUploads={pendingUploads}

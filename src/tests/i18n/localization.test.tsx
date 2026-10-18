@@ -127,4 +127,21 @@ describe("localized plural content", () => {
             "5 nahrávek",
         );
     });
+
+    it.each([
+        {
+            source: "{count, plural, one {# item} other {# items}}",
+            forms: ["1 položka", "2 položky", "1,5 položky", "5 položek"],
+        },
+        {
+            source: "{count, plural, one {# folder} other {# folders}}",
+            forms: ["1 složka", "2 složky", "1,5 složky", "5 složek"],
+        },
+    ])("uses every Czech CLDR form for $source", ({ source, forms }) => {
+        expect(
+            [1, 2, 1.5, 5].map((count) =>
+                translatedSourceMessage("cs-CZ", source, { count }),
+            ),
+        ).toEqual(forms);
+    });
 });

@@ -7,7 +7,7 @@ description: Folder exports to disk or Google Drive, backups, and deleting old d
 
 A folder export keeps a copy of a folder's recordings outside Chatterbox, on a disk or in Google Drive, and keeps it up to date. Your administrator decides which of the two your instance offers.
 
-Open a folder (see [Folders](recordings.md#folders)) and click **Settings**:
+Open a folder (see [Folders](recordings.md#folders)) and click **Export**:
 
 ![Folder export settings](images/folder-export.png)
 

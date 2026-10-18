@@ -16,6 +16,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     accounts,
+    aiEnhancements,
     mailMessages,
     recordingFolders,
     transcriptions,
@@ -52,14 +53,14 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         mockEnv: {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared" as const,
-            ORG_ACCOUNT_EMAIL: "org@example.test",
+            ORG_ACCOUNT_EMAIL: "org@example.com",
             ORG_ACCOUNT_PASSWORD: undefined,
             ORG_ACCOUNT_NAME: undefined,
-            OIDC_ISSUER_URL: "https://sso.example.test/realms/acme",
+            OIDC_ISSUER_URL: "https://sso.example.com/realms/test",
             OIDC_CLIENT_ID: "riffado",
             OIDC_CLIENT_SECRET: "secret",
-            MAIL_DOMAIN: "klepna.example",
-            MAIL_ORG_NICKNAME: "acme",
+            MAIL_DOMAIN: "mail.example.com",
+            MAIL_ORG_NICKNAME: "team",
             MAIL_FORMER_ORG_NICKNAMES: [] as string[],
             MAIL_ADDRESS_HASH_SECRET: "m".repeat(40),
             MAIL_INGEST_SECRET: "i".repeat(40),
@@ -96,7 +97,11 @@ import { createSecretAddress, ensureMailbox } from "@/lib/mail/addresses";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { ensureOrgAccount } from "@/lib/org/account";
-import { foldForSearch, searchItems } from "@/lib/search/item-search";
+import {
+    foldForSearch,
+    type ItemSearchScope,
+    searchItems,
+} from "@/lib/search/item-search";
 import { insertRecordings } from "@/tests/integration/items";
 import {
     rawMessage,
@@ -108,8 +113,8 @@ import {
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
-const company = testSigner("company.example");
-const resolver = testResolver([company]);
+const senderSigner = testSigner("example.com");
+const resolver = testResolver([senderSigner]);
 
 const BODY = [
     "Příliš žluťoučký kůň: the pilot budget is approved.",
@@ -118,7 +123,7 @@ const BODY = [
     "Jan Novotny",
     "Head of Lighthouse",
     "",
-    "On Thu, 8 Oct 2026 at 17:40, Eva Buyer <eva@client.example> wrote:",
+    "On Thu, 8 Oct 2026 at 17:40, Eva Buyer <buyer@example.com> wrote:",
     "> The warehouse expects the samples on Monday.",
 ].join("\n");
 
@@ -139,7 +144,7 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         userMailbox: string,
         subject: string,
         body: string,
-        from = "Jan Novotny <jan@company.example>",
+        from = "Jan Novotny <jan@example.com>",
     ): Promise<string> {
         const raw = await signMessage(
             rawMessage(
@@ -148,18 +153,18 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
                     `To: ${userMailbox}`,
                     `Subject: ${subject}`,
                     "Date: Fri, 09 Oct 2026 14:02:00 +0200",
-                    `Message-ID: <${Math.random().toString(36).slice(2)}@company.example>`,
+                    `Message-ID: <${Math.random().toString(36).slice(2)}@example.com>`,
                     "MIME-Version: 1.0",
                     "Content-Type: text/plain; charset=utf-8",
                 ],
                 body,
             ),
-            company,
+            senderSigner,
         );
         const now = new Date();
         const facts = await authenticateMessage(raw, { resolver, now });
         await precheckMail({ recipients: [userMailbox], facts });
-        await ingestMail({
+        const result = await ingestMail({
             raw,
             recipients: [userMailbox],
             spf: "pass",
@@ -171,7 +176,11 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
             .from(mailMessages)
             .orderBy(desc(mailMessages.createdAt))
             .limit(1);
-        if (!message) throw new Error("mail not stored");
+        if (!message) {
+            throw new Error(
+                `mail not stored: ${JSON.stringify(result.outcomes)}`,
+            );
+        }
         return message.id;
     }
 
@@ -179,8 +188,9 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         viewerUserId: string,
         query: string,
         view: "private" | "org" = "private",
+        scopes?: readonly ItemSearchScope[],
     ) =>
-        (await searchItems({ viewerUserId, view, query })).hits.map(
+        (await searchItems({ viewerUserId, view, query, scopes })).hits.map(
             (hit) => hit.id,
         );
 
@@ -194,8 +204,8 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
         orgUserId = (await ensureOrgAccount()) ?? "";
         for (const [id, email, sub] of [
-            ["u-jan", "jan@company.example", "sub-jan"],
-            ["u-eva", "eva@company.example", "sub-eva"],
+            ["u-jan", "jan@example.com", "sub-jan"],
+            ["u-eva", "eva@example.com", "sub-eva"],
         ] as const) {
             await db().insert(users).values({
                 id,
@@ -209,7 +219,7 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
             await ensureRootFolders(id);
         }
         const mailbox = await ensureMailbox("u-jan");
-        await ensureMailbox("u-eva");
+        const evaMailbox = await ensureMailbox("u-eva");
         const secret = await createSecretAddress({
             userId: "u-jan",
             baseAddressId: mailbox?.id ?? "",
@@ -217,15 +227,15 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         });
         token = secret.localPart;
         janMail = await deliver(
-            "jan@klepna.example",
-            "Pilot",
-            `${BODY}\n\nFile the receipts through ${secret.localPart}@klepna.example please.`,
+            `${mailbox?.localPart}@mail.example.com`,
+            "Flight plan",
+            `${BODY}\n\nFile the receipts through ${secret.localPart}@mail.example.com please.`,
         );
         evaMail = await deliver(
-            "eva@klepna.example",
+            `${evaMailbox?.localPart}@mail.example.com`,
             "Eva's own",
             "The pilot budget is Eva's secret too.",
-            "Eva Buyer <eva@company.example>",
+            "Eva Buyer <eva@example.com>",
         );
         expect(evaMail).not.toBe(janMail);
         await insertRecordings(db(), {
@@ -253,6 +263,28 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
                 model: "whisper-1",
                 source: "riffado",
             });
+        await db()
+            .insert(aiEnhancements)
+            .values([
+                {
+                    itemId: "rec-jan",
+                    userId: "u-jan",
+                    summary: encryptText(
+                        "The constellation schedule is approved.",
+                    ),
+                    provider: "openai",
+                    model: "test-model",
+                    source: "riffado",
+                },
+                {
+                    itemId: janMail,
+                    userId: "u-jan",
+                    summary: encryptText("The harbor launch is ready."),
+                    provider: "openai",
+                    model: "test-model",
+                    source: "riffado",
+                },
+            ]);
     }, 120_000);
 
     afterAll(async () => {
@@ -290,6 +322,33 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
 
     it("finds a recording by its transcript", async () => {
         expect(await ids("u-jan", "zeppelin")).toEqual(["rec-jan"]);
+    });
+
+    describe.each([
+        {
+            scope: "title" as const,
+            audioQuery: "weekly",
+            mailQuery: "flight",
+        },
+        {
+            scope: "content" as const,
+            audioQuery: "zeppelin",
+            mailQuery: "zlutoucky",
+        },
+        {
+            scope: "summary" as const,
+            audioQuery: "constellation",
+            mailQuery: "harbor",
+        },
+    ])("$scope search scope", ({ scope, audioQuery, mailQuery }) => {
+        it("finds audio and mail only from that field", async () => {
+            expect(await ids("u-jan", audioQuery, "private", [scope])).toEqual([
+                "rec-jan",
+            ]);
+            expect(await ids("u-jan", mailQuery, "private", [scope])).toEqual([
+                janMail,
+            ]);
+        });
     });
 
     it("reads only the library asked for", async () => {

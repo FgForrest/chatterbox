@@ -5,13 +5,12 @@ description: The recording list, the player, uploads, folders, erasing, and what
 
 ## The recording list
 
-The list on the left of **Recordings** shows your newest recordings first, grouped by day. Each row shows the title and the first words of the transcript, or the length and date when there is no transcript yet.
+The Chatter list on the left shows your newest recordings and mail first, grouped by day. Each row shows the title and the first matching words, or its sender, length and date when there is no text to show.
 
 ![The recording list with the Needs review filter on](images/recording-list-needs-review.png)
 
-- **Search** finds words in titles and transcripts. It reads corrected transcripts, so a name Learn fixed is found as you spell it. It also finds a mail by its sender and by what the mail itself says, not by the earlier messages it quotes, its signature or its disclaimer.
-- **Newest** changes the order: newest first, oldest first, or by name.
-- **Needs review** appears when Learn has proposals waiting on some recordings, and shows just those. See [Learn](learn.md).
+- **Search** reads the fields selected under **Search in**: titles, transcripts and message text, or summaries. It reads corrected transcripts. Mail text excludes quoted earlier messages, signatures and disclaimers.
+- The **All · Newest** menu chooses which channels to show and sorts the result by newest, oldest or name. **Needs review** appears in this menu when Learn has proposals waiting. See [Learn](learn.md).
 - **Organize** switches the list to your folders. See [Folders](#folders).
 - The **⋯** menu on a row opens the recording, downloads its audio, or deletes it.
 
@@ -90,6 +89,6 @@ Click a folder to see its recordings in a table you can sort by title, date, len
 
 ![A folder](images/folder-pane.png)
 
-**Settings** on a folder sets its **Default profiles** for recordings and mail, or sets up an export to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
+**Processing** on a folder sets the profiles for recordings and mail. **Export** sets up an export to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
 
 Next: [Transcripts](transcripts.md)
