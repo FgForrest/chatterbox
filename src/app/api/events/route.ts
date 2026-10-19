@@ -1,25 +1,17 @@
 import { requireApiSession } from "@/lib/auth-server";
-import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { apiHandler } from "@/lib/errors";
+import { subscribePersonalEvents } from "@/lib/events/personal";
 import { getOrgUserId } from "@/lib/org/config";
 import { type OrgEvent, subscribeOrgEvents } from "@/lib/org/events";
 
 export const dynamic = "force-dynamic";
 
-/** Keep-alive cadence, well inside a typical proxy idle timeout. */
 const KEEPALIVE_MS = 25_000;
 
-/**
- * `GET /api/org/events` -- Organization invalidations as Server-Sent Events.
- *
- * Every tab of every account holds one of these. Events carry ids only; the
- * client refetches through the ordinary access-checked routes, so nothing
- * here needs to be filtered per viewer.
- */
+/** Stream the viewer's personal and configured Organization invalidations. */
 export const GET = apiHandler(async (request: Request) => {
-    await requireApiSession(request);
-    if (!(await getOrgUserId())) {
-        throw new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
-    }
+    const session = await requireApiSession(request);
+    const hasOrg = Boolean(await getOrgUserId());
 
     const encoder = new TextEncoder();
     let cleanup = () => {};
@@ -35,9 +27,17 @@ export const GET = apiHandler(async (request: Request) => {
                     cleanup();
                 }
             };
-            const unsubscribe = subscribeOrgEvents((event: OrgEvent) => {
-                write(`data: ${JSON.stringify(event)}\n\n`);
-            });
+            const unsubscribeOrg = hasOrg
+                ? subscribeOrgEvents((event: OrgEvent) => {
+                      write(`data: ${JSON.stringify(event)}\n\n`);
+                  })
+                : () => {};
+            const unsubscribePersonal = subscribePersonalEvents(
+                session.user.id,
+                () => {
+                    write('data: {"type":"mail"}\n\n');
+                },
+            );
             const keepalive = setInterval(
                 () => write(": keep-alive\n\n"),
                 KEEPALIVE_MS,
@@ -45,14 +45,17 @@ export const GET = apiHandler(async (request: Request) => {
             cleanup = () => {
                 closed = true;
                 clearInterval(keepalive);
-                unsubscribe();
+                unsubscribeOrg();
+                unsubscribePersonal();
+                request.signal.removeEventListener("abort", cleanup);
                 try {
                     controller.close();
                 } catch {
                     // Already closed by the client.
                 }
             };
-            request.signal.addEventListener("abort", () => cleanup());
+            request.signal.addEventListener("abort", cleanup, { once: true });
+            if (request.signal.aborted) cleanup();
             write(": connected\n\n");
         },
         cancel() {

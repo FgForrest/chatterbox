@@ -42,6 +42,16 @@ function forward(key: "db" | "sql") {
 
 vi.mock("@/db", () => ({ db: forward("db"), sqlClient: forward("sql") }));
 
+vi.mock("@/lib/auth-server", () => ({
+    requireApiSession: async (request: Request) => ({
+        user: { id: request.headers.get("test-user") },
+    }),
+}));
+vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => "org" }));
+vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => false }));
+vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
+
+import { GET } from "@/app/api/events/route";
 import {
     notifyOrgChange,
     type OrgEvent,
@@ -97,6 +107,40 @@ describeWithDatabase("Organization events (PostgreSQL)", () => {
             type: "recording",
             recordingId: "rec-1",
         });
+    });
+
+    it("delivers Organization changes to both viewers through /api/events while mail is off", async () => {
+        const aborts = [new AbortController(), new AbortController()];
+        try {
+            const responses = await Promise.all(
+                aborts.map((abort, index) =>
+                    GET(
+                        new Request("http://app/api/events", {
+                            signal: abort.signal,
+                            headers: { "test-user": `user-${index}` },
+                        }),
+                    ),
+                ),
+            );
+            const readers = responses.map((response) => {
+                const reader = response.body?.getReader();
+                if (!reader) throw new Error("missing stream");
+                return reader;
+            });
+            for (const reader of readers) {
+                expect(
+                    new TextDecoder().decode((await reader.read()).value),
+                ).toBe(": connected\n\n");
+            }
+            await notifyOrgChange({ type: "tree" });
+            for (const reader of readers) {
+                expect(
+                    new TextDecoder().decode((await reader.read()).value),
+                ).toBe('data: {"type":"tree"}\n\n');
+            }
+        } finally {
+            for (const abort of aborts) abort.abort();
+        }
     });
 
     it("carries tree changes", async () => {
