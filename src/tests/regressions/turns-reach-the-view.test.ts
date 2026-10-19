@@ -2,10 +2,9 @@
  * Stored turns have to survive the same two hops that `source` and `model`
  * once failed (see `transcript-provenance-reaches-view.test.ts`).
  *
- * There are two independent SSR loaders that decrypt transcript text --
- * `app/(app)/dashboard/page.tsx` and `app/(app)/recordings/[id]/page.tsx` --
- * and both feed the same `TranscriptView`. A loader that selects `turns` but
- * does not pass it, or passes it but does not select it, degrades silently:
+ * The dashboard SSR loader decrypts transcript text and feeds the same
+ * `TranscriptView`. A loader that selects `turns` but does not pass it, or
+ * passes it but does not select it, degrades silently:
  * the regex fallback still produces a readable dialog, so nothing errors and
  * nothing looks wrong. The only visible difference is that the turns carry
  * timings and the regex cannot, which is exactly what the knowledge base
@@ -47,7 +46,6 @@ vi.mock("@/lib/auth-server", () => ({
     requireAuth: vi
         .fn()
         .mockResolvedValue({ user: { id: "user-1", email: "a@b.c" } }),
-    requireCompletedOnboarding: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/hosted/admin/guard", () => ({
@@ -74,20 +72,7 @@ vi.mock("@/components/dashboard/workstation", () => ({
     },
 }));
 
-vi.mock("@/components/recordings/recording-workstation", () => ({
-    RecordingWorkstation: function RecordingWorkstation() {
-        return null;
-    },
-}));
-
-vi.mock("next/navigation", () => ({
-    notFound: () => {
-        throw new Error("notFound");
-    },
-}));
-
 import DashboardPage from "@/app/(app)/dashboard/page";
-import RecordingDetailPage from "@/app/(app)/recordings/[id]/page";
 import { toTranscriptList } from "@/components/dashboard/transcription-panel";
 import { db } from "@/db";
 import { transcriptions } from "@/db/schema";
@@ -187,21 +172,7 @@ const RECORDING_ROW = {
     audioReapedAt: null,
 };
 
-/** The same recording as the detail page selects it, with `audioItemColumns`. */
-const AUDIO_ITEM_ROW = {
-    id: "rec-1",
-    userId: "user-1",
-    title: "Board meeting",
-    duration: 60_000,
-    occurredAt: new Date("2026-09-11T18:42:00.000Z"),
-    filesize: 100,
-    deviceSn: "SN-1",
-    waveformPeaks: null,
-    audioReapedAt: null,
-    contentReapedAt: null,
-};
-
-describe("stored turns survive both SSR loaders", () => {
+describe("stored turns survive the dashboard SSR loader", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         projections = [];
@@ -266,20 +237,6 @@ describe("stored turns survive both SSR loaders", () => {
             text: DIARIZED_TEXT,
             readText: "speaker_0: Nazdar.\nspeaker_1: Zdravím.",
         });
-    });
-
-    it("passes turns from the single-recording loader", async () => {
-        queueSelect([AUDIO_ITEM_ROW]);
-        queueSelect([TRANSCRIPT_ROW]);
-        queueSelect([]);
-
-        const element = (await RecordingDetailPage({
-            params: Promise.resolve({ id: "rec-1" }),
-        })) as {
-            props: { transcripts: { turns: TranscriptTurn[] | null }[] };
-        };
-
-        expect(element.props.transcripts[0].turns).toEqual(TURNS);
     });
 
     it("passes no turns from the dashboard loader when the row carries none", async () => {

@@ -40,7 +40,7 @@ Klikněte na konkrétní nahrávku a otevře se napravo.
 
 Nahoře naleznete:
 
-- **Název.** Kliknutím na tužku vedle názvu jej můžete přejmenovat. Vlastnoručně zadaný název nebude nikdy přepsán automaticky generovaným.
+- **Název.** Kliknutím na tužku vedle názvu jej můžete přejmenovat. První dokončené shrnutí může vytvořit jeden automatický název, který další zpracování nenahradí. Pomocí ikony obnovení můžete název kdykoli vytvořit znovu; pokud existuje shrnutí, použije se shrnutí, jinak přepis. Vlastnoručně zadaný název nebude nikdy přepsán automaticky.
 - **Kdy, jak dlouhá, jak velká.**
 - **Odhadovaná spotřeba AI** (viz níže).
 - [Pruh pracovního postupu](processing-and-profiles.md#the-workflow-indicator). Dokud zbývá práce, ukazuje aktuální krok, kdo je na řadě, a jednu očekávanou akci.

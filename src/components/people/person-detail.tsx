@@ -21,6 +21,7 @@ import { PersonActions } from "@/components/people/person-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
+import { itemDetailHref } from "@/lib/item-detail";
 import type { PageRelation } from "@/lib/knowledge/fact-page";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import { initials } from "@/lib/utils";
@@ -253,11 +254,10 @@ export function PersonDetail({
                             {heard.map((appearance) => (
                                 <li key={appearance.recordingId}>
                                     <Link
-                                        href={
-                                            appearance.view === "org"
-                                                ? `/dashboard?recording=${encodeURIComponent(appearance.recordingId)}&view=org`
-                                                : `/recordings/${appearance.recordingId}`
-                                        }
+                                        href={itemDetailHref(
+                                            appearance.recordingId,
+                                            { view: appearance.view },
+                                        )}
                                         className="group flex items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/40"
                                     >
                                         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/30 text-muted-foreground transition-colors group-hover:text-primary">
