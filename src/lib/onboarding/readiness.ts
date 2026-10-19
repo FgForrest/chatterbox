@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
-import { holderAccess } from "@/lib/authz/access-state";
+import { type HolderAccess, holderAccess } from "@/lib/authz/access-state";
 import { AppError } from "@/lib/errors";
 import { isIdpAuthorization } from "@/lib/identity/factory";
 import {
@@ -58,6 +58,7 @@ async function providerReadiness(
     step: "transcription" | "summary",
     pin: ProviderPin | null,
     organizationDefaultsOnly: boolean,
+    readOnlyAccess: () => Promise<HolderAccess>,
 ): Promise<ProviderReadiness> {
     try {
         const selected = await resolveStepProviderSelection({
@@ -65,6 +66,7 @@ async function providerReadiness(
             step,
             pin,
             readOnly: true,
+            readOnlyAccess,
             organizationDefaultsOnly,
         });
         if (selected.kind === "managed") {
@@ -104,11 +106,13 @@ async function channelReadiness(
     channel: ProfileChannel,
     organizationDefaultsOnly: boolean,
     accessCheck: Promise<void>,
+    readOnlyAccess: () => Promise<HolderAccess>,
 ) {
     try {
         await accessCheck;
         const state = await getDefaultProfileState(userId, channel, userId, {
             seed: false,
+            readOnlyAccess,
         });
         const profile = state.effective;
         const profileReadiness: ProfileReadiness = {
@@ -136,6 +140,7 @@ async function channelReadiness(
                 "summary",
                 profile?.settings.steps.summary.provider ?? null,
                 organizationDefaultsOnly,
+                readOnlyAccess,
             ),
             channel === "audio"
                 ? providerReadiness(
@@ -145,6 +150,7 @@ async function channelReadiness(
                           ? profile.settings.steps.transcribe.provider
                           : null,
                       organizationDefaultsOnly,
+                      readOnlyAccess,
                   )
                 : Promise.resolve(unavailable),
         ]);
@@ -186,11 +192,14 @@ function plaudConnectionStatus(
         : "not-connected";
 }
 
-async function checkOrganizationAccess(userId: string): Promise<void> {
+async function checkOrganizationAccess(
+    userId: string,
+    readOnlyAccess: () => Promise<HolderAccess>,
+): Promise<void> {
     if (!isOrgScopeEnabled() || !isIdpAuthorization()) return;
     const organizationId = await getOrgUserId();
     if (!organizationId || organizationId === userId) return;
-    const access = await holderAccess(userId, { readOnly: true });
+    const access = await readOnlyAccess();
     if (!access.ok && access.reason === "unavailable") {
         throw new Error("Organization access could not be checked");
     }
@@ -241,11 +250,28 @@ export async function loadOnboardingReadiness(
     options: { plaudConnection?: { invalidatedAt: Date | null } | null } = {},
 ): Promise<OnboardingReadiness> {
     const personal = capabilities.audience !== "organization-account";
-    const accessCheck = checkOrganizationAccess(userId);
+    let access: Promise<HolderAccess> | undefined;
+    const readOnlyAccess = () => {
+        access ??= holderAccess(userId, { readOnly: true });
+        return access;
+    };
+    const accessCheck = checkOrganizationAccess(userId, readOnlyAccess);
     const [audio, mailProfile, plaud, google, mail] = await Promise.all([
-        channelReadiness(userId, "audio", !personal, accessCheck),
+        channelReadiness(
+            userId,
+            "audio",
+            !personal,
+            accessCheck,
+            readOnlyAccess,
+        ),
         capabilities.mailAvailable || !personal
-            ? channelReadiness(userId, "mail", !personal, accessCheck)
+            ? channelReadiness(
+                  userId,
+                  "mail",
+                  !personal,
+                  accessCheck,
+                  readOnlyAccess,
+              )
             : Promise.resolve(null),
         personal
             ? options.plaudConnection !== undefined

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { captureServerException } from "@/lib/posthog-server";
 import { isSsoEnabled } from "@/lib/sso/config";
 
 /**
@@ -87,13 +88,27 @@ export async function isOrgAccount(userId: string): Promise<boolean> {
 }
 
 /** Reject actions that would give the organization account recordings of its own. */
-export async function assertNotOrgAccount(userId: string): Promise<void> {
+export async function assertNotOrgAccount(
+    userId: string,
+    recorder?: { surface: string; sessionId?: string },
+): Promise<void> {
     if (await isOrgAccount(userId)) {
-        throw new AppError(
+        const error = new AppError(
             ErrorCode.FORBIDDEN,
             "The organization account cannot own recordings",
             403,
         );
+        if (recorder) {
+            const context = { userId, ...recorder };
+            console.warn("[recorder] Organization account refused", context);
+            captureServerException(error, {
+                source: "recorder",
+                distinctId: userId,
+                reason: "organization_account_refused",
+                ...context,
+            });
+        }
+        throw error;
     }
 }
 

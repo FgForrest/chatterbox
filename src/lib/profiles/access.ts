@@ -1,4 +1,4 @@
-import { holderAccess } from "@/lib/authz/access-state";
+import { type HolderAccess, holderAccess } from "@/lib/authz/access-state";
 import { actsForOrganization } from "@/lib/authz/curator";
 import type { ActorContext } from "@/lib/authz/model";
 import { isIdpAuthorization } from "@/lib/identity/factory";
@@ -13,11 +13,16 @@ export interface ProfileAccessSubject {
 /** Whether a user may use profiles from the Organization scope. */
 export async function mayUseOrganizationProfiles(
     userId: string,
-    options: { readOnly?: boolean } = {},
+    options: {
+        readOnly?: boolean;
+        readOnlyAccess?: () => Promise<HolderAccess>;
+    } = {},
 ): Promise<boolean> {
     if (!isOrgScopeEnabled()) return false;
     if (!isIdpAuthorization()) return true;
-    const access = await holderAccess(userId, options);
+    const access = await (options.readOnly && options.readOnlyAccess
+        ? options.readOnlyAccess()
+        : holderAccess(userId, options));
     return access.ok && access.capabilities.has("use");
 }
 
@@ -36,7 +41,10 @@ export async function mayEditProfile(
 export async function mayUseProfile(
     actorUserId: string,
     profile: ProfileAccessSubject,
-    options: { readOnly?: boolean } = {},
+    options: {
+        readOnly?: boolean;
+        readOnlyAccess?: () => Promise<HolderAccess>;
+    } = {},
 ): Promise<boolean> {
     if (profile.scope === "personal") {
         return actorUserId === profile.ownerUserId;
