@@ -6,6 +6,7 @@ import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
 import { getEntity } from "@/lib/knowledge/entities";
 import { factsForPage } from "@/lib/knowledge/fact-page";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { getOrgUserId } from "@/lib/org/config";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export default async function EntityPage({ params }: Params) {
     const session = await requireAuth();
+    const labels = await getVocabularyLabels();
 
     const { id } = await params;
     const userId = session.user.id;
@@ -35,7 +37,7 @@ export default async function EntityPage({ params }: Params) {
         listAliases(userId, { entityId: id }),
         vocabularyVisibleTo(userId),
     ]);
-    const almanac = almanacVocabulary(vocabulary);
+    const almanac = almanacVocabulary(vocabulary, labels);
     const typeLabel = almanac.typeLabels[entity.typeKey] ?? null;
     // Private things are their owner's to change; the Organization's, its
     // account's. Such a thing takes the Organization's types and the core's.

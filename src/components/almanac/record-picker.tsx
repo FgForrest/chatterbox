@@ -4,6 +4,7 @@ import { Command } from "cmdk";
 import { Building2, UserRound } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 /** A person or a thing, as the picker offers it. */
 export interface PickedRecord {
@@ -35,6 +36,7 @@ export function RecordPicker({
     onPick: (record: PickedRecord) => void;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const [records, setRecords] = useState<PickedRecord[] | null>(null);
 
     useEffect(() => {
@@ -128,9 +130,11 @@ export function RecordPicker({
                             </span>
                             <span className="shrink-0 text-xs text-muted-foreground">
                                 {record.kind === "person"
-                                    ? i18n("Person")
-                                    : (typeLabels[record.typeKey] ??
-                                      record.typeKey)}
+                                    ? labels.entityType("person")
+                                    : labels.entityType(
+                                          record.typeKey,
+                                          typeLabels[record.typeKey],
+                                      )}
                                 {record.scope === "org" &&
                                     ` · ${i18n("Organization")}`}
                             </span>

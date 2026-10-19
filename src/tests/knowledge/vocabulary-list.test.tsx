@@ -94,7 +94,7 @@ describe("VocabularyList", () => {
         renderList();
         expect(screen.getByText("From a share")).toBeTruthy();
         expect(
-            screen.getByText("Relation person → project · 2 facts"),
+            screen.getByText("Relation Person → Project · 2 facts"),
         ).toBeTruthy();
         expect(screen.getByText("Kind of thing · 3 entities")).toBeTruthy();
         // Only the adopted one has Keep.

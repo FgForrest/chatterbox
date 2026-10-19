@@ -5,7 +5,7 @@ description: Umožněte uživatelům exportovat složky do Google Drive prostře
 
 Export složky může zapisovat do Google Drive místo do souborového systému serveru. Funguje stejně jako export do souborového systému: každá nahrávka ve stromu složky dostane svou vlastní složku obsahující audio, přepisy a souhrny, které se průběžně aktualizují při změnách. Přepisy a souhrny lze zapisovat jako soubory Markdown, jako Google Docs, nebo obojí.
 
-Integrace je určena pro instance s vlastním hostingem v rámci jednoho Google Workspace. Používá OAuth consent screen typu **Interní**, který mohou využívat pouze účty Vašeho Workspace a který Google nekontroluje.
+Integrace je určena pro instance s vlastním hostingem v rámci jednoho Google Workspace. Používá obrazovku souhlasu OAuth typu **Interní**, kterou mohou využívat pouze účty Vašeho Workspace a kterou Google nekontroluje.
 
 <span id="what-chatterbox-can-see" />
 
@@ -38,10 +38,10 @@ Google Docs jsou znovu generovány pokaždé, když se změní přepis nebo souh
    - Oprávněné URI pro přesměrování:
      `<APP_URL>/api/integrations/google/callback`.
 
-   Zkopírujte client id a secret.
+   Zkopírujte ID klienta a jeho tajný klíč.
 5. **Credentials → Create credentials → API key**. Omezte jej na
    **Google Picker API** a na HTTP referrery `<APP_URL>/*`.
-6. Číslo projektu naleznete na dashboardu projektu (**Project info**).
+6. Číslo projektu naleznete v přehledu projektu (**Project info**).
 
 Poté nastavte:
 

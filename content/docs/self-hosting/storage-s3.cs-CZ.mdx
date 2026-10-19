@@ -19,12 +19,12 @@ a další.
 
 Úložiště můžete nakonfigurovat dvěma způsoby:
 
-1. **Pro jednotlivé uživatele, přes uživatelské rozhraní Nastavení** — `Settings → Storage`. Každý uživatel
-   na instanci s vlastním hostingem může použít jiný bucket. Přihlašovací údaje
+1. **Pro jednotlivé uživatele, přes uživatelské rozhraní Nastavení** — **Nastavení → Úložiště**. Každý uživatel
+   na instanci s vlastním hostingem může použít jiný kontejner. Přihlašovací údaje
    jsou šifrovány uložených dat.
 2. **Pro celou instanci, přes proměnné prostředí** – nastavte
    `DEFAULT_STORAGE_TYPE=s3` a také níže uvedené proměnné `S3_*`. To je užitečné,
-   pokud chcete, aby každý nový účet standardně používal sdílený bucket.
+   pokud chcete, aby každý nový účet standardně používal sdílený kontejner.
 
 Konfigurace přes proměnné prostředí je výchozí, kterou získají noví uživatelé.
 Nastavení v UI toto chování přebírá pro konkrétního uživatele. Kompletní
@@ -70,7 +70,7 @@ S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
 ```
 
-Pokud MinIO běží ve stejné Docker síti jako Klepna, endpoint je
+Pokud MinIO běží ve stejné Docker síti jako Klepna, koncový bod je
 jméno služby (`http://minio:9000`), nikoliv `localhost`.
 
 ### Backblaze B2
@@ -102,7 +102,7 @@ S3_SECRET_ACCESS_KEY=YOUR_SECRET
 V uživatelském rozhraní Nastavení je tlačítko **Testovat připojení**,
 které volá `testConnection()` na poskytovateli úložiště — jde o rychlý dotaz,
 který včas upozorní na nedostatky v oprávněních nebo přihlašovacích údajích,
-ještě než přepnete aktivní backend.
+ještě než přepnete aktivní systém úložiště.
 
 <span id="encryption-at-the-storage-layer" />
 
@@ -110,7 +110,7 @@ ještě než přepnete aktivní backend.
 
 Šifrování uložených dat v Klepna se týká **položek v databázi**,
 nikoli zvukových objektů v úložišti. Pro S3 doporučujeme **šifrování
-na úrovni bucketu na straně serveru** (SSE-S3, SSE-KMS nebo ekvivalent
+na úrovni kontejneru na straně serveru** (SSE-S3, SSE-KMS nebo ekvivalent
 u vašeho poskytovatele). Šifrování každého objektu na úrovni aplikace
 je výrazně složitější změna a zatím není podporována.
 
@@ -119,17 +119,17 @@ přesný rozsah šifrování na úrovni databáze.
 
 <span id="migrating-between-backends" />
 
-## Migrace mezi backendy
+## Migrace mezi systémy úložiště
 
 Klepna neobsahuje vestavěný nástroj na přesunutí všech nahrávek z lokálního úložiště do S3.
 Doporučený postup:
 
 1. Zastavte synchronizaci (aby se nevytvářely nové soubory).
-2. Zrcadlete lokální adresář se zvukovými soubory do vašeho bucketu pomocí `aws s3 sync`,
+2. Zrcadlete lokální adresář se zvukovými soubory do vašeho kontejneru pomocí `aws s3 sync`,
    `rclone` nebo obdobného nástroje.
 3. Přepněte nastavení úložiště v Nastavení.
 4. Znovu povolte synchronizaci.
 
 Záznamy o nahrávkách ukládají přímo klíč v úložišti; rozložení je stejné
-ve všech backendech (`{userId}/{filename}.mp3`, s příponami `(2)`, `(3)`&nbsp;…
-při kolizích), takže běžné zrcadlení lokálního adresáře do bucketu je dostačující.
+ve všech systémech úložiště (`{userId}/{filename}.mp3`, s příponami `(2)`, `(3)`&nbsp;…
+při kolizích), takže běžné zrcadlení lokálního adresáře do kontejneru je dostačující.

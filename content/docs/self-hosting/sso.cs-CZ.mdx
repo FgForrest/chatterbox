@@ -17,32 +17,32 @@ Hostovaný Klepna tyto proměnné ignoruje.
 
 ## Nastavení poskytovatele
 
-Vytvořte důvěrného klienta OpenID Connect (authorization code flow) s těmito parametry:
+Vytvořte důvěrného klienta OpenID Connect (tok s autorizačním kódem) s těmito parametry:
 
 - **Přesměrovací URI:** `<APP_URL>/api/auth/oauth2/callback/oidc`
-- **Scope:** `openid`, `profile`, `email`
-- **PKCE:** `S256` (Klepna vždy posílá code challenge)
+- **Rozsah oprávnění:** `openid`, `profile`, `email`
+- **PKCE:** `S256` (Klepna vždy posílá ověřovací výzvu)
 
 Klepna potřebuje položky `sub`, `email`, `name` a `email_verified`.
 
 <details>
 <summary>Keycloak</summary>
 
-1. Ve svém realm **Clients → Create client**, zvolte **OpenID Connect**,
-   client id `chatterbox`.
+1. Ve svém realmu **Clients → Create client**, zvolte **OpenID Connect**,
+   ID klienta `chatterbox`.
 2. **Client authentication:** zapnuto. **Authentication flow:** pouze Standard flow.
 3. **Valid redirect URIs:** `<APP_URL>/api/auth/oauth2/callback/oidc`.
 4. **Advanced → Proof Key for Code Exchange Code Challenge Method:** `S256`.
 5. Zkopírujte tajný klíč v **Credentials**.
 
-Issuer je `https://<keycloak-host>/realms/<realm>`.
+Vydavatel je `https://<keycloak-host>/realms/<realm>`.
 
 </details>
 
 <details>
 <summary>Microsoft Entra ID</summary>
 
-Zaregistrujte aplikaci s **Web** přesměrovacím URI výše a vytvořte klientský tajný klíč. Issuer je `https://login.microsoftonline.com/<tenant-id>/v2.0`. Entra neposílá `email_verified`; viz [Stávající účty](#existing-accounts).
+Zaregistrujte aplikaci s **Web** přesměrovacím URI výše a vytvořte klientský tajný klíč. Vydavatel je `https://login.microsoftonline.com/<tenant-id>/v2.0`. Entra neposílá `email_verified`; viz [Stávající účty](#existing-accounts).
 
 </details>
 
@@ -57,9 +57,9 @@ OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
 # OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
 ```
 
-Klepna načítá endpoints poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Issuer musí být `https`: Klepna věří ID tokenu, který získá přímo od endpoints poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
+Klepna načítá koncové body poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Adresa vydavatele musí být `https`: Klepna věří ID tokenu, který získá přímo od koncových bodů poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
 
-Všechny tři údaje – issuer, client id a secret – musí být nastaveny; částečná konfigurace zastaví server s chybou.
+Všechny tři údaje – vydavatel, ID klienta a tajný klíč – musí být nastaveny; částečná konfigurace zastaví server s chybou.
 
 <span id="existing-accounts" />
 
@@ -71,7 +71,7 @@ Pokud poskytovatel adresu neověřil, Klepna odmítne propojit s existujícím �
 
 Od této chvíle je účet vázán na uživatelské id poskytovatele (`sub`): jméno i e-mail odpovídají údajům u poskytovatele při každém přihlášení. E-mail, který už používá jiný účet Klepna, nebude převzat; uživatel si ponechá svůj stávající.
 
-Účet je navíc vázán na issuer, který za něj ručil, bez ohledu na `AUTHZ_MODE`. Přesměrování Klepna na jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením „belongs to a different identity provider“. Issuer se odvíjí od adresy poskytovatele, takže přesun téhož realmu na nový hostname, z `http` na `https` nebo pod nový název realmu odmítne stejně všechny. Po takovém přesunu účty jednou odvažte; každý se při dalším přihlášení naváže na nový issuer:
+Účet je navíc vázán na vydavatele, který za něj ručil, bez ohledu na `AUTHZ_MODE`. Přesměrování Klepna na jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením „belongs to a different identity provider“. Vydavatel se odvíjí od adresy poskytovatele, takže přesun téhož realmu na nový název hostitele, z `http` na `https` nebo pod nový název realmu odmítne stejně všechny. Po takovém přesunu účty jednou odvažte; každý se při dalším přihlášení naváže na nového vydavatele:
 
 ```sql
 UPDATE accounts SET issuer = NULL WHERE provider_id = 'oidc';
@@ -128,10 +128,10 @@ uživateli a veřejnými testovacími údaji. Účty a reset popisuje
 
 Ve vlastním realmu nastavte důvěrného webového klienta se třemi klientskými
 rolemi, skupinu pro každé oprávnění a servisního ověřovatele pouze pro čtení.
-Připojte standardní client scopes `basic`, `profile`, `email` a `roles`:
-ID token musí obsahovat `auth_time`, access token klientské role pod
-`resource_access`. Vypněte Full Scope Allowed a explicitně nastavte scope
-mappingy popsané níže. Prvnímu správci přidělte přes skupiny `use` i
+Připojte standardní rozsahy oprávnění klienta `basic`, `profile`, `email` a `roles`:
+ID token musí obsahovat `auth_time`, přístupový token klientské role pod
+`resource_access`. Vypněte Full Scope Allowed a explicitně nastavte mapování
+rozsahů oprávnění popsané níže. Prvnímu správci přidělte přes skupiny `use` i
 `access.manage`. Názvy skupin jsou libovolné, aplikace používá jejich UUID.
 MCP klienty nastavte podle [MCP dokumentace](./mcp).
 `bun scripts/export-authz.ts` vypíše katalog oprávnění aplikace.
@@ -164,9 +164,9 @@ administrátorským účtem. Změřeno na Keycloaku 26.7.2:
 | odhlásit osobu u poskytovatele                     | `realm-management/manage-users` |
 
 Správcovské skupině přidělte `manage-users` a `view-clients`
-a obě role zahrňte do scope mappingu přihlašovacího klienta. Při vypnutém
+a obě role zahrňte do mapování rozsahu oprávnění přihlašovacího klienta. Při vypnutém
 Full Scope Allowed samotné členství ve skupině nestačí. Ověřovatel má
-`view-users` a `view-clients` jak na service accountu, tak ve scope mappingu.
+`view-users` a `view-clients` jak na servisním účtu, tak v mapování rozsahu oprávnění.
 MCP klienti nedostávají žádné role `realm-management`.
 
 `view-clients` pokrývá nasazení omezující čtení klientských rolí: požadavek
@@ -177,8 +177,8 @@ Běhové přihlašovací údaje nepotřebují `manage-clients` ani `realm-admin`
 ### Relace
 
 - Přihlášení je odmítnuto dřív, než vznikne jakýkoli účet, pokud
-  poskytovatel neudělí `use`. ID token i access token se ověřují (podpis,
-  issuer, audience, expirace, klient).
+  poskytovatel neudělí `use`. ID token i přístupový token se ověřují (podpis,
+  vydavatel, příjemce, expirace, klient).
 - Tokeny poskytovatele se uchovávají pro každou relaci zvlášť, šifrovaně,
   pouze na serveru; nikdy se nedostanou do prohlížeče a zanikají s relací.
 - Relace si u poskytovatele znovu ověřuje svá oprávnění každých
@@ -190,7 +190,7 @@ Běhové přihlašovací údaje nepotřebují `manage-clients` ani `realm-admin`
   `AUTHZ_ADMIN_MAX_AUTH_AGE` (výchozí 8 hodin). Po vypršení nabídne obrazovka
   nové přihlášení s `prompt=login` a `max_age=0`, které se vrátí do nastavení
   přístupů. Rozpracovaná změna se automaticky neodešle.
-- Účet je vázán na issuer, který za něj ručil; viz
+- Účet je vázán na vydavatele, který za něj ručil; viz
   [Stávající účty](#existing-accounts).
 
 ### API klíče a záznamník schůzek
@@ -218,7 +218,7 @@ klíče; záznamník nabídne opakování toho, co si ponechal.
 | osoba deaktivována nebo smazána u poskytovatele | při prvním požadavku po vypršení posledního ověření (nejvýše `AUTHZ_VERIFICATION_MAX_AGE`) |
 | skupina změněna přímo u poskytovatele       | do `AUTHZ_VERIFICATION_MAX_AGE`                |
 
-Access token, který už AI klient drží, platí až do své expirace (doba
+Přístupový token, který už AI klient drží, platí až do své expirace (doba
 platnosti v realmu, 15 minut u uživatelských MCP klientů v lokálním příkladu);
 Klepna při každém volání MCP znovu kontroluje `use` dané osoby. Pokud
 váš adresář deaktivuje lidi ještě před Keycloakem, celkové zpoždění
@@ -244,7 +244,7 @@ osoba v obou případech nedostane.
 
 ## Vyzkoušení lokálně
 
-End-to-end stack v repozitáři má Keycloak override s testovacím realm (`riffado-e2e`, uživatelé `alice`, `bob`, `carol`, `dave`, všichni s heslem `<name>-password`):
+Sada služeb pro testování celého systému v repozitáři má doplňkovou konfiguraci Keycloaku s testovacím realmem (`riffado-e2e`, uživatelé `alice`, `bob`, `carol`, `dave`, všichni s heslem `<name>-password`):
 
 ```bash
 RIFFADO_E2E_APP_URL=http://localhost:3310 \

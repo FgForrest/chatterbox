@@ -1,18 +1,19 @@
 ---
 title: Oznámení
-description: Push oznámení Bark, oznámení v prohlížeči a e-mail — backendy a konfigurace.
+description: Oznámení na telefon přes Bark, oznámení v prohlížeči a e-mail — způsoby doručování a konfigurace.
 ---
 
-Klepna Vás může upozornit, když nahrávka dokončí synchronizaci nebo když je dokončen přepis. V základu jsou tři backendy: Bark (iOS push), oznámení prohlížeče (Web Notifications API) a e-mail (SMTP). Každý backend funguje samostatně; můžete povolit libovolnou kombinaci.
+Klepna Vás může upozornit, když nahrávka dokončí synchronizaci nebo když je dokončen přepis. V základu jsou tři způsoby doručování: Bark (oznámení na iOS), oznámení prohlížeče (Web Notifications API) a e-mail (SMTP). Každý způsob doručování funguje samostatně; můžete povolit libovolnou kombinaci.
 
-Oznámení nikdy neblokují synchronizační smyčku — každý backend má pevně nastavený časový limit (tři sekundy pro Bark, podobně pro e-mail) a případné chyby jsou zaznamenány do logu, ale neopakují se ve frontě.
+Oznámení nikdy neblokují synchronizační smyčku — každý způsob doručování má pevně nastavený časový limit (tři sekundy pro Bark, podobně pro e-mail) a případné chyby jsou zaznamenány do logu, ale neopakují se ve frontě.
 
-## Bark (iOS push)
+<span id="bark-ios-push" />
 
-[Bark](https://github.com/Finb/Bark) je bezplatná, open-source iOS push
-služba s možností vlastního hostingu. Nainstalujte si aplikaci Bark, která Vám poskytne osobní push URL. Toto URL vložíte do Klepna.
+## Bark (oznámení na iOS)
 
-**Nastavení → Oznámení → Bark push URL.** Vložte URL, kterou Vám Bark poskytl (vypadá jako `https://api.day.app/<your-key>`). URL se ukládá pro každého uživatele zvlášť.
+[Bark](https://github.com/Finb/Bark) je bezplatná služba pro oznámení na iOS s otevřeným zdrojovým kódem s možností vlastního hostingu. Nainstalujte si aplikaci Bark, která Vám poskytne osobní URL pro oznámení. Toto URL vložíte do Klepna.
+
+**Nastavení → Oznámení → URL pro oznámení Bark.** Vložte URL, kterou Vám Bark poskytl (vypadá jako `https://api.day.app/<your-key>`). URL se ukládá pro každého uživatele zvlášť.
 
 Klepna posílá oznámení s `level: "timeSensitive"`, díky čemuž
 projdou přes režim Soustředění v iOS. Pokud oznámení selže, synchronizace běží dále bez přerušení — pokud očekávané oznámení nepřišlo, zkontrolujte serverové logy.
@@ -37,15 +38,15 @@ Před zapnutím e-mailových oznámení musí správce instance nastavit SMTP; v
 **Nastavení → Oznámení → E-mail → Povolit.** Klepna zašle zprávu na e-mail k Vašemu účtu, když je nahrávka synchronizována nebo dokončen přepis.
 
 Pokud si chcete ověřit, že vše funguje, aniž byste čekali na ostrou událost, klikněte na
-**Nastavení → Oznámení → E-mail → Odeslat testovací e-mail**. Pokud správce vlastního hostingu nenakonfiguroval SMTP, backend skončí elegantně a do serverového logu zapíše varování "SMTP není nakonfigurováno" — žádný e-mail neodejde a v uživatelském rozhraní se neobjeví žádná chyba.
+**Nastavení → Oznámení → E-mail → Odeslat testovací e-mail**. Pokud správce vlastního hostingu nenakonfiguroval SMTP, způsob doručování se řádně ukončí a do serverového logu zapíše varování "SMTP není nakonfigurováno" — žádný e-mail neodejde a v uživatelském rozhraní se neobjeví žádná chyba.
 
 <span id="picking-a-backend" />
 
-## Výběr backendu
+## Výběr způsobu doručování
 
 | Potřeba                                | Použijte            |
 | -------------------------------------- | -------------------- |
-| Push na telefon, mimo pracovní stůl    | Bark                 |
+| Oznámení na telefon, mimo pracovní stůl    | Bark                 |
 | Oznámení při otevřeném Klepna         | Oznámení v prohlížeči |
 | Auditní stopa dokončených akcí         | E-mail               |
 | Upozornění týmu s více uživateli       | E-mail               |

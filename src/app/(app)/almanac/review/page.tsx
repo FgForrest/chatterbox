@@ -9,6 +9,7 @@ import {
     listVocabularyProposals,
     vocabularyVisibleTo,
 } from "@/lib/knowledge/vocabulary";
+import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { reviewQueue } from "@/lib/learn/pending";
 import { isOrgAccount } from "@/lib/org/config";
 import { taskViewer } from "@/lib/tasks/access";
@@ -26,6 +27,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function ReviewQueuePage() {
     const session = await requireAuth();
+    const labels = await getVocabularyLabels();
     const i18n = await getExtracted();
     const organization = await isOrgAccount(session.user.id);
     const rows = isLearnDeploymentAvailable()
@@ -42,14 +44,20 @@ export default async function ReviewQueuePage() {
         ? await vocabularyVisibleTo(session.user.id, { sharedOnly: true })
         : { entityTypes: [], relationTypes: [] };
     const entityTypes = [
-        { key: "person", label: i18n("Person") },
+        { key: "person", label: labels.entityType("person") },
         ...vocabulary.entityTypes
             .filter((type) => !type.adoptedAsKey)
-            .map((type) => ({ key: type.key, label: type.label })),
+            .map((type) => ({
+                key: type.key,
+                label: labels.entityType(type.key, type.label),
+            })),
     ];
     const relationTypes = vocabulary.relationTypes
         .filter((type) => !type.adoptedAsKey)
-        .map((type) => ({ key: type.key, label: type.label }));
+        .map((type) => ({
+            key: type.key,
+            label: labels.relation(type.key, type.label),
+        }));
 
     return (
         <div className="mx-auto max-w-3xl space-y-8">

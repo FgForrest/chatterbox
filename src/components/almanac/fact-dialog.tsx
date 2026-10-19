@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { parseApiError } from "@/lib/api-errors";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 /** A relation a fact may use, as the viewer's vocabulary has it. */
 export interface FactRelation {
@@ -61,6 +62,7 @@ export function FactDialog({
     editing?: { factId: string; relationKey: string; other: Other };
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const usable = relations.filter(
         (relation) =>
@@ -169,7 +171,12 @@ export function FactDialog({
                     <p className="text-sm">
                         {i18n(
                             "“{relation}” holds one value at a time, and it has one already. Replace it?",
-                            { relation: relation?.label ?? relationKey },
+                            {
+                                relation: labels.relation(
+                                    relationKey,
+                                    relation?.label,
+                                ),
+                            },
                         )}
                     </p>
                 ) : (
@@ -190,7 +197,10 @@ export function FactDialog({
                                     key={candidate.key}
                                     value={candidate.key}
                                 >
-                                    {candidate.label}
+                                    {labels.relation(
+                                        candidate.key,
+                                        candidate.label,
+                                    )}
                                 </option>
                             ))}
                         </NativeSelect>

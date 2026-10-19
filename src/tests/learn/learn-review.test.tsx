@@ -646,7 +646,7 @@ describe("LearnReview", () => {
             await screen.findByRole("button", { name: "Review (2)" }),
         );
         const fact = screen.getByRole("checkbox", {
-            name: "Speaker 1 — works_for — Tavesi",
+            name: "Speaker 1 — works for — Tavesi",
         }) as HTMLInputElement;
         expect(fact.disabled).toBe(true);
         expect(screen.getByText("replaces Acme")).toBeTruthy();
@@ -656,7 +656,7 @@ describe("LearnReview", () => {
         );
         await waitFor(() => expect(fact.disabled).toBe(false));
         expect(fact.getAttribute("aria-label")).toBe(
-            "Jan — works_for — Tavesi",
+            "Jan — works for — Tavesi",
         );
         expect(screen.queryByText("needs Speaker 1 named")).toBeNull();
         expect(fetch).toHaveBeenCalled();
@@ -1606,7 +1606,7 @@ describe("LearnReview", () => {
             expect(headings[0]).toMatch(/^Speakers/);
             expect(headings[1]).toMatch(/^New in the Almanac/);
             const fact = screen.getByRole("checkbox", {
-                name: "Petra Kolářová — works_for — Veltrix",
+                name: "Petra Kolářová — works for — Veltrix",
             }) as HTMLInputElement;
             const speaker = screen.getByRole("checkbox", {
                 name: "Accept speaker_1 as Petra Kolářová",

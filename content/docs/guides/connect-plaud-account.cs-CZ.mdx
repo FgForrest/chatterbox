@@ -3,7 +3,7 @@ title: Připojení vašeho Plaud účtu
 description: Přihlášení do Plaud z Klepna, včetně postupu pro Google/Apple.
 ---
 
-Klepna se přihlašuje přímo do Plaud — stejným způsobem jako oficiální aplikace Plaud. Žádný scraping obrazovky, žádný bezhlavý prohlížeč, žádný reverzně inženýrovaný provoz mobilní aplikace. Způsob přihlášení závisí na tom, jak jste si původně vytvořili svůj Plaud účet.
+Klepna se přihlašuje přímo do Plaud — stejným způsobem jako oficiální aplikace Plaud. Žádné automatické získávání údajů z obrazovky, žádný bezhlavý prohlížeč, žádný reverzně inženýrovaný provoz mobilní aplikace. Způsob přihlášení závisí na tom, jak jste si původně vytvořili svůj Plaud účet.
 
 <span id="email-and-code-default-path" />
 
@@ -19,7 +19,7 @@ Kód je předán serverům Plaud a **nikdy není uložen lokálně**. Po přihl�
 [Šifrování uložených dat](../reference/encryption-at-rest)
 pro podrobnosti.
 
-Region účtu Plaud (Global, EU, Asia Pacific) je detekován automaticky: pokud globální endpoint odpoví `status: -302` a regionálním hostitelem API v `data.domains.api`, Klepna následuje přesměrování a uloží region účtu spolu s tokenem.
+Region účtu Plaud (globální, EU, Asie a Pacifik) je detekován automaticky: pokud globální koncový bod odpoví `status: -302` a regionálním hostitelem API v `data.domains.api`, Klepna následuje přesměrování a uloží region účtu spolu s tokenem.
 
 <span id="signed-up-with-google-or-apple" />
 
@@ -32,10 +32,10 @@ Skutečné „Přihlášení pomocí Google/Apple“ přímo v Klepna je technic
 
 <span id="easy-path-the-connector-extension" />
 
-### Jednodušší cesta: rozšíření „connector“
+### Jednodušší cesta: rozšíření konektoru
 
 Nainstalujte si [rozšíření prohlížeče](https://github.com/riffado/connector/releases/latest)
-prohlížečové rozšíření (AGPL-3.0) — stáhněte si aktuální verzi z GitHubu a načtěte ji jako rozbalené rozšíření. S nainstalovaným rozšířením se na přihlašovací obrazovce zobrazí tlačítko **Přihlásit se do Plaud**. Přihlásíte se do `web.plaud.ai` obvyklým způsobem; rozšíření předá výsledný přístupový token vaší instanci Klepna. Žádné kopírování a vkládání, žádné devtools.
+prohlížečové rozšíření (AGPL-3.0) — stáhněte si aktuální verzi z GitHubu a načtěte ji jako rozbalené rozšíření. S nainstalovaným rozšířením se na přihlašovací obrazovce zobrazí tlačítko **Přihlásit se do Plaud**. Přihlásíte se do `web.plaud.ai` obvyklým způsobem; rozšíření předá výsledný přístupový token vaší instanci Klepna. Žádné kopírování a vkládání, žádné vývojářské nástroje.
 
 <span id="manual-fallback-paste-the-token" />
 
@@ -46,15 +46,15 @@ Pokud rozšíření nemůžete nebo nechcete instalovat:
 1. Otevřete [web.plaud.ai](https://web.plaud.ai) v nové záložce a přihlaste se přes Google nebo Apple jako obvykle.
 2. Otevřete vývojářské nástroje prohlížeče (F12 / Cmd+Option+I) a přejděte na **Application → Local Storage → https://web.plaud.ai** (v některých prohlížečích **Storage**).
 3. Zkopírujte hodnotu `pld_tokenstr`. Jde o dlouhodobě platný uživatelský token. Nekopírujte hlavičku `Authorization` z požadavků `/device/list` ani `/file/simple/web`: ty používají krátkodobé tokeny pracovního prostoru.
-4. V Klepna přepněte na kartu **Vložit token**, vyberte region svého účtu Plaud (Global, EU nebo APAC) a vložte hodnotu.
+4. V Klepna přepněte na kartu **Vložit token**, vyberte region svého účtu Plaud (globální, EU nebo APAC) a vložte hodnotu.
 
 Vložený token je uložen a šifrován stejně jako token získaný běžným způsobem přes kód.
 
 <span id="what-about-refresh-tokens" />
 
-## A co refresh tokeny?
+## A co obnovovací tokeny?
 
-API Plaud nevydává refresh tokeny. Odpověď na OTP přihlášení obsahuje pouze přístupový token, což je dlouhodobě platný JWT token (pozorovaná platnost cca 300 dní). Po vypršení platnosti se v dashboardu zobrazí banner s výzvou k opětovnému připojení a celý výše uvedený postup zopakujete. Žádné tiché obnovení tokenu na pozadí zde neprobíhá.
+API Plaud nevydává obnovovací tokeny. Odpověď na OTP přihlášení obsahuje pouze přístupový token, což je dlouhodobě platný JWT token (pozorovaná platnost cca 300 dní). Po vypršení platnosti se v přehledu zobrazí pruh s výzvou k opětovnému připojení a celý výše uvedený postup zopakujete. Žádné tiché obnovení tokenu na pozadí zde neprobíhá.
 
 <span id="switching-accounts" />
 

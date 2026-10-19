@@ -2,6 +2,7 @@ import { getExtracted } from "next-intl/server";
 import { VocabularyList } from "@/components/people/vocabulary-list";
 import { requireAuth } from "@/lib/auth-server";
 import { listOwnTypes, vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { isOrgAccount } from "@/lib/org/config";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function VocabularyPage() {
     const session = await requireAuth();
+    const labels = await getVocabularyLabels();
     const i18n = await getExtracted();
     const userId = session.user.id;
     const organization = await isOrgAccount(userId);
@@ -29,12 +31,18 @@ export default async function VocabularyPage() {
         .map((type) => ({
             kind: type.kind,
             key: type.key,
-            label: type.label,
+            label:
+                type.kind === "entity"
+                    ? labels.entityType(type.key, type.label)
+                    : labels.relation(type.key, type.label),
             core: type.layer === "core",
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
     const entityTypeLabels = Object.fromEntries(
-        vocabulary.entityTypes.map((type) => [type.key, type.label]),
+        vocabulary.entityTypes.map((type) => [
+            type.key,
+            labels.entityType(type.key, type.label),
+        ]),
     );
 
     return (

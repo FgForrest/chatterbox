@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 /** A new record's payload, as the review shows it. */
 export interface NewRecordView {
@@ -121,6 +122,7 @@ export function NewRecordItem({
     onLinked: (choice: NewRecordChoice) => Promise<void>;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const current = newRecordAs(payload, choice);
     const [name, setName] = useState(current.name);
     const [typeKey, setTypeKey] = useState(current.typeKey);
@@ -128,7 +130,12 @@ export function NewRecordItem({
     const [picking, setPicking] = useState(false);
     const linked = linkedRecordId(choice);
     const typeLabel = (key: string | null) =>
-        entityTypes.find((type) => type.key === key)?.label ?? key ?? "";
+        key
+            ? labels.entityType(
+                  key,
+                  entityTypes.find((type) => type.key === key)?.label,
+              )
+            : "";
 
     const keep = (next: { name: string; typeKey: string | null }) =>
         onDecide("accepted", next);
@@ -227,13 +234,16 @@ export function NewRecordItem({
                             >
                                 {entityTypes.map((type) => (
                                     <option key={type.key} value={type.key}>
-                                        {type.label}
+                                        {labels.entityType(
+                                            type.key,
+                                            type.label,
+                                        )}
                                     </option>
                                 ))}
                             </NativeSelect>
                         ) : (
                             <span className="px-3 text-xs text-muted-foreground">
-                                {i18n("Person")}
+                                {labels.entityType("person")}
                             </span>
                         )}
                         <div className="hidden items-center justify-end gap-1 @[560px]/learn:flex">
@@ -323,7 +333,7 @@ export function NewRecordItem({
                             {linked && (
                                 <>
                                     {payload.kind === "person"
-                                        ? i18n("Person")
+                                        ? labels.entityType("person")
                                         : typeLabel(current.typeKey)}
                                     {" · "}
                                 </>

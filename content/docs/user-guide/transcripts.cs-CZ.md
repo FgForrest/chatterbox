@@ -12,7 +12,7 @@ Nahrávka bez přepisu nabízí dvě tlačítka:
 - **Přepsat** odešle zvuk k poskytovateli přepisů Vašeho účtu (Nastavení → Přepis). Funguje i tehdy, když nahrávka ještě čeká na zařazení.
 - **Přepsat v prohlížeči** spustí Whisper ve vašem prohlížeči. Je to zdarma a nic neopustí váš počítač, ale je to pomalejší.
 
-**Znovu přepsat** u nahrávky, která už má přepis, nejprve požádá o potvrzení a pak spustí přepis s vaším aktuálním poskytovatelem. Jde o placené volání poskytovatele. Nahradí přepis a znovu vytvoří shrnutí, název, témata i výsledky Learn. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
+**Znovu přepsat** u nahrávky, která už má přepis, nejprve požádá o potvrzení a pak spustí přepis s vaším aktuálním poskytovatelem. Jde o placené volání poskytovatele. Nahradí přepis a znovu vytvoří shrnutí, název, témata i poznatky z Učení. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
 
 Nahrávka se přepíše automaticky až po zařazení a pouze tehdy, když má její [profil zpracování](processing-and-profiles.md) u přepisu zapnuté **Spouštět automaticky**. Profil může zvolit jiného poskytovatele a jazyk než výchozí hodnoty účtu používané tlačítkem **Přepsat**.
 
@@ -30,7 +30,7 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 | OpenAI `whisper-1`, Groq, místní Whisper | Ne | Ano | Dlouhé projevy se dělí do odstavců. |
 | OpenAI `gpt-4o-transcribe`, Google Gemini | Dle případu | Ne | |
 
-**Na časování záleží.** Témata, Learn, přehrávání jedné věty a navigace v přepisu vyžadují informaci o tom, kdy byla která replika řečena. Přepis bez časování se zobrazí jako prostý text.
+**Na časování záleží.** Témata, Učení, přehrávání jedné věty a navigace v přepisu vyžadují informaci o tom, kdy byla která replika řečena. Přepis bez časování se zobrazí jako prostý text.
 
 **Jména z Almanachu.** ElevenLabs Scribe v2 a Speechmatics dostanou s každou nahrávkou až 500 jmen z vašeho [Almanachu](almanac.md): nejprve vaše, pak osoby a věci zmíněné nedávno. Jména pak napíšou správně mnohem častěji. Jména jsou odesílána u každé nahrávky, včetně osob, jež se v ní nevyskytují.
 
@@ -40,7 +40,7 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 ## Čtení přepisu
 
-![Přepis s mluvčími, tématy a návrhy Learn](images/transcript-speakers.png)
+![Přepis s mluvčími, tématy a poznatky z Učení](images/transcript-speakers.png)
 
 Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. **Sbalit přepis** na pravém konci záhlaví přepis skryje; na stejném místě se pak zobrazí **Rozbalit přepis**. V zápatí vidíte, který poskytovatel a model jej vytvořil, v jakém jazyce a jak je dlouhý.
 
@@ -52,7 +52,7 @@ Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně od
 
 - Klikněte na štítek, například **Mluvčí 2**, a vyberte, kdo to je, ze svého [Almanachu](almanac.md), vytvořte novou osobu nebo označte mluvčího jako **Neznámý**.
 - Přerušovaný štítek končící na **?**, například **Priya Raman?**, je návrh. Klikněte na **✓** pro potvrzení nebo **×** pro odmítnutí; odmítnuté jméno již nebude tomuto mluvčímu nabídnuto. **▷** přehraje okamžik, na jehož základě návrh vznikl.
-- **Hádaní mluvčích** nad přepisem jsou návrhy Learn. Viz [Learn](learn.md).
+- **Hádaní mluvčích** nad přepisem jsou poznatky z Učení. Viz [Učení](learn.md).
 - Pravým tlačítkem myši na štítek přehrajete další výstup daného mluvčího.
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.
@@ -87,7 +87,7 @@ Přednáška nebo dlouhý monolog se rozdělí do odstavců zhruba po půl minut
 
 ## Opravená slova
 
-Pokud Learn opravila špatně rozpoznané jméno, přepis jej zobrazuje již opravené. Opravená slova jsou podtržená.
+Pokud Učení opravilo špatně rozpoznané jméno, přepis jej zobrazuje již opravené. Opravená slova jsou podtržená.
 
 | Opraveno | Původní |
 | --- | --- |
@@ -97,7 +97,7 @@ Pokud Learn opravila špatně rozpoznané jméno, přepis jej zobrazuje již opr
 - Klikněte na opravené slovo a zrušíte tuto jednu opravu.
 - Shrnutí, témata, vyhledávání, exporty i API vždy využívají opravený text.
 
-Viz [Learn](learn.md), kde vznikají opravy.
+Viz [Učení](learn.md), kde vznikají opravy.
 
 <span id="copying-and-downloading" />
 

@@ -20,24 +20,30 @@ import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
-    useExtracted: () => (message: string, values?: Record<string, unknown>) => {
-        const count = Number(values?.count ?? 0);
-        if (
-            message ===
-            "{count, plural, one {# change applied} other {# changes applied}}"
-        ) {
-            return `${count} ${count === 1 ? "change" : "changes"} applied`;
-        }
-        if (
-            message ===
-            "Review finished: {count, plural, one {# change} other {# changes}} made"
-        ) {
-            return `Review finished: ${count} ${count === 1 ? "change" : "changes"} made`;
-        }
-        return message.replace(/\{(\w+)\}/g, (_match, key: string) =>
-            String(values?.[key] ?? ""),
-        );
-    },
+    useExtracted:
+        () =>
+        (
+            input: string | { message: string },
+            values?: Record<string, unknown>,
+        ) => {
+            const message = typeof input === "string" ? input : input.message;
+            const count = Number(values?.count ?? 0);
+            if (
+                message ===
+                "{count, plural, one {# change applied} other {# changes applied}}"
+            ) {
+                return `${count} ${count === 1 ? "change" : "changes"} applied`;
+            }
+            if (
+                message ===
+                "Review finished: {count, plural, one {# change} other {# changes}} made"
+            ) {
+                return `Review finished: ${count} ${count === 1 ? "change" : "changes"} made`;
+            }
+            return message.replace(/\{(\w+)\}/g, (_match, key: string) =>
+                String(values?.[key] ?? ""),
+            );
+        },
 }));
 
 vi.mock("sonner", () => ({

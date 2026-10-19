@@ -1,14 +1,14 @@
 ---
 title: Externí MCP server
-description: Umožněte AI klientům a backendovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle oprávnění klienta a jeho držitele.
+description: Umožněte AI klientům a serverovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle oprávnění klienta a jeho držitele.
 ---
 
 Samoobslužný Klepna, který se přihlašuje přes [jednotné přihlášení](./sso),
-může také poskytovat endpoint MCP (Model Context Protocol). Lidé k němu
-připojí svého AI klienta a ptají se na své nahrávky; backendové služby
-čtou, co Organizace ví. Klepna zde funguje jako resource server:
+může také poskytovat koncový bod MCP (Model Context Protocol). Lidé k němu
+připojí svého AI klienta a ptají se na své nahrávky; serverové služby
+čtou, co Organizace ví. Klepna zde funguje jako server chráněných zdrojů:
 tokeny vydává realm a oprávnění tokenu určují, do jakých oblastí
-se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z claimu `scope`
+se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z položky `scope`
 odděleného mezerami. Režim `AUTHZ_MODE=local` zachovává původní klientské
 role Keycloaku (`resource_access[MCP_AUDIENCE].roles`).
 
@@ -89,10 +89,10 @@ MCP_AUDIENCE=chatterbox-mcp          # client id of the resource client below
   "MCP_AUDIENCE needs single sign-on (OIDC_ISSUER_URL, OIDC_CLIENT_ID,
   OIDC_CLIENT_SECRET)" nebo "MCP_AUDIENCE needs APP_URL".
 - Tokeny musí pocházet z realmů jednotného přihlášení. Samostatné
-  nastavení issueru není: druhý realm by mohl vydat token, jehož `sub`
+  nastavení vydavatele není: druhý realm by mohl vydat token, jehož `sub`
   se bude shodovat se skutečným uživatelem.
 - Při nezadané hodnotě `MCP_AUDIENCE` odpovídá `/api/mcp` a jeho metadata 404.
-- Hosted Klepna jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
+- Hostovaná Klepna jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
 - `docker-compose.yml` předává všechny tyto proměnné dál.
 - Při prázdném `MCP_ALLOWED_CLIENTS` server při startu zapíše do logu
   varování: volat smí kterýkoliv klient realmu, jehož token nese potřebná oprávnění.
@@ -100,8 +100,8 @@ MCP_AUDIENCE=chatterbox-mcp          # client id of the resource client below
 Klepna načítá `issuer` realmu a podpisové klíče z
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Hodnota `iss`
 tokenu musí být přesně stejně jako `issuer`. Když je `OIDC_ISSUER_URL`
-interní adresa (například služba v compose), opravte veřejný hostname v Keycloaku (`KC_HOSTNAME`), ať realm uvádí
-stejného issuer pro Klepna i klienty, kteří získávají tokeny.
+interní adresa (například služba v compose), opravte veřejný název hostitele v Keycloaku (`KC_HOSTNAME`), ať realm uvádí
+stejného vydavatele pro Klepna i klienty, kteří získávají tokeny.
 
 <span id="keycloak-setup" />
 
@@ -111,30 +111,30 @@ Ruční mapování rolí níže popisuje **`AUTHZ_MODE=local`**.
 Pro **`AUTHZ_MODE=idp`** nastavte [role poskytovatele](./sso#authorization-from-the-identity-provider)
 a následující MCP konfiguraci. Statický lokální realm slouží jako funkční příklad:
 
-- Osoba potřebuje `use`, nikoli MCP resource role. Každý dotaz omezuje sdílení dat.
-- Pro každé výše uvedené oprávnění vytvořte OIDC client scope se zapnutým
+- Osoba potřebuje `use`, nikoli MCP role chráněných zdrojů. Každý dotaz omezuje sdílení dat.
+- Pro každé výše uvedené oprávnění vytvořte rozsah oprávnění klienta OIDC se zapnutým
   **Include in token scope**. Klientům připojte jen povolená oprávnění.
-  Default scopes se udělují i při požadavku pouze na `openid`; optional scopes
-  musí klient výslovně požadovat. Vynechání default scope jej z tokenu neodebere.
-- Každému MCP klientovi přidejte audience mapper pro ID resource klienta
+  Výchozí rozsahy oprávnění se udělují i při požadavku pouze na `openid`; volitelné rozsahy oprávnění
+  musí klient výslovně požadovat. Vynechání výchozího rozsahu oprávnění jej z tokenu neodebere.
+- Každému MCP klientovi přidejte mapování příjemce pro ID klienta chráněných zdrojů
   (`MCP_AUDIENCE`), nezávisle na rolích. Pro `MCP_RESOURCE_AUDIENCE=true`
-  zahrňte také `<APP_URL>/api/mcp` jako custom audience.
-- Vypněte Full Scope Allowed a ze scope mappingů MCP klientů vynechte webové
+  zahrňte také `<APP_URL>/api/mcp` jako vlastního příjemce.
+- Vypněte Full Scope Allowed a z mapování rozsahů oprávnění MCP klientů vynechte webové
   a administrátorské role. Servisní klienti v tomto režimu MCP role nepotřebují.
-- Servisní klienti používají jen client credentials, níže popsané označení služby
+- Servisní klienti používají jen přihlašovací údaje klienta, níže popsané označení služby
   a záznamy v `MCP_SERVICE_CLIENTS` i `MCP_ALLOWED_CLIENTS`.
-- Osobní a organizační konektor mohou mít odlišná ID a secrety, například
+- Osobní a organizační konektor mohou mít odlišná ID a tajné klíče, například
   `claude` a `claude-enterprise`. Oba jednají za přihlášeného člověka a nepatří
   do `MCP_SERVICE_CLIENTS`.
 
-Při přechodu z MCP rolí na IdP režim nastavte scopes oprávnění a získejte nové
+Při přechodu z MCP rolí na IdP režim nastavte rozsahy oprávnění a získejte nové
 tokeny. Tokeny s pouhými rolemi v IdP režimu MCP oprávnění neudělují.
 Lokální režim zachovává ruční postup s rolemi níže.
 
 <details>
-<summary>Krok 1: resource klient</summary>
+<summary>Krok 1: klient chráněných zdrojů</summary>
 
-1. **Clients → Create client**, typ **OpenID Connect**, client id
+1. **Clients → Create client**, typ **OpenID Connect**, ID klienta
    `chatterbox-mcp` (hodnota `MCP_AUDIENCE`).
 2. **Client authentication:** vypnuto. Vypněte veškeré autentizační toky:
    do tohoto klienta se nikdo nepřihlašuje; nese pouze role.
@@ -144,8 +144,8 @@ Lokální režim zachovává ruční postup s rolemi níže.
 4. Přiřaďte role uživatelům či skupinám, kteří mohou danou oblast využívat
    (**Role mapping → Assign role → Filter by clients**).
 
-Není třeba žádný audience mapper. Výchozí scope klienta `roles` v realmu
-nese audience-resolve mapper, který přidává `chatterbox-mcp` do `aud`
+Není třeba žádné mapování příjemce. Výchozí rozsah oprávnění klienta `roles` v realmu
+nese mapování pro určení příjemce (audience-resolve), které přidává `chatterbox-mcp` do `aud`
 vždy, když některá jeho role je obsažena v tokenu, a ukládá role pod
 `resource_access.chatterbox-mcp.roles`, odkud je čte Klepna. Klepna ověřuje, že v
 `aud` je `MCP_AUDIENCE`.
@@ -159,7 +159,7 @@ Jeden klient na aplikaci, aby bylo možné přístupy omezit a rozlišit v
 přístupovém logu.
 
 1. **Create client**, typ **OpenID Connect**. **Client authentication:**
-   vypnuto (public client). **Authentication flow:** pouze Standard flow.
+   vypnuto (veřejný klient). **Authentication flow:** pouze Standard flow.
 2. **Valid redirect URIs:** adresy, které dokumentuje aplikace.
 3. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
    `S256`.
@@ -174,19 +174,19 @@ shrnutích, dostane pouze `summaries:read`, i když uživatel vlastní všech š
 </details>
 
 <details>
-<summary>Krok 3: servisní účty (backendy)</summary>
+<summary>Krok 3: servisní účty (serverové služby)</summary>
 
 1. **Create client**, typ **OpenID Connect**. **Client authentication:**
    zapnuto. **Authentication flow:** pouze Service accounts roles.
-2. **Service accounts roles → Assign role:** role `chatterbox-mcp`, které backend
+2. **Service accounts roles → Assign role:** role `chatterbox-mcp`, které serverová služba
    potřebuje.
 3. Doporučeno: **Credentials → Client Authenticator:** Signed JWT
    (`private_key_jwt`) místo sdíleného tajemství a
    **Advanced → Access Token Lifespan** na 5 až 15 minut.
 
 Uveďte klienta v `MCP_SERVICE_CLIENTS` (a `MCP_ALLOWED_CLIENTS`) a
-přidejte mu mapper **hardcoded claim**: claim `chatterbox_subject_kind`,
-hodnota `service`, pouze do access tokenu. Za službu se považuje jen takový token; samotný claim `client_id`
+přidejte mu mapování **hardcoded claim**: položku `chatterbox_subject_kind`,
+hodnota `service`, pouze do přístupového tokenu. Za službu se považuje jen takový token; samotná položka `client_id`
 z Keycloaku jím po nastavení `MCP_SERVICE_CLIENTS` už token neudělá.
 Servisní účet jedná v datovém kontextu Organizace, takže je potřeba mít
 povolenou [Organizaci](./organization) (`SELF_HOST_MODE=shared` a
@@ -197,15 +197,15 @@ povolenou [Organizaci](./organization) (`SELF_HOST_MODE=shared` a
 <details>
 <summary>Krok 4: výměna tokenu</summary>
 
-Backend, který už drží token uživatele, jej může vyměnit za token pro
+Serverová služba, která už drží token uživatele, jej může vyměnit za token pro
 Klepna pomocí **standard token exchange** v Keycloaku (V2,
 Keycloak 26.2 a vyšší): zapněte **Standard token exchange** u klienta
-backendu a požadujte `audience=chatterbox-mcp`. Token uživatele
-musí být vydán pro tento backend (klient v `aud`). Výsledkem je
+serverové služby a požadujte `audience=chatterbox-mcp`. Token uživatele
+musí být vydán pro tuto serverovou službu (klient v `aud`). Výsledkem je
 stále uživatel, s rolemi, které nový token nese.
 
-Keep refresh tokens out of exchanges (client **Advanced → Allow refresh
-token in Standard Token Exchange:** No), takže přístup backendu končí s
+Při výměně nevydávejte obnovovací tokeny (klient **Advanced → Allow refresh
+token in Standard Token Exchange:** No), takže přístup serverové služby končí s
 tokenem, který dostane. Ověřte si nastavení pro svou verzi Keycloak.
 
 **Legacy token exchange (V1) s impersonací není podporováno** a musí
@@ -217,7 +217,7 @@ byly zaznamenány jako jeho. Token nelze odlišit od skutečného
 přihlášení; odlišit ho lze pouze podle `azp` (klient) v
 přístupovém logu.
 
-- Nechte vypnutou preview funkcionalitu `token-exchange` (výchozí od
+- Nechte vypnutou experimentální funkci `token-exchange` (výchozí od
   Keycloak 26.2); žádnému klientovi nepřidělujte oprávnění *impersonate*.
 - Omezte roli správce `impersonation`. Správci realmů se mohou vždy
   přihlásit jako jakýkoliv uživatel; Klepna je považuje za plně důvěryhodné.
@@ -232,31 +232,31 @@ přístupovém logu.
 
 | Co                         | Kde                                                         |
 | -------------------------- | ----------------------------------------------------------- |
-| MCP endpoint               | `<APP_URL>/api/mcp`                                      |
-| Metadata o chráněném resource | `<APP_URL>/.well-known/oauth-protected-resource/api/mcp` |
+| Koncový bod MCP               | `<APP_URL>/api/mcp`                                      |
+| Metadata o chráněném zdroji | `<APP_URL>/.well-known/oauth-protected-resource/api/mcp` |
 
-Endpoint používá bezstavové Streamable HTTP: pouze `POST`,
-odpovědi v JSON, žádné relace ani server-sent events, jedna JSON-RPC
-zpráva na jeden požadavek. Batch (JSON pole) je odmítnut s 400 a
-JSON-RPC chybou `-32600`, MCP 2025-06-18 zrušilo batching. Dotaz bez
+Koncový bod používá bezstavové Streamable HTTP: pouze `POST`,
+odpovědi v JSON, žádné relace ani události odesílané serverem, jedna JSON-RPC
+zpráva na jeden požadavek. Dávka (pole JSON) je odmítnuta s 400 a
+JSON-RPC chybou `-32600`, MCP 2025-06-18 zrušilo dávkové zpracování. Dotaz bez
 použitelného tokenu dostává 401
 s `WWW-Authenticate: Bearer resource_metadata="…", scope="openid"`
 (a s `error="invalid_token"`, pokud byl token poslán). Hlavička odkazuje na
-metadata, kde je realm jako authorization server a `openid` jako scope,
-o který má klient žádat. Bez uvedeného scope by klient žádal o všechny
-scopes, které realm nabízí, a Keycloak by přihlášení odmítl s
+metadata, kde je realm jako autorizační server a `openid` jako rozsah oprávnění,
+o který má klient žádat. Bez uvedeného rozsahu oprávnění by klient žádal o všechny
+rozsahy oprávnění, které realm nabízí, a Keycloak by přihlášení odmítl s
 `invalid_scope`. Tato metadata jsou také dostupná na `<APP_URL>/.well-known/oauth-protected-resource`.
 
 Pravý token realmu, který nebyl vydán pro tento server (například
 token přihlašovacího webového klienta), odpoví 403, ne 401: 401
 by klienta poslala znovu přihlašovat, pro stejný token.
 
-Každé klientské aplikaci zadejte client id, které jste pro ni
-vytvořili v kroku 2. Dynamic Client Registration není k tomu potřeba.
+Každé klientské aplikaci zadejte ID klienta, které jste pro ni
+vytvořili v kroku 2. Dynamická registrace klientů není k tomu potřeba.
 Otevřené anonymní registrace povolujte pouze pokud klient opravdu
 nemůže použít předregistrované id, a pak jen se zásadou **Trusted Hosts**
 omezující, kdo může registraci provést. `MCP_ALLOWED_CLIENTS` obsahuje pevné
-client ids, čímž současně nepustí dynamicky registrované klienty.
+ID klientů, čímž současně nepustí dynamicky registrované klienty.
 
 Servisní účet ručně:
 
@@ -329,7 +329,7 @@ jako `resolved`; nejasná odpoví až pěti kandidáty. Bez
 (potvrzení mluvčí nahrávek, přiřazení úkolů), nikoli věci.
 
 **Vyhledávání má limity.** Názvy, přepisy, shrnutí a úkoly jsou při
-uložení šifrovány (encryption at rest), takže vyhledávání dešifruje za
+uložení šifrovány (šifrování uložených dat), takže vyhledávání dešifruje za
 chodu vždy od nejnovějšího, s limitem:
 
 | Vyhledávání                        | Čte maximálně  | Vrací maximálně                  |
@@ -361,22 +361,22 @@ S [`AUTHZ_MODE=idp`](./sso#authorization-from-the-identity-provider):
   access to Klepna has been withdrawn"; 503, dokud ho nelze ověřit).
 - Službou je pouze token klienta uvedeného v `MCP_SERVICE_CLIENTS`, který
   realm označí jako službu (`chatterbox_subject_kind: service`, nastavuje
-  hardcoded claim mapper u klientů určených jen pro služby). Token nesoucí pouze
+  mapování **hardcoded claim** u klientů určených jen pro služby). Token nesoucí pouze
   `client_id` patří osobě a je odmítnut, pokud se tato osoba nepřihlásila.
   Služba nikdy nespravuje přístup a nikdy není kurátorem Organizace.
 - Tokeny přihlašovacího klienta (`OIDC_CLIENT_ID`) nikdy nejsou MCP
-  přihlašovacími údaji. Administrátorské role ponechte mimo scope
+  přihlašovacími údaji. Administrátorské role ponechte mimo rozsah oprávnění
   všech MCP klientů.
 
 V obou režimech:
 
-- Access tokeny musí uvádět `typ: Bearer` (access tokeny Keycloaku to
-  dělají); ID token, refresh token nebo token bez typu je odmítnut (401).
+- Přístupové tokeny musí uvádět `typ: Bearer` (přístupové tokeny Keycloaku to
+  dělají); ID token, obnovovací token nebo token bez typu je odmítnut (401).
 - `tasks:write` s sebou přináší `tasks:read`.
 - Volání nástroje, který oprávnění tokenu nepokrývají, odpoví 403 s
   `WWW-Authenticate: Bearer error="insufficient_scope", scope="<permissions>"`.
-  Metadata resource uvádějí `openid` a šest oprávnění v
-  `scopes_supported`; vytvořte client scope s názvem každého
+  Metadata zdroje uvádějí `openid` a šest oprávnění v
+  `scopes_supported`; vytvořte rozsah oprávnění klienta s názvem každého
   oprávnění, takže klient, který o ně požádá, dostane ta, která mít smí,
   a zbytek realm odmítne (`invalid_scope`).
 
@@ -397,10 +397,10 @@ bude 429 s `Retry-After`; hledání nad svůj limit odpoví "Příliš mnoho hle
 zkuste za minutu znovu". Limit na IP klienta není: všichni uživatelé
 Claude přicházejí z několika stejných adres Anthropicu. Objem omezte na
 reverzní proxy. Sloupec `ip` v přístupovém logu vyžaduje
-`RATE_LIMIT_TRUST_PROXY_HEADERS=true` za proxy, která forwarding
+`RATE_LIMIT_TRUST_PROXY_HEADERS=true` za proxy, která přeposílací
 hlavičky přepisuje (viz [Proměnné prostředí](./environment-variables)).
-Pokud není dostupný discovery dokument realmu nebo podpisové klíče,
-endpoint odpovídá 503 místo 401, takže klient nezahodí dobrý token.
+Pokud není dostupný dokument metadat realmu nebo podpisové klíče,
+koncový bod odpovídá 503 místo 401, takže klient nezahodí dobrý token.
 
 Každý volání nástroje a každý validní token bez přiřazeného volajícího
 zapisuje jeden řádek do tabulky `mcp_access_log`:
@@ -422,15 +422,15 @@ Argumenty a obsah se neukládají. Řádky starší než
 údržbovým úkolem, i po vypnutí serveru. Obrazovka pro log zatím není;
 tabulku je nutné dotazovat přímo.
 
-`MCP_ALLOWED_CLIENTS` (čárkou oddělené client id) odmítá tokeny, jejichž
+`MCP_ALLOWED_CLIENTS` (čárkou oddělená ID klientů) odmítá tokeny, jejichž
 `azp` není v seznamu, jak pro uživatele tak pro servisní účty.
 Pokud není nastaveno, může volat libovolný klient realmu, jehož token
-projde kontrolou audience a oprávnění.
+projde kontrolou příjemce a oprávnění.
 
-Tokeny se kontrolují na přesného issuer, `aud` obsahující
-`MCP_AUDIENCE` (nebo URL MCP endpointu při
+Tokeny se kontrolují na přesného vydavatele, `aud` obsahující
+`MCP_AUDIENCE` (nebo URL koncového bodu MCP při
 `MCP_RESOURCE_AUDIENCE=true`), expiraci (toleruje se 30 sekund rozdílu v čase),
-`RS256`, `PS256` nebo `ES256` podpis a profil access tokenu poskytovatele.
+`RS256`, `PS256` nebo `ES256` podpis a profil přístupového tokenu poskytovatele.
 Adaptér Keycloaku vyžaduje `typ: Bearer`, i v lokálním režimu.
 Klepna je nikdy neposílá dál.
 
@@ -438,7 +438,7 @@ Klepna je nikdy neposílá dál.
 
 ## Vyzkoušení lokálně
 
-End-to-end Keycloak realm ze stránky [Jednotné přihlášení](./sso#trying-it-locally)
+Realm Keycloaku pro testování celého systému ze stránky [Jednotné přihlášení](./sso#trying-it-locally)
 obsahuje klienty MCP: `riffado-mcp`, `riffado-mcp-tester`,
 `riffado-mcp-bot`, `claude` a `claude-code`. Volitelný test
 `src/tests/mcp/keycloak.integration.test.ts` se přes ně přihlašuje stejně

@@ -1,10 +1,10 @@
 ---
 title: Aktualizace
-description: Stáhněte nový image, restartujte stack a vyberte správný tag podle vaší míry tolerance rizika.
+description: Stáhněte nový obraz, restartujte sadu služeb a vyberte správnou značku podle vaší míry tolerance rizika.
 ---
 
-Klepna je distribuován jako jeden Docker image na GitHub Container Registry.
-Aktualizace probíhá stažením image a restartem; migrace databáze se spouští
+Klepna je distribuován jako jeden obraz Docker na GitHub Container Registry.
+Aktualizace probíhá stažením obrazu a restartem; migrace databáze se spouští
 automaticky při startu kontejneru.
 
 <span id="standard-upgrade" />
@@ -18,7 +18,7 @@ docker compose pull && docker compose up -d
 ```
 
 Aplikační kontejner se spustí, provede všechny čekající migrace databáze
-v rámci stejného procesu, než otevře HTTP listener, a po připravenosti
+v rámci stejného procesu, než začne naslouchat HTTP požadavkům, a po připravenosti
 ohlásí stav healthy pomocí `/api/health`. Neexistuje žádný samostatný „migrační
 kontejner“ — pokud migrace selže, selže i start kontejneru, což je
 žádané chování.
@@ -27,7 +27,7 @@ kontejner“ — pokud migrace selže, selže i start kontejneru, což je
 
 ## Vydání se zpracovatelským postupem
 
-Není nutná žádná změna konfigurace. Stáhněte nový image a restartujte jej podle
+Není nutná žádná změna konfigurace. Stáhněte nový obraz a restartujte jej podle
 postupu výše. Při startu kontejner použije migrace `0112` až `0128`. Všechny
 jsou aditivní s výjimkou uvolnění jedinečnosti v migraci `0128`. Migrace `0116`
 označí existující položky jako **Zpracováno před
@@ -43,10 +43,10 @@ vyřešená historie už neblokuje nový návrh.
 
 Po aktualizaci čekají nové nahrávky a pošta poslaná do hlavní schránky na
 zařazení vlastníkem do složky, než se spustí placený krok. Pošta poslaná na
-adresu složky, nahrání přes přehled se zvolenou složkou a relace Meeting
-Recorderu se složkou toto čekání přeskočí.
+adresu složky, nahrání přes přehled se zvolenou složkou a relace Nahrávání
+schůzek se složkou toto čekání přeskočí.
 
-Rozšíření Meeting Recorder potřebuje odpovídající vydání v obchodě kvůli novému
+Rozšíření Nahrávání schůzek potřebuje odpovídající vydání v obchodě kvůli novému
 výběru složky. Staré rozšíření zůstává kompatibilní s novým serverem, ale jeho
 nahrávky přijdou bez `folderId` a čekají na zařazení. Proti staršímu serveru
 nabízí nové rozšíření pouze **Zařadit později**; pokud server vybranou složku
@@ -57,31 +57,31 @@ hodnotu 60. Chcete-li ji změnit, upravte předání prostředí do služby apli
 Compose podle [Proměnných prostředí](./environment-variables#optional-knobs).
 
 Aktualizace je podle ověření bezpečná. Před aktualizací vytvořte `pg_dump`
-databáze Klepny. Podporovaný rollback spočívá v obnovení tohoto výpisu a
-spuštění předchozího image. Spuštění předchozího image nad aktualizovanou
+databáze Klepny. Podporovaný návrat k předchozí verzi spočívá v obnovení tohoto výpisu a
+spuštění předchozího obrazu. Spuštění předchozího obrazu nad aktualizovanou
 databází podporované není: proběhne bez chyby, ale vyřešené návrhy znovu zobrazí
 jako čekající. Přijetí takového návrhu v kontrole úkolů použije zastaralou změnu
-a smaže řádky návrhů. Během rollbacku kontroly úkolů neotvírejte. Nahrávky
-nahrané během rollbacku je po návratu vpřed nutné spustit ručně.
+a smaže řádky návrhů. Během návratu k předchozí verzi kontroly úkolů neotvírejte. Nahrávky
+nahrané během návratu k předchozí verzi je po návratu vpřed nutné spustit ručně.
 
 <span id="picking-a-tag" />
 
-## Výběr tagu
+## Výběr značky
 
-`CHATTERBOX_VERSION` ve vašem `.env` určuje, který tag image Compose stáhne.
+`CHATTERBOX_VERSION` ve vašem `.env` určuje, kterou značku obrazu Compose stáhne.
 Zastaralá proměnná `RIFFADO_VERSION` zůstává po dobu jednoho vydání jako
 náhradní, pokud `CHATTERBOX_VERSION` není nastavena.
 
-| Tag             | Co získáte                                | Kdy použít                              |
+| Značka             | Co získáte                                | Kdy použít                              |
 | --------------- | ----------------------------------------  | --------------------------------------- |
 | `latest`        | Nejnovější stabilní verze                 | Výchozí; většina uživatelů              |
 | `2026.1`        | Jedno konkrétní vydání                    | Produkční prostředí; zamčení pro opakovatelnost |
 | `dev`           | Průběžné sestavení z větve `dev`          | Nejnovější vývoj; přijměte občasné chyby |
 
 `dev` je **integrační větev** a může být rozbitá v libovolném commitu.
-Každý push do `main` je vydání, publikované jako tag `YYYY.N` a `latest`.
+Každé odeslání změn do `main` je vydání, publikované jako značka `YYYY.N` a `latest`.
 Nikdy nenasazujte klonováním repozitáře a vlastním sestavením;
-používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
+používejte výše uvedené obrazy se značkami. Podrobnosti naleznete v [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 v sekci o větvení.
 
 <span id="update-badge" />
@@ -89,19 +89,19 @@ v sekci o větvení.
 ## Označení aktualizace
 
 V patičce se zobrazuje malé označení „Je dostupná aktualizace“, pokud je na
-GitHubu dostupná novější vydaná verze. Tento badge je pouze informativní —
+GitHubu dostupná novější vydaná verze. Tento odznak je pouze informativní —
 nic sám automaticky neaktualizuje.
 
 Kontrola se provádí pomocí volání `api.github.com` jednou za relaci. Pokud vaše
 instance nemá nikdy „volat domů“, nastavte `DISABLE_UPDATE_CHECK=true` ve vašem
-`.env` a badge bude vždy skryt.
+`.env` a odznak bude vždy skryt.
 
 <span id="rolling-back" />
 
-## Vracení zpět (rollback)
+## Návrat k předchozí verzi
 
-Pro bezpečný rollback obnovte `pg_dump` vytvořený před aktualizací, nastavte
-`CHATTERBOX_VERSION` na předchozí tag a spusťte stack:
+Pro bezpečný návrat k předchozí verzi obnovte `pg_dump` vytvořený před aktualizací, nastavte
+`CHATTERBOX_VERSION` na předchozí značku a spusťte sadu služeb:
 
 ```bash
 # In .env
@@ -112,7 +112,7 @@ CHATTERBOX_VERSION=2026.1
 docker compose pull && docker compose up -d
 ```
 
-Předchozí image nespouštějte nad databází po aktualizaci. Může v ní zobrazit
+Předchozí obraz nespouštějte nad databází po aktualizaci. Může v ní zobrazit
 vyřešené návrhy jako čekající a jejich přijetí může použít zastaralou změnu.
 
 <span id="backing-up-before-an-upgrade" />
@@ -120,12 +120,12 @@ vyřešené návrhy jako čekající a jejich přijetí může použít zastaral
 ## Zálohování před aktualizací
 
 Před aktualizací nejprve vytvořte logický výpis `pg_dump` databáze Klepny.
-Před aktualizací na hlavní (major) verzi také nezapomeňte zálohovat dvě věci:
+Před aktualizací na hlavní verzi také nezapomeňte zálohovat dvě věci:
 
 1. Svazek Postgresu (cesta, na kterou váš compose soubor mapuje
    `postgres:/var/lib/postgresql/data`).
 2. Svazek s audiem (`/app/audio` v aplikačním kontejneru) — nebo váš S3
-   bucket, pokud jste přešli na vzdálené úložiště.
+   kontejner, pokud jste přešli na vzdálené úložiště.
 
 Můžete také vytvořit logický export přes **Nastavení → Export/Záloha
 → Vytvořit zálohu**, což vytvoří zip archiv nahrávek, audia, přepisů,

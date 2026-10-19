@@ -80,7 +80,7 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
 ![Nastavení zobrazení](images/settings-display.png)
 
-**Jazyk** (English nebo Čeština), způsob zobrazení data, pořadí seznamu nahrávek, počet nahrávek na stránce a motiv.
+**Jazyk** (Angličtina nebo Čeština), způsob zobrazení data, pořadí seznamu nahrávek, počet nahrávek na stránce a motiv.
 
 ## Ostatní sekce
 
