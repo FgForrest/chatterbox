@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { formatDateTime } from "@/lib/format-date";
+import { itemDetailHref } from "@/lib/item-detail";
 import type {
     FactSide,
     PageEvidence,
@@ -40,13 +41,13 @@ function timestamp(ms: number): string {
 }
 
 function recordingHref(evidence: PageEvidence): string {
-    if (evidence.view === "org") {
-        return `/dashboard?recording=${encodeURIComponent(evidence.recordingId)}&view=org`;
-    }
-    // A mail opens in the pile; the recording page is for audio.
-    return evidence.kind === "mail"
-        ? `/dashboard?recording=${encodeURIComponent(evidence.recordingId)}`
-        : `/recordings/${evidence.recordingId}`;
+    return itemDetailHref(evidence.recordingId, {
+        view: evidence.view,
+        playFrom:
+            evidence.kind === "audio" && evidence.startMs !== null
+                ? evidence.startMs
+                : undefined,
+    });
 }
 
 function Side({ side }: { side: FactSide }) {

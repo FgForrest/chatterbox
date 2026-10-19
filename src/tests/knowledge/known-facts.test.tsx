@@ -112,13 +112,13 @@ describe("KnownFacts", () => {
         expect(screen.getByText(/Entered by hand/)).toBeDefined();
         const june = screen.getByRole("link", { name: /June sync 2:05/ });
         expect(june.getAttribute("href")).toBe(
-            "/dashboard?recording=rec-2&view=org",
+            "/dashboard?recording=rec-2&view=org&playFrom=125000",
         );
         expect(
             screen
                 .getByRole("link", { name: /Weekly 12:04/ })
                 .getAttribute("href"),
-        ).toBe("/recordings/rec-1");
+        ).toBe("/dashboard?recording=rec-1&playFrom=724000");
     });
 
     it("links a mail to the pile, and marks words quoted from an earlier writer", () => {
