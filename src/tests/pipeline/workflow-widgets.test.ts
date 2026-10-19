@@ -139,6 +139,31 @@ describe("workflow widgets", () => {
         expect(widgets.summary.visible).toBe(false);
     });
 
+    it("restores the Learn run action after its results are erased", () => {
+        const widgets = deriveWorkflowWidgets(
+            presentation({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "content-available"),
+                    learn: phase("skipped", "erased"),
+                    summary: phase("done", "completed"),
+                    taskReview: phase("done", "reviewed"),
+                },
+                outputs: { transcript: true, learn: false, summary: true },
+            }),
+        );
+
+        expect(widgets.workflowVisible).toBe(true);
+        expect(widgets.learn).toMatchObject({
+            visible: true,
+            active: true,
+            collapsed: false,
+            frame: "inline",
+            tone: "next",
+            action: "run",
+        });
+    });
+
     it("keeps a pipeline review inline and a manual rerun review in a dialog", () => {
         const base = presentation({
             outputs: { transcript: true, learn: false, summary: false },

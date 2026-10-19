@@ -1,9 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
@@ -23,41 +23,57 @@ import { emitEvent } from "@/lib/webhooks/emit";
 type IdContext = { params: Promise<{ id: string }> };
 
 export const POST = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
     const access = await requireRecordingView(
         session.user.id,
         id,
         requestedRecordingView(request),
+        { kinds: ["audio", "mail"] },
     );
-    assertMayChange(access, session.user.id);
+    const curates = access.view === "org" && (await actsForOrganization(actor));
+    assertMayChange(access, session.user.id, curates);
     const ownerUserId = access.ownerUserId;
-    const [recording] = await db
+    const [item] = await db
         .select({
-            plaudFileId: recordings.plaudFileId,
             titleEditedAt: chatterItems.titleEditedAt,
         })
-        .from(recordings)
-        .innerJoin(chatterItems, recordingItemJoin)
+        .from(chatterItems)
         .where(
             and(
-                eq(recordings.id, id),
-                eq(recordings.userId, ownerUserId),
-                isNull(recordings.deletedAt),
+                eq(chatterItems.id, id),
+                eq(chatterItems.userId, ownerUserId),
+                eq(chatterItems.kind, access.kind),
+                isNull(chatterItems.deletedAt),
             ),
         )
         .limit(1);
-    if (!recording) {
+    if (!item) {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,
             "Recording not found",
             404,
         );
     }
+    const [recording] =
+        access.kind === "audio"
+            ? await db
+                  .select({ plaudFileId: recordings.plaudFileId })
+                  .from(recordings)
+                  .where(
+                      and(
+                          eq(recordings.id, id),
+                          eq(recordings.userId, ownerUserId),
+                          isNull(recordings.deletedAt),
+                      ),
+                  )
+                  .limit(1)
+            : [{ plaudFileId: undefined }];
     const refusal = await contentWriterRefusalNow({
         recordingId: id,
         ownerUserId,
         actorUserId: session.user.id,
+        actsForOrganization: curates,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -69,20 +85,28 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             400,
         );
     }
-    const [settings] = await db
-        .select({ syncTitleToPlaud: userSettings.syncTitleToPlaud })
-        .from(userSettings)
-        .where(eq(userSettings.userId, ownerUserId))
-        .limit(1);
+    const [settings] =
+        access.kind === "audio"
+            ? await db
+                  .select({ syncTitleToPlaud: userSettings.syncTitleToPlaud })
+                  .from(userSettings)
+                  .where(eq(userSettings.userId, ownerUserId))
+                  .limit(1)
+            : [{ syncTitleToPlaud: false }];
     const retitled = await applyGeneratedTitle({
         userId: ownerUserId,
         actorUserId: session.user.id,
         recordingId: id,
         ...input,
-        plaudFileId: recording.plaudFileId,
+        kind: access.kind,
+        view: access.view,
+        plaudFileId: recording?.plaudFileId,
         syncTitleToPlaud:
-            access.view === "private" && (settings?.syncTitleToPlaud ?? false),
-        expectedTitleEditedAt: recording.titleEditedAt,
+            access.kind === "audio" &&
+            access.view === "private" &&
+            (settings?.syncTitleToPlaud ?? false),
+        expectedTitleEditedAt: item.titleEditedAt,
+        actsForOrganization: curates,
     });
     if (!retitled) {
         throw new AppError(

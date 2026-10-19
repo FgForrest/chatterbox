@@ -180,6 +180,13 @@ function displayState(
         return data.jobs.summary === "queued" ? "queued" : "working";
     }
     if (
+        phase === "learn" &&
+        record?.state === "skipped" &&
+        record.reason === "erased"
+    ) {
+        return "manual";
+    }
+    if (
         data.failures.some(
             (failure) =>
                 failure.phase === phase &&
@@ -564,7 +571,13 @@ function currentStepId(
     steps: WorkflowStep[],
     status: WorkflowStatusSentence | null,
 ): WorkflowStepId | null {
-    if (!status) return null;
+    if (!status) {
+        return (
+            steps.find(
+                (step) => step.state === "manual" && step.reason === "erased",
+            )?.id ?? null
+        );
+    }
     if (status.action === "chooseProfile" || status.message === "notFiled") {
         return "categorize";
     }
@@ -647,15 +660,17 @@ export function deriveWorkflowStatus(
     const visible =
         !data.legacy &&
         steps.some((step) =>
-            [
-                "next",
-                "review",
-                "working",
-                "queued",
-                "others",
-                "problem",
-                "outdated",
-            ].includes(step.state),
+            step.reason === "erased"
+                ? step.state === "manual"
+                : [
+                      "next",
+                      "review",
+                      "working",
+                      "queued",
+                      "others",
+                      "problem",
+                      "outdated",
+                  ].includes(step.state),
         );
     return {
         visible,

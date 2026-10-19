@@ -9,13 +9,12 @@ import {
     Paperclip,
     Share2,
     ShieldAlert,
-    Trash2,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useConfirm } from "@/components/confirm-dialog";
+import { ItemHeader } from "@/components/items/item-header";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
@@ -24,8 +23,14 @@ import {
     openWidget,
     WorkflowWidget,
 } from "@/components/pipeline/workflow-widget";
+import { ItemEraseMenu } from "@/components/recordings/erase-recording-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
@@ -134,7 +139,6 @@ export function MailDetailPane({
     const i18n = useExtracted();
     const searchParams = useSearchParams();
     const locale = useLocale();
-    const confirm = useConfirm();
     const [detail, setDetail] = useState<MailDetailResponse | null>(null);
     const [processing, setProcessing] =
         useState<ItemProcessingPresentation | null>(null);
@@ -142,10 +146,15 @@ export function MailDetailPane({
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
+    const [title, setTitle] = useState(mail.filename);
     const highlight = useMemo(
         () => evidenceRange(searchParams),
         [searchParams],
     );
+
+    useEffect(() => {
+        setTitle(mail.filename);
+    }, [mail.filename]);
 
     useEffect(() => {
         if (!detail || !highlight) return;
@@ -251,29 +260,15 @@ export function MailDetailPane({
         [i18n, mail.id, onChanged],
     );
 
-    const remove = useCallback(() => {
-        void confirm({
-            title: i18n("Delete this mail?"),
-            description: i18n(
-                "The message, its attachments and anything made from it are removed for good.",
-            ),
-            confirmLabel: i18n("Delete"),
-            pendingLabel: i18n("Deleting…"),
-            destructive: true,
-            onConfirm: async () => {
-                const response = await fetch(
-                    `/api/mail/${encodeURIComponent(mail.id)}`,
-                    { method: "DELETE" },
-                );
-                if (!response.ok) {
-                    toast.error(i18n("The mail could not be deleted."));
-                    return;
-                }
-                toast.success(i18n("Mail deleted."));
-                onChanged();
-            },
-        });
-    }, [confirm, i18n, mail.id, onChanged]);
+    const remove = useCallback(async () => {
+        const response = await fetch(
+            `/api/mail/${encodeURIComponent(mail.id)}`,
+            { method: "DELETE" },
+        );
+        if (!response.ok) {
+            throw new Error(i18n("The mail could not be deleted."));
+        }
+    }, [i18n, mail.id]);
 
     const isOwn = mail.isOwn !== false;
     const from = detail ? withRole(detail.participants, "from")[0] : undefined;
@@ -296,6 +291,49 @@ export function MailDetailPane({
         isOrgAccount,
         canCurate,
     });
+    const metadata = [
+        mail.mail?.from ?? i18n("Unknown sender"),
+        formatDateTime(
+            detail?.sentAt ?? detail?.receivedAt ?? mail.startTime,
+            dateTimeFormat,
+            locale,
+        ),
+        formatBytes(detail?.sizeBytes ?? mail.filesize),
+    ];
+    const retentionNotes = detail
+        ? [
+              detail.rawReapedAt
+                  ? i18n(
+                        "The message as it arrived and its attachments were removed on {date}.",
+                        {
+                            date: formatDateTime(
+                                detail.rawReapedAt,
+                                "absolute",
+                                locale,
+                            ),
+                        },
+                    )
+                  : null,
+              detail.contentReapedAt
+                  ? i18n("Its text was removed on {date}.", {
+                        date: formatDateTime(
+                            detail.contentReapedAt,
+                            "absolute",
+                            locale,
+                        ),
+                    })
+                  : null,
+              detail.summaryReapedAt
+                  ? i18n("Its summary was removed on {date}.", {
+                        date: formatDateTime(
+                            detail.summaryReapedAt,
+                            "absolute",
+                            locale,
+                        ),
+                    })
+                  : null,
+          ].filter((note): note is string => note !== null)
+        : [];
 
     return (
         <div
@@ -312,51 +350,31 @@ export function MailDetailPane({
             >
                 <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
             </Button>
-            <div className="space-y-1">
-                <div className="flex items-start justify-between gap-3">
-                    <h1 className="text-lg font-semibold break-words">
-                        {mail.filename || i18n("(no subject)")}
-                    </h1>
-                    {isOwn && (
-                        <div className="flex shrink-0 gap-1">
-                            {detail?.hasRaw && (
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={i18n("Download the message")}
-                                    title={i18n("Download the message")}
-                                    asChild
-                                >
-                                    <a
-                                        href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
-                                        download
-                                    >
-                                        <Download className="size-4" />
-                                    </a>
-                                </Button>
-                            )}
-                            {mail.view !== "org" && (
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={i18n("Delete")}
-                                    title={i18n("Delete")}
-                                    onClick={remove}
-                                >
-                                    <Trash2 className="size-4" />
-                                </Button>
-                            )}
-                        </div>
-                    )}
-                </div>
-                {!isOwn && mail.ownerName && (
-                    <p className="text-xs text-muted-foreground">
-                        {i18n("Shared by {owner}", {
-                            owner: mail.ownerName,
-                        })}
-                    </p>
-                )}
-            </div>
+            <ItemHeader
+                itemId={mail.id}
+                kind="mail"
+                title={title || i18n("(no subject)")}
+                metadata={metadata}
+                view={mail.view}
+                isOwn={isOwn}
+                ownerName={mail.ownerName}
+                readOnly={!canChange}
+                onRenamed={(renamed) => {
+                    setTitle(renamed);
+                    onChanged();
+                }}
+                action={
+                    isOwn && mail.view !== "org" ? (
+                        <ItemEraseMenu
+                            recording={{ ...mail, filename: title }}
+                            shared={shared}
+                            onDeleteMail={remove}
+                            onChanged={onChanged}
+                        />
+                    ) : undefined
+                }
+                retentionNotes={retentionNotes}
+            />
             <ItemWorkflow
                 itemId={mail.id}
                 kind="mail"
@@ -496,45 +514,6 @@ export function MailDetailPane({
                         )}
                     </p>
                 )}
-                {detail &&
-                    [
-                        detail.rawReapedAt &&
-                            i18n(
-                                "Retention removed the message as it arrived and its attachments on {date}.",
-                                {
-                                    date: formatDateTime(
-                                        detail.rawReapedAt,
-                                        "absolute",
-                                        locale,
-                                    ),
-                                },
-                            ),
-                        detail.contentReapedAt &&
-                            i18n("Retention removed its text on {date}.", {
-                                date: formatDateTime(
-                                    detail.contentReapedAt,
-                                    "absolute",
-                                    locale,
-                                ),
-                            }),
-                        detail.summaryReapedAt &&
-                            i18n("Retention removed its summary on {date}.", {
-                                date: formatDateTime(
-                                    detail.summaryReapedAt,
-                                    "absolute",
-                                    locale,
-                                ),
-                            }),
-                    ]
-                        .filter(Boolean)
-                        .map((note) => (
-                            <p
-                                key={note as string}
-                                className="text-xs text-muted-foreground"
-                            >
-                                {note}
-                            </p>
-                        ))}
             </div>
 
             {detail &&
@@ -546,20 +525,47 @@ export function MailDetailPane({
                         tone={widgets?.message.active ? "next" : "quiet"}
                         title={i18n("Message")}
                         headerAction={
-                            !detail.rawReapedAt ? (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 gap-1 px-2 text-xs"
-                                    aria-pressed={showFormatted}
-                                    onClick={() => void toggleFormatted()}
-                                >
-                                    <FileCode2 className="size-3.5" />
-                                    {showFormatted
-                                        ? i18n("Show text")
-                                        : i18n("Show formatted")}
-                                </Button>
-                            ) : undefined
+                            <div className="flex items-center gap-1">
+                                {isOwn && detail.hasRaw && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                asChild
+                                            >
+                                                <a
+                                                    href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
+                                                    download
+                                                    rel="nofollow noreferrer"
+                                                    aria-label={i18n(
+                                                        "Download the message",
+                                                    )}
+                                                >
+                                                    <Download className="size-4" />
+                                                </a>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">
+                                            {i18n("Download the message")}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                )}
+                                {!detail.rawReapedAt && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 gap-1 px-2 text-xs"
+                                        aria-pressed={showFormatted}
+                                        onClick={() => void toggleFormatted()}
+                                    >
+                                        <FileCode2 className="size-3.5" />
+                                        {showFormatted
+                                            ? i18n("Show text")
+                                            : i18n("Show formatted")}
+                                    </Button>
+                                )}
+                            </div>
                         }
                     >
                         <div className="space-y-3">

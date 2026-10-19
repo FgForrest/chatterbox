@@ -703,6 +703,30 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
+    it("shows erased Learn results as runnable even for an automatic profile", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "content-available"),
+                    learn: phase("skipped", "erased"),
+                    summary: phase("done", "completed"),
+                    taskReview: phase("done", "reviewed"),
+                },
+                outputs: { transcript: true, learn: false, summary: true },
+            }),
+            "audio",
+        );
+
+        expect(result.visible).toBe(true);
+        expect(result.steps.find((step) => step.id === "learn")).toMatchObject({
+            state: "manual",
+            reason: "erased",
+            current: true,
+        });
+        expect(result.status).toBeNull();
+    });
+
     it("hides when all steps are done, skipped, or untouched manual", () => {
         expect(deriveWorkflowStatus(processing(), "audio").visible).toBe(false);
         expect(

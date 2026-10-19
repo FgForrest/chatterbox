@@ -135,6 +135,8 @@ async function loadOrganizationLibrary(
             deviceSn: recordings.deviceSn,
             waveformPeaks: recordings.waveformPeaks,
             audioReapedAt: recordings.audioReapedAt,
+            transcriptReapedAt: chatterItems.contentReapedAt,
+            summaryReapedAt: chatterItems.summaryReapedAt,
             ownerName: users.name,
             ownerEmail: users.email,
         })
@@ -197,6 +199,8 @@ async function loadOrganizationLibrary(
         ({
             waveformPeaks,
             audioReapedAt,
+            transcriptReapedAt,
+            summaryReapedAt,
             userId,
             ownerName,
             ownerEmail,
@@ -209,6 +213,9 @@ async function loadOrganizationLibrary(
                     hasSummary: summaryIds.has(row.id),
                     needsReview: reviewIds.has(row.id),
                     audioReaped: audioReapedAt !== null,
+                    audioReapedAt,
+                    transcriptReapedAt,
+                    summaryReapedAt,
                     waveformPeaks: Array.isArray(waveformPeaks)
                         ? (waveformPeaks as number[])
                         : null,
@@ -260,6 +267,8 @@ export default async function DashboardPage() {
                 // retention policy" instead of rendering a dead <audio>
                 // element that fails on first play.
                 audioReapedAt: recordings.audioReapedAt,
+                transcriptReapedAt: chatterItems.contentReapedAt,
+                summaryReapedAt: chatterItems.summaryReapedAt,
             })
             .from(recordings)
             .innerJoin(chatterItems, recordingItemJoin)
@@ -337,7 +346,13 @@ export default async function DashboardPage() {
     // an RSC — client never sees a key) before serializing for the
     // workstation. Legacy plaintext rows pass through verbatim.
     const recordingsData = ownRecordings.map(
-        ({ waveformPeaks, audioReapedAt, ...r }) =>
+        ({
+            waveformPeaks,
+            audioReapedAt,
+            transcriptReapedAt,
+            summaryReapedAt,
+            ...r
+        }) =>
             serializeRecording(
                 { ...r, filename: decryptText(r.filename) },
                 {
@@ -345,6 +360,9 @@ export default async function DashboardPage() {
                     hasSummary: summaryIds.has(r.id),
                     needsReview: reviewIds.has(r.id),
                     audioReaped: audioReapedAt !== null,
+                    audioReapedAt,
+                    transcriptReapedAt,
+                    summaryReapedAt,
                     // jsonb comes back already-parsed; coerce to the typed shape.
                     waveformPeaks: Array.isArray(waveformPeaks)
                         ? (waveformPeaks as number[])

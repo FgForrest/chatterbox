@@ -19,6 +19,7 @@ export function RecordingTitle({
     className,
     readOnly = false,
     view,
+    kind = "audio",
 }: {
     recordingId: string;
     filename: string;
@@ -28,6 +29,7 @@ export function RecordingTitle({
     readOnly?: boolean;
     /** The view it is renamed in: the curator renames on the Organization's. */
     view?: RecordingView;
+    kind?: "audio" | "mail";
 }) {
     const i18n = useExtracted();
     const [editing, setEditing] = useState(false);
@@ -143,7 +145,11 @@ export function RecordingTitle({
                 value={draft}
                 disabled={saving}
                 maxLength={MAX_RECORDING_TITLE_LENGTH}
-                aria-label={i18n("Recording name")}
+                aria-label={
+                    kind === "mail"
+                        ? i18n("Mail title")
+                        : i18n("Recording name")
+                }
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => {
                     if (!saving) void commit();
