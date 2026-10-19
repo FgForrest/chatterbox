@@ -19,14 +19,14 @@ Při prvním otevření Klepna vám krátký průvodce pomůže nastavit základ
 
 | Krok | Co dělá |
 | --- | --- |
-| ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Klepna umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Klepna začíná pravidelně stahovat vaše nahrávky. |
-| ![AI provider](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
+| ![Vítejte](images/onboarding-welcome.png) | **Vítejte.** Co Klepna umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
+| ![Připojení účtu Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Klepna začíná pravidelně stahovat vaše nahrávky. |
+| ![Poskytovatel AI](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
 | Kalendář Google a Meet (pokud jsou nastavené) | **Připojte Kalendář Google a Meet.** Přístup jen pro čtení pomůže rozpoznat schůzky a navrhnout mluvčí podle pozvaných hostů a účastníků Meet. |
 | Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Klepny. |
 | E-mail (pokud je nastavený) | **Posílejte e-maily do Klepny.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
 | Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Klepna jako vlastní konektor do Claude nebo Claude Code. |
-| ![Done](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
+| ![Hotovo](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
 Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje.
 
@@ -39,7 +39,7 @@ Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nast
 Horní lišta obsahuje tři sekce:
 
 - **Nahrávky**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
-- **Almanach**: osoby a objekty, o kterých Klepna ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
+- **Almanach**: osoby a objekty, o kterých Klepna ví. Odznak ukazuje počet kontrol čekajících na vás. Viz [Almanach](almanac.md).
 - **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
@@ -59,7 +59,7 @@ Klikněte na **Nápověda** v horní liště nebo stiskněte `h` pro otevření 
 
 - **Kapitola** nahoře v panelu umožňuje přepnout na jinou kapitolu.
 - **Otevřít celou příručku** otevře stejnou stránku v nové záložce s navigací a vyhledáváním.
-- Malé **?** u některých funkcí, například na kartách Přepis a Shrnutí, v recenzi Učit se nebo u nastavení exportu složek, otevře panel přímo u této funkce.
+- Malé **?** u některých funkcí, například na kartách Přepis a Shrnutí, v kontrole poznatků z Učení nebo u nastavení exportu složek, otevře panel přímo u této funkce.
 
 Celá příručka je také dostupná na `/docs` na vaší adrese Klepna v sekci **Uživatelská příručka**.
 

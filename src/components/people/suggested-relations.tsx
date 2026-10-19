@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 export interface SuggestedPhrase {
     id: string;
@@ -83,6 +84,7 @@ function PhraseRow({
     relationTypes: TypeChoice[];
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const [busy, setBusy] = useState(false);
     const [mapTo, setMapTo] = useState(relationTypes[0]?.key ?? "");
@@ -148,7 +150,7 @@ function PhraseRow({
                 >
                     {relationTypes.map((type) => (
                         <option key={type.key} value={type.key}>
-                            {type.label}
+                            {labels.relation(type.key, type.label)}
                         </option>
                     ))}
                 </NativeSelect>
@@ -184,7 +186,7 @@ function PhraseRow({
                 >
                     {entityTypes.map((type) => (
                         <option key={type.key} value={type.key}>
-                            {type.label}
+                            {labels.entityType(type.key, type.label)}
                         </option>
                     ))}
                 </NativeSelect>
@@ -198,7 +200,7 @@ function PhraseRow({
                     <option value="">{i18n("a text")}</option>
                     {entityTypes.map((type) => (
                         <option key={type.key} value={type.key}>
-                            {type.label}
+                            {labels.entityType(type.key, type.label)}
                         </option>
                     ))}
                 </NativeSelect>

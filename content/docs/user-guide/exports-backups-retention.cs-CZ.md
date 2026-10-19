@@ -55,7 +55,7 @@ Nejprve propojte svůj Google účet v **Nastavení → Google účet**. Poté k
 V **Nastavení → Export/Záloha** si můžete vzít svá data s sebou:
 
 - **Exportovat text** vám okamžitě stáhne přepisy a souhrny ve **výchozím exportním formátu** (JSON, TXT, SRT nebo VTT).
-- **Vytvořit úplnou zálohu** vytvoří jeden archiv obsahující vše: audio, přepisy, souhrny, Váš Almanac, Learn recenze a úkoly. Velké knihovny mohou zabrat pár minut; jakmile je záloha připravena, přijde vám e-mail a objeví se tlačítko **Stáhnout**.
+- **Vytvořit úplnou zálohu** vytvoří jeden archiv obsahující vše: audio, přepisy, souhrny, Váš Almanach, kontroly poznatků z Učení a úkoly. Velké knihovny mohou zabrat pár minut; jakmile je záloha připravena, přijde vám e-mail a objeví se tlačítko **Stáhnout**.
 - **Frekvence zálohování** vytváří archiv denně, týdně nebo měsíčně – bez nutnosti si na to vzpomenout.
 
 Mezipaměti odvozené z obsahu, včetně vektorů obsahu úkolů, jsou odvozená data a do záloh se nezahrnují.

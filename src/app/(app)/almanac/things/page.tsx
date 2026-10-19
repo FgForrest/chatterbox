@@ -4,6 +4,7 @@ import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
 import { listEntities } from "@/lib/knowledge/entities";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { isOrgAccount } from "@/lib/org/config";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function ThingsPage() {
     const session = await requireAuth();
+    const labels = await getVocabularyLabels();
     const userId = session.user.id;
     const [things, nicknames, vocabulary, organization] = await Promise.all([
         listEntities(userId),
@@ -22,7 +24,7 @@ export default async function ThingsPage() {
         vocabularyVisibleTo(userId),
         isOrgAccount(userId),
     ]);
-    const almanac = almanacVocabulary(vocabulary);
+    const almanac = almanacVocabulary(vocabulary, labels);
     return (
         <ThingsList
             things={things.map((thing) => ({

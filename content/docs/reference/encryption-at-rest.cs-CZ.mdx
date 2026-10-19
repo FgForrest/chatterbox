@@ -4,10 +4,10 @@ description: Šifrování obálkou AES-256-GCM pro citlivá pole databáze.
 ---
 
 Klepna šifruje uživatelská obsahová pole v databázi algoritmem AES-256-GCM,
-kdy klíč je odvozen z proměnné prostředí `ENCRYPTION_KEY`, kterou již runtime
+kdy klíč je odvozen z proměnné prostředí `ENCRYPTION_KEY`, kterou již běhové prostředí
 vyžaduje.
 
-Jedná se o **šifrování obálkou s klíčem uloženým na serveru.** Nejde o zero-knowledge šifrování.
+Jedná se o **šifrování obálkou s klíčem uloženým na serveru.** Nejde o šifrování s nulovou znalostí.
 
 <span id="what-is-encrypted" />
 
@@ -20,7 +20,7 @@ Jedná se o **šifrování obálkou s klíčem uloženým na serveru.** Nejde o 
 | `ai_enhancements.summary` | text | Shrnutí pomocí LLM |
 | `ai_enhancements.key_points` | jsonb | Uloženo jako obálka `{ "c": "v1:..." }` |
 | `ai_enhancements.action_items` | jsonb | Stejný formát obálky |
-| `user_settings.summary_prompt` | jsonb | Konfigurace vlastních promptů může obsahovat uživatelský kontext |
+| `user_settings.summary_prompt` | jsonb | Konfigurace vlastních pokynů může obsahovat uživatelský kontext |
 | `user_settings.title_generation_prompt` | jsonb | Stejné |
 | `recording_tasks.text`, `.assignee_hint`, `.due_phrase`, `.quote` | text | Úkol, název slyšený pro vykonavatele, termín a slova, ve kterých to bylo řečeno |
 | `task_update_proposals.due_phrase`, `.quote` | text | Následný úkol slyšený na pozdější nahrávce |
@@ -37,8 +37,8 @@ Předchozí šifrování (beze změny):
 Mimo rozsah této vrstvy:
 
 - **Zvukové soubory v úložišti** (lokální FS / S3). Šifrování na úrovni objektu je
-  samostatná, náročnější změna. Pro S3 doporučujeme v současnosti server-side šifrování
-  na úrovni bucketu; k šifrování na úrovni jednotlivých objektů v aplikaci se lze
+  samostatná, náročnější změna. Pro S3 doporučujeme v současnosti šifrování na straně serveru
+  na úrovni kontejneru; k šifrování na úrovni jednotlivých objektů v aplikaci se lze
   případně vrátit později.
 - **Vyhledávání.** Fulltextové vyhledávání v přepisech zatím není implementováno,
   takže šifrováním `text` nedochází ke zhoršení funkce. Pokud bude vyhledávání
@@ -48,8 +48,8 @@ Mimo rozsah této vrstvy:
 
 ## Proti čemu toto chrání
 
-- Odcizené zálohy nebo snapshoty databáze
-- Přístup k read-replikám bez přístupu k aplikačnímu serveru
+- Odcizené zálohy nebo snímky databáze
+- Přístup k replikám pro čtení bez přístupu k aplikačnímu serveru
 - SQL-injection, která pouze čte, ale nespouští kód aplikace
 - Operátoři s přístupem pouze k databázi (např. přes administrační konzoli)
   nemohou číst obsah, aniž by měli také klíč aplikačního serveru
@@ -113,7 +113,7 @@ vlně rotace možné určit, které řádky je třeba přešifrovat.
 během tohoto období toleruje oba formáty. Pokud chcete existující řádky zašifrovat ihned:
 
 **Docker / vlastní hosting (preferovaná cesta):** skript je součástí
-image na adrese `/app/encrypt-backfill.js`.
+obrazu na adrese `/app/encrypt-backfill.js`.
 
 ```bash
 # Report what would change (no writes)

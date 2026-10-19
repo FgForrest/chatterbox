@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type { ImportResult } from "@/lib/knowledge/import-list";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 const EXAMPLE = `product: Alpha, Beta (Béta, B2)
 organization: Acme
@@ -35,6 +36,7 @@ export function ImportDialog({
     typeLabels: Record<string, string>;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const [text, setText] = useState("");
     const [preview, setPreview] = useState<ImportResult | null>(null);
@@ -154,11 +156,16 @@ export function ImportDialog({
                                             </td>
                                             <td className="px-3 py-1.5">
                                                 {row.typeKey === "person"
-                                                    ? i18n("Person")
+                                                    ? labels.entityType(
+                                                          "person",
+                                                      )
                                                     : row.typeKey
-                                                      ? (typeLabels[
-                                                            row.typeKey
-                                                        ] ?? row.typeKey)
+                                                      ? labels.entityType(
+                                                            row.typeKey,
+                                                            typeLabels[
+                                                                row.typeKey
+                                                            ],
+                                                        )
                                                       : row.typeText}
                                             </td>
                                             <td

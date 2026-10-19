@@ -6,6 +6,7 @@
  */
 
 import type { Vocabulary } from "@/lib/knowledge/vocabulary";
+import type { vocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 export interface AlmanacVocabulary {
     /** Types a thing may take; `shared` for the core's and the Organization's. */
@@ -27,23 +28,29 @@ export interface AlmanacVocabulary {
     }[];
 }
 
-export function almanacVocabulary(vocabulary: Vocabulary): AlmanacVocabulary {
+export function almanacVocabulary(
+    vocabulary: Vocabulary,
+    labels: ReturnType<typeof vocabularyLabels>,
+): AlmanacVocabulary {
     return {
         entityTypes: vocabulary.entityTypes
             .filter((type) => type.key !== "person" && !type.adoptedAsKey)
             .map((type) => ({
                 key: type.key,
-                label: type.label,
+                label: labels.entityType(type.key, type.label),
                 shared: type.layer !== "private",
             }))
             .sort((a, b) => a.label.localeCompare(b.label)),
         typeLabels: Object.fromEntries(
-            vocabulary.entityTypes.map((type) => [type.key, type.label]),
+            vocabulary.entityTypes.map((type) => [
+                type.key,
+                labels.entityType(type.key, type.label),
+            ]),
         ),
         relations: vocabulary.relationTypes
             .map((relation) => ({
                 key: relation.key,
-                label: relation.label,
+                label: labels.relation(relation.key, relation.label),
                 subjectTypes: relation.subjectTypes,
                 objectTypes: relation.objectTypes,
                 objectKind: relation.objectKind,

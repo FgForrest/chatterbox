@@ -3,7 +3,7 @@ title: Pro administrátory
 description: Co je potřeba zapnout pro jednotlivé funkce na instanci s vlastním hostingem.
 ---
 
-Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vyžadují nejprve určité nastavení instance. Zapínají se pomocí proměnných v `.env` (viz `.env.example`) a u dvou z nich také pomocí dodatečných služeb v `docker-compose.yml`. Po změně libovolného z těchto nastavení vždy restartujte stack.
+Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vyžadují nejprve určité nastavení instance. Zapínají se pomocí proměnných v `.env` (viz `.env.example`) a u dvou z nich také pomocí dodatečných služeb v `docker-compose.yml`. Po změně libovolného z těchto nastavení vždy restartujte sadu služeb.
 
 | Funkce | Co nastavit | Více informací |
 | --- | --- | --- |
@@ -18,8 +18,8 @@ Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vy
 | Poskytovatelé Claude Code a Codex | profil `agent-bridge` a `BRIDGE_TOKEN` | [níže](#claude-code-and-codex-subscriptions) |
 | MCP server pro AI klienty a služby | `MCP_AUDIENCE` s jednotným přihlašováním, volitelně `MCP_ALLOWED_CLIENTS` | [Externí MCP server](../self-hosting/mcp.mdx) |
 | [Klepna v Claude](claude.md) a Claude Code | klienti v Keycloaku, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS`, `MCP_CONNECTOR_KEYS`, veřejný vstup pro `/api/mcp` | [níže](#claude-and-claude-code) |
-| [Hledání podle významu v Learn](learn.md) | profil `learn` a `EMBEDDING_BASE_URL` | [níže](#learn) |
-| Limit pro automatické souhrny, témata a Learn | `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | |
+| [Hledání podle významu v Učení](learn.md) | profil `learn` a `EMBEDDING_BASE_URL` | [níže](#learn) |
+| Limit pro automatické souhrny, témata a Učení | `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | |
 
 <span id="the-organization" />
 
@@ -47,7 +47,7 @@ věci:
 - **Přístup do Klepna** (`use`): bez něj se nikdo nepřihlásí a jeho API
   klíče, záznamník schůzek i AI klienti přestanou fungovat.
 - **Spravuje Organizaci** (`org.curate`): mění sdílené nahrávky ve
-  zobrazení Organizace (jména mluvčích, Learn, opravy, názvy, shrnutí,
+  zobrazení Organizace (jména mluvčích, Učení, opravy, názvy, shrnutí,
   témata, přepisy) pod svým vlastním jménem.
 - **Spravuje přístup** (`access.manage`): vidí **Nastavení → Přístupy** a
   přepíná tam ostatním tato tři práva.
@@ -76,14 +76,14 @@ prvního administrátora.
 
 ## Claude Code a Codex předplatná
 
-Bridge agent umožňuje, aby souhrny, témata, názvy i Learn běžely na předplatném Claude nebo ChatGPT namísto API klíče:
+Můstek pro agenty umožňuje, aby souhrny, témata, názvy i Učení běžely na předplatném Claude nebo ChatGPT namísto API klíče:
 
 ```bash
 echo "BRIDGE_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose --profile agent-bridge up -d --build agent-bridge
 ```
 
-Přihlaste bridge jednou ke službě Claude nebo Codex (viz `agent-bridge/README.md` v repozitáři). Poté v Klepna přidejte poskytovatele **Claude Code** nebo **Codex** a jako API klíč vložte token z bridge. Bridge nemá připravený image a neotevírá žádný port. Ve výchozím stavu zpracovává vždy jen jeden požadavek; pokud využíváte vícekolečkové (multi-pass) souhrny, zvyšte `BRIDGE_MAX_CONCURRENCY` na potřebný počet kol. Doporučujeme ponechat poskytovatele s API klíčem jako zálohu.
+Přihlaste můstek jednou ke službě Claude nebo Codex (viz `agent-bridge/README.md` v repozitáři). Poté v Klepna přidejte poskytovatele **Claude Code** nebo **Codex** a jako API klíč vložte token z můstku. Můstek nemá připravený obraz a neotevírá žádný port. Ve výchozím stavu zpracovává vždy jen jeden požadavek; pokud využíváte vícenásobné shrnování, zvyšte `BRIDGE_MAX_CONCURRENCY` na potřebný počet kol. Doporučujeme ponechat poskytovatele s API klíčem jako zálohu.
 
 <span id="claude-and-claude-code" />
 
@@ -98,12 +98,14 @@ Se zapnutým [externím MCP serverem](../self-hosting/mcp.mdx) se lidé mohou na
 
 Stránka [Claude a Claude Code](../self-hosting/claude.mdx) obsahuje všechny kroky, kontroly i postup, když je připojení odmítnuto. Lidi odkažte na kapitolu [Klepna v Claude](claude.md).
 
-## Learn
+<span id="learn" />
 
-Learn nepotřebuje žádné další nastavení kromě poskytovatele, který zapisuje souhrny. Dvě volitelné možnosti zvyšují jeho efektivitu:
+## Učení
+
+Učení nepotřebuje žádné další nastavení kromě poskytovatele, který zapisuje souhrny. Dvě volitelné možnosti zvyšují jeho efektivitu:
 
 - **Hledání podle významu.** `docker compose --profile learn up -d` spouští službu `embeddings` (cca 1,3 GB paměti; při prvním spuštění se stáhne 1,2 GB). Nastavte `EMBEDDING_BASE_URL=http://embeddings:11434/v1`.
-- **Vyhledávání informací v reálném čase.** Pokud je za bridge poskytovatel Claude Code nebo Codex, nastavte `LEARN_MCP_URL=http://app:3000/api/mcp/learn` a `LEARN_BRIDGE_URL=http://agent-bridge:8787/v1` (přesně kořenovou URL poskytovatele) a zvyšte `BRIDGE_TIMEOUT_MS` na `900000`. Model pak může dotazovat Almanac přímo během čtení místo toho, aby dostal vše v promptu.
+- **Vyhledávání informací v reálném čase.** Pokud je za můstkem poskytovatel Claude Code nebo Codex, nastavte `LEARN_MCP_URL=http://app:3000/api/mcp/learn` a `LEARN_BRIDGE_URL=http://agent-bridge:8787/v1` (přesně kořenovou URL poskytovatele) a zvyšte `BRIDGE_TIMEOUT_MS` na `900000`. Model pak může dotazovat Almanach přímo během čtení místo toho, aby dostal vše v pokynu.
 
 <span id="meeting-recorder-meetrec" />
 

@@ -156,7 +156,7 @@ export function TranscriptTopicsMenu({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary"
+                    className="-ml-1.5 h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary has-[>svg]:px-1.5"
                     onClick={runDetect}
                     disabled={detecting}
                 >

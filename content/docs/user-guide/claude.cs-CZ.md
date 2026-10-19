@@ -39,11 +39,11 @@ Pokud Klepna nabídne Claude při prvním nastavení, tento krok ukáže adresu 
 2. Najděte **Klepna** se štítkem **Custom** a klikněte na **Connect**.
 3. Otevře se přihlašovací stránka Vaší organizace. Přihlaste se stejně jako do aplikace Klepna.
 
-**Pokud používáte osobní tarif Claude** (Free, Pro nebo Max), administrátor Vám dá vlastní client ID a tajemství:
+**Pokud používáte osobní tarif Claude** (Free, Pro nebo Max), administrátor Vám dá vlastní ID klienta a tajemství:
 
 1. V Claude otevřete **Customize → Connectors → Add custom connector**.
 2. Zadejte název **Klepna** a adresu od administrátora, která končí na `/api/mcp`.
-3. V **Advanced settings** zadejte své client ID a tajemství. Pokud jste dostali i klíč, přidejte ho v **Request headers** jako `x-api-key`.
+3. V **Advanced settings** zadejte své ID klienta a tajemství. Pokud jste dostali i klíč, přidejte ho v **Request headers** jako `x-api-key`.
 4. Klikněte na **Add**, pak na **Connect** a přihlaste se.
 
 Tajemství si nechte pro sebe, stejně jako heslo.

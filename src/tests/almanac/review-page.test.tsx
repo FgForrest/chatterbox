@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
+import { createTranslator } from "use-intl/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { messagesForLocale } from "@/lib/i18n/messages";
 
 vi.mock("next-intl/server", () => ({
     getExtracted: vi.fn(async () => (message: string) => message),
+    getTranslations: vi.fn(async () =>
+        createTranslator({ locale: "en", messages: messagesForLocale("en") }),
+    ),
 }));
 vi.mock("@/components/people/suggested-relations", () => ({
     SuggestedRelations: () => null,

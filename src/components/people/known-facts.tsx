@@ -29,6 +29,7 @@ import type {
     PageFact,
     PageRelation,
 } from "@/lib/knowledge/fact-page";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 function timestamp(ms: number): string {
     const seconds = Math.floor(ms / 1000);
@@ -99,6 +100,7 @@ export function KnownFacts({
     editing?: FactEditing;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const locale = useLocale();
     const router = useRouter();
     const [adding, setAdding] = useState(false);
@@ -178,8 +180,11 @@ export function KnownFacts({
                           key: `${relation.key}|${direction}`,
                           heading:
                               direction === "subject"
-                                  ? relation.label
-                                  : `${relation.label} ${name}`,
+                                  ? labels.relation(
+                                        relation.key,
+                                        relation.label,
+                                    )
+                                  : `${labels.relation(relation.key, relation.label)} ${name}`,
                           facts,
                       },
                   ];

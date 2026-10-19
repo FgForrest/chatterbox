@@ -13,7 +13,7 @@ Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, sesk
 ![Seznam nahrávek s filtrem Potřebuje zkontrolovat](images/recording-list-needs-review.png)
 
 - **Hledat** prohledává pole vybraná v části **Hledat v**: názvy, přepisy a text zpráv nebo shrnutí. Prohledává opravené přepisy. Text pošty nezahrnuje citované dřívější zprávy, podpisy ani právní dovětky.
-- Nabídka **Vše · Nejnovější** určuje zobrazené kanály a řadí výsledek od nejnovějších, od nejstarších nebo podle názvu. Volba **Potřebuje zkontrolovat** se v nabídce objeví, když má Learn návrhy čekající na schválení. Viz [Learn](learn.md).
+- Nabídka **Vše · Nejnovější** určuje zobrazené kanály a řadí výsledek od nejnovějších, od nejstarších nebo podle názvu. Volba **Potřebuje zkontrolovat** se v nabídce objeví, když má Učení návrhy čekající na schválení. Viz [Učení](learn.md).
 - **Organizovat** přepne seznam do režimu složek. Viz [Soubory](#folders).
 - Nabídka **⋯** na řádku otevře detail nahrávky, stáhne zvuk nebo ji odstraní.
 
@@ -63,7 +63,7 @@ Přehrávač zobrazuje nahrávku jako zvukovou vlnu. Kliknutím kamkoli skočít
 
 ![Odhadovaná spotřeba AI, rozbaleno](images/ai-spend.png)
 
-Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá zpracování u této nahrávky: přepis, souhrn, témata, Learn i název. Dole pak vidíte, který poskytovatel a model danou operaci provedli. Ceny jsou dle oficiálního ceníku každého poskytovatele, nebo podle ceny, kterou jste zadali v nastavení poskytovatele (viz [Poskytovatelé AI](settings.md#ai-providers)). U Claude Code a Codex, které běží na základě předplatného, zobrazená částka ukazuje, kolik by to stálo přes API; není to poplatek. Požadavky uskutečněné před zavedením sledování nákladů nejsou započítány.
+Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá zpracování u této nahrávky: přepis, souhrn, témata, Učení i název. Dole pak vidíte, který poskytovatel a model danou operaci provedli. Ceny jsou dle oficiálního ceníku každého poskytovatele, nebo podle ceny, kterou jste zadali v nastavení poskytovatele (viz [Poskytovatelé AI](settings.md#ai-providers)). U Claude Code a Codex, které běží na základě předplatného, zobrazená částka ukazuje, kolik by to stálo přes API; není to poplatek. Požadavky uskutečněné před zavedením sledování nákladů nejsou započítány.
 
 <span id="erasing" />
 

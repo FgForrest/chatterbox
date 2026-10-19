@@ -6,9 +6,9 @@ description: Nakonfigurujte poskytovatele přepisu a sumarizace kompatibilní s 
 Klepna využívá OpenAI SDK s konfigurovatelnou `baseURL`. Jakýkoliv poskytovatel,
 který nabízí OpenAI-kompatibilní API, funguje: samotné OpenAI, Groq,
 OpenRouter, Together, Azure OpenAI, LM Studio, Ollama a další řešení,
-která podporují stejný wire protokol.
+která podporují stejný komunikační protokol.
 
-Tři přepisová backendy jsou integrovány nativně, protože jejich API
+Tři přepisové služby jsou integrovány nativně, protože jejich API
 nejsou kompatibilní s OpenAI: Google Gemini, ElevenLabs Scribe a
 Speechmatics.
 
@@ -22,20 +22,20 @@ ruční shrnutí lze spustit s libovolným dostupným profilem.
 
 **Nastavení → AI poskytovatelé → Přidat poskytovatele** otevře dialog s přednastaveným
 seznamem. Každá předvolba automaticky vyplní `baseURL`, výchozí model a
-nápovědu k tomu, který API endpoint by měl používat pracovník přepisu:
+nápovědu k tomu, který koncový bod API by měl používat pracovník přepisu:
 
-- **Whisper-style** (`/v1/audio/transcriptions`, multipart upload) —
-  klasický rozhraní OpenAI Whisper. Používají ho OpenAI, Groq Whisper, Together
+- **Styl Whisper** (`/v1/audio/transcriptions`, nahrání ve vícedílném požadavku) —
+  klasické rozhraní OpenAI Whisper. Používají ho OpenAI, Groq Whisper, Together
   Whisper, LM Studio, Ollama.
-- **Chat-style** (`/v1/chat/completions` s částí obsahu `input_audio`) —
+- **Styl chatu** (`/v1/chat/completions` s částí obsahu `input_audio`) —
   pro poskytovatele, kteří nabízejí LLM s audio vstupem místo dedikovaného API pro přepis.
   Využívá OpenRouter směrující Gemini / GPT-audio / Voxtral.
-- **Gemini-style** (`generateContent` s inline audio daty) —
+- **Styl Gemini** (`generateContent` se zvukovými daty vloženými přímo do požadavku) —
   nativní Google Gemini API. Používá předvolba Google Gemini.
-- **Scribe-style** (`/v1/speech-to-text`, multipart upload, autentizace
+- **Styl Scribe** (`/v1/speech-to-text`, nahrání ve vícedílném požadavku, autentizace
   přes `xi-api-key`) — nativní API ElevenLabs. Používá předvolba ElevenLabs.
-- **Speechmatics-style** (`POST /v2/jobs`, následně polling, stažení) —
-  Speechmatics Batch job API. Používá předvolba Speechmatics.
+- **Styl Speechmatics** (`POST /v2/jobs`, následně opakované dotazování na stav, stažení) —
+  API dávkových úloh Speechmatics. Používá předvolba Speechmatics.
 
 Vyberte předvolbu, vložte svůj API klíč, zvolte výchozí model, uložte. Postup opakujte pro další poskytovatele.
 
@@ -47,11 +47,11 @@ Vyberte předvolbu, vložte svůj API klíč, zvolte výchozí model, uložte. P
 | -------------- | -----------------------------------------------  | ------------------------------------------------------------------- |
 | OpenAI         | *(prázdné, defaultně api.openai.com)*            | Produkční kvalita; `whisper-1`, `gpt-4o-transcribe`             |
 | Groq           | `https://api.groq.com/openai/v1`             | Bezplatné Whisper API, velmi rychlé                                     |
-| OpenRouter     | `https://openrouter.ai/api/v1`               | Přepis ve stylu Chat; mnoho summarizačních modelů na jeden klíč   |
+| OpenRouter     | `https://openrouter.ai/api/v1`               | Přepis ve stylu chatu; mnoho summarizačních modelů na jeden klíč   |
 | Together AI    | `https://api.together.xyz/v1`                | Úsporné, široký výběr modelů                                         |
 | Google Gemini  | *(prázdné, nativní Google API)*                   | Přepis ve stylu Gemini; pouze přepis                                 |
 | ElevenLabs     | *(prázdné, defaultně api.elevenlabs.io)*         | Přepis ve stylu Scribe, volitelné označení mluvčích; pouze přepis   |
-| Speechmatics   | *(prázdné, automatické směrování asr.api.speechmatics.com)* | Přepis typu batch job, volitelné označení mluvčích; pouze přepis    |
+| Speechmatics   | *(prázdné, automatické směrování asr.api.speechmatics.com)* | Přepis pomocí dávkové úlohy, volitelné označení mluvčích; pouze přepis    |
 | Azure          | `https://<resource>.openai.azure.com/...`    | Soulad s korporátními požadavky, URL vázaná na nasazení             |
 | LM Studio      | `http://localhost:1234/v1`                   | Lokální, 100% offline                                               |
 | Ollama         | `http://localhost:11434/v1`                  | Lokální, snadná správa modelů                                       |
@@ -60,7 +60,7 @@ Vyberte předvolbu, vložte svůj API klíč, zvolte výchozí model, uložte. P
 Předvolby LM Studio a Ollama ve výchozím stavu používají `http://localhost`. Zevnitř
 kontejneru Docker je `localhost` samotný kontejner, ne hostitelský
 stroj — použijte `http://host.docker.internal:<port>` na Mac/Windows, nebo
-Docker bridge IP na Linuxu, abyste se dostali na AI server běžící na
+IP adresu přemosťovací sítě Docker na Linuxu, abyste se dostali na AI server běžící na
 hostiteli. Pokud provozujete Ollamu ve stejné síti Docker jako Klepna, použijte
 název služby (`http://ollama:11434/v1`).
 
@@ -77,36 +77,36 @@ rozhoduje o možnostech nabídky předvybraný seznam, a možnost
 při vydání této dokumentace v oficiálním seznamu.
 
 Sumarizace je volnější — funguje libovolný chatovací model, který
-splňuje shape OpenAI `chat/completions`. Vyberte model rychlý a levný
+splňuje formát OpenAI `chat/completions`. Vyberte model rychlý a levný
 (např. `gpt-4o-mini`, `llama-3.1-70b-versatile`), pokud nemáte
 konkrétní důvod použít větší model.
 
 ### ElevenLabs Scribe
 
 Předvolba nabízí `scribe_v2` (výchozí), `scribe_v2_medical` a
-legacy `scribe_v1`. Diarizace je volba při požadavku, nikoli samostatný model,
-takže v nabídce je možnost **scribe_v2 (speaker labels)**,
+starší `scribe_v1`. Diarizace je volba při požadavku, nikoli samostatný model,
+takže v nabídce je možnost **scribe_v2 (označení mluvčích)**,
 uložená jako `scribe_v2+diarize`. Při aktivní volbě budou přepisy
 ve formě `speaker_0: …` řádků, což je stejná struktura, jakou Klepna ukládá
 u diarizovaného modelu OpenAI, a pracovní stanice zobrazí tyto přepisy
 jako dialog místo souvislého textu. Viz [Jak se přepisy a souhrny zobrazují](#how-transcripts-and-summaries-are-displayed).
 
-Pole **Base URL** nechte prázdné pro použití `api.elevenlabs.io`. Pokud chcete držet
+Pole **Základní URL** nechte prázdné pro použití `api.elevenlabs.io`. Pokud chcete držet
 audio v určité oblasti, nastavte místo toho hostitele s požadovanou
 lokalitou, například `https://api.eu.residency.elevenlabs.io`. Koncová `/v1` je
 volitelná.
 
-Zvuk je nahráván přesně tak, jak je uložen. Mono Opus re-encode,
-který drží příliš velké nahrávky pod 25 MiB OpenAI limit, je u Scribe
-vynechán, protože Scribe akceptuje i vícagigabajtové nahrávky – takže
+Zvuk je nahráván přesně tak, jak je uložen. Překódování do jednokanálového formátu Opus,
+které drží příliš velké nahrávky pod limitem OpenAI 25 MiB, je u Scribe
+vynecháno, protože Scribe akceptuje i vícagigabajtové nahrávky – takže
 dlouhá setkání jdou do modelu v plné kvalitě.
 
 Scribe v2 a v2 Medical dostávají seznam jmen ze [Almanachu](./almanac),
-max. 500 položek, které jsou zasílány jako keyterms. Viz také
+max. 500 položek, které jsou zasílány jako klíčové výrazy. Viz také
 [Jména z Almanachu](./almanac#names-from-the-almanac). ElevenLabs
-účtuje keyterms jako doplněk k hodinové sazbě.
+účtuje klíčové výrazy jako doplněk k hodinové sazbě.
 
-ElevenLabs je pouze pro přepis. Nepodporuje `chat/completions` endpoint,
+ElevenLabs je pouze pro přepis. Nepodporuje koncový bod `chat/completions`,
 takže mějte druhého poskytovatele pro výchozí sumarizaci.
 
 ### Speechmatics
@@ -115,7 +115,7 @@ Předvolba nabízí `enhanced` (výchozí, nejvyšší přesnost), `standard`
 (rychlejší a levnější), a `melia-1`, což je vícejazyčný model, který
 sám detekuje jazyk a přepíná mezi jazyky. Stejně jako u Scribe je diarizace
 nastavení v požadavku, ne samostatný model – každá předvolba má tedy
-i variantu **(speaker labels)** v rozbalovací nabídce, uloženou jako `enhanced+diarize`
+i variantu **(označení mluvčích)** v rozbalovací nabídce, uloženou jako `enhanced+diarize`
 a další. Při výběru těchto variant jsou přepisy ve formátu `speaker_1: …`
 řádků a pracovní stanice je zobrazí jako dialog — viz
 [Jak se přepisy a souhrny zobrazují](#how-transcripts-and-summaries-are-displayed).
@@ -131,24 +131,24 @@ nemáte nastavený, Klepna požádá o `auto` a nechá Speechmatics
 jazyk rozpoznat. Výjimkou je `melia-1`: přijímá pouze `multi`,
 takže nastavení jazyka se při jejím výběru ignoruje.
 
-Pole **Base URL** ponechte prázdné pro použití `asr.api.speechmatics.com`, který směruje
+Pole **Základní URL** ponechte prázdné pro použití `asr.api.speechmatics.com`, který směruje
 do nejbližší oblasti. Pokud chcete zajistit umístění dat v konkrétní oblasti,
 nastavte místo toho regionálního hostitele — `https://eu2.asr.api.speechmatics.com`,
 `https://us1.asr.api.speechmatics.com`, `https://au1.asr.api.speechmatics.com`
 atd. Koncová `/v2` je volitelná.
 
-Batch je asynchronní API: Klepna nahraje audio jako úlohu, poté se
+Dávkové API je asynchronní: Klepna nahraje audio jako úlohu, poté se
 každé 3 sekundy dotazuje na stav, stáhne přepis při dosažení `done`
 a následně úlohu smaže, aby audio a přepis nezůstaly na serverech
 Speechmatics čekající na vypršení retenční lhůty. Celé čekání
 je omezeno na `WHISPER_REQUEST_TIMEOUT_MS` (výchozí 60 minut) — zvyšte limit,
 pokud přepisujete delší nahrávky.
 
-Audio je nahráno přesně tak, jak je uložené; mono Opus re-encode
-omezující velikost pod limit OpenAI 25 MiB je i zde vynechán, stejně jako u Scribe.
+Audio je nahráno přesně tak, jak je uložené; překódování do jednokanálového formátu Opus
+omezující velikost pod limit OpenAI 25 MiB je i zde vynecháno, stejně jako u Scribe.
 
 Speechmatics je pouze pro přepis — nemá `chat/completions`
-endpoint, takže si ponechte zvláštního poskytovatele jako výchozí pro sumarizaci.
+koncový bod, takže si ponechte zvláštního poskytovatele jako výchozí pro sumarizaci.
 
 <span id="what-gets-sent-to-the-provider" />
 
@@ -193,11 +193,11 @@ nebo profil položky a potom spusťte **Přepsat** či **Přepsat znovu**.
 **Souhrny jsou v Markdownu.** Model je požádán o JSON objekt a
 hodnota `summary` v něm je v Markdownu a jako taková je i vykreslena:
 nadpisy, odrážky, číslované seznamy, tučný text, odkazy a tabulky jsou
-podporovány. Pokyn k tomuto formátování je připojen ke každému promptu,
+podporovány. Instrukce k tomuto formátování se připojuje ke každému pokynu,
 včetně těch vlastních, takže ve svých proměnných nemusíte formát výslovně
 zmiňovat.
 
-JSON obálka zůstává prostý objekt bez jakýchkoli code bloků.
+JSON obálka zůstává prostý objekt bez jakýchkoli bloků kódu.
 Pokud model požadavek ignoruje a odpoví souvislým textem, odpověď se
 zobrazí, nevyřazuje se – a protože je interpretována jako Markdown,
 většinou se čte správně.
@@ -205,7 +205,7 @@ většinou se čte správně.
 Surový HTML kód v souhrnu je vypouštěn, nebude zobrazen.
 
 **Diarizované přepisy se zobrazují jako dialog.** Když přepis pochází
-z endpointu s rozpoznáním mluvčích, pracovní stanice zobrazí jeden blok
+z koncového bodu s rozpoznáním mluvčích, pracovní stanice zobrazí jeden blok
 na každé vystoupení s jménem mluvčího nad ním (barevně odlišené),
 seskupené podle mluvčího. Týká se to
 `gpt-4o-transcribe-diarize`, `scribe_v2+diarize`, modelů
@@ -252,7 +252,7 @@ náklady zvýšit. Dva mantinely:
 
 - **Hodinový limit na uživatele.** Požadavky auto-souhrnu jsou omezeny
   pomocí `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` (výchozí `60`). Po vyčerpání
-  limitu čeká práce pipeline za odloženými úlohami. Přepis zůstane uložen
+  limitu čeká práce zpracovatelského postupu za odloženými úlohami. Přepis zůstane uložen
   a odložení kvůli limitu nevyvolá `summary.failed`. Ruční shrnutí tento
   limit neomezuje.
 - **Zvolte model v profilu.** Každý krok shrnutí výslovně určuje
@@ -263,7 +263,7 @@ náklady zvýšit. Dva mantinely:
 ### Neaktuální souhrny po opakovaném přepisu
 
 Po **opakovaném přepisu** se staré shrnutí a pozdější výsledky pracovního
-postupu označí jako **Zastaralé**. Pipeline znovu vytvoří automatické kroky
+postupu označí jako **Zastaralé**. Zpracovatelský postup znovu vytvoří automatické kroky
 zapnuté v přiřazeném profilu. Pouze ručně vytvořený výsledek zůstane viditelný
 jako zastaralý, dokud jej znovu nespustíte.
 

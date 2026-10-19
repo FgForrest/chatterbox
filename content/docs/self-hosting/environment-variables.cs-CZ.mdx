@@ -14,7 +14,7 @@ pro instalaci s vlastním hostingem.
 ## Povinné za běhu
 
 Tyto proměnné musí být nastavené pokaždé, když server skutečně běží (vývoj i produkce).
-Jsou volitelné ve vrstvě **build** (sestavení), aby `next build`
+Jsou volitelné ve vrstvě **sestavení**, aby `next build`
 nezávisel na produkčních tajemstvích.
 
 | Proměnná                   | Typ      | Poznámky                                                                 |
@@ -32,21 +32,21 @@ nezávisel na produkčních tajemstvích.
 | ------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `DISABLE_REGISTRATION`              | `false`                            | Při `true` je registrace odmítnuta na straně serveru a stránka `/register` je zakázána. Stávající uživatelé dál fungují. S [jednotným přihlašováním](./sso) se mohou přihlásit pouze existující účty. |
 | `DISABLE_UPDATE_CHECK`              | `false`                            | Při hodnotě `true` patička nikdy nekontroluje u `api.github.com` nové vydané verze.                                 |
-| `DOCS_REPOSITORY`                   | `FgForrest/chatterbox`             | GitHub repozitář (`owner/name`), na který směřují odkazy **Upravit na GitHubu** v dokumentaci. Čte se při buildu dokumentace: předává se jako build argument Dockeru. |
-| `SELF_HOST_MODE`                    | `shared`                           | `shared` umožňuje úroveň Organization; `local` drží každý účet striktně soukromě.                           |
-| `ORG_ACCOUNT_EMAIL`                 | nenastaveno                          | Při `ORG_ACCOUNT_PASSWORD` povolí úroveň Organization: sdílenou stromovou strukturu složek a jeden účet organizace, který ji spravuje. Nesmí odpovídat e-mailu žádného stávajícího uživatele. |
+| `DOCS_REPOSITORY`                   | `FgForrest/chatterbox`             | GitHub repozitář (`owner/name`), na který směřují odkazy **Upravit na GitHubu** v dokumentaci. Čte se při sestavování dokumentace: předává se jako argument sestavení Dockeru. |
+| `SELF_HOST_MODE`                    | `shared`                           | `shared` umožňuje úroveň Organizace; `local` drží každý účet striktně soukromě.                           |
+| `ORG_ACCOUNT_EMAIL`                 | nenastaveno                          | Při `ORG_ACCOUNT_PASSWORD` povolí úroveň Organizace: sdílenou stromovou strukturu složek a jeden účet organizace, který ji spravuje. Nesmí odpovídat e-mailu žádného stávajícího uživatele. |
 | `ORG_ACCOUNT_PASSWORD`              | nenastaveno                          | Heslo účtu organizace (alespoň 12 znaků). Při každém startu se opětovně nastavuje. Volitelné při jednotném přihlašování, kde účet nemá interaktivní přihlášení. |
 | `ORG_ACCOUNT_NAME`                  | `Organization`                     | Zobrazované jméno účtu organizace.                                                                                |
 | `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` | `60`                         | Nejvyšší počet volání, která může jeden člen provést u každého poskytovatele AI Organizace v jednom hodinovém okně. Ostatní členové mají samostatné limity. |
-| `CHATTERBOX_VERSION`             | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které image tagy Compose stahuje.                                  |
+| `CHATTERBOX_VERSION`             | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které značky obrazů Compose stahuje.                                  |
 | `RIFFADO_VERSION`                | nenastaveno                        | Zastaralá po dobu jednoho vydání. Použije se pouze tehdy, když `CHATTERBOX_VERSION` není nastavena.                |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
-| `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro bucketování rate-limitů. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
-| `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace session secretu. |
+| `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro rozdělování limitů počtu požadavků. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
+| `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace tajného klíče relací. |
 
 Nastavení `RATE_LIMIT_TRUST_PROXY_HEADERS=true` bez proxy,
-která přepisuje forwarding záhlaví, umožní klientům falšovat vlastní IP adresy
-a zcela obejít rate limiting. Pokud si nejste jistí, že Vaše proxy tato záhlaví
+která přepisuje přeposílací záhlaví, umožní klientům falšovat vlastní IP adresy
+a zcela obejít omezení počtu požadavků. Pokud si nejste jistí, že Vaše proxy tato záhlaví
 přepisuje/maže, ponechte nenastaveno.
 
 Chcete-li změnit `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, musí jej produkční
@@ -62,8 +62,8 @@ a nastavte hodnotu v `.env`. Prázdná nebo chybějící hodnota zachová výcho
 | ----------------------- | ----------- | ------------------------------------------------------------------- |
 | `DEFAULT_STORAGE_TYPE`  | `local`     | `local` nebo `s3`. Výchozí pro nové uživatele; možnost individuálně změnit v UI.|
 | `LOCAL_STORAGE_PATH`    | `./storage` | Systémová cesta k souborům, pokud `DEFAULT_STORAGE_TYPE=local`.                  |
-| `S3_ENDPOINT`           | —           | URL endpointu. Prázdné pro AWS S3.                                    |
-| `S3_BUCKET`             | —           | Název bucketu.                                                        |
+| `S3_ENDPOINT`           | —           | URL koncového bodu. Prázdné pro AWS S3.                                    |
+| `S3_BUCKET`             | —           | Název kontejneru.                                                        |
 | `S3_REGION`             | —           | Region (`auto` na R2).                                            |
 | `S3_ACCESS_KEY_ID`      | —           |                                                                   |
 | `S3_SECRET_ACCESS_KEY`  | —           |                                                                   |
@@ -75,7 +75,7 @@ Viz [S3-kompatibilní úložiště](./storage-s3) pro šablony konfigurací jedn
 Export/Záloha → Frekvence záloh**. Bez něj se každý plánovaný archiv
 zápisuje do stejného místa jako zvuková data, která obsahuje – složka se
 tak zhruba zdvojnásobí a záloha sdílí disk s originálem. Nastavte na samostatné
-úložiště (externí disk, NAS), a archivy půjdou tam bez ohledu na backend k nahrávkám.
+úložiště (externí disk, NAS), a archivy půjdou tam bez ohledu na systém úložiště nahrávek.
 Vždy se uvádí lokální systémová cesta, včetně případů, kdy instance běží na S3: záloha,
 kterou nelze bez běžící aplikace přečíst, není opravdu záloha.
 
@@ -89,11 +89,11 @@ Viz [Export na Google Drive](./google-drive) pro nastavení v Google Cloud.
 
 | Proměnná                      | Výchozí | Efekt                                                                                      |
 | ----------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID`            | —       | OAuth client id („Web application“ klient).                                                |
-| `GOOGLE_CLIENT_SECRET`        | —       | OAuth client secret.                                                                       |
+| `GOOGLE_CLIENT_ID`            | —       | ID klienta OAuth („Web application“ klient).                                                |
+| `GOOGLE_CLIENT_SECRET`        | —       | Tajný klíč klienta OAuth.                                                                       |
 | `GOOGLE_PICKER_API_KEY`       | —       | Prohlížečový API klíč pro Google Picker. Omezte pouze na Picker API a svou `APP_URL`.     |
-| `GOOGLE_CLOUD_PROJECT_NUMBER` | —       | Číselné projektové číslo v Google Cloud (app id pro Picker).                             |
-| `GOOGLE_WORKSPACE_DOMAINS`    | —       | Čárkou oddělené Workspace domény, které smějí připojit účet. Pokud není, může kdokoliv koho schválí consent screen. |
+| `GOOGLE_CLOUD_PROJECT_NUMBER` | —       | Číselné projektové číslo v Google Cloud (ID aplikace pro Picker).                             |
+| `GOOGLE_WORKSPACE_DOMAINS`    | —       | Čárkou oddělené Workspace domény, které smějí připojit účet. Pokud není, může kdokoliv koho schválí obrazovka souhlasu. |
 
 <span id="single-sign-on-openid-connect" />
 
@@ -106,9 +106,9 @@ e-mailem/heslem, registrace a obnovení hesla jsou vypnuty. Viz
 
 | Proměnná               | Výchozí                | Efekt                                                                                       |
 | ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
-| `OIDC_ISSUER_URL`      | —                      | Issuer URL; endpointy se berou z jeho `/.well-known/openid-configuration`. `https`, nebo `http` pouze na interním hostu. |
-| `OIDC_CLIENT_ID`       | —                      | Client id důvěryhodného klienta.                                                            |
-| `OIDC_CLIENT_SECRET`   | —                      | Client secret.                                                                              |
+| `OIDC_ISSUER_URL`      | —                      | URL vydavatele; koncové body se berou z jeho `/.well-known/openid-configuration`. `https`, nebo `http` pouze na interním hostu. |
+| `OIDC_CLIENT_ID`       | —                      | ID důvěryhodného klienta.                                                            |
+| `OIDC_CLIENT_SECRET`   | —                      | Tajný klíč klienta.                                                                              |
 | `OIDC_PROVIDER_NAME`   | `SSO`                  | Zobrazené na tlačítku: „Přihlásit se pomocí …“.                                              |
 | `OIDC_SCOPES`          | `openid profile email` | Oddělené mezerami nebo čárkami. `openid` je vždy vyžadován.                                 |
 | `OIDC_SESSION_MAX_AGE` | `86400`                | Doba platnosti relace v sekundách (300 až 2592000), neprodlužuje se používáním.             |
@@ -124,12 +124,12 @@ a `APP_URL`; tokeny jsou ze stejné oblasti. Viz
 
 | Proměnná                   | Výchozí | Efekt                                                                                                  |
 | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `chatterbox-mcp`). Pokud není, `/api/mcp` vrací 404. |
-| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Povinné při nastavení `MCP_PUBLIC_CLIENTS`; jinak bez něj může volat každý klient realmu s požadovanou rolí (při startu se zapíše varování). |
+| `MCP_AUDIENCE`             | —       | ID klienta chráněných zdrojů s přístupovými rolemi v Keycloaku (např. `chatterbox-mcp`). Pokud není, `/api/mcp` vrací 404. |
+| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená ID klientů (`azp`), která smějí volat. Povinné při nastavení `MCP_PUBLIC_CLIENTS`; jinak bez něj může volat každý klient realmu s požadovanou rolí (při startu se zapíše varování). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Hlavička, kterou veřejná reverzní proxy nastaví na přeposlané požadavky (např. `X-MCP-Ingress`); vnitřní cesta ji odebere. Požadavek s ní se obslouží jen pro `MCP_PUBLIC_CLIENTS`. |
-| `MCP_PUBLIC_CLIENTS`       | —       | Čárkou oddělená client id obsluhovaná veřejným vstupem (např. `claude`). Vyžaduje `MCP_PUBLIC_INGRESS_HEADER`. |
-| `MCP_CONNECTOR_KEYS`       | —       | Čárkou oddělené dvojice `client=klíč` (klíče od 32 znaků): token uvedeného klienta se obslouží jen s `X-API-Key: <klíč>`, request headerem konektoru Claude. Tajné. |
-| `MCP_RESOURCE_AUDIENCE`    | `false` | Při `true` přijímá i tokeny, jejichž `aud` je `<APP_URL>/api/mcp` (resource indicators v Keycloaku). |
+| `MCP_PUBLIC_CLIENTS`       | —       | Čárkou oddělená ID klientů obsluhovaná veřejným vstupem (např. `claude`). Vyžaduje `MCP_PUBLIC_INGRESS_HEADER`. |
+| `MCP_CONNECTOR_KEYS`       | —       | Čárkou oddělené dvojice `client=klíč` (klíče od 32 znaků): token uvedeného klienta se obslouží jen s `X-API-Key: <klíč>`, hlavičkou požadavku konektoru Claude. Tajné. |
+| `MCP_RESOURCE_AUDIENCE`    | `false` | Při `true` přijímá i tokeny, jejichž `aud` je `<APP_URL>/api/mcp` (identifikátory zdrojů v Keycloaku). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Počet dní po které se záznam v tabulce `mcp_access_log` uchovává (1 až 3650).                              |
 | `MCP_SERVICE_CLIENTS`      | —       | Čárkou oddělení klienti určení jen pro služby, jejichž označené tokeny jednají v datovém kontextu Organizace. Je-li nastaveno `MCP_ALLOWED_CLIENTS`, musí v něm být každý z nich. Při nastavení (nebo při `AUTHZ_MODE=idp`) je token službou, jen když je jeho klient uveden a realm ho označil; bez nastavení v režimu `local` se token s `client_id` stále považuje za službu (zastaralé). |
 
@@ -155,18 +155,18 @@ Pouze vlastní hosting s jednotným přihlášením. Vypnuto, pokud není `AUTHZ
 
 <span id="learn-knowledge-from-recordings" />
 
-## Learn (znalosti z nahrávek)
+## Učení (znalosti z nahrávek)
 
 Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 
 | Proměnná               | Výchozí  | Efekt                                                                                                   |
 | ---------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
-| `EMBEDDING_BASE_URL`   | —        | OpenAI-kompatibilní endpoint `embeddings`. Pokud není, Learn páruje pouze podle slov, a informuje o tom. |
-| `EMBEDDING_MODEL`      | `bge-m3` | Embedding model, který bude endpointu požadován.                                                         |
-| `EMBEDDING_API_KEY`    | —        | Posílá se jako bearer token, pokud ho endpoint vyžaduje.                                                |
-| `EMBEDDING_TIMEOUT_MS` | `60000`  | Časový limit každého požadavku na embedding v milisekundách.                                            |
-| `LEARN_MCP_URL`        | —        | Jediná URL znalostních nástrojů aplikace Klepna pouze pro čtení, kterou může Learn bridge volat zpět.   |
-| `LEARN_BRIDGE_URL`     | —        | Základní URL agent bridge tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Learn přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
+| `EMBEDDING_BASE_URL`   | —        | OpenAI-kompatibilní koncový bod `embeddings`. Pokud není, Učení páruje pouze podle slov, a informuje o tom. |
+| `EMBEDDING_MODEL`      | `bge-m3` | Model pro tvorbu vektorů, který bude od koncového bodu požadován.                                                         |
+| `EMBEDDING_API_KEY`    | —        | Posílá se jako bearer token, pokud ho koncový bod vyžaduje.                                                |
+| `EMBEDDING_TIMEOUT_MS` | `60000`  | Časový limit každého požadavku na tvorbu vektorů v milisekundách.                                            |
+| `LEARN_MCP_URL`        | —        | Jediná URL znalostních nástrojů aplikace Klepna pouze pro čtení, kterou může můstek Učení volat zpět.   |
+| `LEARN_BRIDGE_URL`     | —        | Základní URL můstku pro agenty tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Učení přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
 | `KNOWLEDGE_MEMORY_MB`  | `256`    | Kolik dešifrovaných znalostí drží v paměti jeden proces, než vytlačí nejméně používanou položku.         |
 
 <span id="smtp-email-notifications" />
@@ -175,8 +175,8 @@ Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 
 | Proměnná        | Výchozí                | Efekt                                                                                |
 | --------------- | ---------------------- | ------------------------------------------------------------------------------------- |
-| `SMTP_HOST`     | —                      | Pokud není, e-mailový backend je čistě vypnutý.                                       |
-| `SMTP_PORT`     | 465 pokud secure, jindy 587| Celé číslo.                                                                              |
+| `SMTP_HOST`     | —                      | Pokud není, systém pro odesílání e-mailů je zcela vypnutý.                                       |
+| `SMTP_PORT`     | 465 při zabezpečeném spojení, jindy 587| Celé číslo.                                                                              |
 | `SMTP_SECURE`   | `false`                | `true` => implicitní TLS (port 465). `false` => STARTTLS (port 587).                   |
 | `SMTP_USER`     | —                      |                                                                                       |
 | `SMTP_PASSWORD` | —                      |                                                                                       |
@@ -186,7 +186,7 @@ Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 
 ## Co když hodnoty chybí
 
-Při startu serveru loader prostředí provede dva průchody:
+Při startu serveru načítání prostředí provede dva průchody:
 
 1. **Ověření schématu** – typy, formáty, rozsahy. Chyby vyústí v
    vícenásobnou `Environment validation failed:` chybu, která vypíše
@@ -195,6 +195,6 @@ Při startu serveru loader prostředí provede dva průchody:
    (`DATABASE_URL`, `BETTER_AUTH_SECRET`, `APP_URL`, `ENCRYPTION_KEY`)
    se ověří, že nejsou prázdné a mají správnou sílu. Tyto kontroly se přeskakují
    při `next build` (fáze `phase-production-build`), aby
-   build front-endu nezávisel na serverových tajemstvích.
+   sestavení uživatelského rozhraní nezáviselo na serverových tajemstvích.
 
 Pokud je hodnota špatná, server odmítne start. To je smluvené chování.

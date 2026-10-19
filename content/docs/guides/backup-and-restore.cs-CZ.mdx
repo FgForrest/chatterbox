@@ -14,7 +14,7 @@ různým účelům:
   pro předání přepisů jiným nástrojům, nikoliv pro zálohování.
 
 Samotné audio soubory jsou uloženy ve Vámi nastaveném úložišti
-(lokální svazek nebo S3 bucket) a zálohují se stejným způsobem jako jiné binární objekty.
+(lokální svazek nebo S3 kontejner) a zálohují se stejným způsobem jako jiné binární objekty.
 
 <span id="backup-the-full-archive" />
 
@@ -141,14 +141,14 @@ nebo archiv po uložení rovnou zkopírujte jinam.
 
 ## Zálohování audio souborů
 
-- **Lokální úložiště.** Docker volume připojené na
+- **Lokální úložiště.** Svazek Docker připojený na
   `/app/audio` uvnitř kontejneru obsahuje všechny audio soubory. Zálohujte jej
   stejně jako jiné svazky — `restic`, `rsync`,
-  ZFS snapshoty, dle volby.
-- **S3 úložiště.** Zvolený bucket již existuje mimo instanci.
-  Zapněte verzování, replikaci mezi regiony nebo cron kopírování přímo na úrovni bucketu.
+  snímky ZFS, dle volby.
+- **S3 úložiště.** Zvolený kontejner již existuje mimo instanci.
+  Zapněte verzování, replikaci mezi regiony nebo cron kopírování přímo na úrovni kontejneru.
 
-Struktura cest v bucketu/složce je
+Struktura cest v kontejneru/složce je
 `{userId}/{filename}.mp3`, při kolizích jsou přidávány přípony `(2)`, `(3)`,&nbsp;…
 
 <span id="bulk-transcript-export" />
@@ -167,7 +167,7 @@ do jediného souboru:
 
 Výchozí formát je ten, který nastavíte v **Nastavení → Export/Záloha
 → Výchozí formát exportu**; pokud není, použije se `json`. Tlačítko **Exportovat vše**
-na stejném panelu volá tento endpoint.
+na stejném panelu volá tento koncový bod.
 
 <span id="markdown-documents-alongside-the-audio" />
 
@@ -185,7 +185,7 @@ pojmenovaný podle audio souboru nahrávky.
 {userId}/Board meeting.summary.md
 ```
 
-Každý soubor obsahuje YAML frontmatter (název, čas nahrání,
+Každý soubor obsahuje úvodní metadata YAML (název, čas nahrání,
 délka, jazyk, poskytovatel, model) a následuje samotný text. Shrnutí
 vykreslují samotné shrnutí, klíčové body a úkoly jako oddíly,
 nevyplněné sekce od poskytovatele jsou přeskočeny.
@@ -215,7 +215,7 @@ Tři typy lze zvolit nezávisle:
 
 | Typ | Co se smaže | Lze obnovit? |
 |---|---|---|
-| Audio | Binární blob v úložišti | Ne. Znovunačtení souboru jej vrátí pouze, pokud Plaud změní verzi nahrávky. |
+| Audio | Binární objekt v úložišti | Ne. Znovunačtení souboru jej vrátí pouze, pokud Plaud změní verzi nahrávky. |
 | Přepis | Řádky `transcriptions` | Pouze novým přepisem, což vyžaduje audio. |
 | Shrnutí | Řádek `ai_enhancements` | Pouze opětovným vygenerováním, potřeba je přepis. |
 
@@ -228,7 +228,7 @@ Několik věcí, které byste měli před spuštěním vědět:
 
 - **Samotná nahrávka se nikdy nemaže.** Název, datum a délka trvání
   zůstávají v seznamu, s označením co bylo odstraněno. U záznamu bez
-  audia je místo přehrávače jen upozornění a jeho audio endpointy vrací
+  audia je místo přehrávače jen upozornění a jeho audio koncové body vrací
   `410 Gone` namísto chyby.
 - **Vše je ve výchozím stavu nezaškrtnuté**, včetně audia. Retenční mazání
   neprovede nic, dokud nezvolíte alespoň jeden typ údajů, což zajistí,
@@ -238,7 +238,7 @@ Několik věcí, které byste měli před spuštěním vědět:
   ji uložíte.
 - **Markdown vedlejší soubory nejsou ovlivněny.** `<recording>.transcript.md` ve
   Vaší složce úložiště je export, o který jste sami požádali, nikoli kopie
-  od Klepna; retence odstraní řádky v databázi a audio blob, ale nesmaže
+  od Klepna; retence odstraní řádky v databázi a zvukový objekt, ale nesmaže
   soubory, které jste si uložili sami. Pokud je chcete smazat, udělejte to
   ručně.
 - Retenční mazání běží jednou za hodinu, po dávkách, a loguje co bylo
@@ -248,15 +248,15 @@ Několik věcí, které byste měli před spuštěním vědět:
 
 ## Obnovení
 
-Dnes zatím neexistuje endpoint `POST /api/backup/restore`. Záložní soubor
+Dnes zatím neexistuje koncový bod `POST /api/backup/restore`. Záložní soubor
 je exportní polovina smlouvy — umožňuje Vám opustit instanci
 s kompletními daty, což znamená, že je splněna „exportní parita“.
 Pokud potřebujete importovat zálohu do nové instance, podporovaná cesta
-je obnovení na úrovni Postgresu (snapshot svazku databáze), nikoliv
+je obnovení na úrovni Postgresu (snímek svazku databáze), nikoliv
 znovunačtení z JSON.
 
 Pokud potřebujete programový import — například pro migraci mezi
-vlastními instancemi — nahlaste Váš konkrétní případ jako issue.
+vlastními instancemi — nahlaste Váš konkrétní případ jako požadavek.
 Jde o záměrnou mezeru, nikoliv opomenutí, a konkrétní postup bude záviset
 na použití.
 
@@ -271,4 +271,4 @@ Připomínka, protože to mnoho uživatelů mate:
 - **V zálohách vytvořených pomocí `/api/backup`** jsou tato pole
   před serializací dešifrována. Od tohoto okamžiku je odpovědnost na Vás.
 - **Audio soubory v úložišti** nejsou šifrovány aplikační vrstvou
-  aplikace Klepna — pokud potřebujete šifrování, použijte SSE na úrovni bucketu.
+  aplikace Klepna — pokud potřebujete šifrování, použijte SSE na úrovni kontejneru.

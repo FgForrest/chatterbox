@@ -10,7 +10,7 @@ description: Nainstalujte Klepna na vlastní infrastrukturu pomocí Docker Compo
 - Docker a Docker Compose
 - Účet Plaud s alespoň jedním zařízením
 - API klíč kompatibilní s OpenAI (OpenAI, Groq, OpenRouter, Ollama, LM Studio,
-  nebo jakýkoli jiný kompatibilní endpoint). Volitelné — přepis v prohlížeči
+  nebo jakýkoli jiný kompatibilní koncový bod). Volitelné — přepis v prohlížeči
   přes Transformers.js funguje i bez API klíče.
 
 <span id="install" />
@@ -34,7 +34,7 @@ echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)"
 echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
 ```
 
-Nastavte `APP_URL` na adresu, kterou budou lidé otevírat, a spusťte stack:
+Nastavte `APP_URL` na adresu, kterou budou lidé otevírat, a spusťte sadu služeb:
 
 ```bash
 docker compose up -d
@@ -51,7 +51,7 @@ uložené nahrávky, přepisy ani přihlašovací údaje přečíst.
 ## Verze a aktualizace
 
 Vydání se číslují `YYYY.N`: rok a pořadové číslo vydání v daném roce
-(`2026.1`, `2026.2`, ...). Značka image `latest` vždy ukazuje na nejnovější
+(`2026.1`, `2026.2`, ...). Značka obrazu `latest` vždy ukazuje na nejnovější
 vydání; chcete-li zůstat na jednom vydání, stáhněte soubory tohoto vydání
 místo `latest` a nastavte v `.env` `CHATTERBOX_VERSION` na jeho číslo.
 Zastaralá proměnná `RIFFADO_VERSION` zůstává po dobu jednoho vydání jako náhradní.

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { parseApiError } from "@/lib/api-errors";
 import type { OwnType } from "@/lib/knowledge/vocabulary";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 const MAX_LABEL_LENGTH = 80;
 
@@ -55,6 +56,7 @@ export function VocabularyList({
     organization,
 }: VocabularyListProps) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const [open, setOpen] = useState<{ type: OwnType; action: Action } | null>(
         null,
@@ -84,7 +86,7 @@ export function VocabularyList({
     }, [open, targetKey]);
 
     const typeName = (key: string) =>
-        key === "person" ? i18n("person") : (entityTypeLabels[key] ?? key);
+        labels.entityType(key, entityTypeLabels[key]);
 
     function shapeOf(type: OwnType): string | null {
         if (type.kind !== "relation") return null;
@@ -332,7 +334,15 @@ export function VocabularyList({
                         <option value="">{i18n("Choose a type")}</option>
                         {candidates.map((candidate) => (
                             <option key={candidate.key} value={candidate.key}>
-                                {candidate.label}
+                                {candidate.kind === "entity"
+                                    ? labels.entityType(
+                                          candidate.key,
+                                          candidate.label,
+                                      )
+                                    : labels.relation(
+                                          candidate.key,
+                                          candidate.label,
+                                      )}
                                 {candidate.core ? ` · ${i18n("built in")}` : ""}
                             </option>
                         ))}
@@ -344,14 +354,32 @@ export function VocabularyList({
                                       "{count, plural, =0 {Nothing joins another entity.} one {# entity joins one of {into} with the same name.} other {# entities join ones of {into} with the same name.}}",
                                       {
                                           count: mergeCount,
-                                          into: target.label,
+                                          into:
+                                              target.kind === "entity"
+                                                  ? labels.entityType(
+                                                        target.key,
+                                                        target.label,
+                                                    )
+                                                  : labels.relation(
+                                                        target.key,
+                                                        target.label,
+                                                    ),
                                       },
                                   )
                                 : i18n(
                                       "{count, plural, =0 {{into} takes every fact.} one {# fact {into} does not take will be deleted.} other {# facts {into} does not take will be deleted.}}",
                                       {
                                           count: mergeCount,
-                                          into: target.label,
+                                          into:
+                                              target.kind === "entity"
+                                                  ? labels.entityType(
+                                                        target.key,
+                                                        target.label,
+                                                    )
+                                                  : labels.relation(
+                                                        target.key,
+                                                        target.label,
+                                                    ),
                                       },
                                   )}
                         </p>

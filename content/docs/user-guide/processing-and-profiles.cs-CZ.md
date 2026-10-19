@@ -13,7 +13,7 @@ Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zař
 
 Karta ukazuje popis profilu a větu popisující, co se spustí samo, například **Po zařazení se samy spustí: přepis, Učení, shrnutí, název a témata.** Při volbě **Bez automatického zpracování** uvádí **Nic se nespustí automaticky. Každý krok spustíte sami.** Volbu uložte tlačítkem **Zařadit nahrávku** nebo **Zařadit e-mail**. U zvuku je k dispozici také **Přepsat nyní**, pokud potřebujete přepis ještě před zařazením.
 
-Položku můžete také přetáhnout na složku ve stromu. Položky adresované nebo nahrané přímo do složky toto čekání přeskočí. Patří sem pošta poslaná na adresu složky a relace Meeting Recorderu nebo nahrávání, u kterých jste vybrali složku.
+Položku můžete také přetáhnout na složku ve stromu. Položky adresované nebo nahrané přímo do složky toto čekání přeskočí. Patří sem pošta poslaná na adresu složky a relace Nahrávání schůzek nebo nahrávání, u kterých jste vybrali složku.
 
 Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
@@ -75,7 +75,7 @@ Pruh pod názvem položky zobrazuje všechny kroky v jednom řádku a potřebné
 
 U každého kroku je stav **Hotovo**, **Další**, **Ke kontrole**, **Běží**, **Ve frontě**, **Čeká**, **Selhalo**, **Zastaralé**, **Ručně** nebo **Přeskočeno**. **Ručně** znamená, že profil tento krok nespouští automaticky. **Zastaralé** znamená, že se po vytvoření výsledku změnil vstup. Na úzké obrazovce zůstane jeden řádek kroužků a pod ním se pojmenuje jen aktuální krok.
 
-Věta pod kroky začíná **Na vás.**, **Pracuje se.**, **Ve frontě.**, **Problém.** nebo **Čeká na ostatní.** Vysvětluje, co bude následovat, a nabízí jedinou očekávanou akci, například **Zkontrolovat Learn**, **Zkontrolovat úkoly** nebo **Sdílet nyní**.
+Věta pod kroky začíná **Na vás.**, **Pracuje se.**, **Ve frontě.**, **Problém.** nebo **Čeká na ostatní.** Vysvětluje, co bude následovat, a nabízí jedinou očekávanou akci, například **Zkontrolovat poznatky**, **Zkontrolovat úkoly** nebo **Sdílet nyní**.
 
 S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, ukazuje svůj průběh na místě a žádné okno sám neotevře. Akce **Zkontrolovat**, **Zobrazit výsledky** a kontrolní akce v pruhu otevřou okno až na Vaše výslovné kliknutí.
 
