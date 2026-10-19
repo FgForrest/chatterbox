@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
-import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
+import { TranscriptChapterBar } from "@/components/dashboard/transcript-chapter-bar";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
@@ -46,6 +46,13 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
@@ -438,7 +445,13 @@ export function TranscriptionPanel({
         );
         if (section && heading instanceof HTMLElement) {
             section.scrollTo({
-                top: heading.offsetTop - 8,
+                top:
+                    section.scrollTop +
+                    heading.getBoundingClientRect().top -
+                    section.getBoundingClientRect().top -
+                    (section.querySelector<HTMLElement>("[data-chapter-bar]")
+                        ?.offsetHeight ?? 0) -
+                    8,
                 behavior: "smooth",
             });
         }
@@ -452,7 +465,16 @@ export function TranscriptionPanel({
             `[data-turn-index="${speakerJump.index}"]`,
         );
         if (section && turn instanceof HTMLElement) {
-            section.scrollTo({ top: turn.offsetTop - 8, behavior: "smooth" });
+            section.scrollTo({
+                top:
+                    section.scrollTop +
+                    turn.getBoundingClientRect().top -
+                    section.getBoundingClientRect().top -
+                    (section.querySelector<HTMLElement>("[data-chapter-bar]")
+                        ?.offsetHeight ?? 0) -
+                    8,
+                behavior: "smooth",
+            });
         }
         const timer = setTimeout(() => setSpeakerJump(null), 2000);
         return () => clearTimeout(timer);
@@ -671,7 +693,7 @@ export function TranscriptionPanel({
         : undefined;
 
     return (
-        <div className="flex flex-col gap-4">
+        <div className="@container/transcription min-w-0 flex flex-col gap-4">
             {correcting && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
@@ -748,6 +770,10 @@ export function TranscriptionPanel({
                                             <Button
                                                 size="sm"
                                                 variant="outline"
+                                                aria-label={i18n(
+                                                    "Re-transcribe",
+                                                )}
+                                                className="@max-[560px]/transcription:size-8 @max-[560px]/transcription:p-0"
                                                 disabled={
                                                     transcriptionRunning ||
                                                     recording.audioReaped
@@ -757,11 +783,13 @@ export function TranscriptionPanel({
                                                         ? i18n(
                                                               "Audio was removed by your retention policy",
                                                           )
-                                                        : undefined
+                                                        : i18n("Re-transcribe")
                                                 }
                                             >
-                                                <RefreshCw className="size-4 mr-2" />{" "}
-                                                {i18n("Re-transcribe")}
+                                                <RefreshCw className="size-4 mr-2 @max-[560px]/transcription:mr-0" />
+                                                <span className="@max-[560px]/transcription:hidden">
+                                                    {i18n("Re-transcribe")}
+                                                </span>
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
@@ -797,21 +825,84 @@ export function TranscriptionPanel({
                                 )}
                                 {transcriptList.length > 1 &&
                                     activeTranscript && (
-                                        <SourceSwitcher
-                                            ariaLabel={i18n(
-                                                "Transcript source",
-                                            )}
-                                            sources={transcriptList.map(
-                                                (candidate) => candidate.source,
-                                            )}
-                                            value={activeTranscript.source}
-                                            onSelect={setActiveSource}
-                                        />
+                                        <>
+                                            <div className="hidden @min-[560px]/transcription:block">
+                                                <SourceSwitcher
+                                                    ariaLabel={i18n(
+                                                        "Transcript source",
+                                                    )}
+                                                    sources={transcriptList.map(
+                                                        (candidate) =>
+                                                            candidate.source,
+                                                    )}
+                                                    value={
+                                                        activeTranscript.source
+                                                    }
+                                                    onSelect={setActiveSource}
+                                                />
+                                            </div>
+                                            <div className="@min-[560px]/transcription:hidden">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger
+                                                        asChild
+                                                    >
+                                                        <Button
+                                                            size="icon-sm"
+                                                            variant="ghost"
+                                                            aria-label={i18n(
+                                                                "Transcript source",
+                                                            )}
+                                                            title={i18n(
+                                                                "Transcript source",
+                                                            )}
+                                                        >
+                                                            <FileText className="size-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuRadioGroup
+                                                            value={
+                                                                activeTranscript.source
+                                                            }
+                                                            onValueChange={
+                                                                setActiveSource
+                                                            }
+                                                        >
+                                                            {transcriptList.map(
+                                                                (candidate) => (
+                                                                    <DropdownMenuRadioItem
+                                                                        key={
+                                                                            candidate.source
+                                                                        }
+                                                                        value={
+                                                                            candidate.source
+                                                                        }
+                                                                    >
+                                                                        {candidate.source ===
+                                                                        "plaud"
+                                                                            ? "Plaud"
+                                                                            : candidate.source ===
+                                                                                "mixed"
+                                                                              ? i18n(
+                                                                                    "Mix",
+                                                                                )
+                                                                              : i18n(
+                                                                                    "Custom",
+                                                                                )}
+                                                                    </DropdownMenuRadioItem>
+                                                                ),
+                                                            )}
+                                                        </DropdownMenuRadioGroup>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                        </>
                                     )}
                                 {activeTranscript?.text && (
                                     <MarkdownActions
                                         recordingId={recording.id}
                                         kind="transcript"
+                                        collapseAtNarrowWidth
                                         source={activeTranscript.source}
                                         view={view}
                                     />
@@ -860,6 +951,11 @@ export function TranscriptionPanel({
                                     <button
                                         type="button"
                                         aria-expanded={transcriptOpen}
+                                        aria-label={
+                                            transcriptOpen
+                                                ? i18n("Collapse transcript")
+                                                : i18n("Expand transcript")
+                                        }
                                         onClick={() => {
                                             if (widgets?.workflowVisible) {
                                                 setWorkflowTranscriptExpanded(
@@ -871,16 +967,18 @@ export function TranscriptionPanel({
                                                 );
                                             }
                                         }}
-                                        className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                        className="flex min-h-8 items-center justify-center gap-1 rounded-sm text-sm font-medium transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[560px]/transcription:size-8"
                                     >
                                         {transcriptOpen ? (
                                             <ChevronUp className="size-4" />
                                         ) : (
                                             <ChevronDown className="size-4" />
                                         )}
-                                        {transcriptOpen
-                                            ? i18n("Collapse transcript")
-                                            : i18n("Expand transcript")}
+                                        <span className="@max-[560px]/transcription:hidden">
+                                            {transcriptOpen
+                                                ? i18n("Collapse transcript")
+                                                : i18n("Expand transcript")}
+                                        </span>
                                     </button>
                                 )}
                             </div>
@@ -923,42 +1021,37 @@ export function TranscriptionPanel({
                             </div>
                         ) : activeTranscript?.text ? (
                             <div className="space-y-4">
-                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                                    <TranscriptTopicsMenu
+                                <section
+                                    ref={transcriptSectionRef}
+                                    aria-label={i18n("Transcript content")}
+                                    className={
+                                        transcriptOpen
+                                            ? "relative max-h-96 overflow-y-auto rounded-lg bg-muted"
+                                            : "rounded-lg bg-muted"
+                                    }
+                                >
+                                    <TranscriptChapterBar
+                                        key={`${attributionKey}:${activeTranscriptKey}`}
                                         widgetId={`recording-topics-${recording.id}`}
                                         topics={topics}
+                                        playback={playback}
+                                        getPlaybackMs={getPlaybackMs}
+                                        expanded={transcriptOpen}
+                                        scrollRef={transcriptSectionRef}
                                         canDetect={canDetectTopics}
                                         waitingForReview={heldForReview}
                                         detecting={detectingTopics}
                                         onDetect={() => void detectTopics()}
                                         onSelect={handleSelectTopic}
-                                        getPlaybackMs={getPlaybackMs}
+                                        hasCorrections={
+                                            (shownCorrections?.list.length ??
+                                                0) > 0
+                                        }
+                                        showOriginal={showOriginal}
+                                        onShowOriginalChange={setShowOriginal}
                                     />
-                                    {(shownCorrections?.list.length ?? 0) >
-                                        0 && (
-                                        <button
-                                            type="button"
-                                            aria-pressed={showOriginal}
-                                            onClick={() =>
-                                                setShowOriginal(!showOriginal)
-                                            }
-                                            className="rounded-sm text-sm font-medium text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            {showOriginal
-                                                ? i18n("Show edited")
-                                                : i18n("Show original")}
-                                        </button>
-                                    )}
-                                </div>
-                                {transcriptOpen && (
-                                    <div className="space-y-4">
-                                        <section
-                                            ref={transcriptSectionRef}
-                                            aria-label={i18n(
-                                                "Transcript content",
-                                            )}
-                                            className="relative max-h-96 overflow-y-auto rounded-lg bg-muted p-4"
-                                        >
+                                    {transcriptOpen && (
+                                        <div className="p-4">
                                             <TranscriptView
                                                 text={activeTranscript.text}
                                                 source={activeTranscript.source}
@@ -1004,9 +1097,9 @@ export function TranscriptionPanel({
                                                         : null
                                                 }
                                             />
-                                        </section>
-                                    </div>
-                                )}
+                                        </div>
+                                    )}
+                                </section>
                             </div>
                         ) : null}
                     </WorkflowWidget>

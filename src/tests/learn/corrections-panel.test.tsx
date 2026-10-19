@@ -121,9 +121,19 @@ describe("corrections in the transcription panel", () => {
             }),
         ).toBeTruthy();
 
-        fireEvent.click(screen.getByRole("button", { name: "Show original" }));
+        expect(
+            screen.getByRole("button", {
+                name: "Tavesi, heard as Tavesy: show undo",
+            }).className,
+        ).toContain("decoration-dotted");
+        expect(
+            screen
+                .getByRole("switch", { name: "Original text" })
+                .closest("[data-chapter-bar]"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("switch", { name: "Original text" }));
         expect(screen.getByText("Máme tu Tavesy.")).toBeTruthy();
-        fireEvent.click(screen.getByRole("button", { name: "Show edited" }));
+        fireEvent.click(screen.getByRole("switch", { name: "Original text" }));
 
         fireEvent.click(
             screen.getByRole("button", {
@@ -143,7 +153,7 @@ describe("corrections in the transcription panel", () => {
         );
         expect(await screen.findByText("Máme tu Tavesy.")).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Show original" }),
+            screen.queryByRole("switch", { name: "Original text" }),
         ).toBeNull();
         expect(onTranscriptStale).toHaveBeenCalled();
     });

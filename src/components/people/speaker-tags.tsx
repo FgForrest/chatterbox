@@ -315,274 +315,208 @@ export function SpeakerTags({
         if (speaker && onPlaySpeaker?.(speaker)) event.preventDefault();
     };
 
-    if (readOnly) {
-        return (
+    const openSpeaker = speakers.find(
+        (speaker) => speaker.speaker === openLabel,
+    );
+    const segmentClass =
+        "inline-flex h-full min-h-7 min-w-7 items-center justify-center px-2 transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60";
+
+    return (
+        <>
             <fieldset
-                className="flex flex-wrap items-center gap-2"
+                className="flex min-w-0 flex-wrap items-center gap-2"
                 aria-label={i18n("Transcript speakers")}
                 onContextMenu={handleContextMenu}
             >
                 {speakers.map((speaker, index) => {
                     const attribution = attributions[speaker.speaker];
-                    const accent = speakerAccent(index).dot;
-                    const dot = (
-                        <span className={`size-1.5 rounded-full ${accent}`} />
+                    const unknown = unknownLabels.has(speaker.speaker);
+                    const suggestion =
+                        attribution || unknown || readOnly
+                            ? undefined
+                            : suggestions[speaker.speaker];
+                    const saving = savingLabel === speaker.speaker;
+                    const accent = speakerAccent(index).text;
+                    const name = attribution?.name ?? speaker.label;
+                    const evidenceMs = suggestion?.evidenceStartMs;
+                    const canPlayEvidence = Boolean(
+                        suggestion && onSeek && evidenceMs != null,
                     );
-                    if (attribution) {
-                        return (
-                            <Link
-                                key={speaker.speaker}
-                                id={speakerAnchorId(speaker.speaker)}
-                                data-speaker={speaker.speaker}
-                                href={`/almanac/${attribution.personId}`}
-                                className="inline-flex h-8 items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-medium transition-colors hover:bg-primary/20"
-                            >
-                                {dot}
-                                {attribution.name}
-                            </Link>
-                        );
-                    }
+                    const canListen = canPlayEvidence || Boolean(onPlaySpeaker);
+                    const label =
+                        attribution?.name ??
+                        (suggestion
+                            ? i18n("{name}?", { name: suggestion.name })
+                            : unknown
+                              ? i18n("{speaker}: unknown", {
+                                    speaker: speaker.label,
+                                })
+                              : speaker.label);
+
                     return (
                         <span
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
                             data-speaker={speaker.speaker}
-                            className="inline-flex h-8 items-center gap-2 rounded-full border bg-muted/30 px-3 text-xs font-medium text-muted-foreground"
+                            className={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
                         >
-                            {dot}
-                            {unknownLabels.has(speaker.speaker)
-                                ? i18n("{speaker}: unknown", {
-                                      speaker: speaker.label,
-                                  })
-                                : speaker.label}
+                            <button
+                                type="button"
+                                className={`${segmentClass} shrink-0 ${accent}`}
+                                disabled={!canListen}
+                                aria-label={
+                                    canPlayEvidence
+                                        ? i18n("Play where {speaker} speaks", {
+                                              speaker: speaker.label,
+                                          })
+                                        : i18n("Play the next turn of {name}", {
+                                              name,
+                                          })
+                                }
+                                title={
+                                    canPlayEvidence ? i18n("Listen") : undefined
+                                }
+                                onClick={() => {
+                                    if (canPlayEvidence && evidenceMs != null) {
+                                        onSeek?.(evidenceMs);
+                                    } else onPlaySpeaker?.(speaker.speaker);
+                                }}
+                            >
+                                <Play className="size-3 fill-current" />
+                            </button>
+                            {readOnly ? (
+                                attribution ? (
+                                    <Link
+                                        href={`/almanac/${attribution.personId}`}
+                                        className={`${segmentClass} min-w-0 break-words text-left`}
+                                    >
+                                        {label}
+                                    </Link>
+                                ) : (
+                                    <span className="min-w-0 px-2 break-words">
+                                        {label}
+                                    </span>
+                                )
+                            ) : (
+                                <button
+                                    type="button"
+                                    className={`${segmentClass} min-w-0 break-words text-left`}
+                                    disabled={saving}
+                                    aria-haspopup="dialog"
+                                    onClick={() =>
+                                        setOpenLabel(speaker.speaker)
+                                    }
+                                    title={
+                                        suggestion
+                                            ? i18n(
+                                                  "Suggested for {speaker}. Pick someone else",
+                                                  { speaker: speaker.label },
+                                              )
+                                            : undefined
+                                    }
+                                >
+                                    {label}
+                                </button>
+                            )}
+                            {!readOnly && suggestion && (
+                                <>
+                                    <button
+                                        type="button"
+                                        className={`${segmentClass} shrink-0 border-l border-dashed border-primary/30 hover:text-primary`}
+                                        disabled={saving}
+                                        onClick={() =>
+                                            void attribute(speaker.speaker, {
+                                                personId: suggestion.personId,
+                                            })
+                                        }
+                                        aria-label={i18n(
+                                            "Confirm {name} as {speaker}",
+                                            {
+                                                name: suggestion.name,
+                                                speaker: speaker.label,
+                                            },
+                                        )}
+                                        title={i18n("Confirm")}
+                                    >
+                                        {saving ? (
+                                            <Loader2 className="size-3 animate-spin" />
+                                        ) : (
+                                            <Check className="size-3" />
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`${segmentClass} shrink-0 border-l border-dashed border-primary/30 hover:bg-destructive/10 hover:text-destructive`}
+                                        disabled={saving}
+                                        onClick={() =>
+                                            void attribute(speaker.speaker, {
+                                                personId: suggestion.personId,
+                                                reject: true,
+                                            })
+                                        }
+                                        aria-label={i18n(
+                                            "{speaker} is not {name}",
+                                            {
+                                                speaker: speaker.label,
+                                                name: suggestion.name,
+                                            },
+                                        )}
+                                        title={i18n("Not this person")}
+                                    >
+                                        <X className="size-3" />
+                                    </button>
+                                </>
+                            )}
+                            {!readOnly && (attribution || unknown) && (
+                                <button
+                                    type="button"
+                                    className={`${segmentClass} shrink-0 border-l border-primary/20 hover:bg-destructive/10 hover:text-destructive`}
+                                    disabled={saving}
+                                    onClick={() =>
+                                        void attribute(speaker.speaker, null)
+                                    }
+                                    aria-label={
+                                        attribution
+                                            ? i18n(
+                                                  "Unlink {name} from {speaker}",
+                                                  {
+                                                      name: attribution.name,
+                                                      speaker: speaker.label,
+                                                  },
+                                              )
+                                            : i18n(
+                                                  "Clear the answer for {speaker}",
+                                                  { speaker: speaker.label },
+                                              )
+                                    }
+                                    title={
+                                        attribution
+                                            ? i18n("Unlink {name}", {
+                                                  name: attribution.name,
+                                              })
+                                            : i18n("Clear")
+                                    }
+                                >
+                                    {saving ? (
+                                        <Loader2 className="size-3 animate-spin" />
+                                    ) : (
+                                        <X className="size-3" />
+                                    )}
+                                </button>
+                            )}
                         </span>
                     );
                 })}
-                <span className="text-xs text-muted-foreground">
-                    {i18n("Managed by the Organization")}
-                </span>
-                {onPlaySpeaker && (
-                    <span className="text-xs text-muted-foreground">
-                        {i18n("Right-click a speaker to hear their next turn")}
-                    </span>
-                )}
             </fieldset>
-        );
-    }
-
-    const openSpeaker = speakers.find(
-        (speaker) => speaker.speaker === openLabel,
-    );
-
-    return (
-        <fieldset
-            className="flex flex-wrap items-center gap-2"
-            aria-label={i18n("Transcript speakers")}
-            onContextMenu={handleContextMenu}
-        >
-            {speakers.map((speaker, index) => {
-                const attribution = attributions[speaker.speaker];
-                const saving = savingLabel === speaker.speaker;
-                const accent = speakerAccent(index).dot;
-
-                if (!attribution && unknownLabels.has(speaker.speaker)) {
-                    return (
-                        <span
-                            key={speaker.speaker}
-                            id={speakerAnchorId(speaker.speaker)}
-                            data-speaker={speaker.speaker}
-                            className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed bg-muted/30 text-xs font-medium text-muted-foreground"
-                        >
-                            <span className="inline-flex h-full items-center gap-2 pl-3 pr-2">
-                                <span
-                                    className={`size-1.5 rounded-full opacity-50 ${accent}`}
-                                />
-                                {i18n("{speaker}: unknown", {
-                                    speaker: speaker.label,
-                                })}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    void attribute(speaker.speaker, null)
-                                }
-                                disabled={saving}
-                                aria-label={i18n(
-                                    "Clear the answer for {speaker}",
-                                    { speaker: speaker.label },
-                                )}
-                                title={i18n("Clear")}
-                                className="flex h-full items-center border-l px-2 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
-                            >
-                                {saving ? (
-                                    <Loader2 className="size-3 animate-spin" />
-                                ) : (
-                                    <X className="size-3" />
-                                )}
-                            </button>
-                        </span>
-                    );
-                }
-
-                const suggestion = attribution
-                    ? undefined
-                    : suggestions[speaker.speaker];
-                if (suggestion) {
-                    const evidenceMs = suggestion.evidenceStartMs;
-                    return (
-                        <span
-                            key={speaker.speaker}
-                            id={speakerAnchorId(speaker.speaker)}
-                            data-speaker={speaker.speaker}
-                            className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed border-primary/40 text-xs font-medium"
-                        >
-                            {onSeek && evidenceMs !== null && (
-                                <button
-                                    type="button"
-                                    onClick={() => onSeek(evidenceMs)}
-                                    aria-label={i18n(
-                                        "Play where {speaker} speaks",
-                                        { speaker: speaker.label },
-                                    )}
-                                    title={i18n("Listen")}
-                                    className="flex h-full items-center border-r border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
-                                >
-                                    <Play className="size-3" />
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => setOpenLabel(speaker.speaker)}
-                                disabled={saving}
-                                title={i18n(
-                                    "Suggested for {speaker}. Pick someone else",
-                                    { speaker: speaker.label },
-                                )}
-                                className="inline-flex h-full items-center gap-2 pl-3 pr-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground disabled:opacity-60"
-                            >
-                                <span
-                                    className={`size-1.5 rounded-full ${accent}`}
-                                />
-                                {i18n("{name}?", { name: suggestion.name })}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    void attribute(speaker.speaker, {
-                                        personId: suggestion.personId,
-                                    })
-                                }
-                                disabled={saving}
-                                aria-label={i18n(
-                                    "Confirm {name} as {speaker}",
-                                    {
-                                        name: suggestion.name,
-                                        speaker: speaker.label,
-                                    },
-                                )}
-                                title={i18n("Confirm")}
-                                className="flex h-full items-center border-l border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-60"
-                            >
-                                {saving ? (
-                                    <Loader2 className="size-3 animate-spin" />
-                                ) : (
-                                    <Check className="size-3" />
-                                )}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    void attribute(speaker.speaker, {
-                                        personId: suggestion.personId,
-                                        reject: true,
-                                    })
-                                }
-                                disabled={saving}
-                                aria-label={i18n("{speaker} is not {name}", {
-                                    name: suggestion.name,
-                                    speaker: speaker.label,
-                                })}
-                                title={i18n("Not this person")}
-                                className="flex h-full items-center border-l border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
-                            >
-                                <X className="size-3" />
-                            </button>
-                        </span>
-                    );
-                }
-
-                if (!attribution) {
-                    return (
-                        <button
-                            key={speaker.speaker}
-                            id={speakerAnchorId(speaker.speaker)}
-                            data-speaker={speaker.speaker}
-                            type="button"
-                            onClick={() => setOpenLabel(speaker.speaker)}
-                            disabled={saving}
-                            className="inline-flex h-8 items-center gap-2 rounded-full border bg-muted/30 px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-foreground disabled:opacity-60"
-                        >
-                            <span
-                                className={`size-1.5 rounded-full ${accent}`}
-                            />
-                            {speaker.label}
-                            {saving && (
-                                <Loader2 className="size-3 animate-spin" />
-                            )}
-                        </button>
-                    );
-                }
-
-                return (
-                    <span
-                        key={speaker.speaker}
-                        id={speakerAnchorId(speaker.speaker)}
-                        data-speaker={speaker.speaker}
-                        className="inline-flex h-8 items-center overflow-hidden rounded-full border border-primary/30 bg-primary/10 text-xs font-medium"
-                    >
-                        <Link
-                            href={`/almanac/${attribution.personId}`}
-                            className="inline-flex h-full items-center gap-2 pl-3 pr-2 transition-colors hover:bg-primary/10"
-                        >
-                            <span
-                                className={`size-1.5 rounded-full ${accent}`}
-                            />
-                            {attribution.name}
-                        </Link>
-                        <button
-                            type="button"
-                            onClick={() =>
-                                void attribute(speaker.speaker, null)
-                            }
-                            disabled={saving}
-                            aria-label={i18n("Unlink {name} from {speaker}", {
-                                name: attribution.name,
-                                speaker: speaker.label,
-                            })}
-                            title={i18n("Unlink {name}", {
-                                name: attribution.name,
-                            })}
-                            className="flex h-full items-center border-l border-primary/20 px-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
-                        >
-                            {saving ? (
-                                <Loader2 className="size-3 animate-spin" />
-                            ) : (
-                                <X className="size-3" />
-                            )}
-                        </button>
-                    </span>
-                );
-            })}
-
-            {onPlaySpeaker && (
-                <span className="text-xs text-muted-foreground">
-                    {i18n("Right-click a speaker to hear their next turn")}
-                </span>
+            {readOnly && (
+                <p className="text-xs text-muted-foreground">
+                    {i18n("Managed by the Organization")}
+                </p>
             )}
-
-            {openSpeaker && (
+            {!readOnly && openSpeaker && (
                 <SpeakerPicker
                     label={openSpeaker.label}
+                    personId={attributions[openSpeaker.speaker]?.personId}
                     organizationOnly={view === "org"}
                     onPick={(choice) => attribute(openSpeaker.speaker, choice)}
                     onMarkUnknown={() =>
@@ -591,6 +525,6 @@ export function SpeakerTags({
                     onClose={() => setOpenLabel(null)}
                 />
             )}
-        </fieldset>
+        </>
     );
 }

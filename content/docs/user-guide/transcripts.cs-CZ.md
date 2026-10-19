@@ -50,10 +50,10 @@ Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně od
 
 Štítky nad přepisem představují mluvčí.
 
-- Klikněte na štítek, například **Mluvčí 2**, a vyberte, kdo to je, ze svého [Almanachu](almanac.md), vytvořte novou osobu nebo označte mluvčího jako **Neznámý**.
-- Přerušovaný štítek končící na **?**, například **Priya Raman?**, je návrh. Klikněte na **✓** pro potvrzení nebo **×** pro odmítnutí; odmítnuté jméno již nebude tomuto mluvčímu nabídnuto. **▷** přehraje okamžik, na jehož základě návrh vznikl.
+- Klikněte na jméno ve štítku, například **Mluvčí 2**, a vyberte, kdo to je, ze svého [Almanachu](almanac.md), vytvořte novou osobu nebo označte mluvčího jako **Neznámý**.
+- Přerušovaný štítek končící na **?**, například **Priya Raman?**, je návrh. Klikněte na **✓** pro potvrzení nebo **×** pro odmítnutí; odmítnuté jméno již nebude tomuto mluvčímu nabídnuto. **▶** přehraje okamžik, na jehož základě návrh vznikl. Pokud návrh nemá ukázku, přehraje další promluvu tohoto mluvčího.
 - **Hádaní mluvčích** nad přepisem jsou poznatky z Učení. Viz [Učení](learn.md).
-- Pravým tlačítkem myši na štítek přehrajete další výstup daného mluvčího.
+- Barevné **▶** má každý štítek, i ten, u kterého jste mluvčího ještě neurčili. Přehraje další promluvu tohoto mluvčího. Pravé tlačítko myši zůstává zkratkou. Kliknutím na potvrzené jméno vyberete jinou osobu nebo zvolíte **Otevřít v Almanachu**, **×** jméno odpojíte. Kliknutí na jméno neznámého mluvčího otevře stejný výběr.
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.
 
@@ -63,7 +63,7 @@ Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exp
 
 ![Menu témat](images/topics-menu.png)
 
-**Témata** rozdělí dlouhý přepis do kapitol s názvem. Kliknutím na **Detekovat témata** se témata vytvoří; výběrem tématu v nabídce **Témata** tam přepis přeskočí: přepis se posune na nadpis a přehrávač na jeho začátek. Profil zpracování se zapnutou volbou **Spouštět automaticky** u témat je rozpozná po každém novém přepisu.
+**Témata** rozdělí dlouhý přepis do kapitol s názvem. Kliknutím na **Rozpoznat témata** se témata vytvoří; pak klikněte na lištu kapitol připnutou nad textem. Při posouvání i během přehrávání ukazuje pořadí aktuálního tématu, celkový počet a název. Výběrem tématu ze seznamu s čísly, názvy a časy přeskočíte na jeho začátek: přepis se posune na nadpis a přehrávač na jeho začátek. Profil zpracování se zapnutou volbou **Spouštět automaticky** u témat je rozpozná po každém novém přepisu. Pokud je můžete spustit, v seznamu najdete i **Rozpoznat témata znovu**. Lišta zůstane dostupná i ve sbaleném přepisu; výběrem tématu přepis rozbalíte. Dokud Učení čeká na kontrolu, lišta zobrazuje **Témata počkají na kontrolu učení**.
 
 <span id="long-talks" />
 
@@ -87,13 +87,13 @@ Přednáška nebo dlouhý monolog se rozdělí do odstavců zhruba po půl minut
 
 ## Opravená slova
 
-Pokud Učení opravilo špatně rozpoznané jméno, přepis jej zobrazuje již opravené. Opravená slova jsou podtržená.
+Pokud Učení opravilo špatně rozpoznané jméno, přepis jej zobrazuje již opravené. Opravená slova mají tečkované podtržení.
 
 | Opraveno | Původní |
 | --- | --- |
 | ![Opravený přepis](images/transcript-corrected.png) | ![Původní přepis](images/transcript-original.png) |
 
-- **Zobrazit původní** ukáže, co slyšel poskytovatel; **Zobrazit upravené** přepne zpět.
+- Přepínač **Původní znění** na konci lišty kapitol ukáže, co slyšel poskytovatel. Vypnutím se vrátíte k opravenému textu. Zobrazí se jen tehdy, když Učení něco opravilo, i bez témat. V úzké kartě se popisek zkrátí na **Původní** a záhlaví používá ikony. Kopírování a stahování najdete v nabídce akcí přepisu.
 - Klikněte na opravené slovo a zrušíte tuto jednu opravu.
 - Shrnutí, témata, vyhledávání, exporty i API vždy využívají opravený text.
 

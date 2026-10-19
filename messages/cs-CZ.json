@@ -696,7 +696,6 @@
   "DZPK2j": "Zkontrolujte témata nalezená v tomto přepisu.",
   "vDQw19": "Témata počkají na kontrolu učení",
   "zh6wkY": "Rozpoznat témata",
-  "zsPrlQ": "Témata ({count, number})",
   "6-dTJ9": "Témata konverzace",
   "TwVuo-": "Rozpoznat témata znovu",
   "EZ7Lh5": "Přehrát od {time}, {speaker}",
@@ -724,8 +723,6 @@
   "W1yKS8": "Zdroj přepisu",
   "fqobnK": "Sbalit přepis",
   "eBg2NA": "Rozbalit přepis",
-  "_BVhGS": "Zobrazit upravený",
-  "F2tE1G": "Zobrazit původní",
   "zUshoy": "Obsah přepisu",
   "3zsbTL": "Zbývá {days, plural, one {# den} few {# dny} other {# dní}} ve vaší zkušební době.",
   "mvjt_u": "Zbývá {days, plural, one {# den} few {# dny} other {# dní}} ve vašem bezplatném okně Hosted Pro.",
@@ -1395,7 +1392,6 @@
   "hAmNMx": "Přepis mluvčích",
   "GOZCPE": "{speaker}: neznámý",
   "hQ2OQ8": "Spravuje Organizace",
-  "lE21MG": "Kliknutím pravým tlačítkem na mluvčího přehrajete jeho další promluvu",
   "_p5Qnr": "Zrušit odpověď pro {speaker}",
   "_GCoTA": "Zrušit",
   "JWgvF5": "Návrh pro {speaker}. Vybrat někoho jiného",
@@ -2943,5 +2939,11 @@
   "_Mzoqv": "Hledám…",
   "2l6w5h": "Vyhledávání se nezdařilo. Zkuste to znovu.",
   "sZdPYv": "Mohou existovat další výsledky. Upřesněte dotaz.",
-  "CwPawm": "Slovník"
+  "CwPawm": "Slovník",
+  "KN6iN8": "Akce přepisu",
+  "MlOKta": "Původní znění",
+  "he9IcT": "Původní",
+  "xSdHy3": "Přehrát další promluvu: {name}",
+  "3rDfZb": "Akce shrnutí",
+  "y6mrQG": "Otevřít v Almanachu"
 }
