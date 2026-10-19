@@ -68,6 +68,17 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
 
+    if (new URL(request.url).searchParams.get("processing") === "1") {
+        const access = await requireRecordingView(
+            session.user.id,
+            id,
+            requestedRecordingView(request),
+        );
+        return NextResponse.json({
+            processing: await loadPrivateItemProcessing(access.ownerUserId, id),
+        });
+    }
+
     const [row] = await db
         .select(audioItemColumns)
         .from(recordings)
@@ -88,12 +99,6 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             "Recording not found",
             404,
         );
-    }
-
-    if (new URL(request.url).searchParams.get("processing") === "1") {
-        return NextResponse.json({
-            processing: await loadPrivateItemProcessing(session.user.id, id),
-        });
     }
 
     // Get transcription if exists. Defense-in-depth: scope by userId

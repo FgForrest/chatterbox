@@ -28,8 +28,8 @@ import {
 } from "@/components/people/speaker-tags";
 import {
     useWorkflowWidgetOpen,
+    WorkflowWidget,
     WorkflowWidgetLine,
-    workflowWidgetHeadingProps,
 } from "@/components/pipeline/workflow-widget";
 import { useProductName } from "@/components/product-name-provider";
 import { SummaryWidget } from "@/components/summary/summary-widget";
@@ -45,7 +45,6 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
@@ -665,6 +664,50 @@ export function TranscriptionPanel({
             ? transcriptWidgetId
             : undefined,
     );
+    const transcriptFooter = activeTranscript
+        ? {
+              status: (
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                          {activeTranscript.source === "plaud"
+                              ? "Plaud"
+                              : activeTranscript.source === "mixed"
+                                ? i18n("Mix")
+                                : i18n("Custom")}
+                      </span>
+                      {activeTranscript.provider && (
+                          <span className="rounded bg-muted px-2 py-0.5">
+                              {activeTranscript.provider}
+                          </span>
+                      )}
+                      {activeTranscript.model && (
+                          <span className="rounded bg-muted px-2 py-0.5 font-mono">
+                              {activeTranscript.model}
+                          </span>
+                      )}
+                      {activeTranscript.language && (
+                          <span className="flex items-center gap-1">
+                              <Languages className="size-3" />
+                              <span>
+                                  {i18n("Language:")}{" "}
+                                  {activeTranscript.language}
+                              </span>
+                          </span>
+                      )}
+                      <span>
+                          {activeTranscript.text.trim()
+                              ? activeTranscript.text.trim().split(/\s+/).length
+                              : 0}{" "}
+                          {i18n("words")}
+                      </span>
+                      <span>
+                          {activeTranscript.text.length} {i18n("characters")}
+                      </span>
+                  </div>
+              ),
+              actions: null,
+          }
+        : undefined;
 
     return (
         <div className="flex flex-col gap-4">
@@ -723,379 +766,288 @@ export function TranscriptionPanel({
                         }}
                     />
                 ) : (
-                    <Card
+                    <WorkflowWidget
                         id={transcriptWidgetId}
-                        className={
-                            widgets?.transcript.active
-                                ? widgets.transcript.tone === "review"
-                                    ? "border-l-2 border-l-[var(--step-review)]"
-                                    : "border-l-2 border-l-primary"
-                                : undefined
+                        frame="inline"
+                        tone={widgets?.transcript.tone ?? "quiet"}
+                        title={i18n("Transcription")}
+                        helpLink={
+                            <HelpLink
+                                topic="transcripts"
+                                label={i18n("reading a transcript")}
+                            />
                         }
-                        data-workflow-widget="transcript"
-                    >
-                        <CardHeader>
-                            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-                                <CardTitle
-                                    {...workflowWidgetHeadingProps(
-                                        transcriptWidgetId,
-                                    )}
-                                    role="heading"
-                                    aria-level={2}
-                                    className="flex items-center gap-2"
-                                >
-                                    <FileText className="size-5" />{" "}
-                                    {i18n("Transcription")}
-                                    <HelpLink
-                                        topic="transcripts"
-                                        label={i18n("reading a transcript")}
-                                    />
-                                </CardTitle>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {activeTranscript?.text && !readOnly && (
-                                        <AlertDialog>
-                                            <AlertDialogTrigger asChild>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    disabled={
-                                                        transcriptionRunning ||
-                                                        recording.audioReaped
-                                                    }
-                                                    title={
-                                                        recording.audioReaped
-                                                            ? i18n(
-                                                                  "Audio was removed by your retention policy",
-                                                              )
-                                                            : undefined
+                        footer={transcriptFooter}
+                        headerAction={
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                {activeTranscript?.text && !readOnly && (
+                                    <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={
+                                                    transcriptionRunning ||
+                                                    recording.audioReaped
+                                                }
+                                                title={
+                                                    recording.audioReaped
+                                                        ? i18n(
+                                                              "Audio was removed by your retention policy",
+                                                          )
+                                                        : undefined
+                                                }
+                                            >
+                                                <RefreshCw className="size-4 mr-2" />{" "}
+                                                {i18n("Re-transcribe")}
+                                            </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>
+                                                    {i18n(
+                                                        "Re-transcribe this recording?",
+                                                    )}
+                                                </AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    {i18n(
+                                                        "This replaces the transcript, then regenerates the summary, title, and topics, and runs Learn again. It also makes a paid call to your transcription provider.",
+                                                    )}
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel>
+                                                    {i18n("Cancel")}
+                                                </AlertDialogCancel>
+                                                <AlertDialogAction
+                                                    onClick={() =>
+                                                        startTranscription(
+                                                            activeTranscript.source,
+                                                            true,
+                                                        )
                                                     }
                                                 >
-                                                    <RefreshCw className="size-4 mr-2" />{" "}
                                                     {i18n("Re-transcribe")}
-                                                </Button>
-                                            </AlertDialogTrigger>
-                                            <AlertDialogContent>
-                                                <AlertDialogHeader>
-                                                    <AlertDialogTitle>
-                                                        {i18n(
-                                                            "Re-transcribe this recording?",
-                                                        )}
-                                                    </AlertDialogTitle>
-                                                    <AlertDialogDescription>
-                                                        {i18n(
-                                                            "This replaces the transcript, then regenerates the summary, title, and topics, and runs Learn again. It also makes a paid call to your transcription provider.",
-                                                        )}
-                                                    </AlertDialogDescription>
-                                                </AlertDialogHeader>
-                                                <AlertDialogFooter>
-                                                    <AlertDialogCancel>
-                                                        {i18n("Cancel")}
-                                                    </AlertDialogCancel>
-                                                    <AlertDialogAction
-                                                        onClick={() =>
-                                                            startTranscription(
-                                                                activeTranscript.source,
-                                                                true,
-                                                            )
-                                                        }
-                                                    >
-                                                        {i18n("Re-transcribe")}
-                                                    </AlertDialogAction>
-                                                </AlertDialogFooter>
-                                            </AlertDialogContent>
-                                        </AlertDialog>
-                                    )}
-                                    {transcriptList.length > 1 &&
-                                        activeTranscript && (
-                                            <SourceSwitcher
-                                                ariaLabel={i18n(
-                                                    "Transcript source",
-                                                )}
-                                                sources={transcriptList.map(
-                                                    (candidate) =>
-                                                        candidate.source,
-                                                )}
-                                                value={activeTranscript.source}
-                                                onSelect={setActiveSource}
-                                            />
-                                        )}
-                                    {activeTranscript?.text && (
-                                        <MarkdownActions
-                                            recordingId={recording.id}
-                                            kind="transcript"
-                                            source={activeTranscript.source}
-                                            view={view}
+                                                </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                )}
+                                {transcriptList.length > 1 &&
+                                    activeTranscript && (
+                                        <SourceSwitcher
+                                            ariaLabel={i18n(
+                                                "Transcript source",
+                                            )}
+                                            sources={transcriptList.map(
+                                                (candidate) => candidate.source,
+                                            )}
+                                            value={activeTranscript.source}
+                                            onSelect={setActiveSource}
                                         />
                                     )}
-                                    {!activeTranscript?.text &&
-                                        !knownTranscriptExists &&
-                                        !transcriptionRunning &&
-                                        !readOnly && (
-                                            <>
-                                                <Button
-                                                    onClick={() =>
-                                                        startTranscription()
-                                                    }
-                                                    size="sm"
+                                {activeTranscript?.text && (
+                                    <MarkdownActions
+                                        recordingId={recording.id}
+                                        kind="transcript"
+                                        source={activeTranscript.source}
+                                        view={view}
+                                    />
+                                )}
+                                {!activeTranscript?.text &&
+                                    !knownTranscriptExists &&
+                                    !transcriptionRunning &&
+                                    !readOnly && (
+                                        <>
+                                            <Button
+                                                onClick={() =>
+                                                    startTranscription()
+                                                }
+                                                size="sm"
+                                                disabled={
+                                                    transcriptionRunning ||
+                                                    recording.audioReaped
+                                                }
+                                                title={
+                                                    recording.audioReaped
+                                                        ? i18n(
+                                                              "Audio was removed by your retention policy",
+                                                          )
+                                                        : undefined
+                                                }
+                                            >
+                                                <Sparkles className="size-4 mr-2" />{" "}
+                                                {i18n("Transcribe")}
+                                            </Button>
+                                            {!orgView && (
+                                                <TranscribeInBrowserButton
+                                                    recordingId={recording.id}
                                                     disabled={
                                                         transcriptionRunning ||
                                                         recording.audioReaped
                                                     }
-                                                    title={
-                                                        recording.audioReaped
-                                                            ? i18n(
-                                                                  "Audio was removed by your retention policy",
-                                                              )
-                                                            : undefined
+                                                    onComplete={
+                                                        onTranscribeComplete ??
+                                                        (() => {})
                                                     }
-                                                >
-                                                    <Sparkles className="size-4 mr-2" />{" "}
-                                                    {i18n("Transcribe")}
-                                                </Button>
-                                                {!orgView && (
-                                                    <TranscribeInBrowserButton
-                                                        recordingId={
-                                                            recording.id
-                                                        }
-                                                        disabled={
-                                                            transcriptionRunning ||
-                                                            recording.audioReaped
-                                                        }
-                                                        onComplete={
-                                                            // Falling back to `onTranscribe` here
-                                                            // would kick off a redundant SERVER
-                                                            // transcription right after a
-                                                            // successful browser one, possibly
-                                                            // overwriting it. Callers that care
-                                                            // about refreshing after a browser
-                                                            // transcription must pass
-                                                            // `onTranscribeComplete` explicitly.
-                                                            onTranscribeComplete ??
-                                                            (() => {})
-                                                        }
-                                                    />
-                                                )}
-                                            </>
+                                                />
+                                            )}
+                                        </>
+                                    )}
+                                {activeTranscript?.text && (
+                                    <button
+                                        type="button"
+                                        aria-expanded={transcriptOpen}
+                                        onClick={() => {
+                                            if (widgets?.workflowVisible) {
+                                                setWorkflowTranscriptExpanded(
+                                                    false,
+                                                );
+                                            } else {
+                                                setTranscriptExpanded(
+                                                    !transcriptExpanded,
+                                                );
+                                            }
+                                        }}
+                                        className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                    >
+                                        {transcriptOpen ? (
+                                            <ChevronUp className="size-4" />
+                                        ) : (
+                                            <ChevronDown className="size-4" />
                                         )}
-                                    {activeTranscript?.text && (
+                                        {transcriptOpen
+                                            ? i18n("Collapse transcript")
+                                            : i18n("Expand transcript")}
+                                    </button>
+                                )}
+                            </div>
+                        }
+                    >
+                        {activeTranscript && speakerTags.length > 0 && (
+                            <SpeakerTags
+                                // Another recording, view, source or text is
+                                // another transcript to name: mount afresh, so
+                                // nothing of the last one's state, or its late
+                                // answers, reaches this one.
+                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
+                                recordingId={recording.id}
+                                source={activeTranscript.source}
+                                speakers={speakerTags}
+                                attributions={speakerAttributions}
+                                onAttributionsChange={handleAttributionsChange}
+                                view={view}
+                                onSeek={onSeekToTurn}
+                                onPlaySpeaker={
+                                    onPlayFromTurn &&
+                                    activeTranscript.turns?.length
+                                        ? handlePlaySpeaker
+                                        : undefined
+                                }
+                                shownVersion={activeTranscript.version}
+                                onStale={onTranscriptStale}
+                                onUnknownLabelsChange={
+                                    handleUnknownLabelsChange
+                                }
+                                readOnly={readOnly}
+                            />
+                        )}
+                        {transcriptionRunning ? (
+                            <div className="flex flex-col items-center justify-center py-12">
+                                <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
+                                <p className="text-sm text-muted-foreground">
+                                    {i18n("Transcribing audio…")}
+                                </p>
+                            </div>
+                        ) : activeTranscript?.text ? (
+                            <div className="space-y-4">
+                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                    <TranscriptTopicsMenu
+                                        widgetId={`recording-topics-${recording.id}`}
+                                        topics={topics}
+                                        canDetect={canDetectTopics}
+                                        waitingForReview={heldForReview}
+                                        detecting={detectingTopics}
+                                        onDetect={() => void detectTopics()}
+                                        onSelect={handleSelectTopic}
+                                        getPlaybackMs={getPlaybackMs}
+                                    />
+                                    {(shownCorrections?.list.length ?? 0) >
+                                        0 && (
                                         <button
                                             type="button"
-                                            aria-expanded={transcriptOpen}
-                                            onClick={() => {
-                                                if (widgets?.workflowVisible) {
-                                                    setWorkflowTranscriptExpanded(
-                                                        false,
-                                                    );
-                                                } else {
-                                                    setTranscriptExpanded(
-                                                        !transcriptExpanded,
-                                                    );
-                                                }
-                                            }}
-                                            className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                            aria-pressed={showOriginal}
+                                            onClick={() =>
+                                                setShowOriginal(!showOriginal)
+                                            }
+                                            className="text-sm font-medium transition-colors hover:text-primary"
                                         >
-                                            {transcriptOpen ? (
-                                                <ChevronUp className="size-4" />
-                                            ) : (
-                                                <ChevronDown className="size-4" />
-                                            )}
-                                            {transcriptOpen
-                                                ? i18n("Collapse transcript")
-                                                : i18n("Expand transcript")}
+                                            {showOriginal
+                                                ? i18n("Show edited")
+                                                : i18n("Show original")}
                                         </button>
                                     )}
                                 </div>
-                            </div>
-                            {activeTranscript && speakerTags.length > 0 && (
-                                <SpeakerTags
-                                    // Another recording, view, source or text is
-                                    // another transcript to name: mount afresh, so
-                                    // nothing of the last one's state, or its late
-                                    // answers, reaches this one.
-                                    key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
-                                    recordingId={recording.id}
-                                    source={activeTranscript.source}
-                                    speakers={speakerTags}
-                                    attributions={speakerAttributions}
-                                    onAttributionsChange={
-                                        handleAttributionsChange
-                                    }
-                                    view={view}
-                                    onSeek={onSeekToTurn}
-                                    onPlaySpeaker={
-                                        onPlayFromTurn &&
-                                        activeTranscript.turns?.length
-                                            ? handlePlaySpeaker
-                                            : undefined
-                                    }
-                                    shownVersion={activeTranscript.version}
-                                    onStale={onTranscriptStale}
-                                    onUnknownLabelsChange={
-                                        handleUnknownLabelsChange
-                                    }
-                                    readOnly={readOnly}
-                                />
-                            )}
-                        </CardHeader>
-                        <CardContent>
-                            {transcriptionRunning ? (
-                                <div className="flex flex-col items-center justify-center py-12">
-                                    <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
-                                    <p className="text-sm text-muted-foreground">
-                                        {i18n("Transcribing audio…")}
-                                    </p>
-                                </div>
-                            ) : activeTranscript?.text ? (
-                                <div className="space-y-4">
-                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                                        <TranscriptTopicsMenu
-                                            widgetId={`recording-topics-${recording.id}`}
-                                            topics={topics}
-                                            canDetect={canDetectTopics}
-                                            waitingForReview={heldForReview}
-                                            detecting={detectingTopics}
-                                            onDetect={() => void detectTopics()}
-                                            onSelect={handleSelectTopic}
-                                            getPlaybackMs={getPlaybackMs}
-                                        />
-                                        {(shownCorrections?.list.length ?? 0) >
-                                            0 && (
-                                            <button
-                                                type="button"
-                                                aria-pressed={showOriginal}
-                                                onClick={() =>
-                                                    setShowOriginal(
-                                                        !showOriginal,
-                                                    )
+                                {transcriptOpen && (
+                                    <div className="space-y-4">
+                                        <section
+                                            ref={transcriptSectionRef}
+                                            aria-label={i18n(
+                                                "Transcript content",
+                                            )}
+                                            className="relative max-h-96 overflow-y-auto rounded-lg bg-muted p-4"
+                                        >
+                                            <TranscriptView
+                                                text={activeTranscript.text}
+                                                source={activeTranscript.source}
+                                                model={activeTranscript.model}
+                                                storedTurns={
+                                                    activeTranscript.turns
                                                 }
-                                                className="text-sm font-medium transition-colors hover:text-primary"
-                                            >
-                                                {showOriginal
-                                                    ? i18n("Show edited")
-                                                    : i18n("Show original")}
-                                            </button>
-                                        )}
-                                    </div>
-                                    {transcriptOpen && (
-                                        <div className="space-y-4">
-                                            <section
-                                                ref={transcriptSectionRef}
-                                                aria-label={i18n(
-                                                    "Transcript content",
-                                                )}
-                                                className="relative max-h-96 overflow-y-auto rounded-lg bg-muted p-4"
-                                            >
-                                                <TranscriptView
-                                                    text={activeTranscript.text}
-                                                    source={
-                                                        activeTranscript.source
-                                                    }
-                                                    model={
-                                                        activeTranscript.model
-                                                    }
-                                                    storedTurns={
-                                                        activeTranscript.turns
-                                                    }
-                                                    speakerAttributions={
-                                                        speakerAttributions
-                                                    }
-                                                    onSeekToTurn={onSeekToTurn}
-                                                    playback={playback}
-                                                    scrollRef={
-                                                        transcriptSectionRef
-                                                    }
-                                                    topics={topics}
-                                                    highlightedTopic={
-                                                        topicJump?.index ?? null
-                                                    }
-                                                    highlightedTurnIndex={
-                                                        speakerJump?.index ??
-                                                        null
-                                                    }
-                                                    // A mix is not the transcript
-                                                    // Learn read.
-                                                    corrections={
-                                                        shownCorrections &&
-                                                        !showOriginal
-                                                            ? {
-                                                                  list: shownCorrections.list,
-                                                                  canUndo:
-                                                                      shownCorrections.canUndo &&
-                                                                      !readOnly,
-                                                                  onUndo: (
+                                                speakerAttributions={
+                                                    speakerAttributions
+                                                }
+                                                onSeekToTurn={onSeekToTurn}
+                                                playback={playback}
+                                                scrollRef={transcriptSectionRef}
+                                                topics={topics}
+                                                highlightedTopic={
+                                                    topicJump?.index ?? null
+                                                }
+                                                highlightedTurnIndex={
+                                                    speakerJump?.index ?? null
+                                                }
+                                                // A mix is not the transcript
+                                                // Learn read.
+                                                corrections={
+                                                    shownCorrections &&
+                                                    !showOriginal
+                                                        ? {
+                                                              list: shownCorrections.list,
+                                                              canUndo:
+                                                                  shownCorrections.canUndo &&
+                                                                  !readOnly,
+                                                              onUndo: (id) =>
+                                                                  void undoCorrection(
                                                                       id,
-                                                                  ) =>
-                                                                      void undoCorrection(
-                                                                          id,
-                                                                      ),
-                                                              }
-                                                            : null
-                                                    }
-                                                    learnMarks={
-                                                        canLearn &&
-                                                        activeTranscript.source !==
-                                                            "mixed"
-                                                            ? learnMarks
-                                                            : null
-                                                    }
-                                                />
-                                            </section>
-                                            <div className="flex items-center gap-4 border-t pt-2 text-xs text-muted-foreground">
-                                                <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                                                    {activeTranscript.source ===
-                                                    "plaud"
-                                                        ? "Plaud"
-                                                        : activeTranscript.source ===
-                                                            "mixed"
-                                                          ? i18n("Mix")
-                                                          : i18n("Custom")}
-                                                </span>
-                                                {activeTranscript.provider && (
-                                                    <span className="rounded bg-muted px-2 py-0.5">
-                                                        {
-                                                            activeTranscript.provider
-                                                        }
-                                                    </span>
-                                                )}
-                                                {activeTranscript.model && (
-                                                    <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                                                        {activeTranscript.model}
-                                                    </span>
-                                                )}
-                                                {activeTranscript.language && (
-                                                    <div className="flex items-center gap-1">
-                                                        <Languages className="size-3" />
-                                                        <span>
-                                                            {i18n("Language:")}{" "}
-                                                            {
-                                                                activeTranscript.language
-                                                            }
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                <div>
-                                                    {activeTranscript.text.trim()
-                                                        ? activeTranscript.text
-                                                              .trim()
-                                                              .split(/\s+/)
-                                                              .length
-                                                        : 0}{" "}
-                                                    {i18n("words")}
-                                                </div>
-                                                <div>
-                                                    {
-                                                        activeTranscript.text
-                                                            .length
-                                                    }{" "}
-                                                    {i18n("characters")}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ) : null}
-                        </CardContent>
-                    </Card>
+                                                                  ),
+                                                          }
+                                                        : null
+                                                }
+                                                learnMarks={
+                                                    canLearn &&
+                                                    activeTranscript.source !==
+                                                        "mixed"
+                                                        ? learnMarks
+                                                        : null
+                                                }
+                                            />
+                                        </section>
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+                    </WorkflowWidget>
                 ))}
 
             {canLearn &&
