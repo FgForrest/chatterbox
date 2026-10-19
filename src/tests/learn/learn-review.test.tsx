@@ -6,6 +6,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -144,6 +145,140 @@ describe("LearnReview", () => {
             });
         }
 
+        it("stacks every section in order, keeps speaker chips, and jumps to a section", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    items: [
+                        READY.items[1],
+                        {
+                            ...READY.items[1],
+                            id: "i-known",
+                            kind: "known_fact",
+                            preTicked: true,
+                        },
+                        READY.items[0],
+                        {
+                            ...READY.items[1],
+                            id: "i-record",
+                            kind: "new_record",
+                            payload: {
+                                ref: "n1",
+                                kind: "person",
+                                typeKey: null,
+                                name: "Eva",
+                                reason: "Introduces herself",
+                                evidenceMs: [],
+                            },
+                        },
+                        {
+                            ...READY.items[1],
+                            id: "i-speaker",
+                            kind: "speaker",
+                            payload: {
+                                label: "speaker_1",
+                                personId: "p-jan",
+                                reason: "Introduces himself",
+                                evidenceMs: [],
+                                recorder: true,
+                            },
+                        },
+                        {
+                            ...READY.items[1],
+                            id: "i-phrase",
+                            kind: "relation_phrase",
+                            payload: {
+                                phrase: "guides",
+                                subject: { personId: "p-jan" },
+                                object: { entityId: "e-orion" },
+                                objectKind: "entity",
+                                count: 1,
+                            },
+                        },
+                    ],
+                },
+            });
+            await openReady();
+            const titles = [
+                "Speakers",
+                "New in the Almanac",
+                "Corrections",
+                "Known facts mentioned again",
+                "New facts",
+                "New kind of relation",
+            ];
+            expect(
+                screen
+                    .getAllByRole("heading", { level: 3 })
+                    .map((heading) => heading.textContent),
+            ).toEqual(titles);
+            const body = document.querySelector("[data-widget-body]");
+            expect(body?.className).toContain("@container/learn");
+            expect(body?.querySelector('[class*="lg:grid-cols-2"]')).toBeNull();
+            expect(
+                body?.querySelector("hr, .border-b, .border-t, .divide-y"),
+            ).toBeNull();
+            const nav = screen.getByRole("navigation", {
+                name: "Review sections",
+            });
+            expect(
+                within(nav)
+                    .getAllByRole("button")
+                    .map((button) => button.textContent),
+            ).toEqual(titles.map((title) => `${title} 1`));
+            for (const title of titles) {
+                const section = screen.getByRole("region", { name: title });
+                const heading = within(section).getByRole("heading");
+                expect(
+                    heading.parentElement?.classList.contains("sticky"),
+                ).toBe(frame === "dialog");
+                expect(
+                    heading.parentElement?.classList.contains("bg-card"),
+                ).toBe(true);
+                const scrollIntoView = vi.fn();
+                Object.defineProperty(section, "scrollIntoView", {
+                    value: scrollIntoView,
+                    configurable: true,
+                });
+                vi.stubGlobal(
+                    "matchMedia",
+                    vi.fn(() => ({ matches: true })),
+                );
+                fireEvent.click(
+                    within(nav).getByRole("button", { name: `${title} 1` }),
+                );
+                expect(scrollIntoView).toHaveBeenCalledWith({
+                    block: "start",
+                    behavior: "auto",
+                });
+                vi.stubGlobal(
+                    "matchMedia",
+                    vi.fn(() => ({ matches: false })),
+                );
+                fireEvent.click(
+                    within(nav).getByRole("button", { name: `${title} 1` }),
+                );
+                expect(scrollIntoView).toHaveBeenLastCalledWith({
+                    block: "start",
+                    behavior: "smooth",
+                });
+            }
+            const speakers = screen.getByRole("region", { name: "Speakers" });
+            expect(
+                speakers.querySelector("[data-shared-learn-row]"),
+            ).toBeNull();
+            expect(within(speakers).getByText("you")).toBeTruthy();
+            expect(
+                within(speakers).getByRole("button", { name: "Someone else…" }),
+            ).toBeTruthy();
+            for (const row of body?.querySelectorAll(
+                "[data-shared-learn-row]",
+            ) ?? []) {
+                expect(row.className).toContain("rounded-lg bg-muted p-3");
+                expect(row.className).toContain("dark:bg-popover");
+            }
+        });
+
         it("ticks a shared fact row", async () => {
             respond({
                 "GET /api/recordings/rec-1/review?source=riffado": READY,
@@ -157,8 +292,11 @@ describe("LearnReview", () => {
             const fact = screen.getByRole("checkbox", {
                 name: "Jan — leads — Orion",
             }) as HTMLInputElement;
+            const section = screen.getByRole("region", { name: "New facts" });
+            expect(within(section).getByText("0 of 1 selected")).toBeTruthy();
             fireEvent.click(fact);
             await waitFor(() => expect(fact.checked).toBe(true));
+            expect(within(section).getByText("1 of 1 selected")).toBeTruthy();
         });
 
         it("toggles a fact group", async () => {
@@ -584,7 +722,8 @@ describe("LearnReview", () => {
                     url.split("/items/")[1]?.split("?")[0],
                     JSON.parse(String(init?.body)).decision,
                 ]);
-        // The fact waiting on its speaker is not ticked with the rest.
+        const section = screen.getByRole("region", { name: "New facts" });
+        expect(within(section).getByText("0 of 2 selected")).toBeTruthy();
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Tick all: New facts" }),
         );
@@ -593,6 +732,7 @@ describe("LearnReview", () => {
             name: "Untick all: New facts",
         })) as HTMLInputElement;
         expect(all.checked).toBe(true);
+        expect(within(section).getByText("1 of 2 selected")).toBeTruthy();
 
         fireEvent.click(all);
         await waitFor(() =>
@@ -610,7 +750,7 @@ describe("LearnReview", () => {
         ).toBe(false);
     });
 
-    it("shows a section half ticked when only some of it is", async () => {
+    it("shows a section half ticked when only some of it is, without jump chips for one section", async () => {
         respond({
             "GET /api/recordings/rec-1/review?source=riffado": {
                 ...READY,
@@ -631,6 +771,67 @@ describe("LearnReview", () => {
         }) as HTMLInputElement;
         expect(all.indeterminate).toBe(true);
         expect(all.checked).toBe(false);
+        expect(
+            screen.queryByRole("navigation", { name: "Review sections" }),
+        ).toBeNull();
+        expect(screen.getByText("1 of 2 selected")).toBeTruthy();
+    });
+
+    it("ticks the speaker section, counts its chips, and skips speakers without a name", async () => {
+        const speaker = (
+            id: string,
+            personId: string | null,
+            preTicked: boolean,
+        ) => ({
+            ...READY.items[1],
+            id,
+            kind: "speaker",
+            preTicked,
+            payload: { label: id, personId, reason: "", evidenceMs: [] },
+        });
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [
+                    speaker("speaker_0", "p-jan", true),
+                    speaker("speaker_1", "p-jan", false),
+                    speaker("speaker_2", null, false),
+                ],
+            },
+            "PATCH /api/recordings/rec-1/review/items/speaker_0?source=riffado":
+                { version: 1 },
+            "PATCH /api/recordings/rec-1/review/items/speaker_1?source=riffado":
+                { version: 1 },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (3)" }),
+        );
+        const all = screen.getByRole("checkbox", {
+            name: "Tick all: Speakers",
+        }) as HTMLInputElement;
+        expect(all.indeterminate).toBe(true);
+        expect(screen.getByText("1 of 3 selected")).toBeTruthy();
+        fireEvent.click(all);
+        await screen.findByText("2 of 3 selected");
+        expect(all.checked).toBe(true);
+        expect(all.indeterminate).toBe(false);
+        fireEvent.click(all);
+        await screen.findByText("0 of 3 selected");
+        expect(
+            fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([url]) => url),
+        ).toEqual([
+            "/api/recordings/rec-1/review/items/speaker_1?source=riffado",
+            "/api/recordings/rec-1/review/items/speaker_0?source=riffado",
+            "/api/recordings/rec-1/review/items/speaker_1?source=riffado",
+        ]);
+        expect(
+            screen.getByRole("checkbox", { name: "Accept speaker_2 as ?" }),
+        ).toHaveProperty("disabled", true);
     });
 
     it("plays a speaker from its chip, where it has turns", async () => {

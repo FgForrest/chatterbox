@@ -33,3 +33,33 @@ it("renders the shared Learn row, evidence, and outcome", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Apply this fact" }));
     expect(onCheckedChange).toHaveBeenCalledWith(true);
 });
+
+it("keeps a record reason directly before its clipped quote and expands only that quote", () => {
+    render(
+        <>
+            <LearnEvidence quote="First quoted words">
+                <div>First reason</div>
+            </LearnEvidence>
+            <LearnEvidence quote="Second quoted words">
+                <div>Second reason</div>
+            </LearnEvidence>
+        </>,
+    );
+    const [first, second] = screen.getAllByRole("button", {
+        name: "Full quote",
+    });
+    const quote = document.getElementById(
+        first.getAttribute("aria-controls") ?? "",
+    );
+    expect(quote?.parentElement?.previousElementSibling?.textContent).toBe(
+        "First reason",
+    );
+    expect(quote?.classList.contains("truncate")).toBe(true);
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    expect(first.textContent).toBe("Shorten");
+    expect(quote?.classList.contains("truncate")).toBe(false);
+    expect(second.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(first);
+    expect(quote?.classList.contains("truncate")).toBe(true);
+});
