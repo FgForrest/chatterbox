@@ -7,6 +7,7 @@ import {
     DEFAULT_NOTICE_TEXT,
     DEFAULT_PLATFORM_MODE,
     PLATFORM_MODES,
+    PROMPT_PLATFORMS,
     STORAGE_KEYS,
 } from "./constants.js";
 import { PLATFORM_IDS } from "./platforms.js";
@@ -27,6 +28,7 @@ import { t } from "./i18n.js";
  * @property {string} serverUrl
  * @property {boolean} hasApiKey
  * @property {string} microphoneId
+ * @property {boolean} micReminderDismissed
  * @property {string|null} noticeText         user override, null = server/default
  * @property {"mixed"|"split"} channelMode
  * @property {Record<string, "off"|"prompt"|"auto">} platformModes
@@ -46,6 +48,7 @@ export async function getSettings() {
         serverUrl: (raw[STORAGE_KEYS.serverUrl] ?? "").replace(/\/+$/, ""),
         hasApiKey: Boolean(raw[STORAGE_KEYS.encryptedApiKey]),
         microphoneId: raw[STORAGE_KEYS.microphoneId] ?? "",
+        micReminderDismissed: raw[STORAGE_KEYS.micReminderDismissed] === true,
         noticeText: raw[STORAGE_KEYS.noticeText] ?? null,
         channelMode: raw[STORAGE_KEYS.channelMode] ?? DEFAULT_CHANNEL_MODE,
         platformModes: raw[STORAGE_KEYS.platformModes] ?? {},
@@ -102,7 +105,7 @@ export function effectiveQuietSeconds(settings) {
  * The mode that applies to each platform, and where it came from.
  *
  * Precedence: a locked server default beats everything; otherwise the user's
- * choice beats the server default, which beats "off".
+ * choice beats the server default, which beats the platform's initial mode.
  *
  * @param {RecorderSettings} settings
  * @returns {Record<string, {mode: "off"|"prompt"|"auto", source: "locked"|"user"|"server"|"default"}>}
@@ -120,7 +123,7 @@ export function effectivePlatformModes(settings) {
         } else if (serverAuto.has(id)) {
             result[id] = { mode: "auto", source: "server" };
         } else {
-            result[id] = { mode: DEFAULT_PLATFORM_MODE, source: "default" };
+            result[id] = { mode: PROMPT_PLATFORMS.includes(id) ? "prompt" : DEFAULT_PLATFORM_MODE, source: "default" };
         }
     }
     return result;

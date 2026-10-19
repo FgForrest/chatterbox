@@ -63,11 +63,11 @@ describe("profile editor transcription fallback", () => {
     it.each([
         [
             true,
-            "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+            "Default uses your default transcription provider, then Mynah when available.",
         ],
         [
             false,
-            "Default uses your default transcription provider, then the Organization default.",
+            "Default uses your default transcription provider, then the Organization default, then its oldest enabled transcription provider.",
         ],
     ])("hosted=%s explains the default as %s", async (isHosted, expected) => {
         render(

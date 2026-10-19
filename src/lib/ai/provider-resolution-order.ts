@@ -1,5 +1,8 @@
 import type { DefaultProviderPointers } from "@/lib/ai/default-provider";
-import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
+import {
+    isEnhancementOnlyProvider,
+    isTranscriptionOnlyProvider,
+} from "@/lib/ai/provider-presets";
 
 export type ResolutionStep =
     | "transcription"
@@ -14,7 +17,8 @@ export interface DefaultProviderCandidate {
         | "member-summary"
         | "organization-role"
         | "organization-summary"
-        | "member-fallback";
+        | "member-fallback"
+        | "organization-fallback";
     providerId: string;
 }
 
@@ -26,12 +30,57 @@ interface DefaultProviderCredential {
     managed?: boolean;
 }
 
+/** Read default pointers from provider cards when no pointer payload is available. */
+export function providerPointersFromFlags(
+    credentials: {
+        id: string;
+        isDefaultTranscription?: boolean;
+        isDefaultEnhancement?: boolean;
+        isDefaultLearn?: boolean;
+        isDefaultTopics?: boolean;
+        isDefaultTitle?: boolean;
+    }[],
+): DefaultProviderPointers {
+    return {
+        transcription:
+            credentials.find((row) => row.isDefaultTranscription)?.id ?? null,
+        summary:
+            credentials.find((row) => row.isDefaultEnhancement)?.id ?? null,
+        learn: credentials.find((row) => row.isDefaultLearn)?.id ?? null,
+        topics: credentials.find((row) => row.isDefaultTopics)?.id ?? null,
+        title: credentials.find((row) => row.isDefaultTitle)?.id ?? null,
+    };
+}
+
+/** Select the oldest enabled credential that supports a processing role. */
+export function oldestSuitableProvider<T extends DefaultProviderCredential>(
+    step: ResolutionStep,
+    credentials: T[],
+): T | undefined {
+    return credentials
+        .filter(
+            (credential) =>
+                credential.disabledAt == null &&
+                credential.managed !== true &&
+                (step === "transcription"
+                    ? !isEnhancementOnlyProvider(credential.provider)
+                    : !isTranscriptionOnlyProvider(credential.provider)),
+        )
+        .sort((left, right) => {
+            const created =
+                new Date(left.createdAt).getTime() -
+                new Date(right.createdAt).getTime();
+            return created === 0 ? left.id.localeCompare(right.id) : created;
+        })[0];
+}
+
 /** Build the provider-pointer resolution order before managed fallback. */
 export function defaultProviderCandidates(
     step: ResolutionStep,
     member: DefaultProviderPointers,
     organization: DefaultProviderPointers | null,
     memberCredentials: DefaultProviderCredential[] = [],
+    organizationCredentials: DefaultProviderCredential[] = [],
 ): DefaultProviderCandidate[] {
     const candidates: DefaultProviderCandidate[] = [];
     const memberRole = member[step];
@@ -64,24 +113,19 @@ export function defaultProviderCandidates(
         return candidates;
     }
     if (step !== "transcription") {
-        const fallback = memberCredentials
-            .filter(
-                (credential) =>
-                    credential.disabledAt == null &&
-                    credential.managed !== true &&
-                    !isTranscriptionOnlyProvider(credential.provider),
-            )
-            .sort((left, right) => {
-                const created =
-                    new Date(left.createdAt).getTime() -
-                    new Date(right.createdAt).getTime();
-                return created === 0
-                    ? left.id.localeCompare(right.id)
-                    : created;
-            })[0];
+        const fallback = oldestSuitableProvider(step, memberCredentials);
         if (fallback) {
             candidates.push({
                 source: "member-fallback",
+                providerId: fallback.id,
+            });
+        }
+    }
+    if (organization) {
+        const fallback = oldestSuitableProvider(step, organizationCredentials);
+        if (fallback) {
+            candidates.push({
+                source: "organization-fallback",
                 providerId: fallback.id,
             });
         }

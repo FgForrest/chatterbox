@@ -1,14 +1,16 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 14. října 2026
+Aktualizováno: 19. října 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
 ## Jaká data rozšíření zpracovává
 
+Při nastavení rozšíření požádá o přístup k mikrofonu a krátce otevře a zastaví zkušební zvukový stream. Tento zkušební zvuk neukládá ani neodesílá. Pokud přístup před nahráváním chybí, musíte mikrofon povolit nebo výslovně zvolit nahrávání bez něj. Rozšíření sděluje po souhlasu s nakládáním s daty stav oprávnění mikrofonu webu právě nastavovaného nebo propojeného serveru prostřednictvím stávajícího kanálu pro rozpoznání a propojení; po souhlasu jej mohou prostřednictvím deklarovaného přímého kanálu pro nastavení získat také stránky pro místní vývoj na localhostu. U služeb Meet, Teams a webového Zoomu jsou výzvy k nahrávání ve výchozím nastavení zapnuté, pokud vaše uložená volba nebo nastavení serveru neurčí jinak. Výzva nikdy nespustí nahrávání bez vašeho zásahu a potvrzení upozornění účastníkům.
+
 - Když spustíte nahrávání, rozšíření zachytává zvuk mikrofonu a zvuk vybrané karty se schůzkou nebo systémový zvuk zvolený v dialogu Chromu. Obraz obrazovky neukládá.
 - Pokud zapnete rozpoznávání schůzek, kontroluje adresy a stav zvuku karet prohlížeče, aby rozpoznalo podporované služby a nabídlo nahrávání. Historii prohlížení ani adresy karet neodesílá.
-- Do úložiště rozšíření ukládá adresu serveru, nastavení, náhodný identifikátor instalace a stav nahrávání. Identifikátor instalace posílá propojenému serveru, aby mohl zneplatnit starší klíče této instalace; nejde o otisk zařízení ani o tajný údaj. Klíč pro nahrávání s oprávněním pouze k zápisu před uložením do `chrome.storage.local` šifruje. Neexportovatelný klíč Web Crypto ukládá do IndexedDB rozšíření. Toto opatření brání běžnému čtení místního úložiště, ale kód spuštěný v rozšíření nebo osoba s kopií celého profilu prohlížeče může klíč stále použít.
+- Do úložiště rozšíření ukládá adresu serveru, nastavení, náhodný identifikátor instalace a stav nahrávání. Identifikátor instalace sdílí po souhlasu s nakládáním s daty pouze s právě nastavovaným nebo propojeným serverem, mimo jiné pro zneplatnění starších klíčů této instalace; stránky pro místní vývoj na localhostu mohou používat také deklarovaný přímý kanál pro nastavení. Nejde o otisk zařízení ani o tajný údaj. Klíč pro nahrávání s oprávněním pouze k zápisu před uložením do `chrome.storage.local` šifruje. Neexportovatelný klíč Web Crypto ukládá do IndexedDB rozšíření. Toto opatření brání běžnému čtení místního úložiště, ale kód spuštěný v rozšíření nebo osoba s kopií celého profilu prohlížeče může klíč stále použít.
 - Každou přibližně pětisekundovou zvukovou část šifruje klíčem vydaným vaším serverem ještě před zápisem do soukromého souborového systému Chromu. Šifrované části odesílá na zvolený server přes HTTPS. Server je dešifruje pro běžné uložení, přepis a export. V prohlížeči zůstanou do potvrzení dokončení serverem nebo do vašeho výslovného zahození. Pád prohlížeče či plný disk může nahrávání přerušit; obnovitelný může být jen ověřený začátek. Samotný prohlížeč může při práci se zvukem dočasně ukládat data mimo šifrované úložiště rozšíření.
 - Přehratelná místní kopie se automaticky nestahuje. Po dokončení záznamu na serveru ji můžete stáhnout na stránce nahrávky po přihlášení do Klepny. Stažený soubor zůstane v počítači, dokud jej nesmažete.
 

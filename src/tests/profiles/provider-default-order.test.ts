@@ -198,3 +198,120 @@ describe("chat credential fallback", () => {
         ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
     });
 });
+
+describe("Organization credential fallback", () => {
+    const credential = (id: string, provider: string, day = 1) => ({
+        id,
+        provider,
+        disabledAt: null as Date | null,
+        createdAt: new Date(`2026-01-0${day}T00:00:00.000Z`),
+    });
+    const org = [
+        credential("codex", "Codex"),
+        credential("audio", "ElevenLabs", 2),
+    ];
+
+    it("puts the own implicit chat selection before the Organization implicit selection", () => {
+        expect(
+            defaultProviderCandidates(
+                "summary",
+                empty(),
+                empty(),
+                [credential("own", "OpenAI")],
+                org,
+            ),
+        ).toEqual([
+            { source: "member-fallback", providerId: "own" },
+            { source: "organization-fallback", providerId: "codex" },
+        ]);
+    });
+
+    it.each([
+        "Codex",
+        "Claude Code",
+    ])("excludes %s bridge presets from transcription", (bridge) => {
+        expect(
+            defaultProviderCandidates(
+                "transcription",
+                empty(),
+                empty(),
+                [],
+                [credential("bridge", bridge), ...org],
+            ),
+        ).toEqual([{ source: "organization-fallback", providerId: "audio" }]);
+    });
+
+    it.each([
+        "summary",
+        "learn",
+        "topics",
+        "title",
+    ] as const)("excludes transcription-only credentials for %s", (step) => {
+        expect(
+            defaultProviderCandidates(
+                step,
+                empty(),
+                empty(),
+                [],
+                [
+                    credential("first-audio", "ElevenLabs"),
+                    credential("chat", "Codex", 2),
+                ],
+            ),
+        ).toEqual([{ source: "organization-fallback", providerId: "chat" }]);
+    });
+
+    it("skips disabled credentials and orders by creation time then id without changing the input", () => {
+        const credentials = [
+            credential("later", "Codex", 3),
+            credential("b", "Codex", 2),
+            credential("a", "Codex", 2),
+            { ...credential("disabled", "OpenAI"), disabledAt: new Date() },
+        ];
+        expect(
+            defaultProviderCandidates(
+                "summary",
+                empty(),
+                empty(),
+                [],
+                credentials,
+            ),
+        ).toEqual([{ source: "organization-fallback", providerId: "a" }]);
+        expect(credentials.map((row) => row.id)).toEqual([
+            "later",
+            "b",
+            "a",
+            "disabled",
+        ]);
+    });
+
+    it("requires an authorized Organization scope even when credentials are supplied", () => {
+        expect(
+            defaultProviderCandidates("summary", empty(), null, [], org),
+        ).toEqual([]);
+    });
+
+    it.each([
+        "member",
+        "organization",
+    ] as const)("keeps an explicit %s pointer terminal ahead of all implicit choices", (owner) => {
+        const member = empty();
+        const organization = empty();
+        (owner === "member" ? member : organization).summary = "missing";
+        expect(
+            defaultProviderCandidates(
+                "summary",
+                member,
+                organization,
+                [credential("own", "OpenAI")],
+                org,
+            ),
+        ).toEqual([
+            {
+                source:
+                    owner === "member" ? "member-role" : "organization-role",
+                providerId: "missing",
+            },
+        ]);
+    });
+});

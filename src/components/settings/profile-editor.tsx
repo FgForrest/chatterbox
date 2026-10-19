@@ -871,10 +871,10 @@ function BasicEditor({
                     <p className="text-xs text-muted-foreground">
                         {isHosted
                             ? i18n(
-                                  "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+                                  "Default uses your default transcription provider, then Mynah when available.",
                               )
                             : i18n(
-                                  "Default uses your default transcription provider, then the Organization default.",
+                                  "Default uses your default transcription provider, then the Organization default, then its oldest enabled transcription provider.",
                               )}
                     </p>
                 </div>
@@ -901,7 +901,7 @@ function BasicEditor({
                 />
                 <p className="text-xs text-muted-foreground">
                     {i18n(
-                        "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role uses your default for that role, then the Organization default, then your first enabled provider.",
+                        "Sets the same provider pin for Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
                     )}
                 </p>
             </div>
