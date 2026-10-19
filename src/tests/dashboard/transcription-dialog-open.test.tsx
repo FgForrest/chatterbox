@@ -178,13 +178,13 @@ function panel(
 }
 
 function lastHeaderButton(heading: "Transcription" | "Summary") {
-    const cardHeader = screen
+    const header = screen
         .getByRole("heading", { name: heading })
-        .closest('[data-slot="card-header"]');
-    if (!(cardHeader instanceof HTMLElement)) {
-        throw new Error(`Missing ${heading} card header`);
+        .closest('[data-slot="card-header"], header');
+    if (!(header instanceof HTMLElement)) {
+        throw new Error(`Missing ${heading} header`);
     }
-    return within(cardHeader).getAllByRole("button").at(-1);
+    return within(header).getAllByRole("button").at(-1);
 }
 
 describe("transcription dialog", () => {
