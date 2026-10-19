@@ -253,6 +253,28 @@ describe("WorkflowStrip", () => {
         expect(onAction).toHaveBeenCalledWith(action);
     });
 
+    it("hides the status action only when read-only", () => {
+        const status = workflow({
+            status: {
+                actor: "yours",
+                message: "profilesDisagree",
+                action: "chooseProfile",
+            },
+        });
+        const { rerender } = render(
+            <WorkflowStrip workflow={status} readOnly />,
+        );
+
+        expect(
+            screen.queryByRole("button", { name: "Choose profile" }),
+        ).toBeNull();
+
+        rerender(<WorkflowStrip workflow={status} />);
+        expect(
+            screen.getByRole("button", { name: "Choose profile" }),
+        ).toBeTruthy();
+    });
+
     it("uses a polite status region and the actor lead", () => {
         render(<WorkflowStrip workflow={workflow()} />);
         const status = screen.getByRole("status");

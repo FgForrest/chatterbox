@@ -1,11 +1,10 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
     mailContents,
     mailMessages,
     mailParticipants,
-    mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
     users,
@@ -53,8 +52,6 @@ export interface MailDetail {
     segments: (Omit<ContentSegment, "at"> & { at: string | null })[];
     attachments: AttachmentMeta[];
     auth: MailAuth | null;
-    /** Organization folders it waits to be shared into (D2); owner only. */
-    pendingShares: { folderId: string; name: string }[];
     /** The folders it is filed into the viewer can see. */
     folderIds: string[];
 }
@@ -107,7 +104,7 @@ export async function loadMailDetail(
         .limit(1);
     if (!row) return null;
     const orgUserId = isOwn ? null : await getOrgUserId();
-    const [participants, [content], pending, assignments] = await Promise.all([
+    const [participants, [content], assignments] = await Promise.all([
         db
             .select()
             .from(mailParticipants)
@@ -128,17 +125,6 @@ export async function loadMailDetail(
                 ),
             )
             .limit(1),
-        isOwn
-            ? db
-                  .select({ folderId: mailPendingShares.folderId })
-                  .from(mailPendingShares)
-                  .where(
-                      and(
-                          eq(mailPendingShares.itemId, itemId),
-                          eq(mailPendingShares.userId, ownerUserId),
-                      ),
-                  )
-            : Promise.resolve([]),
         db
             .select({ folderId: recordingFolderAssignments.folderId })
             .from(recordingFolderAssignments)
@@ -157,21 +143,6 @@ export async function loadMailDetail(
                 ),
             ),
     ]);
-    const pendingFolders =
-        pending.length > 0
-            ? await db
-                  .select({
-                      id: recordingFolders.id,
-                      name: recordingFolders.name,
-                  })
-                  .from(recordingFolders)
-                  .where(
-                      inArray(
-                          recordingFolders.id,
-                          pending.map((share) => share.folderId),
-                      ),
-                  )
-            : [];
     const segments =
         decryptJsonField<
             (Omit<ContentSegment, "at"> & { at: string | null })[]
@@ -229,10 +200,6 @@ export async function loadMailDetail(
             filename: attachment.filename ? mask(attachment.filename) : null,
         })),
         auth: decryptJsonField<MailAuth>(row.auth),
-        pendingShares: pendingFolders.map((folder) => ({
-            folderId: folder.id,
-            name: decryptText(folder.name),
-        })),
         folderIds: assignments.map((assignment) => assignment.folderId),
     };
 }

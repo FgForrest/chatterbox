@@ -1193,7 +1193,7 @@ export function LearnWidget({
                         </p>
                     ) : (
                         <>
-                            {groups.speakers.length > 0 && (
+                            {kind === "audio" && groups.speakers.length > 0 && (
                                 // Who spoke comes first: the facts below name them.
                                 <section
                                     className={`space-y-1 ${who || said ? "border-b pb-6" : ""}`}
@@ -1375,96 +1375,101 @@ export function LearnWidget({
                                 )}
                                 {said && (
                                     <div className="min-w-0 space-y-8">
-                                        {groups.corrections.length > 0 && (
-                                            <section className="space-y-2">
-                                                <SectionTitle
-                                                    title={i18n("Corrections")}
-                                                    count={
-                                                        groups.corrections
-                                                            .length
-                                                    }
-                                                    toggle={groupToggle(
-                                                        groups.corrections,
-                                                        i18n("Corrections"),
-                                                    )}
-                                                />
-                                                {groups.corrections.map(
-                                                    (item) => {
-                                                        const payload =
-                                                            item.payload as {
-                                                                kind:
-                                                                    | "correct"
-                                                                    | "link";
-                                                                heard: string;
-                                                                target: Target;
-                                                                replacement:
-                                                                    | string
-                                                                    | null;
-                                                                anchors: {
-                                                                    turnIndex: number;
-                                                                }[];
-                                                            };
-                                                        return (
-                                                            <div
-                                                                key={item.id}
-                                                                className="-mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
-                                                            >
-                                                                {checkbox(
-                                                                    item,
-                                                                    i18n(
-                                                                        "Correct {heard}",
-                                                                        {
-                                                                            heard: payload.heard,
-                                                                        },
-                                                                    ),
-                                                                )}
-                                                                <div className="min-w-0">
-                                                                    "
-                                                                    {
-                                                                        payload.heard
+                                        {kind === "audio" &&
+                                            groups.corrections.length > 0 && (
+                                                <section className="space-y-2">
+                                                    <SectionTitle
+                                                        title={i18n(
+                                                            "Corrections",
+                                                        )}
+                                                        count={
+                                                            groups.corrections
+                                                                .length
+                                                        }
+                                                        toggle={groupToggle(
+                                                            groups.corrections,
+                                                            i18n("Corrections"),
+                                                        )}
+                                                    />
+                                                    {groups.corrections.map(
+                                                        (item) => {
+                                                            const payload =
+                                                                item.payload as {
+                                                                    kind:
+                                                                        | "correct"
+                                                                        | "link";
+                                                                    heard: string;
+                                                                    target: Target;
+                                                                    replacement:
+                                                                        | string
+                                                                        | null;
+                                                                    anchors: {
+                                                                        turnIndex: number;
+                                                                    }[];
+                                                                };
+                                                            return (
+                                                                <div
+                                                                    key={
+                                                                        item.id
                                                                     }
-                                                                    " ×
-                                                                    {
-                                                                        payload
-                                                                            .anchors
-                                                                            .length
-                                                                    }{" "}
-                                                                    {payload.kind ===
-                                                                    "link"
-                                                                        ? `↔ ${nameOf(payload.target)} (${i18n("link, word kept")})`
-                                                                        : `→ ${payload.replacement ?? nameOf(payload.target)}`}{" "}
-                                                                    {payload.anchors
-                                                                        .slice(
-                                                                            0,
-                                                                            3,
-                                                                        )
-                                                                        .map(
-                                                                            (
-                                                                                anchor,
-                                                                                index,
-                                                                            ) => (
-                                                                                <span
-                                                                                    key={`${anchor.turnIndex}:${index}`}
-                                                                                    className="mr-1"
-                                                                                >
-                                                                                    {seek(
-                                                                                        turnStart(
-                                                                                            anchor.turnIndex,
-                                                                                        ),
-                                                                                    )}
-                                                                                </span>
-                                                                            ),
-                                                                        )}
-                                                                    {waitsNote(
+                                                                    className="-mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
+                                                                >
+                                                                    {checkbox(
                                                                         item,
+                                                                        i18n(
+                                                                            "Correct {heard}",
+                                                                            {
+                                                                                heard: payload.heard,
+                                                                            },
+                                                                        ),
                                                                     )}
+                                                                    <div className="min-w-0">
+                                                                        "
+                                                                        {
+                                                                            payload.heard
+                                                                        }
+                                                                        " ×
+                                                                        {
+                                                                            payload
+                                                                                .anchors
+                                                                                .length
+                                                                        }{" "}
+                                                                        {payload.kind ===
+                                                                        "link"
+                                                                            ? `↔ ${nameOf(payload.target)} (${i18n("link, word kept")})`
+                                                                            : `→ ${payload.replacement ?? nameOf(payload.target)}`}{" "}
+                                                                        {payload.anchors
+                                                                            .slice(
+                                                                                0,
+                                                                                3,
+                                                                            )
+                                                                            .map(
+                                                                                (
+                                                                                    anchor,
+                                                                                    index,
+                                                                                ) => (
+                                                                                    <span
+                                                                                        key={`${anchor.turnIndex}:${index}`}
+                                                                                        className="mr-1"
+                                                                                    >
+                                                                                        {seek(
+                                                                                            turnStart(
+                                                                                                anchor.turnIndex,
+                                                                                            ),
+                                                                                        )}
+                                                                                    </span>
+                                                                                ),
+                                                                            )}
+                                                                        {waitsNote(
+                                                                            item,
+                                                                        )}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        );
-                                                    },
-                                                )}
-                                            </section>
-                                        )}
+                                                            );
+                                                        },
+                                                    )}
+                                                </section>
+                                            )}
 
                                         {[
                                             {

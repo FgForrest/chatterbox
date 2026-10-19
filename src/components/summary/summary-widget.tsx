@@ -18,6 +18,7 @@ import {
     WorkflowWidgetLine,
     WorkflowWidgetRunLine,
 } from "@/components/pipeline/workflow-widget";
+import { SourceSwitcher } from "@/components/source-switcher";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -70,38 +71,6 @@ interface SummaryWidgetProps {
     taskWidgetId: string;
     learnHold?: SummaryLearnHold;
     refreshKey?: string | number;
-}
-
-function SummarySourceSwitcher({
-    value,
-    onSelect,
-}: {
-    value: SummarySource;
-    onSelect: (source: SummarySource) => void;
-}) {
-    const i18n = useExtracted();
-    return (
-        <fieldset
-            className="inline-flex shrink-0 rounded-lg bg-muted/70 p-1"
-            aria-label={i18n("Summary source")}
-        >
-            {(["plaud", "riffado"] as const).map((source) => (
-                <button
-                    key={source}
-                    type="button"
-                    onClick={() => onSelect(source)}
-                    aria-pressed={source === value}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                        source === value
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
-                    }`}
-                >
-                    {source === "plaud" ? "Plaud" : i18n("Custom")}
-                </button>
-            ))}
-        </fieldset>
-    );
 }
 
 /** One summary body and action set for recordings and mail. */
@@ -369,9 +338,13 @@ export function SummaryWidget({
                 </Button>
             )}
             {canSwitchSource && onSourceChange && (
-                <SummarySourceSwitcher
+                <SourceSwitcher
+                    ariaLabel={i18n("Summary source")}
+                    sources={["plaud", "riffado"]}
                     value={source}
-                    onSelect={onSourceChange}
+                    onSelect={(next) =>
+                        onSourceChange(next === "plaud" ? "plaud" : "riffado")
+                    }
                 />
             )}
             {hasSummary && (

@@ -120,13 +120,12 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // by whoever may rename it.
     "folders/[id]/mail-addresses/route.ts": { GET: "folders", PUT: "folders" },
     "folders/[id]/mail-addresses/[addressId]/route.ts": { DELETE: "folders" },
-    // A shared mail is read by everyone, read-only; deleting, sharing and
-    // the raw message (every header unmasked) stay its owner's.
+    // A shared mail is read by everyone, read-only; deleting and the raw
+    // message (every header unmasked) stay its owner's.
     "mail/[id]/route.ts": { GET: "mail", DELETE: "owner" },
     "mail/[id]/html/route.ts": { GET: "mail" },
     "mail/[id]/raw/route.ts": { GET: "owner" },
     "mail/[id]/attachments/[index]/route.ts": { GET: "mail" },
-    "mail/[id]/share/route.ts": { POST: "owner" },
     "mail/addresses/route.ts": { GET: "owner", POST: "owner" },
     "mail/addresses/[id]/route.ts": { PATCH: "owner", DELETE: "owner" },
     "mail/addresses/[id]/rotate/route.ts": { POST: "owner" },

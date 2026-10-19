@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     type SummaryData,
@@ -114,5 +114,72 @@ describe("summary source switching", () => {
             transcriptionText: "Plaud transcript",
         });
         expect(hook.result.current.summaryData?.summary).toBe("Plaud summary");
+    });
+
+    it.each([
+        ["mail", "mail-1", "mail-summary-profile"],
+        ["audio", "audio-1", "audio-summary-profile"],
+    ] as const)("posts %s summaries to the item URL with its channel profile", async (profileChannel, recordingId, profileId) => {
+        const fetchMock = vi.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url.startsWith("/api/settings/profiles?")) {
+                    return jsonResponse({
+                        profiles: [
+                            {
+                                id: profileId,
+                                name: `${profileChannel} summary`,
+                                scope: "personal",
+                                isDefault: true,
+                                isYourDefault: true,
+                            },
+                        ],
+                        nextCursor: null,
+                    });
+                }
+                if (init?.method === "POST") {
+                    return jsonResponse(
+                        summaryBody("riffado", `${profileChannel} summary`),
+                    );
+                }
+                return jsonResponse({
+                    ...summaryBody("riffado", ""),
+                    summary: null,
+                    availableSources: [],
+                });
+            },
+        );
+        vi.stubGlobal("fetch", fetchMock);
+
+        const hook = renderHook(() =>
+            useTranscriptionSummary({
+                recordingId,
+                transcriptionText: `${profileChannel} content`,
+                profileChannel,
+            }),
+        );
+
+        await waitFor(() =>
+            expect(hook.result.current.summaryProfileId).toBe(profileId),
+        );
+        await act(async () => {
+            await hook.result.current.handleSummarize();
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            `/api/settings/profiles?channel=${profileChannel}&pageSize=100`,
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            `/api/recordings/${recordingId}/summary`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "text/event-stream, application/json",
+                },
+                body: JSON.stringify({ profileId }),
+            },
+        );
     });
 });

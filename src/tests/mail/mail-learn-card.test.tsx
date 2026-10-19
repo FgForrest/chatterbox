@@ -478,6 +478,68 @@ it("renders every suggestion kind produced by mail Learn", async () => {
     }
 });
 
+it("hides audio-only speakers and corrections from a mail review", async () => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json({
+                ...ready,
+                items: [
+                    {
+                        id: "speaker-1",
+                        kind: "speaker",
+                        preTicked: false,
+                        decision: null,
+                        choice: null,
+                        version: 0,
+                        dependsOnLabel: null,
+                        payload: {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidenceMs: [],
+                            reason: "wrongly returned for mail",
+                        },
+                    },
+                    {
+                        id: "correction-1",
+                        kind: "correction",
+                        preTicked: false,
+                        decision: null,
+                        choice: null,
+                        version: 0,
+                        dependsOnLabel: null,
+                        payload: {
+                            kind: "correct",
+                            heard: "Oryon",
+                            target: { entityId: "e-orion" },
+                            replacement: "Orion",
+                            anchors: [
+                                { turnIndex: 0, charStart: 10, charEnd: 15 },
+                            ],
+                        },
+                    },
+                    ready.items[1],
+                ],
+            }),
+        ),
+    );
+    render(
+        <MailLearnCard
+            mail={mail}
+            detail={detail}
+            canChange
+            widget={widget("inline")}
+            widgetId="mail-learn-audio-only-kinds"
+        />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    await screen.findByRole("heading", { name: /New facts/ });
+
+    expect(screen.queryByRole("heading", { name: /Speakers/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Corrections/ })).toBeNull();
+});
+
 it("re-learns mail and can forget rejected suggestions", async () => {
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
         if (init?.method === "DELETE") return Response.json({ forgotten: 1 });

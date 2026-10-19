@@ -13,15 +13,19 @@ import {
 import {
     aiEnhancements,
     aiUsageEvents,
+    apiCredentials,
     chatterItems,
     itemProcessing,
     learnDismissals,
     learnReviewItems,
     learnRuns,
+    mailContents,
     mailMessages,
+    processingProfileRevisions,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    transcriptions,
     users,
 } from "@/db/schema";
 import {
@@ -122,9 +126,15 @@ import { GET as aiCost } from "@/app/api/recordings/[id]/ai-cost/route";
 import { POST as erase } from "@/app/api/recordings/[id]/erase/route";
 import { PATCH as rename } from "@/app/api/recordings/[id]/route";
 import { POST as regenerate } from "@/app/api/recordings/[id]/title/route";
+import { encrypt } from "@/lib/encryption";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { loadMailListRows } from "@/lib/mail/list";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { planAdvance } from "@/lib/pipeline/plan";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
 import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -615,6 +625,146 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
                 .from(learnRuns)
                 .where(eq(learnRuns.itemId, AUDIO)),
         ).toHaveLength(0);
+    });
+
+    it.each([
+        { kind: "mail", source: "mail", itemId: MAIL },
+        { kind: "audio", source: "riffado", itemId: AUDIO },
+        { kind: "audio", source: "plaud", itemId: AUDIO },
+    ] as const)("backfills erased Learn inputs from $source content and prevents automatic Learn", async ({
+        kind,
+        source,
+        itemId,
+    }) => {
+        const contentId = `${itemId}-${source}-content`;
+        const revision = 7;
+        if (kind === "mail") {
+            await db().insert(mailContents).values({
+                id: contentId,
+                itemId,
+                userId: OWNER,
+                revision,
+                parserVersion: 1,
+                segments: [],
+            });
+        } else {
+            await db()
+                .insert(transcriptions)
+                .values({
+                    id: contentId,
+                    recordingId: itemId,
+                    userId: OWNER,
+                    source,
+                    revision,
+                    text: encryptText("Transcript"),
+                    turns: [{ speaker: "speaker_0", startMs: 0, endMs: 1_000 }],
+                    provider: "test",
+                    model: "test",
+                });
+        }
+        const credentialId = "learn-provider";
+        await db()
+            .insert(apiCredentials)
+            .values({
+                id: credentialId,
+                userId: OWNER,
+                provider: "openai",
+                apiKey: encrypt("test-api-key"),
+                defaultModel: "test-model",
+            });
+        const profile = await resolveDefaultProfile(OWNER, kind);
+        const settings = defaultProfileSettings(kind);
+        settings.steps.learn.automatic = true;
+        settings.steps.learn.provider = {
+            credentialId,
+            scope: "personal",
+        };
+        await db()
+            .update(processingProfileRevisions)
+            .set({ settings: JSON.stringify(settings) })
+            .where(eq(processingProfileRevisions.id, profile.revisionId));
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "learn-root",
+                    userId: OWNER,
+                    name: encryptText("Private"),
+                    nameHash: lookupHash("Private"),
+                    kind: "private",
+                },
+                {
+                    id: "learn-folder",
+                    userId: OWNER,
+                    parentId: "learn-root",
+                    name: encryptText("Learn folder"),
+                    nameHash: lookupHash("Learn folder"),
+                },
+            ]);
+        await db().insert(recordingFolderAssignments).values({
+            userId: OWNER,
+            itemId,
+            folderId: "learn-folder",
+        });
+        await seedLearn(itemId, OWNER);
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: OWNER,
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 0,
+                        at: new Date().toISOString(),
+                    },
+                    learn: {
+                        state: "waiting",
+                        reason: "manual_review_pending",
+                        generation: 0,
+                        at: new Date().toISOString(),
+                    },
+                },
+            });
+
+        const response = await call(
+            erase,
+            OWNER,
+            itemId,
+            `/api/recordings/${itemId}/erase`,
+            { method: "POST", ...json({ scope: "learn" }) },
+        );
+
+        expect(response.status).toBe(200);
+        const facts = await gatherFacts(itemId, "private", OWNER);
+        const inputs = {
+            contentId,
+            contentSourceId: source,
+            contentRevision: revision,
+        };
+        expect(facts.phases.learn).toMatchObject({
+            state: "skipped",
+            reason: "erased",
+            inputs,
+        });
+        expect(
+            source === "plaud" ? facts.transcription?.plaud : facts.content,
+        ).toMatchObject(inputs);
+        expect(facts.summaryDueAt).toBeNull();
+        expect(facts.learnAvailability).toBe("available");
+        expect(planAdvance(facts).actions).not.toContainEqual(
+            expect.objectContaining({ type: "startAutoLearn" }),
+        );
+        expect(
+            planAdvance({
+                ...facts,
+                phases: { ...facts.phases, learn: undefined },
+            }).actions,
+        ).toContainEqual({ type: "startAutoLearn", source, input: inputs });
     });
 
     it("deletes only the owner's mail, including when it is shared", async () => {
