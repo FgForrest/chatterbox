@@ -318,7 +318,7 @@ export function SpeakerTags({
     if (readOnly) {
         return (
             <fieldset
-                className="flex flex-wrap items-center gap-2 pt-3"
+                className="flex flex-wrap items-center gap-2"
                 aria-label={i18n("Transcript speakers")}
                 onContextMenu={handleContextMenu}
             >
@@ -376,7 +376,7 @@ export function SpeakerTags({
 
     return (
         <fieldset
-            className="flex flex-wrap items-center gap-2 pt-3"
+            className="flex flex-wrap items-center gap-2"
             aria-label={i18n("Transcript speakers")}
             onContextMenu={handleContextMenu}
         >
