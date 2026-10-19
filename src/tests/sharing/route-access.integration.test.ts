@@ -23,6 +23,7 @@ import {
 } from "vitest";
 import {
     asyncJobs,
+    itemProcessing,
     people,
     recordingFolders,
     recordings,
@@ -120,6 +121,7 @@ import { GET as getMarkdown } from "@/app/api/recordings/[id]/markdown/[kind]/ro
 import { POST as postPeaks } from "@/app/api/recordings/[id]/peaks/route";
 import {
     DELETE as deleteRecording,
+    GET as getRecording,
     PATCH as renameRecording,
 } from "@/app/api/recordings/[id]/route";
 import {
@@ -246,6 +248,21 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 model: "whisper-1",
                 source: "riffado",
             });
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: REC,
+                userId: OWNER,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        at: "2026-09-01T10:01:00.000Z",
+                    },
+                },
+            });
     });
 
     async function share() {
@@ -337,6 +354,27 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 ).status,
             ).toBe(200);
         });
+
+        it("keeps the private processing projection owner-only", async () => {
+            const owner = await call(
+                getRecording,
+                OWNER,
+                `/api/recordings/${REC}?processing=1`,
+            );
+            expect(owner.status).toBe(200);
+            await expect(owner.json()).resolves.toMatchObject({
+                processing: { itemId: REC, kind: "audio" },
+            });
+            expect(
+                (
+                    await call(
+                        getRecording,
+                        MEMBER,
+                        `/api/recordings/${REC}?processing=1&view=org`,
+                    )
+                ).status,
+            ).toBe(404);
+        });
     });
 
     describe("after sharing", () => {
@@ -365,6 +403,29 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 expect(markdown.status).toBe(200);
                 expect(await markdown.text()).toContain("Hello.");
             }
+        });
+
+        it("shows the owner's private processing projection read-only in the Organization view", async () => {
+            for (const user of [OWNER, MEMBER, orgUserId]) {
+                const response = await call(
+                    getRecording,
+                    user,
+                    `/api/recordings/${REC}?processing=1&view=org`,
+                );
+                expect(response.status).toBe(200);
+                await expect(response.json()).resolves.toMatchObject({
+                    processing: { itemId: REC, kind: "audio" },
+                });
+            }
+            expect(
+                (
+                    await call(
+                        getRecording,
+                        MEMBER,
+                        `/api/recordings/${REC}?processing=1`,
+                    )
+                ).status,
+            ).toBe(404);
         });
 
         it("keeps the private view the owner's alone", async () => {
