@@ -9,6 +9,8 @@ import { formatDateTime } from "@/lib/format-date";
 import { formatDuration } from "@/lib/format-duration";
 import type { Recording } from "@/types/recording";
 
+const NON_DEVICE_SOURCES = new Set(["local", "mail"]);
+
 interface RecordingPlayerHeaderProps {
     recording: Recording;
     action?: ReactNode;
@@ -46,7 +48,11 @@ export function RecordingPlayerHeader({
         formatDuration(recording.duration / 1000),
         formatBytes(recording.filesize),
     ];
-    if (recording.deviceSn !== "local") metaParts.push(recording.deviceSn);
+    if (recording.deviceSn && !NON_DEVICE_SOURCES.has(recording.deviceSn)) {
+        metaParts.push(
+            i18n("Device: {serial}", { serial: recording.deviceSn }),
+        );
+    }
     const retentionNotes = [
         recording.audioReapedAt
             ? i18n("The audio was removed on {date}.", {
