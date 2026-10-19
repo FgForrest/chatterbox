@@ -24,9 +24,11 @@ function dollars(amount: number): string {
 
 export function AiCostSummary({
     recordingId,
+    kind = "audio",
     view,
 }: {
     recordingId: string;
+    kind?: "audio" | "mail";
     view?: "private" | "org";
 }) {
     const i18n = useExtracted();
@@ -55,7 +57,9 @@ export function AiCostSummary({
     if (summary.requestCount === 0) {
         return (
             <span className="text-sm text-muted-foreground">
-                {i18n("No AI spend tracked for this recording")}
+                {kind === "mail"
+                    ? i18n("No AI spend tracked for this mail")
+                    : i18n("No AI spend tracked for this recording")}
             </span>
         );
     }

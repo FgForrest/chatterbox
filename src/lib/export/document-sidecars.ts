@@ -8,6 +8,7 @@ import {
 import {
     aiEnhancements,
     chatterItems,
+    mailContents,
     recordings,
     transcriptions,
     userSettings,
@@ -28,6 +29,7 @@ import {
     projectSummarySpeakerReferencesForExport,
 } from "@/lib/knowledge/speaker-references";
 import { correctionOverlay } from "@/lib/learn/llm-input";
+import { sanitizeDownloadBasename } from "@/lib/recordings/filename";
 import {
     reconcileRecordingStorage,
     recordingStorageNeedsReconciliation,
@@ -318,6 +320,35 @@ export async function getRecordingMarkdownDocument(
     kind: SidecarKind,
     options: RecordingMarkdownOptions = {},
 ): Promise<RecordingMarkdownDocument | null> {
+    const [item] = await db
+        .select({
+            id: chatterItems.id,
+            kind: chatterItems.kind,
+            title: chatterItems.title,
+            occurredAt: chatterItems.occurredAt,
+        })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, recordingId),
+                eq(chatterItems.userId, ownerUserId),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!item) return null;
+
+    const title = decryptText(item.title);
+    if (item.kind === "mail") {
+        if (kind === "transcript") return null;
+        return renderMailSummaryMarkdownDocument(
+            ownerUserId,
+            item,
+            title,
+            options,
+        );
+    }
+
     const [recording] = await db
         .select(audioItemColumns)
         .from(recordings)
@@ -332,7 +363,6 @@ export async function getRecordingMarkdownDocument(
         .limit(1);
     if (!recording) return null;
 
-    const title = decryptText(recording.title);
     return renderRecordingMarkdownDocument(
         ownerUserId,
         recording,
@@ -341,6 +371,115 @@ export async function getRecordingMarkdownDocument(
         recording.storagePath,
         options,
     );
+}
+
+async function renderMailSummaryMarkdownDocument(
+    userId: string,
+    item: {
+        id: string;
+        occurredAt: Date;
+    },
+    title: string,
+    { source, ownerAuthoredOnly = false }: RecordingMarkdownOptions,
+): Promise<RecordingMarkdownDocument | null> {
+    const enhancements = await db
+        .select()
+        .from(aiEnhancements)
+        .where(
+            and(
+                eq(aiEnhancements.itemId, item.id),
+                eq(aiEnhancements.userId, userId),
+            ),
+        );
+    const enhancement = source
+        ? enhancements.find((candidate) => candidate.source === source)
+        : await preferredEnhancement(userId, enhancements);
+    if (!enhancement) return null;
+
+    const [[content], [settings]] = await Promise.all([
+        db
+            .select({ language: mailContents.language })
+            .from(mailContents)
+            .where(
+                and(
+                    eq(mailContents.itemId, item.id),
+                    eq(mailContents.userId, userId),
+                ),
+            )
+            .limit(1),
+        db
+            .select({
+                aiOutputLanguage: userSettings.aiOutputLanguage,
+                defaultTranscriptionLanguage:
+                    userSettings.defaultTranscriptionLanguage,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, userId))
+            .limit(1),
+    ]);
+    const summary = decryptText(enhancement.summary) ?? null;
+    const keyPoints = stringArray(
+        decryptJsonField<unknown>(enhancement.keyPoints),
+    );
+    const actionItems = stringArray(
+        decryptJsonField<unknown>(enhancement.actionItems),
+    );
+    const tasks = (
+        (
+            await tasksForArchive(
+                ownerAuthoredOnly
+                    ? { kind: "personal", userId }
+                    : { kind: "owner", userId },
+                [item.id],
+            )
+        ).get(item.id) ?? []
+    )
+        .filter((task) => task.status !== "dropped")
+        .map((task) => ({
+            text: task.text,
+            done: task.status === "done",
+            assignee: task.assignee?.name ?? task.assigneeHint,
+            dueDate: task.dueDate,
+        }));
+    if (
+        !summary?.trim() &&
+        keyPoints.length === 0 &&
+        actionItems.length === 0 &&
+        tasks.length === 0
+    ) {
+        return null;
+    }
+
+    const basename = sanitizeDownloadBasename(title) || "untitled";
+    const filename = sidecarKey(
+        `${basename}.eml`,
+        "summary",
+        enhancement.source,
+    )
+        .split("/")
+        .at(-1);
+    if (!filename) return null;
+
+    return {
+        filename,
+        content: buildSummaryMarkdown({
+            title,
+            recordedAt: item.occurredAt,
+            provider: enhancement.provider,
+            model: enhancement.model,
+            source: enhancement.source,
+            transcriptSource: "mail",
+            language: resolveAiOutputLanguage(
+                settings?.aiOutputLanguage,
+                content?.language ?? settings?.defaultTranscriptionLanguage,
+            ),
+            summary,
+            keyPoints,
+            actionItems,
+            tasks,
+            participants: [],
+        }),
+    };
 }
 
 async function renderRecordingMarkdownDocument(

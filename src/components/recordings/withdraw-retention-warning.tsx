@@ -70,9 +70,11 @@ export function useWithdrawPreview(
 export function WithdrawRetentionWarning({
     preview,
     ofOwner = false,
+    kind = "audio",
 }: {
     preview: WithdrawPreview;
     ofOwner?: boolean;
+    kind?: "audio" | "mail";
 }) {
     const i18n = useExtracted();
     if (preview.status === "loading") {
@@ -102,10 +104,14 @@ export function WithdrawRetentionWarning({
             </div>
         );
     }
-    if (preview.due.length === 0) return null;
-    const line = ({ kind, days }: DueKind) => {
+    const visibleDue =
+        kind === "mail"
+            ? preview.due.filter((item) => item.kind === "summary")
+            : preview.due;
+    if (visibleDue.length === 0) return null;
+    const line = ({ kind: dueKind, days }: DueKind) => {
         if (ofOwner) {
-            switch (kind) {
+            switch (dueKind) {
                 case "audio":
                     return i18n(
                         "The owner's retention deletes audio older than {days, plural, one {# day} other {# days}}, so this recording's audio will be deleted within the hour.",
@@ -117,13 +123,18 @@ export function WithdrawRetentionWarning({
                         { days },
                     );
                 case "summary":
-                    return i18n(
-                        "The owner's retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",
-                        { days },
-                    );
+                    return kind === "mail"
+                        ? i18n(
+                              "The owner's retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this mail's summary will be deleted within the hour.",
+                              { days },
+                          )
+                        : i18n(
+                              "The owner's retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",
+                              { days },
+                          );
             }
         }
-        switch (kind) {
+        switch (dueKind) {
             case "audio":
                 return i18n(
                     "Your retention deletes audio older than {days, plural, one {# day} other {# days}}, so this recording's audio will be deleted within the hour.",
@@ -135,10 +146,15 @@ export function WithdrawRetentionWarning({
                     { days },
                 );
             case "summary":
-                return i18n(
-                    "Your retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",
-                    { days },
-                );
+                return kind === "mail"
+                    ? i18n(
+                          "Your retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this mail's summary will be deleted within the hour.",
+                          { days },
+                      )
+                    : i18n(
+                          "Your retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",
+                          { days },
+                      );
         }
     };
     return (
@@ -148,7 +164,7 @@ export function WithdrawRetentionWarning({
         >
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
             <ul className="space-y-1">
-                {preview.due.map((item) => (
+                {visibleDue.map((item) => (
                     <li key={item.kind}>{line(item)}</li>
                 ))}
             </ul>

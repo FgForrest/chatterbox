@@ -209,6 +209,86 @@ describe("processing folder row", () => {
         );
     });
 
+    it("explains the legacy profile chip and adopts a profile through categorization", async () => {
+        const onTranscribe = vi.fn();
+        const fetchMock = vi.fn(
+            async (_input: string | URL | Request, init?: RequestInit) => {
+                if (init?.method === "POST") {
+                    return new Promise<Response>(() => {});
+                }
+                return Response.json(panel);
+            },
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        renderWorkflow({
+            initialData: {
+                ...processing,
+                legacy: true,
+                manualOnly: false,
+                profile: null,
+                outputs: { transcript: true, learn: true, summary: true },
+            },
+            onTranscribe,
+        });
+
+        const chip = screen.getByTestId("profile-chip");
+        expect(chip.textContent).toContain("Processed before profiles");
+        fireEvent.focus(chip);
+        expect(
+            await screen.findAllByText(
+                "Choose a profile for this item. Its existing results stay unchanged.",
+            ),
+        ).not.toHaveLength(0);
+        fireEvent.pointerDown(chip, { button: 0, ctrlKey: false });
+        fireEvent.click(
+            await screen.findByRole("menuitemradio", { name: "Calls" }),
+        );
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/item-1/categorize",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        folderIds: ["notes", "sales"],
+                        profileId: "profile-2",
+                    }),
+                },
+            ),
+        );
+        expect(
+            fetchMock.mock.calls.some(([input]) =>
+                String(input).includes("process-again"),
+            ),
+        ).toBe(false);
+        expect(onTranscribe).not.toHaveBeenCalled();
+    });
+
+    it("loads the owner's processing in the Organization view without actions", async () => {
+        const onProcessingChange = vi.fn();
+        const fetchMock = vi.fn(async () => Response.json({ processing }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        renderWorkflow({
+            initialData: undefined,
+            isOwn: false,
+            view: "org",
+            onProcessingChange,
+        });
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/item-1?processing=1&view=org",
+            ),
+        );
+        await waitFor(() =>
+            expect(onProcessingChange).toHaveBeenCalledWith(processing),
+        );
+        expect(screen.getByLabelText("Workflow")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Share now" })).toBeNull();
+    });
+
     it("starts manual transcription from the workflow action", () => {
         const onTranscribe = vi.fn();
         if (!processing.profile) {

@@ -4,7 +4,6 @@ import {
     asyncJobs,
     chatterItems,
     mailMessages,
-    mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
 } from "@/db/schema";
@@ -12,17 +11,13 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lockOrgTree, orgTreeChanged } from "@/lib/folders/folders";
-import { nudge } from "@/lib/jobs/nudge";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
-import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { deleteRawMail } from "@/lib/mail/raw-storage";
-import { shareMailInTx } from "@/lib/mail/share-gate";
 import { getOrgUserId } from "@/lib/org/config";
-import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import {
     deleteItemTaskDataInTx,
@@ -180,83 +175,4 @@ export async function deleteMail(
             error instanceof Error ? error.message : error,
         );
     });
-}
-
-/**
- * Shares the owner's mail into the Organization folder it was sent to
- * (D2): only a folder it waits for, and only once its review is done (no
- * Learn run open, no task proposal undecided).
- */
-export async function shareMail(input: {
-    ownerUserId: string;
-    itemId: string;
-    folderId: string;
-}): Promise<void> {
-    const orgUserId = await getOrgUserId();
-    if (!orgUserId) throw mailNotFound();
-    await db.transaction(async (tx) => {
-        await lockOrgTree(tx);
-        // Before the item: sharing promotes people, and a promotion may
-        // merge them, which locks items.
-        await lockOrgPeople(tx);
-        await lockMailInTx(tx, input.ownerUserId, input.itemId);
-        const [pending] = await tx
-            .select({ folderId: mailPendingShares.folderId })
-            .from(mailPendingShares)
-            .innerJoin(
-                recordingFolders,
-                eq(recordingFolders.id, mailPendingShares.folderId),
-            )
-            .where(
-                and(
-                    eq(mailPendingShares.itemId, input.itemId),
-                    eq(mailPendingShares.userId, input.ownerUserId),
-                    eq(mailPendingShares.folderId, input.folderId),
-                    eq(recordingFolders.userId, orgUserId),
-                ),
-            )
-            .limit(1);
-        if (!pending) throw mailNotFound();
-        await shareMailInTx(tx, { ...input, orgUserId });
-        await requestAdvanceInTx(tx, {
-            itemId: input.itemId,
-            userId: input.ownerUserId,
-            view: "private",
-            reason: "placement",
-        });
-        await requestAdvanceInTx(tx, {
-            itemId: input.itemId,
-            userId: input.ownerUserId,
-            view: "org",
-            reason: "placement",
-        });
-    });
-    nudge();
-    await orgTreeChanged();
-}
-
-/** Drops a pending share: the mail stays in the owner's pile only. */
-export async function dismissPendingShare(input: {
-    ownerUserId: string;
-    itemId: string;
-    folderId: string;
-}): Promise<void> {
-    await db.transaction(async (tx) => {
-        await tx
-            .delete(mailPendingShares)
-            .where(
-                and(
-                    eq(mailPendingShares.itemId, input.itemId),
-                    eq(mailPendingShares.userId, input.ownerUserId),
-                    eq(mailPendingShares.folderId, input.folderId),
-                ),
-            );
-        await requestAdvanceInTx(tx, {
-            itemId: input.itemId,
-            userId: input.ownerUserId,
-            view: "private",
-            reason: "placement",
-        });
-    });
-    nudge();
 }

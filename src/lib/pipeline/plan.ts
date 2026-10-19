@@ -1231,7 +1231,9 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (
         learn !== undefined &&
         learn.state === "skipped" &&
-        ["gone", "shared", "start_failed"].includes(learn.reason ?? "") &&
+        ["erased", "gone", "shared", "start_failed"].includes(
+            learn.reason ?? "",
+        ) &&
         sameInput(learn, input) &&
         (minimumGeneration === undefined ||
             learn.generation >= minimumGeneration)

@@ -5,7 +5,6 @@ import {
     ChevronUp,
     FileText,
     Languages,
-    ListChecks,
     Loader2,
     RefreshCw,
     Sparkles,
@@ -21,7 +20,6 @@ import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
 import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
-import { Markdown } from "@/components/markdown";
 import {
     confirmedAttributions,
     type SpeakerResponseRow,
@@ -32,13 +30,10 @@ import {
     useWorkflowWidgetOpen,
     WorkflowWidget,
     WorkflowWidgetLine,
-    workflowWidgetHeadingProps,
 } from "@/components/pipeline/workflow-widget";
 import { useProductName } from "@/components/product-name-provider";
-import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
-import { RecordingTasks } from "@/components/tasks/recording-tasks";
-import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
-import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
+import { SourceSwitcher } from "@/components/source-switcher";
+import { SummaryWidget } from "@/components/summary/summary-widget";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -51,40 +46,21 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
-import {
-    type SummarySource,
-    useTranscriptionSummary,
-} from "@/hooks/use-transcription-summary";
+import type { SummarySource } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import {
     speakerKey,
     speakerLabelsForTranscript,
 } from "@/lib/knowledge/speaker-label-rules";
-import {
-    inferSummarySpeakerNumberOffset,
-    type SpeakerAttributions,
-} from "@/lib/knowledge/speaker-references";
+import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import type { OverlayCorrection } from "@/lib/learn/render";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
-import {
-    deriveWorkflowWidgets,
-    isWorkflowWidgetLineVisible,
-} from "@/lib/pipeline/workflow-widgets";
+import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { withRecordingView } from "@/lib/sharing/view";
-import { describeMultiPass } from "@/lib/summary/multi-pass";
-import { formatElapsed } from "@/lib/summary/progress-stream";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -153,46 +129,6 @@ interface TranscriptionPanelProps {
      */
     readOnly?: boolean;
     processing?: ItemProcessingPresentation | null;
-}
-
-function SourceSwitcher({
-    ariaLabel,
-    sources,
-    value,
-    onSelect,
-}: {
-    ariaLabel: string;
-    sources: readonly string[];
-    value: string;
-    onSelect: (source: string) => void;
-}) {
-    const i18n = useExtracted();
-    return (
-        <fieldset
-            className="inline-flex shrink-0 rounded-lg bg-muted/70 p-1"
-            aria-label={ariaLabel}
-        >
-            {sources.map((source) => (
-                <button
-                    key={source}
-                    type="button"
-                    onClick={() => onSelect(source)}
-                    aria-pressed={source === value}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                        source === value
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
-                    }`}
-                >
-                    {source === "plaud"
-                        ? "Plaud"
-                        : source === "mixed"
-                          ? i18n("Mix")
-                          : i18n("Custom")}
-                </button>
-            ))}
-        </fieldset>
-    );
 }
 
 /**
@@ -290,8 +226,6 @@ export function TranscriptionPanel({
     );
     const [transcriptExpanded, setTranscriptExpanded] = useState(true);
     const [workflowTranscriptExpanded, setWorkflowTranscriptExpanded] =
-        useState(false);
-    const [transcriptionDialogOpen, setTranscriptionDialogOpen] =
         useState(false);
     const activeTranscript =
         transcriptList.find((t) => t.source === activeSource) ??
@@ -651,51 +585,6 @@ export function TranscriptionPanel({
         view,
     ]);
 
-    const {
-        summaryData,
-        isSummarizing,
-        summaryProgress,
-        summaryElapsedMs,
-        summaryExpanded,
-        setSummaryExpanded,
-        summaryProfileId = "",
-        setSummaryProfileId,
-        summaryProfileOptions = [],
-        summaryProfilesLoading = false,
-        handleSummarize,
-        recheckSummary,
-    } = useTranscriptionSummary({
-        recordingId: recording?.id,
-        summarySource,
-        transcriptionText: summaryTranscript?.text,
-        view,
-        profileChannel: recording.kind ?? "audio",
-    });
-    const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
-    const [workflowSummaryExpanded, setWorkflowSummaryExpanded] =
-        useState(false);
-    const startSummary = () => {
-        handleSummarize();
-    };
-    const summaryOpen = widgets?.workflowVisible
-        ? !widgets.summary.collapsed || workflowSummaryExpanded
-        : summaryExpanded;
-    const summaryLine = isWorkflowWidgetLineVisible({
-        workflowVisible: widgets?.workflowVisible ?? false,
-        collapsed: widgets?.summary.collapsed ?? false,
-        expanded: workflowSummaryExpanded,
-        working: isSummarizing,
-        frame: widgets?.summary.frame ?? "inline",
-    });
-    const summaryWidgetId = `recording-summary-${recording.id}`;
-    let summaryLineFacts =
-        processing?.profile?.name ??
-        summaryProfileOptions.find((profile) => profile.id === summaryProfileId)
-            ?.name;
-    if (!summaryLineFacts) {
-        summaryLineFacts = summarySource === "plaud" ? "Plaud" : name;
-    }
-
     // The title, summary and topics automatic Learn held back are made by
     // jobs a finished review queues: followed here, since nothing the page
     // started makes them.
@@ -710,7 +599,6 @@ export function TranscriptionPanel({
             setFollowUpRevision((count) => count + 1);
             // The correction pass may have corrected it meanwhile.
             setCorrectionsRead((count) => count + 1);
-            recheckSummary();
             onTranscriptStale?.();
         },
     });
@@ -732,122 +620,55 @@ export function TranscriptionPanel({
         onTranscriptStale?.();
     }, [followReleased, onTranscriptStale]);
 
-    // Null for a single-pass summary, so the badge simply does not
-    // render. Derived rather than stored on the client: the shape comes
-    // from POST and GET alike, so a reload shows the same badge.
-    const baseMultiPassBadge = describeMultiPass(summaryData?.multiPass);
-    const multiPassBadge = (() => {
-        const provenance = summaryData?.multiPass;
-        if (!baseMultiPassBadge || !provenance) return null;
-        const { roundsRequested, passesUsed, merged } = provenance;
-        let title: string;
-        if (merged && passesUsed === roundsRequested) {
-            title = i18n("{used} of {requested} passes merged", {
-                used: String(passesUsed),
-                requested: String(roundsRequested),
-            });
-        } else if (passesUsed === 0) {
-            title = i18n(
-                "No pass returned usable output; showing the raw reply of {requested}.",
-                { requested: String(roundsRequested) },
-            );
-        } else if (!merged && passesUsed === 1) {
-            title = i18n(
-                "Only 1 of {requested} passes succeeded, so it is shown unmerged.",
-                { requested: String(roundsRequested) },
-            );
-        } else if (!merged) {
-            title = i18n(
-                "{used} of {requested} passes succeeded, but the merge failed; showing the most complete single pass.",
-                {
-                    used: String(passesUsed),
-                    requested: String(roundsRequested),
-                },
-            );
-        } else {
-            title = i18n(
-                "{used} of {requested} passes succeeded and were merged.",
-                {
-                    used: String(passesUsed),
-                    requested: String(roundsRequested),
-                },
-            );
-        }
-        return {
-            ...baseMultiPassBadge,
-            label: i18n("multi-pass · {passes}", {
-                passes:
-                    passesUsed === roundsRequested
-                        ? String(roundsRequested)
-                        : `${passesUsed}/${roundsRequested}`,
-            }),
-            title,
-        };
-    })();
-    const summaryStatusLabel = !summaryProgress
-        ? i18n("Generating summary…")
-        : summaryProgress.phase === "merging"
-          ? i18n("Merging {count, plural, one {# pass} other {# passes}}…", {
-                count: summaryProgress.total,
-            })
-          : i18n("Summarizing — {completed}/{total} passes", {
-                completed: String(summaryProgress.completed),
-                total: String(summaryProgress.total),
-            });
-    const summaryStatus =
-        summaryElapsedMs > 0
-            ? `${summaryStatusLabel} · ${formatElapsed(summaryElapsedMs)}`
-            : summaryStatusLabel;
-    // A summary just made may have proposed tasks: read them again.
-    const [summariesMade, setSummariesMade] = useState(0);
-    const wasSummarizing = useRef(false);
-    useEffect(() => {
-        if (wasSummarizing.current && !isSummarizing) {
-            setSummariesMade((count) => count + 1);
-        }
-        wasSummarizing.current = isSummarizing;
-    }, [isSummarizing]);
-    const taskState = useRecordingTasks(
-        recording.id,
-        `${summarySource}:${summariesMade}`,
-    );
-    const playTask = onPlayFromTurn
-        ? (startMs: number) => onPlayFromTurn(startMs)
-        : undefined;
-    const taskSpeakers = useMemo<SpeakerChoice[]>(() => {
-        const seen = new Map<string, SpeakerChoice>();
-        for (const attribution of Object.values(summarySpeakerAttributions)) {
-            seen.set(attribution.personId, {
-                personId: attribution.personId,
-                name: attribution.name,
-            });
-        }
-        return [...seen.values()];
-    }, [summarySpeakerAttributions]);
-    const summarySpeakerNumberOffset = useMemo(() => {
-        if (!summaryData) return 0;
-        return inferSummarySpeakerNumberOffset(
-            [
-                summaryData.summary,
-                ...(summaryData.keyPoints ?? []),
-                ...(summaryData.actionItems ?? []),
-            ].join("\n"),
-            summarySpeakerTags.map((speaker) => speaker.speaker),
-        );
-    }, [summaryData, summarySpeakerTags]);
-
     useWorkflowWidgetOpen(
         (!widgets || widgets.transcript.visible) && !transcriptLine
             ? transcriptWidgetId
             : undefined,
     );
-    useWorkflowWidgetOpen(
-        activeTranscript?.text &&
-            (!widgets || widgets.summary.visible) &&
-            !summaryLine
-            ? summaryWidgetId
-            : undefined,
-    );
+    const transcriptFooter = activeTranscript
+        ? {
+              status: (
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                          {activeTranscript.source === "plaud"
+                              ? "Plaud"
+                              : activeTranscript.source === "mixed"
+                                ? i18n("Mix")
+                                : i18n("Custom")}
+                      </span>
+                      {activeTranscript.provider && (
+                          <span className="rounded bg-muted px-2 py-0.5">
+                              {activeTranscript.provider}
+                          </span>
+                      )}
+                      {activeTranscript.model && (
+                          <span className="rounded bg-muted px-2 py-0.5 font-mono">
+                              {activeTranscript.model}
+                          </span>
+                      )}
+                      {activeTranscript.language && (
+                          <span className="flex items-center gap-1">
+                              <Languages className="size-3" />
+                              <span>
+                                  {i18n("Language:")}{" "}
+                                  {activeTranscript.language}
+                              </span>
+                          </span>
+                      )}
+                      <span>
+                          {activeTranscript.text.trim()
+                              ? activeTranscript.text.trim().split(/\s+/).length
+                              : 0}{" "}
+                          {i18n("words")}
+                      </span>
+                      <span>
+                          {activeTranscript.text.length} {i18n("characters")}
+                      </span>
+                  </div>
+              ),
+              actions: null,
+          }
+        : undefined;
 
     return (
         <div className="flex flex-col gap-4">
@@ -906,379 +727,288 @@ export function TranscriptionPanel({
                         }}
                     />
                 ) : (
-                    <Card
+                    <WorkflowWidget
                         id={transcriptWidgetId}
-                        className={
-                            widgets?.transcript.active
-                                ? widgets.transcript.tone === "review"
-                                    ? "border-l-2 border-l-[var(--step-review)]"
-                                    : "border-l-2 border-l-primary"
-                                : undefined
+                        frame="inline"
+                        tone={widgets?.transcript.tone ?? "quiet"}
+                        title={i18n("Transcription")}
+                        helpLink={
+                            <HelpLink
+                                topic="transcripts"
+                                label={i18n("reading a transcript")}
+                            />
                         }
-                        data-workflow-widget="transcript"
-                    >
-                        <CardHeader>
-                            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-                                <CardTitle
-                                    {...workflowWidgetHeadingProps(
-                                        transcriptWidgetId,
-                                    )}
-                                    role="heading"
-                                    aria-level={2}
-                                    className="flex items-center gap-2"
-                                >
-                                    <FileText className="size-5" />{" "}
-                                    {i18n("Transcription")}
-                                    <HelpLink
-                                        topic="transcripts"
-                                        label={i18n("reading a transcript")}
-                                    />
-                                </CardTitle>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {activeTranscript?.text && !readOnly && (
-                                        <AlertDialog>
-                                            <AlertDialogTrigger asChild>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    disabled={
-                                                        transcriptionRunning ||
-                                                        recording.audioReaped
-                                                    }
-                                                    title={
-                                                        recording.audioReaped
-                                                            ? i18n(
-                                                                  "Audio was removed by your retention policy",
-                                                              )
-                                                            : undefined
+                        footer={transcriptFooter}
+                        headerAction={
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                {activeTranscript?.text && !readOnly && (
+                                    <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={
+                                                    transcriptionRunning ||
+                                                    recording.audioReaped
+                                                }
+                                                title={
+                                                    recording.audioReaped
+                                                        ? i18n(
+                                                              "Audio was removed by your retention policy",
+                                                          )
+                                                        : undefined
+                                                }
+                                            >
+                                                <RefreshCw className="size-4 mr-2" />{" "}
+                                                {i18n("Re-transcribe")}
+                                            </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>
+                                                    {i18n(
+                                                        "Re-transcribe this recording?",
+                                                    )}
+                                                </AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    {i18n(
+                                                        "This replaces the transcript, then regenerates the summary, title, and topics, and runs Learn again. It also makes a paid call to your transcription provider.",
+                                                    )}
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel>
+                                                    {i18n("Cancel")}
+                                                </AlertDialogCancel>
+                                                <AlertDialogAction
+                                                    onClick={() =>
+                                                        startTranscription(
+                                                            activeTranscript.source,
+                                                            true,
+                                                        )
                                                     }
                                                 >
-                                                    <RefreshCw className="size-4 mr-2" />{" "}
                                                     {i18n("Re-transcribe")}
-                                                </Button>
-                                            </AlertDialogTrigger>
-                                            <AlertDialogContent>
-                                                <AlertDialogHeader>
-                                                    <AlertDialogTitle>
-                                                        {i18n(
-                                                            "Re-transcribe this recording?",
-                                                        )}
-                                                    </AlertDialogTitle>
-                                                    <AlertDialogDescription>
-                                                        {i18n(
-                                                            "This replaces the transcript, then regenerates the summary, title, and topics, and runs Learn again. It also makes a paid call to your transcription provider.",
-                                                        )}
-                                                    </AlertDialogDescription>
-                                                </AlertDialogHeader>
-                                                <AlertDialogFooter>
-                                                    <AlertDialogCancel>
-                                                        {i18n("Cancel")}
-                                                    </AlertDialogCancel>
-                                                    <AlertDialogAction
-                                                        onClick={() =>
-                                                            startTranscription(
-                                                                activeTranscript.source,
-                                                                true,
-                                                            )
-                                                        }
-                                                    >
-                                                        {i18n("Re-transcribe")}
-                                                    </AlertDialogAction>
-                                                </AlertDialogFooter>
-                                            </AlertDialogContent>
-                                        </AlertDialog>
-                                    )}
-                                    {transcriptList.length > 1 &&
-                                        activeTranscript && (
-                                            <SourceSwitcher
-                                                ariaLabel={i18n(
-                                                    "Transcript source",
-                                                )}
-                                                sources={transcriptList.map(
-                                                    (candidate) =>
-                                                        candidate.source,
-                                                )}
-                                                value={activeTranscript.source}
-                                                onSelect={setActiveSource}
-                                            />
-                                        )}
-                                    {activeTranscript?.text && (
-                                        <MarkdownActions
-                                            recordingId={recording.id}
-                                            kind="transcript"
-                                            source={activeTranscript.source}
-                                            view={view}
+                                                </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                )}
+                                {transcriptList.length > 1 &&
+                                    activeTranscript && (
+                                        <SourceSwitcher
+                                            ariaLabel={i18n(
+                                                "Transcript source",
+                                            )}
+                                            sources={transcriptList.map(
+                                                (candidate) => candidate.source,
+                                            )}
+                                            value={activeTranscript.source}
+                                            onSelect={setActiveSource}
                                         />
                                     )}
-                                    {!activeTranscript?.text &&
-                                        !knownTranscriptExists &&
-                                        !transcriptionRunning &&
-                                        !readOnly && (
-                                            <>
-                                                <Button
-                                                    onClick={() =>
-                                                        startTranscription()
-                                                    }
-                                                    size="sm"
+                                {activeTranscript?.text && (
+                                    <MarkdownActions
+                                        recordingId={recording.id}
+                                        kind="transcript"
+                                        source={activeTranscript.source}
+                                        view={view}
+                                    />
+                                )}
+                                {!activeTranscript?.text &&
+                                    !knownTranscriptExists &&
+                                    !transcriptionRunning &&
+                                    !readOnly && (
+                                        <>
+                                            <Button
+                                                onClick={() =>
+                                                    startTranscription()
+                                                }
+                                                size="sm"
+                                                disabled={
+                                                    transcriptionRunning ||
+                                                    recording.audioReaped
+                                                }
+                                                title={
+                                                    recording.audioReaped
+                                                        ? i18n(
+                                                              "Audio was removed by your retention policy",
+                                                          )
+                                                        : undefined
+                                                }
+                                            >
+                                                <Sparkles className="size-4 mr-2" />{" "}
+                                                {i18n("Transcribe")}
+                                            </Button>
+                                            {!orgView && (
+                                                <TranscribeInBrowserButton
+                                                    recordingId={recording.id}
                                                     disabled={
                                                         transcriptionRunning ||
                                                         recording.audioReaped
                                                     }
-                                                    title={
-                                                        recording.audioReaped
-                                                            ? i18n(
-                                                                  "Audio was removed by your retention policy",
-                                                              )
-                                                            : undefined
+                                                    onComplete={
+                                                        onTranscribeComplete ??
+                                                        (() => {})
                                                     }
-                                                >
-                                                    <Sparkles className="size-4 mr-2" />{" "}
-                                                    {i18n("Transcribe")}
-                                                </Button>
-                                                {!orgView && (
-                                                    <TranscribeInBrowserButton
-                                                        recordingId={
-                                                            recording.id
-                                                        }
-                                                        disabled={
-                                                            transcriptionRunning ||
-                                                            recording.audioReaped
-                                                        }
-                                                        onComplete={
-                                                            // Falling back to `onTranscribe` here
-                                                            // would kick off a redundant SERVER
-                                                            // transcription right after a
-                                                            // successful browser one, possibly
-                                                            // overwriting it. Callers that care
-                                                            // about refreshing after a browser
-                                                            // transcription must pass
-                                                            // `onTranscribeComplete` explicitly.
-                                                            onTranscribeComplete ??
-                                                            (() => {})
-                                                        }
-                                                    />
-                                                )}
-                                            </>
+                                                />
+                                            )}
+                                        </>
+                                    )}
+                                {activeTranscript?.text && (
+                                    <button
+                                        type="button"
+                                        aria-expanded={transcriptOpen}
+                                        onClick={() => {
+                                            if (widgets?.workflowVisible) {
+                                                setWorkflowTranscriptExpanded(
+                                                    false,
+                                                );
+                                            } else {
+                                                setTranscriptExpanded(
+                                                    !transcriptExpanded,
+                                                );
+                                            }
+                                        }}
+                                        className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                    >
+                                        {transcriptOpen ? (
+                                            <ChevronUp className="size-4" />
+                                        ) : (
+                                            <ChevronDown className="size-4" />
                                         )}
-                                    {activeTranscript?.text && (
+                                        {transcriptOpen
+                                            ? i18n("Collapse transcript")
+                                            : i18n("Expand transcript")}
+                                    </button>
+                                )}
+                            </div>
+                        }
+                    >
+                        {activeTranscript && speakerTags.length > 0 && (
+                            <SpeakerTags
+                                // Another recording, view, source or text is
+                                // another transcript to name: mount afresh, so
+                                // nothing of the last one's state, or its late
+                                // answers, reaches this one.
+                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
+                                recordingId={recording.id}
+                                source={activeTranscript.source}
+                                speakers={speakerTags}
+                                attributions={speakerAttributions}
+                                onAttributionsChange={handleAttributionsChange}
+                                view={view}
+                                onSeek={onSeekToTurn}
+                                onPlaySpeaker={
+                                    onPlayFromTurn &&
+                                    activeTranscript.turns?.length
+                                        ? handlePlaySpeaker
+                                        : undefined
+                                }
+                                shownVersion={activeTranscript.version}
+                                onStale={onTranscriptStale}
+                                onUnknownLabelsChange={
+                                    handleUnknownLabelsChange
+                                }
+                                readOnly={readOnly}
+                            />
+                        )}
+                        {transcriptionRunning ? (
+                            <div className="flex flex-col items-center justify-center py-12">
+                                <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
+                                <p className="text-sm text-muted-foreground">
+                                    {i18n("Transcribing audio…")}
+                                </p>
+                            </div>
+                        ) : activeTranscript?.text ? (
+                            <div className="space-y-4">
+                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                    <TranscriptTopicsMenu
+                                        widgetId={`recording-topics-${recording.id}`}
+                                        topics={topics}
+                                        canDetect={canDetectTopics}
+                                        waitingForReview={heldForReview}
+                                        detecting={detectingTopics}
+                                        onDetect={() => void detectTopics()}
+                                        onSelect={handleSelectTopic}
+                                        getPlaybackMs={getPlaybackMs}
+                                    />
+                                    {(shownCorrections?.list.length ?? 0) >
+                                        0 && (
                                         <button
                                             type="button"
-                                            aria-expanded={transcriptOpen}
-                                            onClick={() => {
-                                                if (widgets?.workflowVisible) {
-                                                    setWorkflowTranscriptExpanded(
-                                                        false,
-                                                    );
-                                                } else {
-                                                    setTranscriptExpanded(
-                                                        !transcriptExpanded,
-                                                    );
-                                                }
-                                            }}
-                                            className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                                            aria-pressed={showOriginal}
+                                            onClick={() =>
+                                                setShowOriginal(!showOriginal)
+                                            }
+                                            className="text-sm font-medium transition-colors hover:text-primary"
                                         >
-                                            {transcriptOpen ? (
-                                                <ChevronUp className="size-4" />
-                                            ) : (
-                                                <ChevronDown className="size-4" />
-                                            )}
-                                            {transcriptOpen
-                                                ? i18n("Collapse transcript")
-                                                : i18n("Expand transcript")}
+                                            {showOriginal
+                                                ? i18n("Show edited")
+                                                : i18n("Show original")}
                                         </button>
                                     )}
                                 </div>
-                            </div>
-                            {activeTranscript && speakerTags.length > 0 && (
-                                <SpeakerTags
-                                    // Another recording, view, source or text is
-                                    // another transcript to name: mount afresh, so
-                                    // nothing of the last one's state, or its late
-                                    // answers, reaches this one.
-                                    key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
-                                    recordingId={recording.id}
-                                    source={activeTranscript.source}
-                                    speakers={speakerTags}
-                                    attributions={speakerAttributions}
-                                    onAttributionsChange={
-                                        handleAttributionsChange
-                                    }
-                                    view={view}
-                                    onSeek={onSeekToTurn}
-                                    onPlaySpeaker={
-                                        onPlayFromTurn &&
-                                        activeTranscript.turns?.length
-                                            ? handlePlaySpeaker
-                                            : undefined
-                                    }
-                                    shownVersion={activeTranscript.version}
-                                    onStale={onTranscriptStale}
-                                    onUnknownLabelsChange={
-                                        handleUnknownLabelsChange
-                                    }
-                                    readOnly={readOnly}
-                                />
-                            )}
-                        </CardHeader>
-                        <CardContent>
-                            {transcriptionRunning ? (
-                                <div className="flex flex-col items-center justify-center py-12">
-                                    <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
-                                    <p className="text-sm text-muted-foreground">
-                                        {i18n("Transcribing audio…")}
-                                    </p>
-                                </div>
-                            ) : activeTranscript?.text ? (
-                                <div className="space-y-4">
-                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                                        <TranscriptTopicsMenu
-                                            widgetId={`recording-topics-${recording.id}`}
-                                            topics={topics}
-                                            canDetect={canDetectTopics}
-                                            waitingForReview={heldForReview}
-                                            detecting={detectingTopics}
-                                            onDetect={() => void detectTopics()}
-                                            onSelect={handleSelectTopic}
-                                            getPlaybackMs={getPlaybackMs}
-                                        />
-                                        {(shownCorrections?.list.length ?? 0) >
-                                            0 && (
-                                            <button
-                                                type="button"
-                                                aria-pressed={showOriginal}
-                                                onClick={() =>
-                                                    setShowOriginal(
-                                                        !showOriginal,
-                                                    )
+                                {transcriptOpen && (
+                                    <div className="space-y-4">
+                                        <section
+                                            ref={transcriptSectionRef}
+                                            aria-label={i18n(
+                                                "Transcript content",
+                                            )}
+                                            className="relative max-h-96 overflow-y-auto rounded-lg bg-muted p-4"
+                                        >
+                                            <TranscriptView
+                                                text={activeTranscript.text}
+                                                source={activeTranscript.source}
+                                                model={activeTranscript.model}
+                                                storedTurns={
+                                                    activeTranscript.turns
                                                 }
-                                                className="text-sm font-medium transition-colors hover:text-primary"
-                                            >
-                                                {showOriginal
-                                                    ? i18n("Show edited")
-                                                    : i18n("Show original")}
-                                            </button>
-                                        )}
-                                    </div>
-                                    {transcriptOpen && (
-                                        <div className="space-y-4">
-                                            <section
-                                                ref={transcriptSectionRef}
-                                                aria-label={i18n(
-                                                    "Transcript content",
-                                                )}
-                                                className="relative max-h-96 overflow-y-auto rounded-lg bg-muted p-4"
-                                            >
-                                                <TranscriptView
-                                                    text={activeTranscript.text}
-                                                    source={
-                                                        activeTranscript.source
-                                                    }
-                                                    model={
-                                                        activeTranscript.model
-                                                    }
-                                                    storedTurns={
-                                                        activeTranscript.turns
-                                                    }
-                                                    speakerAttributions={
-                                                        speakerAttributions
-                                                    }
-                                                    onSeekToTurn={onSeekToTurn}
-                                                    playback={playback}
-                                                    scrollRef={
-                                                        transcriptSectionRef
-                                                    }
-                                                    topics={topics}
-                                                    highlightedTopic={
-                                                        topicJump?.index ?? null
-                                                    }
-                                                    highlightedTurnIndex={
-                                                        speakerJump?.index ??
-                                                        null
-                                                    }
-                                                    // A mix is not the transcript
-                                                    // Learn read.
-                                                    corrections={
-                                                        shownCorrections &&
-                                                        !showOriginal
-                                                            ? {
-                                                                  list: shownCorrections.list,
-                                                                  canUndo:
-                                                                      shownCorrections.canUndo &&
-                                                                      !readOnly,
-                                                                  onUndo: (
+                                                speakerAttributions={
+                                                    speakerAttributions
+                                                }
+                                                onSeekToTurn={onSeekToTurn}
+                                                playback={playback}
+                                                scrollRef={transcriptSectionRef}
+                                                topics={topics}
+                                                highlightedTopic={
+                                                    topicJump?.index ?? null
+                                                }
+                                                highlightedTurnIndex={
+                                                    speakerJump?.index ?? null
+                                                }
+                                                // A mix is not the transcript
+                                                // Learn read.
+                                                corrections={
+                                                    shownCorrections &&
+                                                    !showOriginal
+                                                        ? {
+                                                              list: shownCorrections.list,
+                                                              canUndo:
+                                                                  shownCorrections.canUndo &&
+                                                                  !readOnly,
+                                                              onUndo: (id) =>
+                                                                  void undoCorrection(
                                                                       id,
-                                                                  ) =>
-                                                                      void undoCorrection(
-                                                                          id,
-                                                                      ),
-                                                              }
-                                                            : null
-                                                    }
-                                                    learnMarks={
-                                                        canLearn &&
-                                                        activeTranscript.source !==
-                                                            "mixed"
-                                                            ? learnMarks
-                                                            : null
-                                                    }
-                                                />
-                                            </section>
-                                            <div className="flex items-center gap-4 border-t pt-2 text-xs text-muted-foreground">
-                                                <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                                                    {activeTranscript.source ===
-                                                    "plaud"
-                                                        ? "Plaud"
-                                                        : activeTranscript.source ===
-                                                            "mixed"
-                                                          ? i18n("Mix")
-                                                          : i18n("Custom")}
-                                                </span>
-                                                {activeTranscript.provider && (
-                                                    <span className="rounded bg-muted px-2 py-0.5">
-                                                        {
-                                                            activeTranscript.provider
-                                                        }
-                                                    </span>
-                                                )}
-                                                {activeTranscript.model && (
-                                                    <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                                                        {activeTranscript.model}
-                                                    </span>
-                                                )}
-                                                {activeTranscript.language && (
-                                                    <div className="flex items-center gap-1">
-                                                        <Languages className="size-3" />
-                                                        <span>
-                                                            {i18n("Language:")}{" "}
-                                                            {
-                                                                activeTranscript.language
-                                                            }
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                <div>
-                                                    {activeTranscript.text.trim()
-                                                        ? activeTranscript.text
-                                                              .trim()
-                                                              .split(/\s+/)
-                                                              .length
-                                                        : 0}{" "}
-                                                    {i18n("words")}
-                                                </div>
-                                                <div>
-                                                    {
-                                                        activeTranscript.text
-                                                            .length
-                                                    }{" "}
-                                                    {i18n("characters")}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ) : null}
-                        </CardContent>
-                    </Card>
+                                                                  ),
+                                                          }
+                                                        : null
+                                                }
+                                                learnMarks={
+                                                    canLearn &&
+                                                    activeTranscript.source !==
+                                                        "mixed"
+                                                        ? learnMarks
+                                                        : null
+                                                }
+                                            />
+                                        </section>
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+                    </WorkflowWidget>
                 ))}
 
             {canLearn &&
@@ -1302,523 +1032,55 @@ export function TranscriptionPanel({
                         }
                         onFinished={handleReviewFinished}
                         onMarks={setLearnMarks}
-                        frame={widgets?.learn.frame ?? "dialog"}
+                        frame={widgets?.learn.frame ?? "inline"}
                         widgetId={`recording-learn-review-${recording.id}`}
                         folderName={folderName}
                         showTrigger={false}
+                        collapseReady
                     />
                 )}
 
             {activeTranscript?.text &&
-                (!widgets || widgets.summary.visible) &&
-                (summaryLine ? (
-                    <WorkflowWidgetLine
-                        id={summaryWidgetId}
-                        title={i18n("Summary")}
-                        facts={
-                            isSummarizing
-                                ? i18n("Generating the summary")
-                                : summaryLineFacts
+                (!widgets || widgets.summary.visible) && (
+                    <SummaryWidget
+                        itemId={recording.id}
+                        kind="audio"
+                        canChange={!readOnly}
+                        contentText={summaryTranscript?.text}
+                        canSummarize={Boolean(
+                            summaryTranscript ||
+                                (orgView && transcriptList.length > 0),
+                        )}
+                        view={view}
+                        source={summarySource}
+                        canSwitchSource={canHavePlaudSummary}
+                        onSourceChange={(source) =>
+                            setSummarySelection({
+                                recordingId: recording.id,
+                                source,
+                            })
                         }
-                        icon={<ListChecks className="size-4" />}
-                        tone={widgets?.summary.tone ?? "quiet"}
-                        working={isSummarizing}
-                        expanded={isSummarizing ? undefined : false}
-                        onExpand={
-                            isSummarizing
-                                ? undefined
-                                : () => setWorkflowSummaryExpanded(true)
-                        }
-                        expandLabel={
-                            isSummarizing ? undefined : i18n("View summary")
-                        }
-                        onOpen={() => {
-                            setWorkflowSummaryExpanded(true);
-                        }}
-                    />
-                ) : (
-                    <Card
-                        id={summaryWidgetId}
-                        className={
-                            widgets?.summary.active
-                                ? "border-l-2 border-l-primary"
+                        sourceLabel={name}
+                        speakerAttributions={summarySpeakerAttributions}
+                        speakerLabels={summarySpeakerTags.map(
+                            (speaker) => speaker.speaker,
+                        )}
+                        onPlay={
+                            onPlayFromTurn
+                                ? (startMs) => onPlayFromTurn(startMs)
                                 : undefined
                         }
-                        data-workflow-widget="summary"
-                    >
-                        <CardHeader>
-                            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-                                <CardTitle
-                                    {...workflowWidgetHeadingProps(
-                                        summaryWidgetId,
-                                    )}
-                                    role="heading"
-                                    aria-level={2}
-                                    className="flex items-center gap-2"
-                                >
-                                    <ListChecks className="size-5" />{" "}
-                                    {i18n("Summary")}
-                                    <HelpLink
-                                        topic="summaries"
-                                        label={i18n("summaries")}
-                                    />
-                                </CardTitle>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {summarySource === "riffado" &&
-                                        !readOnly && (
-                                            <Button
-                                                onClick={startSummary}
-                                                size="sm"
-                                                variant={
-                                                    summaryData
-                                                        ? "outline"
-                                                        : "default"
-                                                }
-                                                disabled={
-                                                    isSummarizing ||
-                                                    summaryProfilesLoading ||
-                                                    !summaryProfileId ||
-                                                    (!summaryTranscript &&
-                                                        !(
-                                                            orgView &&
-                                                            transcriptList.length >
-                                                                0
-                                                        ))
-                                                }
-                                            >
-                                                {isSummarizing ? (
-                                                    <>
-                                                        <Loader2 className="size-4 mr-2 animate-spin" />{" "}
-                                                        {i18n("Generating…")}
-                                                    </>
-                                                ) : summaryData ? (
-                                                    <>
-                                                        <RefreshCw className="size-4 mr-2" />{" "}
-                                                        {i18n("Re-summarize")}
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Sparkles className="size-4 mr-2" />{" "}
-                                                        {i18n("Summarize")}
-                                                    </>
-                                                )}
-                                            </Button>
-                                        )}
-                                    {canHavePlaudSummary && (
-                                        <SourceSwitcher
-                                            ariaLabel={i18n("Summary source")}
-                                            sources={["plaud", "riffado"]}
-                                            value={summarySource}
-                                            onSelect={(source) =>
-                                                setSummarySelection({
-                                                    recordingId: recording.id,
-                                                    source:
-                                                        source === "plaud"
-                                                            ? "plaud"
-                                                            : "riffado",
-                                                })
-                                            }
-                                        />
-                                    )}
-                                    {summaryData?.summary && (
-                                        <MarkdownActions
-                                            recordingId={recording.id}
-                                            kind="summary"
-                                            source={summarySource}
-                                            view={view}
-                                        />
-                                    )}
-                                    {summarySource === "riffado" &&
-                                        !readOnly &&
-                                        !isSummarizing &&
-                                        summaryProfileOptions.length > 0 && (
-                                            <Select
-                                                value={summaryProfileId}
-                                                onValueChange={
-                                                    setSummaryProfileId
-                                                }
-                                            >
-                                                <SelectTrigger
-                                                    className="h-8 w-[180px] text-xs"
-                                                    aria-label={i18n(
-                                                        "Processing profile",
-                                                    )}
-                                                >
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {summaryProfileOptions.map(
-                                                        (profile) => (
-                                                            <SelectItem
-                                                                key={profile.id}
-                                                                value={
-                                                                    profile.id
-                                                                }
-                                                            >
-                                                                {profile.name}
-                                                            </SelectItem>
-                                                        ),
-                                                    )}
-                                                </SelectContent>
-                                            </Select>
-                                        )}
-                                    {summaryData?.summary && (
-                                        <button
-                                            type="button"
-                                            aria-expanded={summaryOpen}
-                                            onClick={() => {
-                                                if (widgets?.workflowVisible) {
-                                                    setWorkflowSummaryExpanded(
-                                                        false,
-                                                    );
-                                                } else {
-                                                    setSummaryExpanded(
-                                                        !summaryExpanded,
-                                                    );
-                                                }
-                                            }}
-                                            className="flex items-center gap-1 text-sm font-medium hover:text-primary transition-colors"
-                                        >
-                                            {summaryOpen ? (
-                                                <ChevronUp className="size-4" />
-                                            ) : (
-                                                <ChevronDown className="size-4" />
-                                            )}
-                                            {summaryOpen
-                                                ? i18n("Collapse summary")
-                                                : i18n("Expand summary")}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {isSummarizing ? (
-                                <div className="flex flex-col items-center justify-center py-8">
-                                    <Loader2 className="size-8 animate-spin text-primary mb-4" />
-                                    <p className="text-sm text-muted-foreground">
-                                        {summaryStatus}
-                                    </p>
-                                </div>
-                            ) : summaryData?.summary ? (
-                                <div className="space-y-4">
-                                    {summaryOpen && (
-                                        <section
-                                            aria-label={i18n("Summary content")}
-                                            className="max-h-96 space-y-4 overflow-y-auto pr-2"
-                                        >
-                                            {/* Summary text */}
-                                            <div className="bg-muted rounded-lg p-4 text-sm">
-                                                <Markdown
-                                                    speakerAttributions={
-                                                        summarySpeakerAttributions
-                                                    }
-                                                    speakerNumberOffset={
-                                                        summarySpeakerNumberOffset
-                                                    }
-                                                >
-                                                    {summaryData.summary}
-                                                </Markdown>
-                                            </div>
-
-                                            {/* Key points */}
-                                            {summaryData.keyPoints &&
-                                                summaryData.keyPoints.length >
-                                                    0 && (
-                                                    <div>
-                                                        <h4 className="text-sm font-medium mb-2">
-                                                            {i18n("Key Points")}
-                                                        </h4>
-                                                        <ul className="space-y-1">
-                                                            {summaryData.keyPoints.map(
-                                                                (point) => {
-                                                                    const key = `kp-${point.slice(0, 32)}`;
-                                                                    return (
-                                                                        <li
-                                                                            key={
-                                                                                key
-                                                                            }
-                                                                            className="text-sm text-muted-foreground flex items-start gap-2"
-                                                                        >
-                                                                            <span className="text-primary mt-1.5 size-1.5 rounded-full bg-primary shrink-0" />
-                                                                            <Markdown
-                                                                                inline
-                                                                                speakerAttributions={
-                                                                                    summarySpeakerAttributions
-                                                                                }
-                                                                                speakerNumberOffset={
-                                                                                    summarySpeakerNumberOffset
-                                                                                }
-                                                                            >
-                                                                                {
-                                                                                    point
-                                                                                }
-                                                                            </Markdown>
-                                                                        </li>
-                                                                    );
-                                                                },
-                                                            )}
-                                                        </ul>
-                                                    </div>
-                                                )}
-
-                                            {/* Summary metadata */}
-                                            <div className="flex items-center border-t pt-2">
-                                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                                    <span className="px-2 py-0.5 rounded bg-muted font-medium">
-                                                        {summarySource ===
-                                                        "plaud"
-                                                            ? "Plaud"
-                                                            : i18n("Custom")}
-                                                    </span>
-                                                    {summaryData.provider && (
-                                                        <span className="px-2 py-0.5 rounded bg-muted">
-                                                            {
-                                                                summaryData.provider
-                                                            }
-                                                        </span>
-                                                    )}
-                                                    {summaryData.model && (
-                                                        <span className="px-2 py-0.5 rounded bg-muted font-mono">
-                                                            {summaryData.model}
-                                                        </span>
-                                                    )}
-                                                    {summaryData.stale &&
-                                                        summarySource ===
-                                                            "riffado" && (
-                                                            <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                                                {i18n(
-                                                                    "May contain stale names or terms",
-                                                                )}
-                                                                {!readOnly && (
-                                                                    <button
-                                                                        type="button"
-                                                                        className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
-                                                                        disabled={
-                                                                            isSummarizing
-                                                                        }
-                                                                        onClick={
-                                                                            startSummary
-                                                                        }
-                                                                    >
-                                                                        {i18n(
-                                                                            "Regenerate",
-                                                                        )}
-                                                                    </button>
-                                                                )}
-                                                            </span>
-                                                        )}
-                                                    {summaryData.scopeChanged &&
-                                                        summarySource ===
-                                                            "riffado" && (
-                                                            <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                                                {i18n(
-                                                                    "Folders changed since this summary:",
-                                                                )}
-                                                                {!readOnly && (
-                                                                    <button
-                                                                        type="button"
-                                                                        className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
-                                                                        disabled={
-                                                                            isSummarizing
-                                                                        }
-                                                                        onClick={
-                                                                            startSummary
-                                                                        }
-                                                                    >
-                                                                        {i18n(
-                                                                            "Match tasks again",
-                                                                        )}
-                                                                    </button>
-                                                                )}
-                                                            </span>
-                                                        )}
-                                                    {multiPassBadge && (
-                                                        <span
-                                                            className={
-                                                                multiPassBadge.degraded
-                                                                    ? "px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                                                                    : "px-2 py-0.5 rounded bg-muted"
-                                                            }
-                                                            title={
-                                                                multiPassBadge.title
-                                                            }
-                                                        >
-                                                            {
-                                                                multiPassBadge.label
-                                                            }
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </section>
-                                    )}
-                                    {/* Tasks, or the summary's own action items: outside the
-                                    scrolled summary, and shown while it is collapsed */}
-                                    <RecordingTasks
-                                        state={taskState}
-                                        speakers={taskSpeakers}
-                                        organizationOnly={orgView}
-                                        onPlay={playTask}
-                                        fallback={
-                                            summaryData.actionItems &&
-                                            summaryData.actionItems.length >
-                                                0 && (
-                                                <div>
-                                                    <h4 className="text-sm font-medium mb-2">
-                                                        {i18n("Action Items")}
-                                                    </h4>
-                                                    <ul className="space-y-1">
-                                                        {summaryData.actionItems.map(
-                                                            (item) => {
-                                                                const key = `ai-${item.slice(0, 32)}`;
-                                                                return (
-                                                                    <li
-                                                                        key={
-                                                                            key
-                                                                        }
-                                                                        className="text-sm text-muted-foreground flex items-start gap-2"
-                                                                    >
-                                                                        <ListChecks className="size-3.5 mt-0.5 text-primary shrink-0" />
-                                                                        <Markdown
-                                                                            inline
-                                                                            speakerAttributions={
-                                                                                summarySpeakerAttributions
-                                                                            }
-                                                                            speakerNumberOffset={
-                                                                                summarySpeakerNumberOffset
-                                                                            }
-                                                                        >
-                                                                            {
-                                                                                item
-                                                                            }
-                                                                        </Markdown>
-                                                                    </li>
-                                                                );
-                                                            },
-                                                        )}
-                                                    </ul>
-                                                </div>
-                                            )
-                                        }
-                                    />
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center py-8 text-center">
-                                    <ListChecks className="size-10 text-muted-foreground mb-3" />
-                                    <p className="text-sm text-muted-foreground">
-                                        {summarySource === "plaud"
-                                            ? i18n(
-                                                  "No Plaud summary has been imported. It will appear after Plaud sync when available.",
-                                              )
-                                            : summaryTranscript &&
-                                                learnSummaryHold === "running"
-                                              ? i18n(
-                                                    'The summary waits while Learn checks the transcript, then starts by itself. Click "Summarize" to make it now.',
-                                                )
-                                              : summaryTranscript &&
-                                                  learnSummaryHold ===
-                                                      "correcting"
-                                                ? i18n(
-                                                      'The summary waits while Learn corrects the transcript, then starts by itself. Click "Summarize" to make it now.',
-                                                  )
-                                                : summaryTranscript &&
-                                                    learnSummaryHold ===
-                                                        "review"
-                                                  ? i18n(
-                                                        'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
-                                                    )
-                                                  : summaryTranscript
-                                                    ? i18n(
-                                                          'No custom summary yet. Click "Summarize" to generate one.',
-                                                      )
-                                                    : i18n(
-                                                          "A custom transcript is required before generating a custom summary.",
-                                                      )}
-                                    </p>
-                                    {/* Tasks a replaced summary left, until a new one comes */}
-                                    <div className="mt-6 w-full space-y-3 text-left">
-                                        <RecordingTasks
-                                            state={taskState}
-                                            speakers={taskSpeakers}
-                                            organizationOnly={orgView}
-                                            onPlay={playTask}
-                                            fallback={null}
-                                            allowAdd={false}
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                ))}
-            {activeTranscript?.text &&
-                (!widgets || widgets.taskReview.visible) && (
-                    <TaskReviewLink
-                        state={taskState}
-                        speakers={taskSpeakers}
-                        organizationOnly={orgView}
-                        onPlay={playTask}
                         playback={playback}
-                        frame={widgets?.taskReview.frame ?? "dialog"}
-                        widgetId={`recording-task-review-${recording.id}`}
-                        showTrigger={false}
+                        widget={widgets?.summary}
+                        taskWidget={widgets?.taskReview}
+                        workflowVisible={widgets?.workflowVisible ?? false}
+                        profileName={processing?.profile?.name}
+                        widgetId={`recording-summary-${recording.id}`}
+                        taskWidgetId={`recording-task-review-${recording.id}`}
+                        learnHold={learnSummaryHold}
+                        refreshKey={followUpRevision}
                     />
                 )}
-            <WorkflowWidget
-                id={`recording-transcription-dialog-${recording.id}`}
-                frame="dialog"
-                tone={transcriptionRunning ? "working" : "quiet"}
-                open={transcriptionDialogOpen}
-                onOpenChange={setTranscriptionDialogOpen}
-                title={i18n("Transcription")}
-                description={
-                    transcriptionRunning
-                        ? i18n(
-                              "Transcribing. It continues in the background; you can close this window.",
-                          )
-                        : i18n("Review the completed transcript.")
-                }
-                dialogWidth="xl"
-            >
-                {transcriptionRunning ? (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                        {i18n("Transcribing audio…")}
-                    </p>
-                ) : activeTranscript?.text ? (
-                    <div className="max-h-[60vh] overflow-y-auto rounded-lg bg-muted p-4 text-sm whitespace-pre-wrap">
-                        {activeTranscript.text}
-                    </div>
-                ) : null}
-            </WorkflowWidget>
-            <WorkflowWidget
-                id={`recording-summary-dialog-${recording.id}`}
-                frame="dialog"
-                tone={isSummarizing ? "working" : "quiet"}
-                open={summaryDialogOpen}
-                onOpenChange={setSummaryDialogOpen}
-                title={i18n("Summary")}
-                description={
-                    isSummarizing
-                        ? i18n(
-                              "Generating the summary. It continues in the background.",
-                          )
-                        : i18n("Review the completed summary.")
-                }
-                dialogWidth="xl"
-            >
-                {isSummarizing ? (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                        {summaryStatus}
-                    </p>
-                ) : summaryData?.summary ? (
-                    <div className="max-h-[60vh] overflow-y-auto rounded-lg bg-muted p-4 text-sm">
-                        <Markdown>{summaryData.summary}</Markdown>
-                    </div>
-                ) : null}
-            </WorkflowWidget>
         </div>
     );
 }

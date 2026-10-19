@@ -21,6 +21,12 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useItemProcessing } from "@/hooks/use-item-processing";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
@@ -50,6 +56,7 @@ interface FolderActions {
 
 interface ProcessingFolderRowProps extends FolderActions {
     itemId: string;
+    kind: "audio" | "mail";
     processing: ItemProcessingPresentation | null;
     panelData: CategorizationPanelPresentation | null;
     isOwn: boolean;
@@ -66,6 +73,7 @@ const MANUAL_ONLY = "__manual_only__";
 /** Folder placements, intended shares, and profile choice on one header row. */
 export function ProcessingFolderRow({
     itemId,
+    kind,
     processing,
     panelData,
     isOwn,
@@ -86,6 +94,37 @@ export function ProcessingFolderRow({
     const profileChoice = processing?.manualOnly
         ? MANUAL_ONLY
         : (processing?.profile?.id ?? "");
+    const profileChip = processing ? (
+        <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 max-w-[min(18rem,70vw)] rounded-full px-2.5 text-xs"
+            onMouseEnter={onLoadPanel}
+            onFocus={onLoadPanel}
+            data-testid="profile-chip"
+        >
+            <FileText className="size-3.5" aria-hidden />
+            <span className="truncate">
+                {processing.legacy
+                    ? i18n("Processed before profiles")
+                    : processing.profile?.name}
+                {!processing.legacy && processing.manualOnly
+                    ? ` · ${i18n("Nothing automatic")}`
+                    : ""}
+            </span>
+            {!processing.legacy &&
+                processing.profile?.scope === "organization" && (
+                    <Users
+                        className="size-3.5 shrink-0 text-primary"
+                        aria-label={i18n("Organization")}
+                    />
+                )}
+        </Button>
+    ) : null;
+    const profileTrigger = (
+        <DropdownMenuTrigger asChild>{profileChip}</DropdownMenuTrigger>
+    );
     return (
         <div
             className="flex min-w-0 flex-wrap items-start gap-2"
@@ -94,6 +133,7 @@ export function ProcessingFolderRow({
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 <RecordingFolderTags
                     recordingId={itemId}
+                    kind={kind}
                     folders={folders}
                     assignments={folderAssignments}
                     onSelectFolder={onSelectFolder}
@@ -113,12 +153,9 @@ export function ProcessingFolderRow({
                             <span className="inline-flex items-center gap-1.5 px-2.5 text-foreground">
                                 <Users
                                     className="size-3.5 text-primary"
-                                    aria-hidden
+                                    aria-label={i18n("Organization")}
                                 />
                                 <span>{intent.path}</span>
-                                <span className="text-muted-foreground">
-                                    · {i18n("Organization")}
-                                </span>
                             </span>
                             {intent.confirmationRequired &&
                                 !intent.confirmed && (
@@ -146,43 +183,28 @@ export function ProcessingFolderRow({
             </div>
             {!organizationOnly && processing && (
                 <div className="ml-auto shrink-0 self-start">
-                    {processing.legacy ? (
-                        <span className="inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs text-muted-foreground">
-                            <FileText className="size-3.5" aria-hidden />
-                            {i18n("Processed before profiles")}
-                        </span>
-                    ) : processing.profile ? (
+                    {processing.legacy || processing.profile ? (
                         <DropdownMenu
                             onOpenChange={(open) => {
                                 if (open) onLoadPanel();
                             }}
                         >
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 max-w-[min(18rem,70vw)] rounded-full px-2.5 text-xs"
-                                    onMouseEnter={onLoadPanel}
-                                    onFocus={onLoadPanel}
-                                    data-testid="profile-chip"
-                                >
-                                    <FileText
-                                        className="size-3.5"
-                                        aria-hidden
-                                    />
-                                    <span className="truncate">
-                                        {processing.profile.name}
-                                        {processing.profile.scope ===
-                                        "organization"
-                                            ? ` · ${i18n("Organization")}`
-                                            : ""}
-                                        {processing.manualOnly
-                                            ? ` · ${i18n("Nothing automatic")}`
-                                            : ""}
-                                    </span>
-                                </Button>
-                            </DropdownMenuTrigger>
+                            {processing.legacy ? (
+                                <TooltipProvider>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            {profileTrigger}
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {i18n(
+                                                "Choose a profile for this item. Its existing results stay unchanged.",
+                                            )}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            ) : (
+                                profileTrigger
+                            )}
                             <DropdownMenuContent
                                 align="end"
                                 className="min-w-56"
@@ -203,9 +225,14 @@ export function ProcessingFolderRow({
                                             >
                                                 {profile.name}
                                                 {profile.scope ===
-                                                "organization"
-                                                    ? ` · ${i18n("Organization")}`
-                                                    : ""}
+                                                    "organization" && (
+                                                    <Users
+                                                        className="ml-auto size-3.5 text-primary"
+                                                        aria-label={i18n(
+                                                            "Organization",
+                                                        )}
+                                                    />
+                                                )}
                                             </DropdownMenuRadioItem>
                                         ))}
                                         <DropdownMenuSeparator />
@@ -271,12 +298,14 @@ export function ItemWorkflow({
     onProcessingChange,
 }: ItemWorkflowProps) {
     const i18n = useExtracted();
-    const enabled = isOwn && view !== "org";
+    const canEdit = isOwn && view !== "org";
+    const processingEnabled = canEdit || view === "org";
     const { data, setData, workflow } = useItemProcessing({
         itemId,
         kind,
+        view,
         initialData,
-        enabled,
+        enabled: processingEnabled,
     });
     const [panelData, setPanelData] =
         useState<CategorizationPanelPresentation | null>(null);
@@ -301,7 +330,7 @@ export function ItemWorkflow({
     }, [itemId]);
 
     const loadPanel = useCallback(() => {
-        if (!enabled || panelData || panelRequest.current?.itemId === itemId) {
+        if (!canEdit || panelData || panelRequest.current?.itemId === itemId) {
             return;
         }
         panelRequest.current = { itemId };
@@ -322,7 +351,7 @@ export function ItemWorkflow({
                     panelRequest.current = null;
                 }
             });
-    }, [enabled, i18n, itemId, panelData]);
+    }, [canEdit, i18n, itemId, panelData]);
 
     const categorizeReason = data?.phases.categorize?.reason;
     const profileReason =
@@ -404,6 +433,7 @@ export function ItemWorkflow({
             const manualOnly = choice === MANUAL_ONLY;
             setData({
                 ...data,
+                legacy: false,
                 manualOnly,
                 profile: chosen
                     ? {
@@ -616,10 +646,15 @@ export function ItemWorkflow({
 
     return (
         <>
-            {enabled && workflow && (
-                <WorkflowStrip workflow={workflow} onAction={handleAction} />
+            {processingEnabled && workflow && (
+                <WorkflowStrip
+                    workflow={workflow}
+                    kind={kind}
+                    onAction={handleAction}
+                    readOnly={!canEdit}
+                />
             )}
-            {enabled && filingMode ? (
+            {canEdit && filingMode ? (
                 <div ref={filingRef}>
                     {panelData ? (
                         <CategorizePanel
@@ -645,6 +680,7 @@ export function ItemWorkflow({
             ) : (
                 <ProcessingFolderRow
                     itemId={itemId}
+                    kind={kind}
                     processing={data}
                     panelData={panelData}
                     isOwn={isOwn}

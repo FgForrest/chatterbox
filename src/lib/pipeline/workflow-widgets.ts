@@ -133,7 +133,9 @@ export function deriveWorkflowWidgets(
         categorized &&
         (data.outputs.transcript || hasReached(transcriptStep));
     const learnManual =
-        data.manualOnly || data.profile?.automatic.learn === false;
+        data.manualOnly ||
+        data.profile?.automatic.learn === false ||
+        data.phases.learn?.reason === "erased";
     const learnVisible =
         categorized &&
         contentReady &&

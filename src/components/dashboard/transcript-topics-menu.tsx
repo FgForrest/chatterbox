@@ -222,7 +222,7 @@ export function TranscriptTopicsMenu({
                                 className="text-muted-foreground"
                             >
                                 <RefreshCw />
-                                {i18n("Detect topics again")}
+                                {i18n("Re-detect topics")}
                             </DropdownMenuItem>
                         </>
                     )}

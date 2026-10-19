@@ -124,7 +124,7 @@ import { loadMailDetail, mailRawFor } from "@/lib/mail/detail";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
-import { deleteMail, shareMail } from "@/lib/mail/manage";
+import { deleteMail } from "@/lib/mail/manage";
 import { loadDeliveryLog } from "@/lib/mail/views";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
@@ -583,32 +583,6 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
         expect(await loadMailDetail("u-eva", row?.id ?? "")).toBeNull();
     });
 
-    it("shares a mail into the Organization folder it was sent to, once asked", async () => {
-        const [row] = (await loadMailListRows("u-eva")).filter(
-            (r) => r.mail?.waitingToShare,
-        );
-        if (!row) throw new Error("no waiting mail");
-        await expect(
-            shareMail({
-                ownerUserId: "u-jan",
-                itemId: row.id,
-                folderId: orgWeeklyFolderId,
-            }),
-        ).rejects.toMatchObject({ statusCode: 404 });
-        await shareMail({
-            ownerUserId: "u-eva",
-            itemId: row.id,
-            folderId: orgWeeklyFolderId,
-        });
-        const assigned = await db()
-            .select({ folderId: recordingFolderAssignments.folderId })
-            .from(recordingFolderAssignments)
-            .where(eq(recordingFolderAssignments.itemId, row.id));
-        expect(assigned).toEqual([{ folderId: orgWeeklyFolderId }]);
-        const detail = await loadMailDetail("u-eva", row.id);
-        expect(detail?.pendingShares).toEqual([]);
-    });
-
     it("files a mail like a recording: personal folders freely, the Organization through the gate", async () => {
         const raw = await signMessage(
             rawMessage(
@@ -729,6 +703,15 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
     });
 
     it("backs up mail: the owner's own, and the Organization's shared ones", async () => {
+        const [waiting] = (await loadMailListRows("u-eva")).filter(
+            (mail) => mail.mail?.waitingToShare,
+        );
+        if (!waiting) throw new Error("no waiting mail");
+        await addRecordingToFolder({
+            userId: "u-eva",
+            recordingId: waiting.id,
+            folderId: orgWeeklyFolderId,
+        });
         const mine = await collectArchivedMail({
             kind: "personal",
             userId: "u-jan",
@@ -929,7 +912,6 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
         expect(seen).toMatchObject({ isOwn: false, hasRaw: false });
         expect(seen?.ownerName).toEqual(expect.any(String));
         expect(seen?.folderIds).toEqual([orgWeeklyFolderId]);
-        expect(seen?.pendingShares).toEqual([]);
         const shown = JSON.stringify(seen);
         expect(shown).not.toContain(secret.localPart);
         expect(shown).toMatch(/jan\.•{10}@klepna\.example/);

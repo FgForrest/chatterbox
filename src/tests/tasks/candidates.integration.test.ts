@@ -1107,8 +1107,9 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
         const plan = await explainScopedTaskCandidatePlan(
             itemRows.slice(0, 50).map((row) => row.id),
         );
-        expect(plan.join("\n")).not.toMatch(
-            /Seq Scan on (?:public\.)?recording_tasks/u,
+        expect(plan.join("\n")).toMatch(/Index Cond: \(item_id = ANY/u);
+        expect(plan.join("\n")).toMatch(
+            /Index Cond: \(id = mention\.task_id\)/u,
         );
         const result = await searchMergeCandidates(reviewer, TARGET, {
             text: "Scale task 25",

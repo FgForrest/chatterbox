@@ -234,7 +234,7 @@ describe("WorkflowStrip", () => {
         ["reviewTasks", "Review tasks"],
         ["shareNow", "Share now"],
         ["retry", "Try again"],
-        ["processAgain", "Process again"],
+        ["processAgain", "Re-process"],
     ] as const)("calls the %s handler", (action, label) => {
         const onAction = vi.fn();
         render(
@@ -251,6 +251,28 @@ describe("WorkflowStrip", () => {
         );
         fireEvent.click(screen.getByRole("button", { name: label }));
         expect(onAction).toHaveBeenCalledWith(action);
+    });
+
+    it("hides the status action only when read-only", () => {
+        const status = workflow({
+            status: {
+                actor: "yours",
+                message: "profilesDisagree",
+                action: "chooseProfile",
+            },
+        });
+        const { rerender } = render(
+            <WorkflowStrip workflow={status} readOnly />,
+        );
+
+        expect(
+            screen.queryByRole("button", { name: "Choose profile" }),
+        ).toBeNull();
+
+        rerender(<WorkflowStrip workflow={status} />);
+        expect(
+            screen.getByRole("button", { name: "Choose profile" }),
+        ).toBeTruthy();
     });
 
     it("uses a polite status region and the actor lead", () => {
@@ -303,6 +325,51 @@ describe("WorkflowStrip", () => {
         );
         fireEvent.click(screen.getByRole("button", { name: "Transcribe" }));
         expect(onAction).toHaveBeenCalledWith("transcribe");
+    });
+
+    it.each([
+        ["learnRunning", "Learn is reading the message with your Almanac."],
+        ["summaryRunning", "Writing the summary and title."],
+    ] as const)("uses mail copy for %s", (message, sentence) => {
+        render(
+            <WorkflowStrip
+                kind="mail"
+                workflow={workflow({
+                    status: { actor: "working", message },
+                })}
+            />,
+        );
+
+        expect(screen.getByRole("status").textContent).toContain(sentence);
+    });
+
+    it("describes a shared mail without calling it a recording", async () => {
+        mockStripWidth(4_000);
+        render(
+            <WorkflowStrip
+                kind="mail"
+                workflow={workflow({
+                    steps: [
+                        {
+                            id: "summary",
+                            state: "skipped",
+                            reason: "shared",
+                            current: true,
+                        },
+                    ],
+                    status: null,
+                })}
+            />,
+        );
+
+        fireEvent.focus(
+            screen.getByRole("listitem", { name: "Summarize, Skipped" }),
+        );
+        expect(
+            await screen.findByRole("tooltip", {
+                name: "This mail is shared; the Organization processes it.",
+            }),
+        ).toBeTruthy();
     });
 
     it("renders a plain generic failure without a reason code", () => {

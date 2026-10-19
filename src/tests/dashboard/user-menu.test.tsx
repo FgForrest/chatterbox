@@ -74,7 +74,7 @@ describe("user menu setup and sync status", () => {
     it("opens onboarding from the menu", () => {
         const onOpenOnboarding = vi.fn();
         renderMenu(onOpenOnboarding);
-        fireEvent.click(screen.getByText("Run setup again"));
+        fireEvent.click(screen.getByText("Re-run setup"));
         expect(onOpenOnboarding).toHaveBeenCalledOnce();
     });
 

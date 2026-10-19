@@ -195,7 +195,7 @@ export function WorkstationDetailPane({
                 onClick={onBackToList}
                 className="-ml-2 h-9 gap-1 px-2 lg:hidden"
             >
-                <ArrowLeft className="size-4" /> {i18n("Back to recordings")}
+                <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
             </Button>
             {currentRecording ? (
                 <>
@@ -337,9 +337,7 @@ export function WorkstationDetailPane({
                 <Card>
                     <CardContent className="py-16 text-center">
                         <p className="text-muted-foreground">
-                            {i18n(
-                                "Select a recording to view details and transcription",
-                            )}
+                            {i18n("Select an item to view its details")}
                         </p>
                     </CardContent>
                 </Card>

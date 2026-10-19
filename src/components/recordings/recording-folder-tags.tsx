@@ -31,6 +31,7 @@ import type {
 
 interface RecordingFolderTagsProps {
     recordingId: string;
+    kind?: "audio" | "mail";
     folders: RecordingFolder[];
     assignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
@@ -69,6 +70,7 @@ interface RecordingFolderTagsProps {
 
 export function RecordingFolderTags({
     recordingId,
+    kind = "audio",
     folders,
     assignments,
     onSelectFolder,
@@ -290,9 +292,13 @@ export function RecordingFolderTags({
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>
-                            {i18n(
-                                "Take this recording out of the Organization?",
-                            )}
+                            {kind === "mail"
+                                ? i18n(
+                                      "Take this mail out of the Organization?",
+                                  )
+                                : i18n(
+                                      "Take this recording out of the Organization?",
+                                  )}
                         </DialogTitle>
                         <DialogDescription>
                             {isOwn
@@ -308,6 +314,7 @@ export function RecordingFolderTags({
                         <WithdrawRetentionWarning
                             preview={preview}
                             ofOwner={!isOwn}
+                            kind={kind}
                         />
                     )}
                     <DialogFooter>
