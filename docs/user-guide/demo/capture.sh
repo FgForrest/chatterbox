@@ -201,8 +201,9 @@ section_transcript() {
     tag transcript "Transcription" ".bg-card"
     scroll_to guesses
     crop transcript-speakers guesses transcript
-    tag topics "Topics (4)" "button"
-    click_button "Topics (4)"
+    ab click "[data-chapter-bar] button[aria-haspopup=menu]" >/dev/null
+    ab wait 900 >/dev/null
+    js "(() => { document.querySelector('[data-chapter-bar] button[aria-haspopup=menu]').setAttribute('data-shot', 'topics'); return 'ok'; })()" >/dev/null
     crop topics-menu "css:[role=menu]" topics
     escape
     click_js "Morning." 1500
@@ -213,9 +214,11 @@ section_transcript() {
     tag transcript "Transcription" ".bg-card"
     scroll_to transcript
     crop transcript-corrected transcript
-    click_button "Show original"
+    ab find role switch click --name "Original text" >/dev/null
+    ab wait 900 >/dev/null
     crop transcript-original transcript
-    click_button "Show edited"
+    ab find role switch click --name "Original text" >/dev/null
+    ab wait 900 >/dev/null
     select_recording "Lecture: field research methods"
     tag transcript "Transcription" ".bg-card"
     scroll_to transcript

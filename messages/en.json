@@ -696,7 +696,6 @@
   "DZPK2j": "Review the topics found in this transcript.",
   "vDQw19": "Topics follow the Learn review",
   "zh6wkY": "Detect topics",
-  "zsPrlQ": "Topics ({count, number})",
   "6-dTJ9": "Conversation topics",
   "TwVuo-": "Re-detect topics",
   "EZ7Lh5": "Play from {time}, {speaker}",
@@ -724,8 +723,6 @@
   "W1yKS8": "Transcript source",
   "fqobnK": "Collapse transcript",
   "eBg2NA": "Expand transcript",
-  "_BVhGS": "Show edited",
-  "F2tE1G": "Show original",
   "zUshoy": "Transcript content",
   "3zsbTL": "{days, plural, one {# day} other {# days}} left in your trial.",
   "mvjt_u": "{days, plural, one {# day} other {# days}} left in your free Hosted Pro window.",
@@ -1358,7 +1355,6 @@
   "hAmNMx": "Transcript speakers",
   "GOZCPE": "{speaker}: unknown",
   "hQ2OQ8": "Managed by the Organization",
-  "lE21MG": "Right-click a speaker to hear their next turn",
   "_p5Qnr": "Clear the answer for {speaker}",
   "_GCoTA": "Clear",
   "JWgvF5": "Suggested for {speaker}. Pick someone else",
@@ -2893,5 +2889,11 @@
   "8vtCUP": "Your monthly price is locked at",
   "z5PC6k": "for as long as your subscription stays active. Thanks for being early.",
   "X1BDgP": "Open {name}",
-  "wOF4ZI": "\"Email support\" isn't a ticket queue here. Reply to this email if anything's off or you have a question. It reaches me directly."
+  "wOF4ZI": "\"Email support\" isn't a ticket queue here. Reply to this email if anything's off or you have a question. It reaches me directly.",
+  "KN6iN8": "Transcript actions",
+  "MlOKta": "Original text",
+  "he9IcT": "Original",
+  "xSdHy3": "Play the next turn of {name}",
+  "3rDfZb": "Summary actions",
+  "y6mrQG": "Open in Almanac"
 }

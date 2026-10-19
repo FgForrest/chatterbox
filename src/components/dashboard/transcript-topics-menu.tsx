@@ -1,8 +1,8 @@
 "use client";
 
-import { Loader2, RefreshCw, Sparkles, Tag } from "lucide-react";
+import { ChevronDown, Loader2, RefreshCw, Sparkles, Tag } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,11 +13,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-    activeTopicIndex,
-    formatClock,
-    type TranscriptTopic,
-} from "@/lib/topics/timeline";
+import { formatClock, type TranscriptTopic } from "@/lib/topics/timeline";
 
 interface TranscriptTopicsMenuProps {
     topics: TranscriptTopic[] | null;
@@ -28,16 +24,11 @@ interface TranscriptTopicsMenuProps {
     detecting: boolean;
     onDetect: () => void;
     onSelect: (index: number) => void;
-    /** Playback position, to mark the topic being played. */
-    getPlaybackMs?: () => number;
+    activeIndex?: number;
     widgetId: string;
 }
 
-/**
- * "Topics (n)" beside the transcript's collapse toggle: the chapters of the
- * conversation, each a jump to where it starts. Without topics it offers to
- * detect them, when the transcript has the timings they need.
- */
+/** Topic list and detection actions for the transcript chapter bar. */
 export function TranscriptTopicsMenu({
     topics,
     canDetect,
@@ -45,31 +36,12 @@ export function TranscriptTopicsMenu({
     detecting,
     onDetect,
     onSelect,
-    getPlaybackMs,
+    activeIndex = 0,
     widgetId,
 }: TranscriptTopicsMenuProps) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
     const [runOpen, setRunOpen] = useState(false);
-    const [active, setActive] = useState(-1);
-    // A ref, so a parent passing a fresh function each render does not
-    // restart the timer below.
-    const playbackRef = useRef(getPlaybackMs);
-    playbackRef.current = getPlaybackMs;
-
-    // Follow playback while the list is open, so the highlighted topic is
-    // the one playing now rather than the one playing when it was opened.
-    useEffect(() => {
-        if (!open || !topics?.length) return;
-        const update = () => {
-            const ms = playbackRef.current?.();
-            setActive(ms === undefined ? -1 : activeTopicIndex(topics, ms));
-        };
-        update();
-        const timer = setInterval(update, 1000);
-        return () => clearInterval(timer);
-    }, [open, topics]);
-
     const runDetect = () => {
         onDetect();
     };
@@ -156,7 +128,7 @@ export function TranscriptTopicsMenu({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="-ml-1.5 h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary has-[>svg]:px-1.5"
+                    className="-ml-1.5 min-h-7 h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary has-[>svg]:px-1.5"
                     onClick={runDetect}
                     disabled={detecting}
                 >
@@ -175,17 +147,20 @@ export function TranscriptTopicsMenu({
     }
 
     return (
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
             <DropdownMenu open={open} onOpenChange={setOpen}>
                 <DropdownMenuTrigger asChild>
                     <button
                         type="button"
-                        className="flex items-center gap-1 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-sm text-sm font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                        <Tag className="size-4" />
-                        {i18n("Topics ({count, number})", {
-                            count: topics.length,
-                        })}
+                        <span className="shrink-0 font-semibold tabular-nums text-primary">
+                            {activeIndex + 1} / {topics.length}
+                        </span>{" "}
+                        <span className="min-w-0 truncate">
+                            {topics[activeIndex]?.title ?? topics[0].title}
+                        </span>
+                        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
                     </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
@@ -199,8 +174,11 @@ export function TranscriptTopicsMenu({
                     {topics.map((topic, index) => (
                         <DropdownMenuItem
                             key={`${topic.fromMs}-${topic.title}`}
+                            aria-current={
+                                index === activeIndex ? "location" : undefined
+                            }
                             onSelect={() => onSelect(index)}
-                            className={`items-baseline gap-3 ${index === active ? "bg-primary/10 text-primary" : ""}`}
+                            className={`items-baseline gap-3 ${index === activeIndex ? "bg-primary/10 text-primary" : ""}`}
                         >
                             <span className="w-5 shrink-0 text-right font-semibold tabular-nums text-primary">
                                 {index + 1}.

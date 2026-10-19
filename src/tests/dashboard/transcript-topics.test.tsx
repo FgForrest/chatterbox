@@ -171,9 +171,9 @@ function renderPanel(
 }
 
 /** Radix opens a dropdown from the keyboard in jsdom, not from a click. */
-function openTopics(count: number) {
+function openTopics(_count: number) {
     fireEvent.keyDown(
-        screen.getByRole("button", { name: `Topics (${count})` }),
+        screen.getByRole("button", { name: /1 \/ 2 Objednání jízdenky/ }),
         { key: "Enter" },
     );
 }
@@ -254,19 +254,15 @@ describe("transcript topics", () => {
         expect(indented()).toEqual([false, false, false]);
     });
 
-    it("marks the topic being played", async () => {
-        renderPanel(
-            { ...PLAUD, topics: TOPICS },
-            { getPlaybackMs: () => 100_000 },
-        );
+    it("marks the topic at the reading position", async () => {
+        renderPanel({ ...PLAUD, topics: TOPICS });
         openTopics(2);
         const item = await screen.findByRole("menuitem", {
-            name: /Špatné datum/,
+            name: /Objednání jízdenky/,
         });
-        expect(item.className).toContain("text-primary");
+        expect(item.getAttribute("aria-current")).toBe("location");
         expect(
-            screen.getByRole("menuitem", { name: /Objednání jízdenky/ })
-                .className,
+            screen.getByRole("menuitem", { name: /Špatné datum/ }).className,
         ).not.toContain("bg-primary/10");
     });
 
@@ -289,7 +285,9 @@ describe("transcript topics", () => {
         ).toBeTruthy();
         expect(screen.queryByRole("dialog")).toBeNull();
         finishDetection(json({ topics: TOPICS }));
-        await screen.findByRole("button", { name: "Topics (2)" });
+        await screen.findByRole("button", {
+            name: /1 \/ 2 Objednání jízdenky/,
+        });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/topics?source=plaud",
             expect.objectContaining({ method: "POST" }),
@@ -326,7 +324,9 @@ describe("transcript topics", () => {
             ).toHaveProperty("disabled", true),
         );
         settle();
-        await screen.findByRole("button", { name: "Topics (2)" });
+        await screen.findByRole("button", {
+            name: /1 \/ 2 Objednání jízdenky/,
+        });
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
     });
 
@@ -370,7 +370,9 @@ describe("transcript topics", () => {
 
         renderPanel({ ...PLAUD, source: "riffado" });
 
-        await screen.findByRole("button", { name: "Topics (2)" });
+        await screen.findByRole("button", {
+            name: /1 \/ 2 Objednání jízdenky/,
+        });
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
     });
 
