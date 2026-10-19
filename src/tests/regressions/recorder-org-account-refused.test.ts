@@ -16,6 +16,7 @@ import {
     recordingSessions,
     users,
 } from "@/db/schema";
+import { RECORDER_REFUSAL_REPORT_WINDOW_MS } from "@/lib/org/config";
 import { captureServerException } from "@/lib/posthog-server";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import {
@@ -232,6 +233,32 @@ describe.skipIf(!url)(
             ).rejects.toMatchObject({ code: "FORBIDDEN" });
             expectRefusal("saveUploadedAudioFile", "old-session");
             expect(storage.uploadStream).not.toHaveBeenCalled();
+        });
+        it("reports a retrying client once per surface and window", async () => {
+            const refuse = () =>
+                expect(
+                    gateRecordingSessionRequest(
+                        new Request(
+                            "https://example.test/api/v1/recording-sessions/retry-session/complete",
+                        ),
+                    ),
+                ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
+            const start = Date.now();
+            const now = vi.spyOn(Date, "now").mockReturnValue(start);
+            await refuse();
+            await refuse();
+            await refuse();
+            expectRefusal(
+                "GET /api/v1/recording-sessions/retry-session/complete",
+                "retry-session",
+            );
+            vi.clearAllMocks();
+            now.mockReturnValue(start + RECORDER_REFUSAL_REPORT_WINDOW_MS);
+            await refuse();
+            expectRefusal(
+                "GET /api/v1/recording-sessions/retry-session/complete",
+                "retry-session",
+            );
         });
         it("still lets a regular member start a personal recording session", async () => {
             const result = await createRecordingSession({
