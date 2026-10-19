@@ -9,6 +9,7 @@ import {
     vi,
 } from "vitest";
 import { POST as pair } from "@/app/api/settings/recorder/pair/route";
+import { POST as rebind } from "@/app/api/settings/recorder/rebind/route";
 import { GET as status } from "@/app/api/settings/recorder/status/route";
 import {
     apiKeys,
@@ -158,10 +159,19 @@ describe.skipIf(!url)(
         it.each([
             ["pair", pair],
             ["status", status],
-        ] as const)("refuses %s before key creation or status reads", async (_name, handler) => {
+            ["rebind", rebind],
+        ] as const)("refuses %s before key creation, status reads or rebinding", async (_name, handler) => {
             const response = await handler(
                 new Request("https://example.test/api/settings/recorder", {
-                    method: _name === "pair" ? "POST" : "GET",
+                    method: _name === "status" ? "GET" : "POST",
+                    ...(_name === "rebind"
+                        ? {
+                              body: JSON.stringify({
+                                  clientRecordingId: "old-capture",
+                                  apiKeyId: "old-org-key",
+                              }),
+                          }
+                        : {}),
                 }),
             );
             expect(response.status).toBe(403);
