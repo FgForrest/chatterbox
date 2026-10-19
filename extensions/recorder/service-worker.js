@@ -39,7 +39,16 @@ import {
     STATE,
 } from "./lib/constants.js";
 import { t } from "./lib/i18n.js";
-import { getInstallationId, originOf, refreshServerConfig } from "./lib/pairing.js";
+import { microphoneError, microphonePermission } from "./lib/microphone.js";
+import { sameMeetingTarget } from "./lib/meeting-target.js";
+import {
+    connectGrantedOrigins,
+    getInstallationId,
+    hasPairingRelayAccess,
+    originOf,
+    refreshServerConfig,
+    unregisterPairingScripts,
+} from "./lib/pairing.js";
 import { queuePairing } from "./lib/pairing-request.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
 import { canPumpUploads } from "./lib/upload-state.js";
@@ -52,6 +61,11 @@ import {
     isPaired,
     saveSettings,
 } from "./lib/settings.js";
+import {
+    openStartRequest,
+    START_REQUEST_KEY,
+    START_REQUEST_TTL_MS,
+} from "./lib/start-request.js";
 
 const STATE_KEY = "recordingState";
 const ARMED_KEY = "armedTabs";
@@ -113,6 +127,8 @@ const IDLE_STATE = Object.freeze({
     recordingUrl: null,
     partial: false,
     error: null,
+    micWarning: null,
+    withoutMicrophone: false,
     levels: { micDb: -100, systemDb: -100 },
 });
 
@@ -209,6 +225,7 @@ async function openDesktopRecorder(input) {
         platformHint: input.platformHint ?? null,
         autoStarted: input.auto ?? false,
         noticeAcknowledgedAt: input.noticeAcknowledgedAt ?? null,
+        withoutMicrophone: input.withoutMicrophone ?? false,
         error: null,
     });
     try {
@@ -231,6 +248,10 @@ async function openDesktopRecorder(input) {
 }
 
 chrome.windows.onRemoved.addListener((windowId) => {
+    void chrome.storage.session.get(START_REQUEST_KEY).then(async (stored) => {
+        if (stored[START_REQUEST_KEY]?.windowId === windowId)
+            await chrome.storage.session.remove(START_REQUEST_KEY);
+    }).catch((error) => console.warn("[recorder] request window cleanup:", error));
     void handleDesktopWindowClosed(windowId);
 });
 
@@ -301,11 +322,11 @@ let starting = false;
 /**
  * @param {{tabId?: number, platformHint?: string, auto?: boolean, noticeAcknowledgedAt?: string}} input
  */
-async function startRecording(input) {
+async function startRecording(input, microphoneChecked = false) {
     if (starting) throw new Error(t("alreadyInProgress"));
     starting = true;
     try {
-        return await startRecordingLocked(input);
+        return await startRecordingLocked(input, microphoneChecked);
     } catch (error) {
         if ((await getState()).state === STATE.awaitingPicker) {
             await setState({
@@ -324,7 +345,9 @@ async function startRecordingLocked({
     platformHint,
     auto = false,
     noticeAcknowledgedAt,
-}) {
+    withoutMicrophone = false,
+    forceDesktop = false,
+}, microphoneChecked) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
         throw new Error(t("alreadyInProgress"));
@@ -337,12 +360,22 @@ async function startRecordingLocked({
         throw new Error(t("dataUseRequired"));
     }
     const apiKey = await readToken();
+    if (!microphoneChecked && (await microphonePermission()) !== "granted") {
+        return openStartRequest({
+            tabId,
+            platformHint,
+            auto,
+            noticeAcknowledgedAt,
+        });
+    }
+    if (!noticeAcknowledgedAt) throw new Error(t("participantAckRequired"));
 
-    await setState({ state: STATE.awaitingPicker, error: null });
+    await setState({ state: STATE.awaitingPicker, error: null, micWarning: null, withoutMicrophone });
 
-    const useTab = typeof tabId === "number" && Boolean(platformHint);
+    const useTab =
+        !forceDesktop && typeof tabId === "number" && Boolean(platformHint);
     if (!useTab) {
-        return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt });
+        return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
     }
 
     return startCapturedRecording({
@@ -351,6 +384,7 @@ async function startRecordingLocked({
         auto,
         noticeAcknowledgedAt,
         captureMode: "tab",
+        withoutMicrophone,
         apiKey,
     });
 }
@@ -361,6 +395,7 @@ async function startCapturedRecording({
     auto = false,
     noticeAcknowledgedAt,
     captureMode,
+    withoutMicrophone = false,
     captureWindowId = null,
     pickerRequestId = null,
     apiKey,
@@ -485,7 +520,7 @@ async function startCapturedRecording({
             if (!streamId) {
                 await closeOffscreen();
                 await discardSession(session.id);
-                return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt });
+                return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
             }
             response = await messageOffscreen("start", {
                 sessionId: session.id,
@@ -495,6 +530,7 @@ async function startCapturedRecording({
                 channelMode: settings.channelMode,
                 streamId,
                 microphoneId: settings.microphoneId,
+                withoutMicrophone,
             });
         } else {
             const current = await getState();
@@ -508,10 +544,11 @@ async function startCapturedRecording({
                 captureMode,
                 channelMode: settings.channelMode,
                 microphoneId: settings.microphoneId,
+                withoutMicrophone,
             });
         }
         if (!response?.ok) {
-            throw new Error(response?.error ?? t("couldNotCapture"));
+            throw new Error(response?.error || t("couldNotCapture"));
         }
 
         return { sessionId: session.id };
@@ -829,6 +866,7 @@ async function notify(title, message, options = {}) {
             title,
             message,
             requireInteraction: options.requireInteraction ?? false,
+            ...(options.buttons ? { buttons: options.buttons } : {}),
         });
     } catch {
         return null;
@@ -844,18 +882,42 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
         return;
     }
     if (!notificationId.startsWith(NUDGE_PREFIX)) return;
-    chrome.notifications.clear(notificationId);
+    await chrome.notifications.clear(notificationId);
     const tabId = Number.parseInt(notificationId.slice(NUDGE_PREFIX.length), 10);
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return;
-    // A notification click cannot start capture (Chrome requires the toolbar
-    // click or shortcut), so bring the meeting tab forward and let the badge
-    // do the asking.
     await safe(chrome.tabs.update(tabId, { active: true }));
     if (tab.windowId != null) {
         await safe(chrome.windows.update(tab.windowId, { focused: true }));
     }
 });
+
+chrome.notifications.onButtonClicked.addListener((id, button) => {
+    void handleMeetingNotification(id, button).catch((error) =>
+        notify(t("couldNotStart"), error.message),
+    );
+});
+
+async function handleMeetingNotification(id, button) {
+    if (!id.startsWith(NUDGE_PREFIX)) return;
+    const tabId = Number(id.slice(NUDGE_PREFIX.length));
+    const armed = await getArmed();
+    const entry = armed[tabId];
+    if (!entry) return;
+    await chrome.notifications.clear(id);
+    entry.nudged = true;
+    await setArmed(armed);
+    if (button !== 0) return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const platform = tab?.url ? detectMeetingPlatform(tab.url) : null;
+    if (!platform || platform.id !== entry.platformId) return;
+    if (!(await isPaired())) return;
+    await openStartRequest({
+        tabId,
+        platformHint: platform.id,
+        auto: entry.mode === "auto",
+    });
+}
 
 // ---- Auto mode: arming -------------------------------------------------
 
@@ -904,12 +966,12 @@ async function arm(tab, platform, mode) {
     armed[tab.id] = {
         platformId: platform.id,
         mode,
-        nudged: existing?.nudged ?? false,
+        nudged: existing?.platformId === platform.id ? existing.nudged : false,
     };
     await setArmed(armed);
     await applyArmedUi(tab.id, platform, mode);
     if (tab.audible && !armed[tab.id].nudged) {
-        await nudge(tab.id, platform, mode);
+        await nudge(tab.id, platform);
     }
 }
 
@@ -924,7 +986,7 @@ async function disarm(tabId) {
     await safe(chrome.action.setTitle({ tabId, title: DEFAULT_TITLE }));
 }
 
-async function nudge(tabId, platform, mode) {
+async function nudge(tabId, platform) {
     const settings = await getSettings();
     if (!settings.nudgeEnabled) return;
     const armed = await getArmed();
@@ -932,11 +994,13 @@ async function nudge(tabId, platform, mode) {
     armed[tabId].nudged = true;
     await setArmed(armed);
     await notify(
-        t("meetingDetected", platform.name),
-        mode === "auto"
-            ? t("nudgeAuto")
-            : t("nudgePrompt"),
-        { id: `${NUDGE_PREFIX}${tabId}`, requireInteraction: true },
+        t("meetingRecordQuestion", t("appName")),
+        t("meetingRecordBody", platform.name),
+        {
+            id: `${NUDGE_PREFIX}${tabId}`,
+            requireInteraction: true,
+            buttons: [{ title: t("record") }, { title: t("notNow") }],
+        },
     );
 }
 
@@ -947,39 +1011,29 @@ async function nudge(tabId, platform, mode) {
 async function evaluateTab(tab) {
     if (!tab || tab.id == null) return;
     const settings = await getSettings();
-    if (!settings.dataUseAcknowledgedAt) {
-        await disarm(tab.id);
-        return;
-    }
-    const platform = tab.url ? detectMeetingPlatform(tab.url) : null;
     const state = await getState();
+    const platform = tab.url ? detectMeetingPlatform(tab.url) : null;
+    const recording = state.tabId === tab.id &&
+        [STATE.recording, STATE.finalizing].includes(state.state);
 
-    if (!platform) {
-        await disarm(tab.id);
-        if (
-            state.state === STATE.recording &&
-            state.tabId === tab.id &&
+    if (recording) {
+        if (!platform && state.state === STATE.recording &&
             state.autoStarted
-        ) {
+        )
             await stopRecording("meeting-ended");
-        }
         return;
     }
-
-    if (!(await isPaired())) return;
-    const mode = effectivePlatformModes(settings)[platform.id]?.mode ?? "off";
-    if (mode === "off") {
-        await disarm(tab.id);
+    const mode = platform ? effectivePlatformModes(settings)[platform.id]?.mode ?? "off" : "off";
+    if (settings.dataUseAcknowledgedAt && platform && mode !== "off" && await isPaired()) {
+        await arm(tab, platform, mode);
         return;
     }
-
-    // While recording this tab, leave the recording badge alone.
-    if (state.state === STATE.recording && state.tabId === tab.id) return;
-
-    // Arming is idempotent (it keeps the nudged flag), so re-apply it even
-    // for a tab that is already armed: a recording that just ended, or a
-    // worker restart, may have left the badge or popup state stale.
-    await arm(tab, platform, mode);
+    await disarm(tab.id);
+    const micMissing = settings.dataUseAcknowledgedAt && !settings.micReminderDismissed &&
+        (await microphonePermission()) !== "granted";
+    await safe(chrome.action.setBadgeText({ tabId: tab.id, text: micMissing ? "MIC!" : "" }));
+    if (micMissing)
+        await safe(chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b45309" }));
 }
 
 async function reevaluateTab(tabId) {
@@ -988,12 +1042,6 @@ async function reevaluateTab(tabId) {
 }
 
 async function reevaluateAllTabs() {
-    if (!(await getSettings()).dataUseAcknowledgedAt) {
-        for (const tabId of Object.keys(await getArmed())) {
-            await disarm(Number(tabId));
-        }
-        return;
-    }
     const tabs = await chrome.tabs.query({}).catch(() => []);
     for (const tab of tabs) await evaluateTab(tab);
 }
@@ -1009,7 +1057,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         const entry = armed[tabId];
         if (entry && !entry.nudged) {
             const platform = platformById(entry.platformId);
-            if (platform) await nudge(tabId, platform, entry.mode);
+            if (platform) await nudge(tabId, platform);
         }
     }
 
@@ -1043,7 +1091,9 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 // defaults, without waiting for the next navigation.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.platformModes || changes.serverDefaults || changes.encryptedApiKey || changes.dataUseAcknowledgedAt) {
+    if (changes.platformModes || changes.serverDefaults || changes.encryptedApiKey || changes.dataUseAcknowledgedAt
+        || changes.micReminderDismissed
+    ) {
         void reevaluateAllTabs();
     }
     if (changes.dataUseAcknowledgedAt?.newValue) {
@@ -1185,6 +1235,7 @@ async function pingStatus() {
         paired: consented && Boolean(settings.serverUrl && settings.hasApiKey),
         pairedTo: consented && settings.serverUrl ? originOf(settings.serverUrl) : null,
         autoMode: consented && anyPlatformAuto(settings),
+        micPermission: consented ? await microphonePermission() : undefined,
     };
 }
 
@@ -1207,7 +1258,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
                 if (!settings.dataUseAcknowledgedAt) {
                     return { ok: false, error: t("dataUseRequired") };
                 }
-                return queuePairing(message, senderOrigin);
+                return queuePairing(message, senderOrigin, chrome, sender.tab?.id);
             })
             .then(sendResponse)
             .catch((error) =>
@@ -1244,10 +1295,58 @@ async function handleDesktopPickerMessage(message, sender) {
         platformHint: state.platformHint,
         auto: state.autoStarted,
         noticeAcknowledgedAt: state.noticeAcknowledgedAt,
+        withoutMicrophone: state.withoutMicrophone,
         captureMode: "desktop",
         captureWindowId: state.captureWindowId,
         pickerRequestId: state.pickerRequestId,
     }).then(() => ({ ok: true }));
+}
+
+async function resumeRecording(message, sender) {
+    const request = (await chrome.storage.session.get(START_REQUEST_KEY))[
+        START_REQUEST_KEY
+    ];
+    const expected = chrome.runtime.getURL(
+        `request/request.html?requestId=${message.requestId}`,
+    );
+    if (
+        !request ||
+        request.id !== message.requestId ||
+        sender.url !== expected ||
+        sender.tab?.windowId !== request.windowId ||
+        Date.now() - request.createdAt > START_REQUEST_TTL_MS
+    ) {
+        throw new Error(t("recordingRequestExpired"));
+    }
+    const settings = await getSettings();
+    if (settings.serverUrl !== request.serverUrl)
+        throw new Error(t("recordingRequestExpired"));
+    if (request.input.tabId != null) {
+        const tab = await chrome.tabs.get(request.input.tabId).catch(() => null);
+        if (!tab) throw new Error(t("meetingTabClosed"));
+        if (!sameMeetingTarget(request.tabUrl, tab.url))
+            throw new Error(t("recordingRequestExpired"));
+    }
+    if (
+        !message.withoutMicrophone &&
+        (await microphonePermission()) !== "granted"
+    )
+        throw new Error(t("micWarning"));
+    const notice =
+        request.input.noticeAcknowledgedAt ?? message.noticeAcknowledgedAt;
+    if (!notice || !Number.isFinite(Date.parse(notice)))
+        throw new Error(t("participantAckRequired"));
+    const result = await startRecording(
+        {
+            ...request.input,
+            noticeAcknowledgedAt: notice,
+            forceDesktop: true,
+            withoutMicrophone: message.withoutMicrophone === true,
+        },
+        true,
+    );
+    await chrome.storage.session.remove(START_REQUEST_KEY);
+    return { ok: true, ...result };
 }
 
 // ---- Internal messaging (popup, options, offscreen, content script) --------
@@ -1256,6 +1355,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.target === "offscreen") return false;
 
     switch (message.type) {
+        case "resume-recording":
+            resumeRecording(message, sender)
+                .then(sendResponse)
+                .catch((error) =>
+                    sendResponse({ ok: false, error: error.message }),
+                );
+            return true;
         case "desktop-capture-ready":
         case "desktop-picker-cancelled":
         case "desktop-picker-error":
@@ -1294,6 +1400,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case "start-recording":
+            if (sender.url !== chrome.runtime.getURL(POPUP_URL)) {
+                sendResponse({ ok: false, error: t("unrecognizedSender") });
+                return false;
+            }
             startRecording(message.payload ?? {})
                 .then((result) => sendResponse({ ok: true, ...result }))
                 .catch((error) =>
@@ -1371,18 +1481,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // From the pairing content script.
         case MESSAGES.ping:
-            pingStatus().then((status) =>
+            (async () => {
+                const origin = originOf(sender.url);
+                if (
+                    origin
+                        ? !(await hasPairingRelayAccess(origin))
+                        : !sender.url?.startsWith(chrome.runtime.getURL(""))
+                )
+                    return { installed: true, unreachable: true };
+                return pingStatus();
+            })().then((status) =>
                 sendResponse({ ...status, channel: "content" }),
             );
             return true;
 
         case MESSAGES.pair:
             getSettings()
-                .then((settings) => {
+                .then(async (settings) => {
                     if (!settings.dataUseAcknowledgedAt) {
                         return { ok: false, error: t("dataUseRequired") };
                     }
-                    return queuePairing(message, originOf(sender.url ?? ""));
+                    if (!(await hasPairingRelayAccess(originOf(sender.url))))
+                        return { ok: false, error: t("serverAccessDenied") };
+                    return queuePairing(message, originOf(sender.url ?? ""), chrome, sender.tab?.id);
                 })
                 .then(sendResponse)
                 .catch((error) =>
@@ -1405,11 +1526,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
 
         case "mic-unavailable":
-            // Non-fatal: the meeting audio is recording without the mic.
-            notify(
-                t("micUnavailable"),
-                t("micUnavailableBody"),
-            );
+            void handleMicrophoneFailure(message);
             return false;
 
         case "stream-ended":
@@ -1426,6 +1543,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
     }
 });
+
+async function handleMicrophoneFailure(message) {
+    const state = await getState();
+    if (state.sessionId !== message.sessionId || state.state !== STATE.recording) return;
+    const warning = t("micUnavailableBody", microphoneError(message.errorName));
+    await setState({ micWarning: warning });
+    await notify(t("micUnavailable"), warning, {
+        id: `mic:${message.sessionId}`,
+        requireInteraction: true,
+    });
+}
 
 async function handleRecordingStopped(message) {
     const state = await getState();
@@ -1569,6 +1697,7 @@ async function discardBuffer(bufferId) {
 // ---- Startup ---------------------------------------------------------------
 
 async function reconcileOnStartup() {
+    await unregisterPairingScripts();
     await ensureConfigAlarm();
     await reconcileDesktopWindow();
     // Session storage is empty after a browser restart; re-arm open meetings.
@@ -1704,6 +1833,18 @@ async function reconcileOnStartup() {
         );
     }
 }
+
+chrome.permissions.onAdded.addListener((permissions) => {
+    void connectGrantedOrigins(permissions.origins ?? []).catch((error) =>
+        console.warn("[recorder] relay registration failed:", error),
+    );
+});
+
+chrome.permissions.onRemoved.addListener(() => {
+    void unregisterPairingScripts().catch((error) =>
+        console.warn("[recorder] relay removal failed:", error),
+    );
+});
 
 chrome.runtime.onStartup.addListener(() => {
     reconcileOnStartup().catch((error) =>

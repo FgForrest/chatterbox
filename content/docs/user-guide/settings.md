@@ -36,6 +36,8 @@ Members inspect **Organization providers** as **Read-only** and may choose any e
 
 If a provider you chose is disabled or deleted, the selector keeps that choice visible as unavailable. Processing for that role stops until you choose another provider. Before an Organization provider is disabled or deleted, the confirmation shows how many members selected it as their own default.
 
+Without an explicit choice, members can use the Organization’s oldest enabled suitable provider even when no Organization default is set. Disabled providers are skipped for automatic selection. Managers see a notice for missing transcription and summary defaults with an action to make the fallback the default. Members see which fallback they use. The Organization pays for its providers, including private processing.
+
 ## Transcription
 
 **Transcription** now holds account defaults for **Transcribe**, generated titles when a profile does not pin a provider, and imported recorder content. It includes:
@@ -45,14 +47,16 @@ If a provider you chose is disabled or deleted, the selector keeps that choice v
 - **Primary transcript** when both Plaud and your provider have made one,
 - **Default transcription language**, used when you transcribe now.
 
-Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Without a profile pin, titles use your title choice, your summary choice, the Organization title default, the Organization summary default, then your first enabled chat provider. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
+Without a profile pin, transcription uses your transcription choice, the Organization transcription default, then its oldest enabled provider that can transcribe. Claude Code and Codex bridge providers cannot transcribe.
+
+Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Without a profile pin, titles use your title choice, your summary choice, the Organization title default, the Organization summary default, then your first enabled chat provider, then the Organization’s oldest enabled chat provider. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
 
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that
 does not pin a topics provider uses your topics choice, your summary choice,
 the Organization topics default, the Organization summary default, then your
-first enabled chat provider. Automatic topic detection is set under
+first enabled chat provider, then the Organization’s oldest enabled chat provider. Automatic topic detection is set under
 **Profiles**. Topic templates you created or edited before profiles remain
 read-only under **Templates from before profiles**; use **Copy into a profile**
 to keep editing one.
@@ -62,14 +66,14 @@ to keep editing one.
 This section keeps the account-level Learn provider default. A profile that
 does not pin a Learn provider uses your Learn choice, your summary choice, the
 Organization Learn default, the Organization summary default, then your first
-enabled chat provider. Automatic Learn and transcript
+enabled chat provider, then the Organization’s oldest enabled chat provider. Automatic Learn and transcript
 correction are set under **Profiles**.
 
 ## Summary
 
 This section keeps the account-level summary provider and multi-pass defaults.
 A profile without a pinned summary provider uses your summary choice, the
-Organization summary default, then your first enabled chat provider. Automatic titles and
+Organization summary default, then your first enabled chat provider, then the Organization’s oldest enabled chat provider. Automatic titles and
 summaries, output language and format, and profile-specific multi-pass behavior
 are set under **Profiles**. Summary templates you created or edited before
 profiles remain read-only under **Templates from before profiles**; use **Copy

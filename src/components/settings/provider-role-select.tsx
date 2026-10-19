@@ -22,7 +22,10 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
-import { defaultProviderCandidates } from "@/lib/ai/provider-resolution-order";
+import {
+    defaultProviderCandidates,
+    providerPointersFromFlags,
+} from "@/lib/ai/provider-resolution-order";
 
 type Role = "transcription" | "topics" | "learning" | "summary" | "title";
 type PickerProvider = ProviderListItem & { scope?: "organization" };
@@ -83,28 +86,6 @@ const EMPTY_DEFAULTS: DefaultProviderPointers = {
     title: null,
 };
 
-function organizationDefaults(
-    providers: PickerProvider[],
-): DefaultProviderPointers {
-    return {
-        transcription:
-            providers.find((provider) => provider.isDefaultTranscription)?.id ??
-            null,
-        summary:
-            providers.find((provider) => provider.isDefaultEnhancement)?.id ??
-            null,
-        learn:
-            providers.find((provider) => provider.isDefaultLearn === true)
-                ?.id ?? null,
-        topics:
-            providers.find((provider) => provider.isDefaultTopics === true)
-                ?.id ?? null,
-        title:
-            providers.find((provider) => provider.isDefaultTitle === true)
-                ?.id ?? null,
-    };
-}
-
 /** Choose one account default from personal and Organization providers. */
 export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const i18n = useExtracted();
@@ -113,6 +94,8 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const [defaults, setDefaults] = useState<DefaultProviderPointers | null>(
         null,
     );
+    const [organizationPointers, setOrganizationPointers] =
+        useState<DefaultProviderPointers>(EMPTY_DEFAULTS);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -131,11 +114,16 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         ).catch(() => null);
         if (!organizationResponse?.ok) {
             setOrganization([]);
+            setOrganizationPointers(EMPTY_DEFAULTS);
             return;
         }
         const organizationBody =
             (await organizationResponse.json()) as ProviderResponse;
         setOrganization(organizationBody.providers);
+        setOrganizationPointers(
+            organizationBody.defaults ??
+                providerPointersFromFlags(organizationBody.providers),
+        );
     }, []);
 
     useEffect(() => {
@@ -162,12 +150,12 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const selectedId = defaults?.[role] ?? null;
     const followsSummary =
         purpose === "topics" || purpose === "learning" || purpose === "title";
-    const organizationPointers = organizationDefaults(organization);
     const [candidate] = defaultProviderCandidates(
         role,
         defaults ?? EMPTY_DEFAULTS,
         organizationPointers,
         personal,
+        organization,
     );
     const candidateProvider = candidate
         ? [...personal, ...organization].find(
@@ -197,7 +185,10 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         ? available(organizationDefault, purpose)
         : false;
     const automaticProvider =
-        candidate?.source === "member-fallback" ? candidateProvider : undefined;
+        candidate?.source === "member-fallback" ||
+        candidate?.source === "organization-fallback"
+            ? candidateProvider
+            : undefined;
 
     const save = async (id: string) => {
         if (id === NOT_CHOSEN && !selectedId) return;
@@ -306,7 +297,8 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                         )}
                     {purpose === "transcription" &&
                         !organizationDefaultAvailable &&
-                        !noOptions && (
+                        !noOptions &&
+                        !automaticProvider && (
                             <SelectItem value={NOT_CHOSEN}>
                                 {i18n("Not chosen")}
                             </SelectItem>
@@ -342,6 +334,21 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     )}
                 </SelectContent>
             </Select>
+            {organization.length > 0 && !loading && (
+                <p className="text-xs text-muted-foreground">
+                    {purpose === "transcription"
+                        ? i18n(
+                              "Without a choice, transcription uses the Organization default, then its oldest enabled transcription provider.",
+                          )
+                        : followsSummary
+                          ? i18n(
+                                "Without a role choice, Learn, topics and titles try your summary choice first. Then come the Organization defaults, your first enabled chat provider, and the Organization’s oldest enabled chat provider.",
+                            )
+                          : i18n(
+                                "Without a choice, summaries use the Organization default, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
+                            )}
+                </p>
+            )}
             {candidateUnavailable && !loading && (
                 <p className="text-xs text-muted-foreground">
                     {i18n(

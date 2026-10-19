@@ -76,7 +76,6 @@ export function ItemHeader({
                     <AiCostSummary
                         key={`${itemId}:${view ?? "private"}`}
                         recordingId={itemId}
-                        kind={kind}
                         view={view}
                     />
                     {organization && (

@@ -54,6 +54,8 @@ The player shows the recording as a waveform. Click anywhere on it to jump there
 
 Click **Estimated AI spend** to see what each step cost on this recording: transcription, summary, topics, Learn and the title, and below that, which provider and model did the work. Prices come from each provider's published price list, or from the price you entered on the provider (see [AI providers](settings.md#ai-providers)). For Claude Code and Codex, which run on a subscription, the amount shows what the same work would cost through the API; it is not a charge. Requests made before cost tracking was added are not counted.
 
+The amount counts everything spent on the recording, whoever paid. When one payer covered all of it, the panel says who, for example "Paid by the Organization."; when several did, each line names its payer. **≥ $0.45** means at least that much: some requests have no price, and the panel lists them. **unpriced** means none of the requests has a price. When no AI work was recorded for the item, nothing is shown.
+
 ### Erasing
 
 ![The Erase menu](images/erase-menu.png)
