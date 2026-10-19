@@ -1069,6 +1069,41 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             ).toEqual(["search-shared"]);
         });
 
+        it("reads a Plaud summary when the mail has no Chatterbox one", async () => {
+            await seedMail("search-plaud-only", READER, {
+                segments: [body("Plaudfixture")],
+            });
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    itemId: "search-plaud-only",
+                    userId: READER,
+                    source: "plaud",
+                    provider: "test",
+                    model: "test",
+                    summary: encryptText("Plaudsolomarker"),
+                });
+            const out = await search(reader(), { query: "Plaudsolomarker" });
+            expect(ids(out)).toEqual(["search-plaud-only"]);
+            expect(out.results[0]?.snippets[0]?.part).toBe("summary");
+        });
+
+        it("ignores entity without knowledge:read instead of narrowing or failing", async () => {
+            const caller = reader(["mail:read"]);
+            const unfiltered = ids(
+                await search(caller, { query: "Visibilitymarker" }),
+            );
+            expect(unfiltered.length).toBeGreaterThan(0);
+            expect(
+                ids(
+                    await search(caller, {
+                        query: "Visibilitymarker",
+                        entity: entityId,
+                    }),
+                ),
+            ).toEqual(unfiltered);
+        });
+
         it("hides entity without knowledge:read and reads only caller-readable facts", async () => {
             const tool = ALL_TOOLS.find((tool) => tool.name === "search_mail");
             expect(tool?.input(reader(["mail:read"]))).not.toHaveProperty(
