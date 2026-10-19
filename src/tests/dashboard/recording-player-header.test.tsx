@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
-    useExtracted: () => (message: string) => message,
+    useExtracted: () => (message: string, values?: Record<string, string>) =>
+        message.replace(/\{(\w+)\}/g, (_, key: string) => values?.[key] ?? ""),
     useLocale: () => "en",
 }));
 vi.mock("@/components/recordings/ai-cost-summary", () => ({
