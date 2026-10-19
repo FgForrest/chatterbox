@@ -50,7 +50,9 @@ export function RecordingPlayerHeader({
         formatBytes(recording.filesize),
     ];
     if (recording.deviceSn && !NON_DEVICE_SOURCES.has(recording.deviceSn)) {
-        metaParts.push(`${i18n("Device")}: ${recording.deviceSn}`);
+        metaParts.push(
+            i18n("Device: {serial}", { serial: recording.deviceSn }),
+        );
     }
     if (recording.view === "org") {
         metaParts.push(
