@@ -4,7 +4,7 @@
 //   node extensions/recorder/pack.mjs
 //
 // Produces extensions/recorder/dist/chatterbox-recorder-<version>.zip, suitable
-// for an unlisted Chrome Web Store upload or manual distribution. For local
+// for a Chrome Web Store upload or manual distribution. For local
 // development you do not need this: load the extensions/recorder folder as an
 // unpacked extension instead.
 
@@ -18,6 +18,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(
     await readFile(join(here, "manifest.json"), "utf8"),
 );
+const storeManifest = { ...manifest };
+delete storeManifest.key;
 const distDir = join(here, "dist");
 await mkdir(distDir, { recursive: true });
 const outPath = join(distDir, `chatterbox-recorder-${manifest.version}.zip`);
@@ -31,9 +33,11 @@ const done = new Promise((resolve, reject) => {
 });
 
 archive.pipe(output);
+archive.append(`${JSON.stringify(storeManifest, null, 4)}\n`, {
+    name: "manifest.json",
+});
 // Everything the extension needs at runtime; nothing else.
 for (const entry of [
-    "manifest.json",
     "service-worker.js",
     "content-pairing.js",
     "probe.png",

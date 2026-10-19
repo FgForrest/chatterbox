@@ -4,7 +4,7 @@ Use the public [extension privacy policy](../PRIVACY.md) in the Store's **Privac
 
 ## Single purpose
 
-Record meeting audio at the user's request and send it to the Chatterbox server the user pairs with the extension.
+Record meeting audio at the user's request and upload it to the self-hosted instance of the open-source Chatterbox server they pair with the extension.
 
 ## Prominent data disclosure
 
@@ -22,9 +22,9 @@ Record meeting audio at the user's request and send it to the Chatterbox server 
 | `storage` | Keeps the paired server URL, encrypted write-only recorder token, random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
 | `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes, so that site's Setup recorder button can connect the extension. |
 | `alarms` | Refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
-| Required `https://riffado.com/*` and `https://*.riffado.com/*` host access | Allows the existing Chatterbox-compatible web app and its subdomains to detect the extension and offer pairing. Review whether this access can be made optional before store submission. |
 | Optional `https://*/*` host access | Allows the user to pair a self-hosted Chatterbox server at a chosen HTTPS origin. Access is requested for that specific origin during pairing. |
 | Optional `http://localhost/*` host access | Allows pairing a Chatterbox instance on the user's own computer for local development. Remote HTTP is not supported. |
+| `externally_connectable` for `localhost` | Allows a local Chatterbox page to message the extension for setup without a pairing relay. Other origins use the relay after the user grants access. |
 
 ## Data-use declarations to check in the dashboard
 
@@ -35,5 +35,5 @@ The privacy policy, store listing, permission explanations, and in-extension con
 ## Remaining submission risks
 
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
-- Required `riffado.com` host access remains in the manifest for compatibility with the existing hosted site, although pairing also asks for access to the chosen origin. Review whether that required access can be removed without affecting the product flow; Chrome requires the narrowest permissions needed.
+- The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
