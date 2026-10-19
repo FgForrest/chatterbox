@@ -1,14 +1,16 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 14 October 2026
+Last updated: 19 October 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
 ## What the extension handles
 
+Setup asks for microphone access and briefly opens then stops a test stream. This test audio is not saved or sent. Before recording, missing access requires a decision: allow the microphone or explicitly record without it. The extension reports microphone permission status after data-use consent to the current setup site or paired server using its existing presence/pairing channel; localhost development pages can also receive this status after consent through the declared direct setup channel. Meeting prompts are enabled by default for Meet, Teams and Zoom web unless your saved choice or server settings override them. A prompt never starts recording without your action and acknowledgement of the participant notice.
+
 - When you choose to record, the extension captures microphone audio and either the selected meeting tab's audio or the system audio from Chrome's screen picker. It records audio, not the screen video.
 - When meeting detection is enabled, it checks browser tab URLs and audible status to identify supported meeting sites and show a recording prompt. It does not upload browsing history or tab URLs.
-- It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is sent to the paired server to retire older recorder keys from this installation; it is not a device fingerprint or a secret. The write-only recorder API token is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
+- It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is shared after data-use consent only with the current setup site or paired server, including to retire older recorder keys from this installation; localhost development pages can also use the declared direct setup channel. It is not a device fingerprint or a secret. The write-only recorder API token is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
 - It encrypts each five-second audio segment with a key issued by your server before writing that segment to Chrome's private file system. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Encrypted segments remain on this device until the server confirms completion or you explicitly discard them. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
 - It does not automatically download a playable local copy. Once the server finishes the recording, you can download one from the authenticated Chatterbox recording page. A file you download remains until you delete it.
 

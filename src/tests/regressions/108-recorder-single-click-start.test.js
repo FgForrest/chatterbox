@@ -4,6 +4,9 @@ beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
 
 function setupPopup(tabUrl, folderId = null, folderLabel = null) {
+    vi.stubGlobal("navigator", {
+        permissions: { query: vi.fn(async () => ({ state: "granted" })) },
+    });
     const nodes = new Map();
     let onMessage;
     const node = (id) => {
@@ -63,8 +66,12 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
                 set: storageSet,
             },
         },
-        tabs: { query: async () => [{ id: 42, url: tabUrl }] },
+        tabs: {
+            query: async () => [{ id: 42, url: tabUrl }],
+            create: vi.fn(async () => {}),
+        },
         runtime: {
+            getURL: (path) => `chrome-extension://test/${path}`,
             sendMessage,
             onMessage: {
                 addListener: (listener) => {
@@ -92,9 +99,28 @@ describe("manual recorder start", () => {
             true,
         ],
         ["other tab", "https://example.com", undefined, false],
-    ])("starts from one confirmation click on a %s", async (_, url, platformHint, pickerHidden) => {
+        [
+            "server tab before consent",
+            "https://example.com",
+            undefined,
+            false,
+            false,
+        ],
+    ])("starts recording or setup from one confirmation click on a %s", async (_, url, platformHint, pickerHidden, consented = true) => {
         const { node, sendMessage, close } = setupPopup(url);
+        if (!consented) chrome.storage.local.get = async () => ({});
         await import("../../../extensions/recorder/popup/popup.js");
+        if (!consented) {
+            await vi.waitFor(() =>
+                expect(node("view-connect").hidden).toBe(false),
+            );
+            await node("connect-origin").click();
+            expect(chrome.tabs.create).toHaveBeenCalledWith({
+                url: "chrome-extension://test/options/options.html?origin=https%3A%2F%2Fexample.com&tabId=42",
+            });
+            expect(close).toHaveBeenCalledOnce();
+            return;
+        }
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
 
         expect(node("picker-hint").hidden).toBe(pickerHidden);
