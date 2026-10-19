@@ -20,6 +20,7 @@ class CompletedTranscriptionFailure extends AppError {}
 function failedResultError(
     code: TranscribeErrorCode | undefined,
     message?: string,
+    organizationProviderMissing = false,
 ): CompletedTranscriptionFailure {
     switch (code) {
         case "RECORDING_NOT_FOUND":
@@ -38,7 +39,9 @@ function failedResultError(
         case "NO_TRANSCRIPTION_PROVIDER":
             return new CompletedTranscriptionFailure(
                 ErrorCode.NO_TRANSCRIPTION_PROVIDER,
-                "No transcription provider is configured",
+                organizationProviderMissing
+                    ? "Neither you nor the Organization has a provider for transcription. Add a provider in Settings or ask an administrator."
+                    : "No transcription provider is configured",
                 400,
             );
         case "HOSTED_LOCKED_OUT":
@@ -125,7 +128,11 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             return { skipped: "shared" };
         }
         if (!result.success) {
-            throw failedResultError(result.errorCode, result.error);
+            throw failedResultError(
+                result.errorCode,
+                result.error,
+                result.organizationProviderMissing,
+            );
         }
         return { transcribed: true };
     },

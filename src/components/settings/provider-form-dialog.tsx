@@ -319,7 +319,7 @@ export function ProviderFormDialog({
                     {scope === "organization" && (
                         <DialogDescription>
                             {i18n(
-                                "Members may use this provider for account defaults and Organization profiles. Keys are write-only.",
+                                "Members may use this provider for account defaults and Organization profiles. Without a default, members use the oldest enabled provider for the role. Keys are write-only.",
                             )}
                         </DialogDescription>
                     )}

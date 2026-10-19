@@ -113,6 +113,10 @@ s oprávněním `access.manage`, případně účet organizace v místním reži
 autorizace. Každá správcovská změna se zapisuje do auditního protokolu
 administrátora.
 
+Kroky bez připnutého poskytovatele zkoušejí volbu člena pro danou roli, jeho volbu pro shrnutí u Učení, témat a názvů, volbu Organizace pro danou roli, její volbu pro shrnutí u navazujících rolí, nejstarší povolené vlastní přihlašovací údaje chatu člena (jen pro chatové role) a nakonec nejstarší povolené vhodné přihlašovací údaje Organizace (`createdAt`, poté `id`). Přepis vylučuje předvolby pouze pro rozšíření; chatové role vylučují předvolby pouze pro přepis. Výslovně zvolené chybějící nebo zakázané odkazy a připnutí zůstávají konečnou chybou. Náhradní výběr vyžaduje povolený rozsah Organizace a oprávnění aktéra k jeho použití. Platí stejný plátce Organizace, evidence využití a limit na člena jako u výchozího poskytovatele Organizace, včetně soukromých položek. Hostovaná verze a výběr pro samotný účet Organizace se nemění.
+
+Správci poskytovatelů vidí upozornění na chybějící výchozí poskytovatele přepisu a shrnutí s akcí pro nastavení náhradního jako výchozího poskytovatele Organizace. Karty členů jen pro čtení označují jejich skutečného náhradního poskytovatele. Změna schématu ani nastavení stávajících členů nejsou potřeba.
+
 Ve výchozím nastavení může každý člen provést 60 volání za hodinu u každého
 poskytovatele Organizace. Limit změníte pomocí
 `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`; produkční soubor Compose musí tuto

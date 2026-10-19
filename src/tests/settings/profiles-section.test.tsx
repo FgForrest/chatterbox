@@ -516,12 +516,12 @@ describe("Settings Profiles", () => {
         expect(provider.textContent).toContain("ElevenLabs · scribe_v2");
         expect(
             screen.getByText(
-                "Default uses your default transcription provider, then the Organization default.",
+                "Default uses your default transcription provider, then the Organization default, then its oldest enabled transcription provider.",
             ),
         ).toBeTruthy();
         expect(
             screen.getByText(
-                "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role uses your default for that role, then the Organization default, then your first enabled provider.",
+                "Sets the same provider pin for Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
             ),
         ).toBeTruthy();
     });

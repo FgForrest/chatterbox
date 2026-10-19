@@ -181,7 +181,11 @@ function candidateChoice(
     if (candidate.source === "member-summary") {
         return { kind: "member-default", role: "summary" };
     }
-    if (candidate.source === "member-fallback") return { kind: "automatic" };
+    if (
+        candidate.source === "member-fallback" ||
+        candidate.source === "organization-fallback"
+    )
+        return { kind: "automatic" };
     return { kind: "member-default", role: step };
 }
 
@@ -548,11 +552,14 @@ async function resolveUnpinned(
     const organizationState = orgUserId
         ? await loadDefaultProviderState(orgUserId)
         : null;
+    const hasSeparateOrganization =
+        Boolean(orgUserId) && orgUserId !== actorUserId;
     const [candidate] = defaultProviderCandidates(
         step,
         actorState.pointers,
         organizationState?.pointers ?? null,
         actorState.credentials,
+        hasSeparateOrganization ? organizationState?.credentials : [],
     );
     if (candidate) {
         const choice = candidateChoice(candidate, step);
@@ -604,14 +611,24 @@ async function resolveUnpinned(
     if (step === "transcription") {
         throw new AppError(
             ErrorCode.NO_TRANSCRIPTION_PROVIDER,
-            "No transcription API configured",
+            hasSeparateOrganization
+                ? "Neither you nor the Organization has a provider for transcription. Add a provider in Settings or ask an administrator."
+                : "No transcription API configured",
             400,
-            { providerSelection: "absent" },
+            {
+                providerSelection: "absent",
+                organizationProviderMissing: hasSeparateOrganization,
+            },
         );
     }
-    throw missingProvider(`No provider is configured for ${step}`, {
-        providerSelection: "absent",
-    });
+    throw missingProvider(
+        hasSeparateOrganization
+            ? `Neither you nor the Organization has a provider for ${step}. Add a provider in Settings or ask an administrator.`
+            : `No provider is configured for ${step}`,
+        {
+            providerSelection: "absent",
+        },
+    );
 }
 
 /** Choose and authorize one processing provider without decrypting its key. */

@@ -106,6 +106,10 @@ of `access.manage`, or the organization account in local authorization mode,
 may add, change, disable or remove them. Every management change is written to
 the administrator audit log.
 
+For unpinned steps, resolution tries the member role pointer, their summary pointer for Learn/topics/titles, the Organization role pointer, its summary pointer for those following roles, the member’s oldest enabled chat credential (chat roles only), then the Organization’s oldest enabled suitable credential (`createdAt`, then `id`). Transcription excludes enhancement-only presets; chat roles exclude transcription-only presets. Explicit missing or disabled pointers and pins remain terminal errors. The Organization fallback requires an enabled scope and the actor’s permission to use it. It uses the same Organization payer, usage attribution and per-member rate limit as an Organization default, including for private items. Hosted and the organization account’s own resolution are unchanged.
+
+Provider managers see missing-default notices for transcription and summaries with an action to set the fallback as the Organization default. Members’ read-only cards identify their actual fallback. No schema change or setup is required for existing members.
+
 Each member may make 60 calls per hour to each Organization provider by
 default. Set `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` to change that limit; the
 production Compose file must pass the variable into the application container.
