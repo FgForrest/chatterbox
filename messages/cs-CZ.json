@@ -769,8 +769,6 @@
   "btAPTq": "Začněte vytvořením složky",
   "iLwjfs": "Nejprve vytvořte složku. Pak synchronizujte zařízení nebo nahrajte soubor.",
   "3ZxZ4n": "Synchronizovat zařízení",
-  "zeoruf": "Otevřít paletu příkazů",
-  "xOSf5l": "Hledat nahrávky, přepisy a úkoly",
   "Poih_c": "Synchronizováno {count, plural, one {# nová nahrávka} few {# nové nahrávky} many {# nových nahrávek} other {# nových nahrávek}}",
   "maZslp": "Synchronizace dokončena - žádné nové nahrávky",
   "ecjViF": "Smazání selhalo",
@@ -2875,5 +2873,18 @@
   "8vtCUP": "Vaše měsíční cena je zamčena na",
   "z5PC6k": "dokud vaše předplatné zůstane aktivní. Děkujeme, že jste mezi prvními.",
   "X1BDgP": "Otevřít aplikaci {name}",
-  "wOF4ZI": "„Emailová podpora“ zde není fronta tiketů. Odpovězte na tento e-mail, pokud něco není v pořádku nebo máte otázku. Dostane se to přímo ke mně."
+  "wOF4ZI": "„Emailová podpora“ zde není fronta tiketů. Odpovězte na tento e-mail, pokud něco není v pořádku nebo máte otázku. Dostane se to přímo ke mně.",
+  "2AMmPw": "Hledat v Almanachu",
+  "appHeader_searchTasks": "Hledat v úkolech",
+  "inzG42": "Hledat v Klepech",
+  "RUr9_E": "Hledat všude…",
+  "tYgq_K": "Hledat osoby, věci nebo pojmy…",
+  "SuYLTe": "Hledat v úkolech…",
+  "2zhYPB": "Oblast hledání",
+  "jh-9q7": "Všude",
+  "_cTlkF": "přepnout oblast",
+  "_Mzoqv": "Hledám…",
+  "2l6w5h": "Vyhledávání se nezdařilo. Zkuste to znovu.",
+  "sZdPYv": "Mohou existovat další výsledky. Upřesněte dotaz.",
+  "CwPawm": "Slovník"
 }

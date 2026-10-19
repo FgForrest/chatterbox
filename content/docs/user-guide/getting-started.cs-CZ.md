@@ -38,22 +38,23 @@ Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nast
 
 Horní lišta obsahuje tři sekce:
 
-- **Nahrávky**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
+- **Klepy**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
 - **Almanach**: osoby a objekty, o kterých Klepna ví. Odznak ukazuje počet kontrol čekajících na vás. Viz [Almanach](almanac.md).
 - **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
 
-- **Hledat** (nebo `Ctrl`/`⌘` + `K`) otevře příkazovou paletu.
-- **Synchronizovat zařízení** okamžitě stáhne nové nahrávky z cloudu vašeho nahrávače, místo čekání na další automatickou synchronizaci.
+- **Hledat v Klepech**, **Hledat v Almanachu** nebo **Hledat v úkolech** (nebo `Ctrl`/`⌘` + `K`) otevře vyhledávání v aktuální sekci.
 - **Nahrát** přidá zvukový nebo video soubor z vašeho počítače. Tlačítko je dostupné také v Úkolech, Almanachu a Nastavení. Po nahrání se otevřou Nahrávky, nová položka bude vybraná a její pracovní postup bude na začátku.
-- Kulaté tlačítko s vaším iniciálou otevře nabídku účtu: **Nastavení**, **Klávesové zkratky**, režim světlý/tmavý a **Odhlásit se**.
+- Nabídka účtu **≡** je dostupná ve všech třech sekcích: **Nastavení**, **Klávesové zkratky**, **Nápověda**, **Spustit nastavení znovu**, **Synchronizovat zařízení**, světlý či tmavý režim a **Odhlásit se**. Nastavení organizace se zobrazí, pokud k němu máte přístup. **Synchronizovat zařízení** stáhne nové nahrávky hned, bez čekání na automatickou synchronizaci.
+
+Na úzké obrazovce se vyhledávání, Nahrát a ≡ zobrazí jako tlačítka s ikonami. Ikony všech tří sekcí zůstávají viditelné, název má jen aktuální sekce.
 
 <span id="getting-help" />
 
 ## Získání pomoci
 
-Klikněte na **Nápověda** v horní liště nebo stiskněte `h` pro otevření této příručky vedle vaší práce, v kapitole týkající se aktuální obrazovky. Na stránce nahrávky se otevře [Přepisy](transcripts.md), na stránce Úkoly [Stránka Úkoly](summaries-and-tasks.md#the-tasks-page), v Nastavení se otevře právě zvolená sekce.
+Vyberte **≡ → Nápověda** nebo stiskněte `h` pro otevření této příručky vedle vaší práce, v kapitole týkající se aktuální obrazovky. Na stránce nahrávky se otevře [Přepisy](transcripts.md), na stránce Úkoly [Stránka Úkoly](summaries-and-tasks.md#the-tasks-page), v Nastavení se otevře právě zvolená sekce.
 
 ![Panel nápovědy vedle nahrávky](images/help-drawer.png)
 
@@ -71,7 +72,14 @@ Celá příručka je také dostupná na `/docs` na vaší adrese Klepna v sekci 
 
 ![Příkazová paleta](images/command-palette.png)
 
-Paleta během psaní vyhledává v názvech i přepisech. Stiskněte `Enter` pro otevření nahrávky, nebo `⌘` + `Enter` pro přepis nahrávky, která ještě nemá přepis. Umí také spustit akce jako **Synchronizovat zařízení**, **Nahrát** nebo **Otevřít nastavení**.
+Vyhledávání začíná v sekci, kterou máte otevřenou. Dvě tlačítka pod vyhledávacím polem ukazují aktuální sekci a **Všude**. Klávesou `Tab` mezi nimi přepnete bez zavření palety.
+
+- **Klepy** hledají v nahrávkách a přepisech a nabízejí akce jako **Synchronizovat zařízení**, **Nahrát** a **Otevřít nastavení**. Klávesami `⌘`/`Ctrl` + `Enter` spustíte přepis vybrané nahrávky, která přepis ještě nemá.
+- **Almanach** hledá osoby, věci všech typů a naučené přeslechy se správnými názvy. Výsledek ukazuje typ záznamu ve vašem jazyce a otevře jeho stránku v Almanachu.
+- **Úkoly** prohledávají vaše i sledované úkoly. Otevřené jsou před hotovými, u každého je termín a zdrojová nahrávka. Vybraný úkol se otevře přímo, bez ohledu na filtry seznamu.
+- **Všude** spojí výsledky ze všech sekcí a rozdělí je do skupin.
+
+Výsledek vyberete šipkami `↑` a `↓`, otevřete klávesou `Enter` a paletu zavřete klávesou `Esc`. Vyhledávání v jednotlivých seznamech i filtry úkolů fungují dál nezávisle. Pokud vyhledávání hlásí, že mohou existovat další výsledky, upřesněte dotaz.
 
 <span id="keyboard-shortcuts" />
 

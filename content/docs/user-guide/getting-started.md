@@ -24,7 +24,7 @@ The first time you open Chatterbox, a short wizard helps you set up the essentia
 | Claude (when configured) | **Connect Claude.** Add Chatterbox as a custom connector in Claude or Claude Code. |
 | ![Done](images/onboarding-done.png) | **You're all set.** Click **Get Started**. |
 
-To see the wizard again, open the user menu and choose **Run setup again**. This does not reset your completed setup.
+To see the wizard again, open the user menu and choose **Re-run setup**. This does not reset your completed setup.
 
 ## Finding your way around
 
@@ -32,20 +32,21 @@ To see the wizard again, open the user menu and choose **Run setup again**. This
 
 The bar at the top has three sections:
 
-- **Recordings**: your library. The list and folder panel stay on the left, with the selected recording on the right. Before the first recording arrives, use **New folder** to organize the library, or sync or upload right away.
+- **Chatter**: your library. The list and folder panel stay on the left, with the selected recording on the right. Before the first recording arrives, use **New folder** to organize the library, or sync or upload right away.
 - **Almanac**: the people and things Chatterbox knows about. A badge counts reviews waiting for you. See [The Almanac](almanac.md).
 - **Tasks**: action items followed across your recordings and mail. A badge counts new tasks and proposals for you. See [Summaries and tasks](summaries-and-tasks.md#the-tasks-page).
 
 On the right of the bar:
 
-- **Search** (or `Ctrl`/`⌘` + `K`) opens the command palette.
-- **Sync device** fetches new recordings from your recorder's cloud now, instead of waiting for the next automatic sync.
+- **Search Klepy**, **Search the Almanac** or **Search tasks** (or `Ctrl`/`⌘` + `K`) opens search for the current section.
 - **Upload** adds an audio or video file from your computer. It remains available on Tasks, Almanac, and Settings too. After an upload, Recordings opens with the new item selected and its workflow at the start.
-- The round button with your initial opens the account menu: **Settings**, **Keyboard shortcuts**, the light/dark theme, and **Log out**.
+- The **≡** account menu is available in all three sections: **Settings**, **Keyboard shortcuts**, **Help**, **Re-run setup**, **Sync device**, the light/dark theme, and **Log out**. Organization settings appear when available. **Sync device** fetches new recordings now instead of waiting for automatic sync.
+
+On a narrow screen, Search, Upload and ≡ appear as icon buttons. All three section icons remain visible; only the current section keeps its label.
 
 ## Getting help
 
-Click **Help** in the top bar, or press `h`, to open this guide beside your work at the chapter about the screen you are on. On a recording it opens [Transcripts](transcripts.md), on the Tasks page [The Tasks page](summaries-and-tasks.md#the-tasks-page), in Settings the section you have open.
+Choose **≡ → Help**, or press `h`, to open this guide beside your work at the chapter about the screen you are on. On a recording it opens [Transcripts](transcripts.md), on the Tasks page [The Tasks page](summaries-and-tasks.md#the-tasks-page), in Settings the section you have open.
 
 ![The help drawer beside a recording](images/help-drawer.png)
 
@@ -61,7 +62,14 @@ The whole guide is also at `/docs` on your Chatterbox address, under **User guid
 
 ![The command palette](images/command-palette.png)
 
-The palette searches titles and transcripts as you type. Press `Enter` to open a recording, or `⌘` + `Enter` to transcribe one that has no transcript yet. It also runs actions such as **Sync device**, **Upload** and **Open settings**.
+Search starts in the section you are viewing. Two pills below the search field show the current section and **Everywhere**. Press `Tab` to switch between them without closing the palette.
+
+- **Chatter** searches recordings and transcripts and offers actions such as **Sync device**, **Upload** and **Open settings**. Press `⌘`/`Ctrl` + `Enter` to transcribe a listed recording that has no transcript yet.
+- **Almanac** finds people, things of every type, and taught misheard terms with their correct names. Results show the record type in your language; opening one takes you to its Almanac page.
+- **Tasks** searches Mine and Tracked together. Open tasks come before completed tasks, with each task's due date and source recording. Opening a task shows it directly, regardless of the list filters.
+- **Everywhere** combines these results, grouped by section.
+
+Use `↑` and `↓` to choose a result, `Enter` to open it, and `Esc` to close the palette. Existing list searches and task filters still work independently. If search says more results may be available, narrow the query.
 
 ## Keyboard shortcuts
 

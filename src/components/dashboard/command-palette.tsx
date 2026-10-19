@@ -1,70 +1,139 @@
 "use client";
 
-import { Command } from "cmdk";
+import { Command, defaultFilter } from "cmdk";
 import { Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActionsGroup,
     Kbd,
     PaletteFooter,
     RECORDING_CAP,
     RecordingsGroup,
+    recordingPaletteValue,
     ThemeGroup,
-    transcriptSnippet,
 } from "@/components/dashboard/command-palette-parts";
+import { PaletteSearchResults } from "@/components/dashboard/palette-search-results";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { DateTimeFormat } from "@/lib/format-date";
+import type {
+    AppSearchResults,
+    AppSearchScope,
+    PageSearchScope,
+} from "@/lib/search/types";
+import { cn } from "@/lib/utils";
 import type { Recording } from "@/types/recording";
 import "@/components/dashboard/command-palette.css";
 
 interface TranscriptionData {
     text?: string;
-    /** The text as people read it, when corrections change it. */
     readText?: string;
     language?: string;
 }
 
+const EMPTY_RECORDINGS: Recording[] = [];
+const EMPTY_TRANSCRIPTIONS = new Map<string, TranscriptionData>();
+const EMPTY_ACTIONS = new Map<string, "transcribing" | "summarizing">();
+const EMPTY_RESULTS: AppSearchResults = {
+    chatter: [],
+    almanac: [],
+    tasks: [],
+    limited: false,
+};
+const noop = () => {};
+
 interface CommandPaletteProps {
+    pageScope?: PageSearchScope;
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    recordings: Recording[];
-    transcriptions: Map<string, TranscriptionData>;
-    currentRecording: Recording | null;
-    inFlightActions: Map<string, "transcribing" | "summarizing">;
+    recordings?: Recording[];
+    transcriptions?: Map<string, TranscriptionData>;
+    currentRecording?: Recording | null;
+    inFlightActions?: Map<string, "transcribing" | "summarizing">;
     currentTheme: "light" | "dark" | "system";
     dateTimeFormat: DateTimeFormat;
-    onSelectRecording: (r: Recording) => void;
+    onSelectRecording?: (r: Recording) => void;
     onSync: () => void;
     onUpload: () => void;
     onOpenSettings: () => void;
     onOpenShortcuts: () => void;
     onSetTheme: (t: "light" | "dark" | "system") => void;
-    onTranscribeRecording: (id: string) => void;
+    onTranscribeRecording?: (id: string) => void;
 }
 
 export function CommandPalette({
+    pageScope = "chatter",
     open,
     onOpenChange,
-    recordings,
-    transcriptions,
-    currentRecording,
-    inFlightActions,
+    recordings = EMPTY_RECORDINGS,
+    transcriptions = EMPTY_TRANSCRIPTIONS,
+    currentRecording = null,
+    inFlightActions = EMPTY_ACTIONS,
     currentTheme,
     dateTimeFormat,
-    onSelectRecording,
+    onSelectRecording = noop,
     onSync,
     onUpload,
     onOpenSettings,
     onOpenShortcuts,
     onSetTheme,
-    onTranscribeRecording,
+    onTranscribeRecording = noop,
 }: CommandPaletteProps) {
     const i18n = useExtracted();
-    // Wrap action handlers so the palette closes first, then the
-    // action runs on the next tick. Without the defer, dialogs the
-    // action opens (settings, shortcuts) race the palette's own
-    // close transition and end up stacked or fail to mount.
+    const { push } = useRouter();
+    const [scope, setScope] = useState<AppSearchScope>(pageScope);
+    const [query, setQuery] = useState("");
+    const [response, setResponse] = useState<{
+        key: string;
+        results: AppSearchResults;
+    } | null>(null);
+    const [failedKey, setFailedKey] = useState<string | null>(null);
+    const requestKey = `${scope}:${query.trim()}`;
+    const results =
+        response?.key === requestKey ? response.results : EMPTY_RESULTS;
+    const loading = response?.key !== requestKey && failedKey !== requestKey;
+    const showChatter = scope === "chatter" || scope === "all";
+    const scopeLabel =
+        pageScope === "almanac"
+            ? i18n("Almanac")
+            : pageScope === "tasks"
+              ? i18n("Tasks")
+              : i18n("Chatter");
+    useEffect(() => {
+        if (!open) return;
+        setScope(pageScope);
+        setQuery("");
+        setActiveValue("");
+        setResponse(null);
+        setFailedKey(null);
+    }, [open, pageScope]);
+    useEffect(() => {
+        if (!open) return;
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+            const params = new URLSearchParams({ scope, q: query.trim() });
+            void fetch(`/api/app-search?${params}`, {
+                signal: controller.signal,
+            })
+                .then((res) => {
+                    if (!res.ok) throw new Error();
+                    return res.json() as Promise<AppSearchResults>;
+                })
+                .then((data) => {
+                    if (!controller.signal.aborted)
+                        setResponse({ key: requestKey, results: data });
+                })
+                .catch(() => {
+                    if (!controller.signal.aborted) setFailedKey(requestKey);
+                });
+        }, 180);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [open, scope, query, requestKey]);
+
     const runAction = (fn: () => void) => () => {
         onOpenChange(false);
         setTimeout(fn, 0);
@@ -72,55 +141,44 @@ export function CommandPalette({
 
     const visibleRecordings = recordings.slice(0, RECORDING_CAP);
 
-    // Controlled `value` on the cmdk root lets us look up the
-    // currently-highlighted item when the user fires a global
-    // keyboard shortcut like ⌘↵. Without controlling it, cmdk owns
-    // the value internally and there's no way to peek at it from a
-    // keydown handler.
     const [activeValue, setActiveValue] = useState("");
 
-    // Build a lookup from a row's cmdk `value` string to its
-    // recording id. The Transcribe quick action only applies to
-    // recordings without a transcript, so the map deliberately
-    // skips rows that wouldn't render the button — keying off this
-    // map is both the "is this row a recording" check and the
-    // "does it have a transcribe action" check.
     const transcribeTargets = useMemo(() => {
         const map = new Map<string, string>();
         for (const r of visibleRecordings) {
             if (r.hasTranscript) continue;
             if (inFlightActions.get(r.id) === "transcribing") continue;
-            const snippet = transcriptSnippet(
-                transcriptions.get(r.id)?.readText ??
-                    transcriptions.get(r.id)?.text,
+            const value = recordingPaletteValue(
+                r,
+                transcriptions.get(r.id),
+                results.chatter.some((hit) => hit.id === r.id)
+                    ? query
+                    : undefined,
             );
-            // Filter falsy parts before joining so the value doesn't
-            // end in a trailing space when `snippet` is null. cmdk
-            // trims values internally, so a trailing space would
-            // make `activeValue` (trimmed) miss this map's key and
-            // ⌘↵ / Ctrl+↵ would silently no-op.
-            const value = [r.filename, r.id, snippet]
-                .filter((p): p is string => Boolean(p))
-                .join(" ");
             map.set(value, r.id);
         }
         return map;
-    }, [visibleRecordings, inFlightActions, transcriptions]);
+    }, [
+        visibleRecordings,
+        inFlightActions,
+        transcriptions,
+        results.chatter,
+        query,
+    ]);
 
-    // Stable ref to the latest map + handler so the keydown listener
-    // doesn't have to be re-created (or get stale) on every render.
     const transcribeTargetsRef = useRef(transcribeTargets);
     transcribeTargetsRef.current = transcribeTargets;
     const onTranscribeRef = useRef(onTranscribeRecording);
     onTranscribeRef.current = onTranscribeRecording;
 
     const handleKeyDownCapture = (e: React.KeyboardEvent<HTMLDivElement>) => {
-        // ⌘↵ / Ctrl+↵ — secondary action on the highlighted row.
-        // Captured before cmdk processes Enter so the regular Enter
-        // path (open recording) stays untouched. The palette stays
-        // open so the user can trigger more quick actions in
-        // succession without re-opening; the row's status flips to
-        // "Transcribing" the moment markAction lands.
+        if (e.key === "Tab") {
+            e.preventDefault();
+            setScope((current) => (current === "all" ? pageScope : "all"));
+            setActiveValue("");
+            return;
+        }
+        if (!showChatter) return;
         if (e.key !== "Enter" || (!e.metaKey && !e.ctrlKey)) return;
         const id = transcribeTargetsRef.current.get(activeValue);
         if (!id) return;
@@ -134,12 +192,18 @@ export function CommandPalette({
             <DialogContent
                 className="max-w-xl gap-0 overflow-hidden p-0"
                 showCloseButton={false}
+                aria-describedby={undefined}
             >
                 <DialogTitle className="sr-only">
                     {i18n("Command palette")}
                 </DialogTitle>
                 <Command
                     className="command-palette"
+                    filter={(value, search, keywords) =>
+                        keywords?.includes("server-match")
+                            ? 1
+                            : defaultFilter(value, search, keywords)
+                    }
                     label={i18n("Command palette")}
                     value={activeValue}
                     onValueChange={setActiveValue}
@@ -151,51 +215,140 @@ export function CommandPalette({
                             aria-hidden="true"
                         />
                         <Command.Input
-                            placeholder={i18n(
-                                "Search recordings, transcripts, or actions…",
-                            )}
+                            value={query}
+                            onValueChange={setQuery}
+                            maxLength={200}
+                            aria-label={i18n("Search")}
+                            placeholder={
+                                scope === "all"
+                                    ? i18n("Search everywhere…")
+                                    : pageScope === "almanac"
+                                      ? i18n("Search people, things, or terms…")
+                                      : pageScope === "tasks"
+                                        ? i18n("Search tasks…")
+                                        : i18n(
+                                              "Search recordings, transcripts, or actions…",
+                                          )
+                            }
                         />
                         <Kbd>{i18n("⌘K")}</Kbd>
                     </div>
 
-                    <Command.List className="max-h-[60vh] overflow-y-auto p-2">
-                        <Command.Empty>
-                            {i18n("No matches.")}{" "}
-                            <div className="cmd-empty-hint">
-                                {i18n(
-                                    "Try searching by something you talked about.",
+                    <fieldset
+                        className="flex items-center gap-2 border-b px-3 py-2"
+                        aria-label={i18n("Search scope")}
+                    >
+                        {[
+                            { value: pageScope, label: scopeLabel },
+                            {
+                                value: "all" as const,
+                                label: i18n("Everywhere"),
+                            },
+                        ].map((entry) => (
+                            <button
+                                key={entry.value}
+                                type="button"
+                                aria-pressed={scope === entry.value}
+                                className={cn(
+                                    "rounded-full px-3 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring",
+                                    scope === entry.value
+                                        ? "bg-primary/15 text-primary"
+                                        : "bg-muted text-muted-foreground",
                                 )}
-                            </div>
-                        </Command.Empty>
+                                onClick={() => {
+                                    setScope(entry.value);
+                                    setActiveValue("");
+                                }}
+                            >
+                                {entry.label}
+                            </button>
+                        ))}
+                        <span className="ml-auto text-xs text-muted-foreground">
+                            <Kbd>Tab</Kbd> {i18n("switch scope")}
+                        </span>
+                    </fieldset>
+                    <Command.List className="max-h-[60vh] overflow-y-auto p-2">
+                        <output className="px-3 text-xs text-muted-foreground">
+                            {loading
+                                ? i18n("Searching…")
+                                : failedKey === requestKey
+                                  ? i18n("Could not search. Try again.")
+                                  : results.limited
+                                    ? i18n(
+                                          "More results may be available. Refine your search.",
+                                      )
+                                    : null}
+                        </output>
+                        {!loading && (
+                            <Command.Empty>
+                                {i18n("No matches.")}{" "}
+                                <div className="cmd-empty-hint">
+                                    {i18n(
+                                        "Try searching by something you talked about.",
+                                    )}
+                                </div>
+                            </Command.Empty>
+                        )}
 
-                        <RecordingsGroup
-                            recordings={visibleRecordings}
-                            transcriptions={transcriptions}
-                            currentRecording={currentRecording}
-                            inFlightActions={inFlightActions}
-                            dateTimeFormat={dateTimeFormat}
-                            onSelectRecording={onSelectRecording}
-                            onTranscribeRecording={onTranscribeRecording}
-                            runAction={runAction}
-                        />
+                        {showChatter && (
+                            <>
+                                <RecordingsGroup
+                                    query={query}
+                                    serverMatches={
+                                        new Map(
+                                            results.chatter.map((hit) => [
+                                                hit.id,
+                                                hit.snippet,
+                                            ]),
+                                        )
+                                    }
+                                    recordings={visibleRecordings}
+                                    transcriptions={transcriptions}
+                                    currentRecording={currentRecording}
+                                    inFlightActions={inFlightActions}
+                                    dateTimeFormat={dateTimeFormat}
+                                    onSelectRecording={onSelectRecording}
+                                    onTranscribeRecording={
+                                        onTranscribeRecording
+                                    }
+                                    runAction={runAction}
+                                />
 
-                        <ActionsGroup
-                            onSync={onSync}
-                            onUpload={onUpload}
-                            onOpenSettings={onOpenSettings}
-                            onOpenShortcuts={onOpenShortcuts}
-                            runAction={runAction}
-                        />
+                                <ActionsGroup
+                                    onSync={onSync}
+                                    onUpload={onUpload}
+                                    onOpenSettings={onOpenSettings}
+                                    onOpenShortcuts={onOpenShortcuts}
+                                    runAction={runAction}
+                                />
 
-                        <ThemeGroup
-                            currentTheme={currentTheme}
-                            onSetTheme={onSetTheme}
-                            runAction={runAction}
+                                <ThemeGroup
+                                    currentTheme={currentTheme}
+                                    onSetTheme={onSetTheme}
+                                    runAction={runAction}
+                                />
+                            </>
+                        )}
+                        <PaletteSearchResults
+                            results={results}
+                            scope={scope}
+                            localRecordingIds={
+                                showChatter
+                                    ? new Set(
+                                          visibleRecordings.map(
+                                              (recording) => recording.id,
+                                          ),
+                                      )
+                                    : new Set()
+                            }
+                            onSelect={(href) => runAction(() => push(href))()}
                         />
                     </Command.List>
 
                     <PaletteFooter
-                        showTranscribeHint={transcribeTargets.size > 0}
+                        showTranscribeHint={
+                            showChatter && transcribeTargets.size > 0
+                        }
                     />
                 </Command>
             </DialogContent>

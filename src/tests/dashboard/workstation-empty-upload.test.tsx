@@ -41,6 +41,24 @@ vi.mock("next-intl", () => ({
 
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
 
+vi.mock("@/components/app-chrome-provider", () => ({
+    useAppChrome: () => ({
+        settingsOpen: false,
+        setSettingsOpen: vi.fn(),
+        onboardingOpen: false,
+        paletteOpen: false,
+        setPaletteOpen: vi.fn(),
+        shortcutsOpen: false,
+        setShortcutsOpen: vi.fn(),
+        theme: "light",
+        setTheme: vi.fn(),
+        isAutoSyncing: false,
+        lastSyncResult: null,
+        manualSync: vi.fn(),
+        handleReconnected: vi.fn(),
+    }),
+}));
+
 vi.mock("@/hooks/use-auto-sync", () => ({
     useAutoSync: () => ({
         isAutoSyncing: false,
@@ -89,8 +107,8 @@ vi.mock("@/hooks/use-upload-queue", () => ({
     },
 }));
 
-vi.mock("@/components/dashboard/workstation-header", () => ({
-    WorkstationHeader: () => <div>Dashboard header</div>,
+vi.mock("@/components/app-header", () => ({
+    AppHeader: () => <div>Dashboard header</div>,
 }));
 vi.mock("@/components/dashboard/recording-list", () => ({
     RecordingList: ({
@@ -214,12 +232,6 @@ const baseProps: ComponentProps<typeof WorkstationComponent> = {
     initialSettings: settings,
     plaudNeedsReconnect: false,
     isHosted: false,
-    onboardingCapabilities: {
-        googleConfigured: false,
-        mailAvailable: false,
-        mcpConnectorUrl: null,
-        recorderStoreUrl: "https://store.example/recorder",
-    },
     exportProviders: { filesystem: false, googleDrive: false, mail: false },
     initialFolderOrganization: {
         folders: [rootFolder],
@@ -331,6 +343,19 @@ describe("Workstation empty account", () => {
 
         expect(screen.getByText("Selected: none")).toBeTruthy();
         expect(screen.queryByText("Start with a folder")).toBeNull();
+    });
+
+    it("selects a search result when the dashboard query changes", () => {
+        window.history.replaceState({}, "", "/dashboard");
+        const first = recording("first", "First recording");
+        const second = recording("second", "Search result");
+        const { rerender } = render(
+            <Workstation {...baseProps} recordings={[first, second]} />,
+        );
+        window.history.replaceState({}, "", "/dashboard?recording=second");
+        rerender(<Workstation {...baseProps} recordings={[first, second]} />);
+        expect(screen.getByText("Selected: Search result")).toBeTruthy();
+        window.history.replaceState({}, "", "/dashboard");
     });
 
     it("selects the newest personal recording on first load", () => {

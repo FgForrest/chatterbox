@@ -45,6 +45,23 @@ export function transcriptSnippet(
     return `${stripped.slice(0, maxChars - 1).trimEnd()}…`;
 }
 
+/** The stable command value shared by a recording row and its keyboard actions. */
+export function recordingPaletteValue(
+    recording: Recording,
+    transcript: TranscriptionData | undefined,
+    matchedQuery?: string,
+): string {
+    return [
+        recording.filename,
+        recording.id,
+        transcriptSnippet(transcript?.readText ?? transcript?.text),
+        transcript?.readText ? transcriptSnippet(transcript.text) : null,
+        matchedQuery,
+    ]
+        .filter(Boolean)
+        .join(" ");
+}
+
 export function Row({
     icon,
     title,
@@ -87,7 +104,11 @@ export function RecordingsGroup({
     onSelectRecording,
     onTranscribeRecording,
     runAction,
+    serverMatches,
+    query,
 }: {
+    serverMatches?: ReadonlyMap<string, string | null>;
+    query?: string;
     recordings: Recording[];
     transcriptions: Map<string, TranscriptionData>;
     currentRecording: Recording | null;
@@ -110,9 +131,6 @@ export function RecordingsGroup({
                 const snippet = transcriptSnippet(
                     transcript?.readText ?? transcript?.text,
                 );
-                const heard = transcript?.readText
-                    ? transcriptSnippet(transcript.text)
-                    : null;
                 const inFlight = inFlightActions.get(r.id);
                 const isCurrent = currentRecording?.id === r.id;
 
@@ -154,12 +172,12 @@ export function RecordingsGroup({
                       ? `${durationText} · ${timeText}`
                       : timeText;
 
-                const searchValue = [
-                    r.filename,
-                    r.id,
-                    snippet ?? "",
-                    heard ?? "",
-                ].join(" ");
+                const serverMatched = serverMatches?.has(r.id);
+                const searchValue = recordingPaletteValue(
+                    r,
+                    transcript,
+                    serverMatched ? query : undefined,
+                );
 
                 let accessory: ReactNode = null;
                 if (inFlight === "transcribing") {
@@ -209,7 +227,8 @@ export function RecordingsGroup({
 
                 return (
                     <Command.Item
-                        key={r.id}
+                        key={serverMatched ? `${r.id}:${query}` : r.id}
+                        keywords={serverMatched ? ["server-match"] : []}
                         value={searchValue}
                         onSelect={runAction(() => onSelectRecording(r))}
                     >
@@ -220,7 +239,7 @@ export function RecordingsGroup({
                                 </span>
                             }
                             title={r.filename}
-                            subtitle={subtitle}
+                            subtitle={serverMatches?.get(r.id) ?? subtitle}
                             accessory={accessory}
                         />
                     </Command.Item>
