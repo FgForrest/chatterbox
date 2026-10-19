@@ -24,7 +24,9 @@ const PAIR_LIMIT_PER_HOUR = 10;
  */
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
-    await assertNotOrgAccount(session.user.id);
+    await assertNotOrgAccount(session.user.id, {
+        surface: "settings/recorder/pair",
+    });
 
     const limit = await consumeRateLimitBucket(
         `recorder:pair:user:${session.user.id}`,

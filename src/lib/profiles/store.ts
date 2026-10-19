@@ -13,6 +13,7 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import type { HolderAccess } from "@/lib/authz/access-state";
 import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -286,7 +287,11 @@ export async function getProfile(
     ownerUserId: string,
     profileId: string,
     actorUserId: string,
-    options: { includeArchived?: boolean; readOnly?: boolean } = {},
+    options: {
+        includeArchived?: boolean;
+        readOnly?: boolean;
+        readOnlyAccess?: () => Promise<HolderAccess>;
+    } = {},
 ): Promise<ProfileRecord | null> {
     const [row] = await db
         .select({
@@ -325,7 +330,10 @@ async function getOwnedDefaultProfile(
     ownerUserId: string,
     channel: ProfileChannel,
     actorUserId: string,
-    options: { readOnly?: boolean } = {},
+    options: {
+        readOnly?: boolean;
+        readOnlyAccess?: () => Promise<HolderAccess>;
+    } = {},
 ): Promise<ProfileRecord | null> {
     const [row] = await db
         .select({
@@ -389,13 +397,14 @@ async function pointedProfile(input: {
     channel: ProfileChannel;
     pointerId: string | null;
     readOnly?: boolean;
+    readOnlyAccess?: () => Promise<HolderAccess>;
 }): Promise<ProfileRecord | null> {
     if (!input.pointerId) return null;
     const personal = await getProfile(
         input.ownerUserId,
         input.pointerId,
         input.actorUserId,
-        { readOnly: input.readOnly },
+        { readOnly: input.readOnly, readOnlyAccess: input.readOnlyAccess },
     );
     if (personal?.channel === input.channel) return personal;
     if (!input.organizationUserId) return null;
@@ -403,7 +412,7 @@ async function pointedProfile(input: {
         input.organizationUserId,
         input.pointerId,
         input.actorUserId,
-        { readOnly: input.readOnly },
+        { readOnly: input.readOnly, readOnlyAccess: input.readOnlyAccess },
     );
     return organization?.channel === input.channel ? organization : null;
 }
@@ -413,9 +422,15 @@ export async function getDefaultProfileState(
     ownerUserId: string,
     channel: ProfileChannel,
     actorUserId = ownerUserId,
-    options: { seed?: boolean } = {},
+    options: {
+        seed?: boolean;
+        readOnlyAccess?: () => Promise<HolderAccess>;
+    } = {},
 ): Promise<DefaultProfileState> {
-    const accessOptions = { readOnly: options.seed === false };
+    const accessOptions = {
+        readOnly: options.seed === false,
+        readOnlyAccess: options.readOnlyAccess,
+    };
     if (options.seed !== false) await ensureProfiles(ownerUserId);
     const organizationUserId = await getOrgUserId();
     const organizationAccount = organizationUserId === ownerUserId;
@@ -475,6 +490,7 @@ export async function getDefaultProfileState(
         channel,
         pointerId,
         readOnly: accessOptions.readOnly,
+        readOnlyAccess: accessOptions.readOnlyAccess,
     });
     const rule = defaultProfileRule({
         pointerId,

@@ -16,7 +16,9 @@ import {
  */
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
-    await assertNotOrgAccount(session.user.id);
+    await assertNotOrgAccount(session.user.id, {
+        surface: "settings/recorder/status",
+    });
 
     const rows = await db
         .select({

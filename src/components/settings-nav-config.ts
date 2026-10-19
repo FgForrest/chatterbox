@@ -105,6 +105,13 @@ export interface SettingsNavOptions {
     accessManagement?: boolean;
 }
 
+/** Whether a settings section configures a personal recording source. */
+export function isPersonalSettingsSection(section: SettingsSection): boolean {
+    return ["plaud-account", "google-account", "recorder", "mail"].includes(
+        section,
+    );
+}
+
 /**
  * Build the settings nav. `isHosted` toggles the Billing group, which
  * is meaningless on self-host, and the Google account, which exists
@@ -127,10 +134,7 @@ export function buildSettingsNavGroups(
                                 },
                             ]
                           : []),
-                      ...group.items.filter(
-                          (item) =>
-                              !opts.isOrgAccount || item.id !== "recorder",
-                      ),
+                      ...group.items,
                       ...(opts.isHosted
                           ? []
                           : [
@@ -173,7 +177,16 @@ export function buildSettingsNavGroups(
                   },
               ]
             : []),
-        ...groups,
+        ...groups
+            .map((group) => ({
+                ...group,
+                items: group.items.filter(
+                    (item) =>
+                        !opts.isOrgAccount ||
+                        !isPersonalSettingsSection(item.id),
+                ),
+            }))
+            .filter((group) => group.items.length > 0),
     ];
 }
 

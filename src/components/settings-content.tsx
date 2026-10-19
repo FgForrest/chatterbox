@@ -4,6 +4,7 @@ import type { SettingsSection } from "@/types/settings";
 import { ApiKeysSection } from "./settings/api-keys-section";
 import { RecorderSection } from "./settings/recorder-section";
 import { WebhooksSection } from "./settings/webhooks-section";
+import { isPersonalSettingsSection } from "./settings-nav-config";
 import { AccessSection } from "./settings-sections/access-section";
 import { BillingSection } from "./settings-sections/billing-section";
 import { DevSection } from "./settings-sections/dev-section";
@@ -53,6 +54,7 @@ export function SettingsContent({
     accessManagement = false,
     onPlaudReconnected,
 }: SettingsContentProps) {
+    if (isOrgAccount && isPersonalSettingsSection(activeSection)) return null;
     switch (activeSection) {
         case "providers":
             return (
@@ -64,7 +66,6 @@ export function SettingsContent({
         case "api-keys":
             return <ApiKeysSection />;
         case "recorder":
-            if (isOrgAccount) return null;
             return <RecorderSection />;
         case "webhooks":
             return <WebhooksSection />;

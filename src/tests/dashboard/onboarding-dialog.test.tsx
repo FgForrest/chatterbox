@@ -20,6 +20,7 @@ import type {
     OnboardingReadiness,
 } from "@/lib/onboarding/capabilities";
 import { shouldOpenOnboarding } from "@/lib/onboarding/capabilities";
+import type { RecorderExtensionState } from "@/lib/recorder-extension/client";
 
 vi.mock("next-intl", () => {
     const translate = (source: string, values?: Record<string, string>) =>
@@ -32,8 +33,12 @@ vi.mock("next-intl", () => {
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 const { detectRecorder, presence } = vi.hoisted(() => ({
-    detectRecorder: vi.fn(async () => ({ kind: "not-installed" as const })),
-    presence: vi.fn(() => vi.fn()),
+    detectRecorder: vi.fn<() => Promise<RecorderExtensionState>>(async () => ({
+        kind: "not-installed",
+    })),
+    presence: vi.fn((_listener: (state: RecorderExtensionState) => void) =>
+        vi.fn(),
+    ),
 }));
 vi.mock("@/lib/recorder-extension/client", () => ({
     browserRecorderExtensionClient: () => ({
@@ -91,8 +96,8 @@ function next() {
 }
 
 beforeEach(() => {
-    detectRecorder.mockClear();
-    presence.mockClear();
+    detectRecorder.mockReset().mockResolvedValue({ kind: "not-installed" });
+    presence.mockReset().mockImplementation(() => vi.fn());
     vi.stubGlobal(
         "fetch",
         vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -109,6 +114,7 @@ beforeEach(() => {
 });
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
@@ -442,6 +448,71 @@ describe("status hydration and explicit decisions", () => {
         await waitFor(() => expect(detectRecorder).toHaveBeenCalledTimes(2));
         expect(presence).toHaveBeenCalledTimes(2);
         expect(stopRecorder).toHaveBeenCalledOnce();
+    });
+    it("updates Recorder and Complete when the extension appears without overlapping pollers", async () => {
+        vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+            "Mozilla/5.0 Chrome/130.0.0.0",
+        );
+        vi.useFakeTimers();
+        const intervals = vi.spyOn(window, "setInterval");
+        const clearInterval = vi.spyOn(window, "clearInterval");
+        const paired: RecorderExtensionState = {
+            kind: "reachable",
+            channel: "content",
+            paired: true,
+            pairedTo: window.location.origin,
+            pairedHere: true,
+        };
+        const { unmount } = render(wizard({ initialStep: "recorder" }));
+        await act(async () => {});
+        expect(detectRecorder).toHaveBeenCalledTimes(1);
+        expect(presence).toHaveBeenCalledTimes(1);
+        expect(intervals).toHaveBeenCalledTimes(1);
+        expect(intervals.mock.calls[0][1]).toBe(2000);
+        detectRecorder.mockResolvedValue(paired);
+        await act(async () => vi.advanceTimersByTimeAsync(2000));
+        expect(
+            screen.getByText(`Connected to ${window.location.host}`),
+        ).toBeTruthy();
+        expect(detectRecorder).toHaveBeenCalledTimes(2);
+        act(() => presence.mock.calls[0][0]({ kind: "not-installed" }));
+        expect(
+            screen.queryByText(`Connected to ${window.location.host}`),
+        ).toBeNull();
+        const stopRecorder = presence.mock.results[0].value;
+        detectRecorder.mockResolvedValue({ kind: "not-installed" });
+        next();
+        await act(async () => {});
+        expect(screen.getByText(/^Recorder: Not set up/)).toBeTruthy();
+        expect(detectRecorder).toHaveBeenCalledTimes(3);
+        expect(presence).toHaveBeenCalledTimes(2);
+        expect(stopRecorder).toHaveBeenCalledOnce();
+        expect(stopRecorder.mock.invocationCallOrder[0]).toBeLessThan(
+            presence.mock.invocationCallOrder[1],
+        );
+        expect(intervals).toHaveBeenCalledTimes(2);
+        expect(clearInterval).toHaveBeenCalledWith(
+            intervals.mock.results[0].value,
+        );
+        expect(clearInterval.mock.invocationCallOrder[0]).toBeLessThan(
+            intervals.mock.invocationCallOrder[1],
+        );
+        detectRecorder.mockResolvedValue(paired);
+        await act(async () => vi.advanceTimersByTimeAsync(2000));
+        expect(
+            screen.getByText("Recorder: Paired with this site"),
+        ).toBeTruthy();
+        expect(detectRecorder).toHaveBeenCalledTimes(4);
+        act(() => presence.mock.calls[1][0]({ kind: "not-installed" }));
+        expect(screen.getByText(/^Recorder: Not set up/)).toBeTruthy();
+        const stopComplete = presence.mock.results[1].value;
+        unmount();
+        expect(stopComplete).toHaveBeenCalledOnce();
+        expect(clearInterval).toHaveBeenCalledWith(
+            intervals.mock.results[1].value,
+        );
+        await act(async () => vi.advanceTimersByTimeAsync(4000));
+        expect(detectRecorder).toHaveBeenCalledTimes(4);
     });
     it("hydrates all server results on OAuth return without visiting earlier steps", async () => {
         render(

@@ -41,7 +41,14 @@ export async function gateRecordingSessionRequest(
     if (authLimitResponse) return { response: authLimitResponse };
 
     requireApiScope(authn, "recordings:write");
-    await assertNotOrgAccount(authn.user.id);
+    const pathname = new URL(request.url).pathname;
+    const sessionId = pathname.match(
+        /^\/api\/v1\/recording-sessions\/([^/]+)(?:\/|$)/,
+    )?.[1];
+    await assertNotOrgAccount(authn.user.id, {
+        surface: `${request.method} ${pathname}`,
+        ...(sessionId ? { sessionId } : {}),
+    });
     if (authn.via !== "api-key" || !authn.apiKeyId) {
         throw new AppError(
             ErrorCode.FORBIDDEN,

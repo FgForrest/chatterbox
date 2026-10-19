@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from "vitest";
 import { POST as pair } from "@/app/api/settings/recorder/pair/route";
 import { GET as status } from "@/app/api/settings/recorder/status/route";
 import {
@@ -7,6 +16,7 @@ import {
     recordingSessions,
     users,
 } from "@/db/schema";
+import { captureServerException } from "@/lib/posthog-server";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import {
     createRecordingSession,
@@ -92,6 +102,31 @@ describe.skipIf(!url)(
             deleteFile: vi.fn(),
             testConnection: vi.fn(),
         };
+        beforeEach(() => {
+            vi.clearAllMocks();
+            vi.spyOn(console, "warn").mockImplementation(() => {});
+        });
+        afterEach(() => vi.restoreAllMocks());
+        function expectRefusal(surface: string, sessionId?: string) {
+            const context = {
+                userId: "org",
+                surface,
+                ...(sessionId ? { sessionId } : {}),
+            };
+            expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+                "[recorder] Organization account refused",
+                context,
+            );
+            expect(captureServerException).toHaveBeenCalledExactlyOnceWith(
+                expect.objectContaining({ code: "FORBIDDEN", statusCode: 403 }),
+                {
+                    source: "recorder",
+                    distinctId: "org",
+                    reason: "organization_account_refused",
+                    ...context,
+                },
+            );
+        }
         beforeAll(async () => {
             database = await createMigratedTestDatabase(
                 url ?? "",
@@ -130,17 +165,27 @@ describe.skipIf(!url)(
             );
             expect(response.status).toBe(403);
             expect(await response.json()).toMatchObject({ code: "FORBIDDEN" });
+            expectRefusal(`settings/recorder/${_name}`);
             expect(mint).not.toHaveBeenCalled();
             expect(reserve).not.toHaveBeenCalled();
         });
-        it("refuses all recording-session routes even with an old Organization API key", async () => {
+        it.each([
+            "",
+            "/old-session/chunks/0",
+            "/old-session/complete",
+            "/old-session/recover",
+        ])("refuses recording-session route %s even with an old Organization API key", async (suffix) => {
             await expect(
                 gateRecordingSessionRequest(
                     new Request(
-                        "https://example.test/api/v1/recording-sessions",
+                        `https://example.test/api/v1/recording-sessions${suffix}?token=not-logged`,
                     ),
                 ),
             ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
+            expectRefusal(
+                `GET /api/v1/recording-sessions${suffix}`,
+                suffix ? "old-session" : undefined,
+            );
         });
         it("refuses direct store creation and replacement without leaving capture or session rows", async () => {
             await expect(
@@ -155,6 +200,8 @@ describe.skipIf(!url)(
                     folderId: null,
                 }),
             ).rejects.toMatchObject({ code: "FORBIDDEN" });
+            expectRefusal("createRecordingSession");
+            vi.clearAllMocks();
             await expect(
                 replaceRecordingSession({
                     userId: "org",
@@ -162,6 +209,7 @@ describe.skipIf(!url)(
                     sessionId: "old-session",
                 }),
             ).rejects.toMatchObject({ code: "FORBIDDEN" });
+            expectRefusal("replaceRecordingSession", "old-session");
             expect(
                 await database.db.select().from(recordingCaptureKeys),
             ).toEqual([]);
@@ -173,6 +221,7 @@ describe.skipIf(!url)(
             await expect(
                 saveUploadedAudioFile({
                     userId: "org",
+                    sessionId: "old-session",
                     fileId: "recording",
                     basename: "Meeting",
                     extension: ".webm",
@@ -181,6 +230,7 @@ describe.skipIf(!url)(
                     recordedAt: new Date(),
                 }),
             ).rejects.toMatchObject({ code: "FORBIDDEN" });
+            expectRefusal("saveUploadedAudioFile", "old-session");
             expect(storage.uploadStream).not.toHaveBeenCalled();
         });
         it("still lets a regular member start a personal recording session", async () => {
@@ -196,6 +246,8 @@ describe.skipIf(!url)(
             });
             expect(result.session.userId).toBe("member");
             expect(result.session.status).toBe("open");
+            expect(console.warn).not.toHaveBeenCalled();
+            expect(captureServerException).not.toHaveBeenCalled();
         });
     },
 );

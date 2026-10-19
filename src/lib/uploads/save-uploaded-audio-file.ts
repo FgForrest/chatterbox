@@ -26,6 +26,7 @@ import { getAudioMimeType } from "@/lib/utils";
 /** Save a recorder file using bounded streams for metadata and storage. */
 export async function saveUploadedAudioFile(input: {
     userId: string;
+    sessionId?: string;
     fileId: string;
     basename: string;
     extension: string;
@@ -36,7 +37,10 @@ export async function saveUploadedAudioFile(input: {
     folderId?: string | null;
     deferredFolderFallback?: DeferredFolderFallback;
 }): Promise<SavedUploadedAudio> {
-    await assertNotOrgAccount(input.userId);
+    await assertNotOrgAccount(input.userId, {
+        surface: "saveUploadedAudioFile",
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    });
     const info = await stat(input.filePath);
     const durationMs = await readAudioFileDurationMs(input.filePath);
     if (durationMs <= 0) {

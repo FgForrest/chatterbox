@@ -184,7 +184,7 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
         const result = await read();
         expect(result.ai.transcription.source).toBe("organization");
         expect(result.ai.summary.status).toBe("ready");
-        expect(verify).toHaveBeenCalled();
+        expect(verify).toHaveBeenCalledTimes(1);
         expect(
             await client()
                 .select()
@@ -194,6 +194,67 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
         expect(seed).not.toHaveBeenCalled();
         expect(reserve).not.toHaveBeenCalled();
         expect(decrypt).not.toHaveBeenCalled();
+    });
+    it.each([
+        "defaults",
+        "profile pins",
+        "member pointers",
+    ] as const)("verifies stale access once per readiness load across channels and roles: %s", async (selection) => {
+        await staleAccess();
+        if (selection === "member pointers") {
+            await setDefaultProvider("member", "transcription", "speech");
+            await setDefaultProvider("member", "summary", "chat");
+        }
+        if (selection === "profile pins") {
+            for (const channel of ["audio", "mail"] as const) {
+                const settings = defaultProfileSettings(channel);
+                settings.steps.summary.provider = {
+                    scope: "organization",
+                    credentialId: "chat",
+                };
+                if ("transcribe" in settings.steps) {
+                    settings.steps.transcribe.provider = {
+                        scope: "organization",
+                        credentialId: "speech",
+                    };
+                }
+                await client()
+                    .insert(processingProfiles)
+                    .values({
+                        id: channel,
+                        ownerUserId: "org",
+                        scope: "organization",
+                        channel,
+                        name: channel,
+                        currentRevisionId: `${channel}-revision`,
+                        isDefault: true,
+                        createdBy: "org",
+                        updatedBy: "org",
+                    });
+                await client()
+                    .insert(processingProfileRevisions)
+                    .values({
+                        id: `${channel}-revision`,
+                        profileId: channel,
+                        settings: JSON.stringify(settings),
+                        createdBy: "org",
+                    });
+            }
+        }
+        const capabilities = {
+            ...(await loadOnboardingCapabilities("member")),
+            mailAvailable: true,
+        };
+        for (let load = 1; load <= 2; load++) {
+            const result = await loadOnboardingReadiness(
+                "member",
+                capabilities,
+            );
+            expect(result.ai.transcription.source).toBe("organization");
+            expect(result.ai.summary.status).toBe("ready");
+            expect(result.ai.mailSummary?.status).toBe("ready");
+            expect(verify).toHaveBeenCalledTimes(load);
+        }
     });
     it("still caches authorization during normal pipeline resolution", async () => {
         const stale = await staleAccess();
