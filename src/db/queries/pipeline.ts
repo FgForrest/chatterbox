@@ -432,6 +432,12 @@ export async function listProviderRecoveryRowsInTx(
     limit = 200,
     perUserLimit = 20,
 ): Promise<ProviderRecoveryRow[]> {
+    const owners = organization
+        ? sql`(p.user_id = ${userId} or exists (
+                select 1 from users organization_user
+                where organization_user.id = ${userId} and organization_user.role = 'org'
+            ))`
+        : sql`p.user_id = ${userId}`;
     return tx.execute<ProviderRecoveryRow>(sql`
         with affected as (
             select p.item_id as "itemId", p.user_id as "userId", p.view,
@@ -439,10 +445,7 @@ export async function listProviderRecoveryRowsInTx(
                 row_number() over (partition by p.user_id order by p.updated_at desc, p.item_id) as owner_rank
             from item_processing p
             inner join chatter_items i on i.id = p.item_id and i.user_id = p.user_id
-            where (p.user_id = ${userId} or (${organization} and exists (
-                select 1 from users organization_user
-                where organization_user.id = ${userId} and organization_user.role = 'org'
-            )))
+            where ${owners}
               and p.view = 'private'
               and not p.manual_only
               and i.deleted_at is null

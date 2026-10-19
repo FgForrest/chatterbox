@@ -719,6 +719,9 @@ export const itemProcessing = pgTable(
             .where(
                 sql`${table.view} = 'private' and ${table.phases} -> 'transcribe' ->> 'state' = 'failed' and coalesce((${table.phases} -> 'transcribe' ->> 'automatic')::boolean, false)`,
             ),
+        providerRecoveryIdx: index("item_processing_provider_recovery_idx")
+            .on(table.userId, table.updatedAt)
+            .where(sql`${table.view} = 'private' and not ${table.manualOnly}`),
         viewCheck: check(
             "item_processing_view_check",
             sql`${table.view} in ('private', 'org')`,
