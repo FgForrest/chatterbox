@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
+import { holderAccess } from "@/lib/authz/access-state";
 import { AppError } from "@/lib/errors";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import {
     GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
     getGoogleOAuthConfig,
@@ -19,7 +21,11 @@ import type {
     ProfileReadiness,
     ProviderReadiness,
 } from "@/lib/onboarding/capabilities";
-import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
+import {
+    getOrgUserId,
+    isOrgAccount,
+    isOrgScopeEnabled,
+} from "@/lib/org/config";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import type { ProfileChannel, ProviderPin } from "@/lib/profiles/settings";
 import { getDefaultProfileState } from "@/lib/profiles/store";
@@ -29,11 +35,11 @@ import { getManagedTranscriptionProvider } from "@/lib/transcription/included-pr
 /** Read deployment and audience capabilities for an authenticated actor. */
 export async function loadOnboardingCapabilities(
     userId: string,
+    organization?: { id: string | null; isAccount: boolean },
 ): Promise<OnboardingCapabilities> {
-    const [organizationId, organizationAccount] = await Promise.all([
-        getOrgUserId(),
-        isOrgAccount(userId),
-    ]);
+    const [organizationId, organizationAccount] = organization
+        ? [organization.id, organization.isAccount]
+        : await Promise.all([getOrgUserId(), isOrgAccount(userId)]);
     return {
         audience: organizationAccount
             ? "organization-account"
@@ -51,6 +57,7 @@ async function providerReadiness(
     userId: string,
     step: "transcription" | "summary",
     pin: ProviderPin | null,
+    organizationDefaultsOnly: boolean,
 ): Promise<ProviderReadiness> {
     try {
         const selected = await resolveStepProviderSelection({
@@ -58,6 +65,7 @@ async function providerReadiness(
             step,
             pin,
             readOnly: true,
+            organizationDefaultsOnly,
         });
         if (selected.kind === "managed") {
             const managed = await getManagedTranscriptionProvider(
@@ -91,8 +99,14 @@ async function providerReadiness(
     }
 }
 
-async function channelReadiness(userId: string, channel: ProfileChannel) {
+async function channelReadiness(
+    userId: string,
+    channel: ProfileChannel,
+    organizationDefaultsOnly: boolean,
+    accessCheck: Promise<void>,
+) {
     try {
+        await accessCheck;
         const state = await getDefaultProfileState(userId, channel, userId, {
             seed: false,
         });
@@ -121,6 +135,7 @@ async function channelReadiness(userId: string, channel: ProfileChannel) {
                 userId,
                 "summary",
                 profile?.settings.steps.summary.provider ?? null,
+                organizationDefaultsOnly,
             ),
             channel === "audio"
                 ? providerReadiness(
@@ -129,6 +144,7 @@ async function channelReadiness(userId: string, channel: ProfileChannel) {
                       profile && "transcribe" in profile.settings.steps
                           ? profile.settings.steps.transcribe.provider
                           : null,
+                      organizationDefaultsOnly,
                   )
                 : Promise.resolve(unavailable),
         ]);
@@ -154,13 +170,29 @@ async function plaudReadiness(userId: string): Promise<OnboardingStatus> {
             .from(plaudConnections)
             .where(eq(plaudConnections.userId, userId))
             .limit(1);
-        return row
-            ? row.invalidatedAt
-                ? "needs-reconnect"
-                : "connected"
-            : "not-connected";
+        return plaudConnectionStatus(row ?? null);
     } catch {
         return "error";
+    }
+}
+
+function plaudConnectionStatus(
+    row: { invalidatedAt: Date | null } | null,
+): OnboardingStatus {
+    return row
+        ? row.invalidatedAt
+            ? "needs-reconnect"
+            : "connected"
+        : "not-connected";
+}
+
+async function checkOrganizationAccess(userId: string): Promise<void> {
+    if (!isOrgScopeEnabled() || !isIdpAuthorization()) return;
+    const organizationId = await getOrgUserId();
+    if (!organizationId || organizationId === userId) return;
+    const access = await holderAccess(userId, { readOnly: true });
+    if (!access.ok && access.reason === "unavailable") {
+        throw new Error("Organization access could not be checked");
     }
 }
 
@@ -206,15 +238,21 @@ async function mailReadiness(
 export async function loadOnboardingReadiness(
     userId: string,
     capabilities: OnboardingCapabilities,
+    options: { plaudConnection?: { invalidatedAt: Date | null } | null } = {},
 ): Promise<OnboardingReadiness> {
     const personal = capabilities.audience !== "organization-account";
+    const accessCheck = checkOrganizationAccess(userId);
     const [audio, mailProfile, plaud, google, mail] = await Promise.all([
-        channelReadiness(userId, "audio"),
+        channelReadiness(userId, "audio", !personal, accessCheck),
         capabilities.mailAvailable || !personal
-            ? channelReadiness(userId, "mail")
+            ? channelReadiness(userId, "mail", !personal, accessCheck)
             : Promise.resolve(null),
         personal
-            ? plaudReadiness(userId)
+            ? options.plaudConnection !== undefined
+                ? Promise.resolve(
+                      plaudConnectionStatus(options.plaudConnection),
+                  )
+                : plaudReadiness(userId)
             : Promise.resolve("not-connected" as const),
         personal && capabilities.googleConfigured
             ? googleReadiness(userId)

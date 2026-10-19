@@ -93,6 +93,7 @@ export function OnboardingDialog({
     const [step, setStep] = useState<OnboardingStepId>(initialStep);
     const [readiness, setReadiness] = useState(initialReadiness ?? null);
     const [failed, setFailed] = useState(false);
+    const checkFailed = failed && !readiness;
     const [skipped, setSkipped] = useState<Set<OnboardingStepId>>(new Set());
     const [plaudOverride, setPlaudOverride] = useState<OnboardingStatus | null>(
         null,
@@ -118,7 +119,7 @@ export function OnboardingDialog({
     const showAi = !(
         capabilities.audience === "organization-member" &&
         organizationAi &&
-        !failed
+        !checkFailed
     );
     const visible = (id: OnboardingStepId) => {
         if (id === "welcome" || id === "complete") return true;
@@ -140,27 +141,31 @@ export function OnboardingDialog({
 
     useEffect(() => {
         if (!open || suspended) return;
-        const controller = new AbortController();
+        let controller: AbortController | undefined;
         const load = async () => {
-            setPlaudOverride(null);
+            controller?.abort();
+            const current = new AbortController();
+            controller = current;
             try {
                 const response = await fetch("/api/onboarding/readiness", {
-                    signal: controller.signal,
+                    signal: current.signal,
                     cache: "no-store",
                 });
                 if (!response.ok) throw new Error("readiness check failed");
                 const snapshot = (await response.json()) as OnboardingReadiness;
-                if (controller.signal.aborted) return;
+                if (current.signal.aborted || controller !== current) return;
+                setPlaudOverride(null);
                 setReadiness(snapshot);
                 setFailed(false);
             } catch {
-                if (!controller.signal.aborted) setFailed(true);
+                if (!current.signal.aborted && controller === current)
+                    setFailed(true);
             }
         };
         void load();
         window.addEventListener("focus", load);
         return () => {
-            controller.abort();
+            controller?.abort();
             window.removeEventListener("focus", load);
         };
     }, [open, suspended]);
@@ -173,7 +178,7 @@ export function OnboardingDialog({
         );
     }, []);
     useEffect(() => {
-        if (!open || !personal || suspended) return;
+        if (!open || !personal || suspended || step !== "complete") return;
         let cancelled = false;
         const client = browserRecorderExtensionClient();
         const detect = async () => {
@@ -194,14 +199,14 @@ export function OnboardingDialog({
             window.clearInterval(interval);
             window.removeEventListener("focus", detect);
         };
-    }, [open, personal, suspended, handleRecorderState]);
+    }, [open, personal, suspended, step, handleRecorderState]);
 
     const handleRecorderConnected = useCallback(
         () => setRecorderStatus("ready"),
         [],
     );
     const status = (value: OnboardingStatus | undefined): OnboardingStatus =>
-        failed ? "error" : (value ?? "checking");
+        checkFailed ? "error" : (value ?? "checking");
     const plaudStatus = plaudOverride ?? status(readiness?.plaud);
     const googleStatus = status(readiness?.google);
     const stepIndex = Math.max(
@@ -212,7 +217,8 @@ export function OnboardingDialog({
         step === "ai-provider" && !showAi
             ? visibleSteps.findIndex(
                   (definition) =>
-                      STEPS.findIndex((item) => item.id === definition.id) > 2,
+                      STEPS.findIndex((item) => item.id === definition.id) >
+                      STEPS.findIndex((item) => item.id === "ai-provider"),
               )
             : stepIndex;
     const definition = visibleSteps[effectiveIndex] ?? visibleSteps[0];
@@ -271,17 +277,17 @@ export function OnboardingDialog({
         i18n("AI"),
         aiStatus,
         i18n("Settings → Providers"),
-        organizationAi && !failed
+        organizationAi && !checkFailed
             ? i18n("provided by your Organization ({name})", {
                   name: providerNames,
               })
-            : aiReady && !failed
+            : aiReady && !checkFailed
               ? i18n("Ready ({name})", { name: providerNames })
               : undefined,
     );
     if (
         readiness &&
-        !failed &&
+        !checkFailed &&
         !organizationAi &&
         !skipped.has("ai-provider")
     ) {
@@ -367,7 +373,9 @@ export function OnboardingDialog({
                             ? i18n("Audio profile")
                             : i18n("Mail profile"),
                     status: status(profile.status),
-                    detail: failed ? undefined : (profile.name ?? undefined),
+                    detail: checkFailed
+                        ? undefined
+                        : (profile.name ?? undefined),
                     location: i18n("Settings → Profiles"),
                 });
         }
@@ -395,10 +403,10 @@ export function OnboardingDialog({
         case "ai-provider":
             content = (
                 <OnboardingStepAiProvider
-                    ai={failed ? null : (readiness?.ai ?? null)}
+                    ai={checkFailed ? null : (readiness?.ai ?? null)}
                     audience={capabilities.audience}
-                    checking={!readiness && !failed}
-                    profiles={failed ? undefined : readiness?.profiles}
+                    checking={!readiness && !checkFailed}
+                    profiles={checkFailed ? undefined : readiness?.profiles}
                     onGoToSettings={() => onOpenSettings("providers")}
                     onOpenProfiles={() => onOpenSettings("profiles")}
                 />
@@ -419,7 +427,7 @@ export function OnboardingDialog({
             content = (
                 <OnboardingStepMail
                     mail={
-                        failed
+                        checkFailed
                             ? { status: "error", address: null }
                             : (readiness?.mail ?? {
                                   status: "checking",

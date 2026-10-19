@@ -1480,6 +1480,7 @@ export function Workstation({
                 isHosted={isHosted}
                 mailEnabled={mailEnabled}
                 accessManagement={accessManagement}
+                isOrgAccount={isOrgAccount}
                 onPlaudReconnected={handleReconnected}
             />
 

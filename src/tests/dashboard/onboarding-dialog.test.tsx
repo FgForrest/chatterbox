@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
@@ -24,11 +31,15 @@ vi.mock("next-intl", () => {
 });
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+const { detectRecorder, presence } = vi.hoisted(() => ({
+    detectRecorder: vi.fn(async () => ({ kind: "not-installed" as const })),
+    presence: vi.fn(() => vi.fn()),
+}));
 vi.mock("@/lib/recorder-extension/client", () => ({
     browserRecorderExtensionClient: () => ({
-        detect: vi.fn().mockResolvedValue({ kind: "not-installed" }),
+        detect: detectRecorder,
         pair: vi.fn(),
-        onPresence: vi.fn(() => vi.fn()),
+        onPresence: presence,
     }),
 }));
 
@@ -80,6 +91,8 @@ function next() {
 }
 
 beforeEach(() => {
+    detectRecorder.mockClear();
+    presence.mockClear();
     vi.stubGlobal(
         "fetch",
         vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -337,6 +350,99 @@ describe("capability-gated personal steps", () => {
 });
 
 describe("status hydration and explicit decisions", () => {
+    it("aborts superseded requests and ignores a late reply", async () => {
+        const requests: {
+            signal: AbortSignal;
+            resolve: (response: Response) => void;
+        }[] = [];
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                (_input: RequestInfo | URL, options: RequestInit) =>
+                    new Promise<Response>((resolve) => {
+                        requests.push({
+                            signal: options.signal as AbortSignal,
+                            resolve,
+                        });
+                    }),
+            ),
+        );
+        const { unmount } = render(wizard({ initialStep: "complete" }));
+        fireEvent.focus(window);
+        expect(requests).toHaveLength(2);
+        expect(requests[0].signal.aborted).toBe(true);
+        await act(async () => {
+            requests[1].resolve(Response.json(orgReady));
+        });
+        expect(
+            screen.getByText(
+                "AI: provided by your Organization (ElevenLabs, Codex)",
+            ),
+        ).toBeTruthy();
+        await act(async () => {
+            requests[0].resolve(Response.json(snapshot));
+        });
+        expect(
+            screen.getByText(
+                "AI: provided by your Organization (ElevenLabs, Codex)",
+            ),
+        ).toBeTruthy();
+        fireEvent.focus(window);
+        expect(requests[1].signal.aborted).toBe(true);
+        unmount();
+        expect(requests[2].signal.aborted).toBe(true);
+    });
+    it.each([
+        false,
+        true,
+    ])("preserves the good snapshot and hidden AI step after a failed refetch (server seed: %s)", async (seeded) => {
+        const fetchReadiness = vi
+            .fn()
+            .mockResolvedValue(Response.json(orgReady));
+        if (seeded) fetchReadiness.mockRejectedValue(new Error("offline"));
+        vi.stubGlobal("fetch", fetchReadiness);
+        render(
+            wizard({
+                capabilities: {
+                    ...capabilities,
+                    audience: "organization-member",
+                },
+                initialReadiness: seeded ? orgReady : undefined,
+                initialStep: "complete",
+            }),
+        );
+        await screen.findByText(
+            "AI: provided by your Organization (ElevenLabs, Codex)",
+        );
+        fetchReadiness.mockRejectedValue(new Error("offline"));
+        await act(async () => {
+            fireEvent.focus(window);
+        });
+        expect(
+            screen.getByText(
+                "AI: provided by your Organization (ElevenLabs, Codex)",
+            ),
+        ).toBeTruthy();
+        expect(screen.getByText("Plaud: Connected")).toBeTruthy();
+        expect(screen.getByText("Step 4 of 4")).toBeTruthy();
+        expect(screen.queryByText(/Could not check/)).toBeNull();
+    });
+    it("polls recorder presence only on the recorder and Complete steps with one subscription", async () => {
+        render(wizard());
+        expect(detectRecorder).not.toHaveBeenCalled();
+        next();
+        await screen.findByText("Plaud is connected");
+        next();
+        expect(detectRecorder).not.toHaveBeenCalled();
+        next();
+        await waitFor(() => expect(detectRecorder).toHaveBeenCalledTimes(1));
+        expect(presence).toHaveBeenCalledTimes(1);
+        const stopRecorder = presence.mock.results[0].value;
+        next();
+        await waitFor(() => expect(detectRecorder).toHaveBeenCalledTimes(2));
+        expect(presence).toHaveBeenCalledTimes(2);
+        expect(stopRecorder).toHaveBeenCalledOnce();
+    });
     it("hydrates all server results on OAuth return without visiting earlier steps", async () => {
         render(
             wizard({

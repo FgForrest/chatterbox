@@ -20,6 +20,7 @@ import {
     users,
 } from "@/db/schema";
 import { setDefaultProvider } from "@/lib/ai/default-provider";
+import { IdentityProviderError } from "@/lib/identity/ports";
 import { GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE } from "@/lib/integrations/google/config";
 import {
     loadOnboardingCapabilities,
@@ -209,6 +210,81 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
         expect(after.verifiedAt.getTime()).toBeGreaterThan(stale.getTime());
         expect(after.source).toBe("verifier");
     });
+    it("reports an IdP outage as a check error without changing pipeline behavior", async () => {
+        await staleAccess();
+        verify.mockRejectedValue(
+            new IdentityProviderError("unavailable", "offline"),
+        );
+        try {
+            const result = await read();
+            expect(result.ai.transcription.status).toBe("error");
+            expect(result.ai.summary.status).toBe("error");
+            await expect(
+                resolveStepProviderSelection({
+                    step: "transcription",
+                    pin: null,
+                    actorUserId: "member",
+                }),
+            ).rejects.toMatchObject({ code: "NO_TRANSCRIPTION_PROVIDER" });
+        } finally {
+            verify.mockResolvedValue({
+                status: "active",
+                capabilities: new Set(["use"]),
+            });
+        }
+    });
+    describe.each([false, true])("inherited coverage (IdP: %s)", (idp) => {
+        it.each([
+            "OpenAI",
+            "Codex",
+            "defaults",
+            "none",
+        ])("shows the same inherited coverage for the Organization and a fresh member: %s", async (configuration) => {
+            const memberId = crypto.randomUUID();
+            await client()
+                .insert(users)
+                .values({
+                    id: memberId,
+                    email: `${memberId}@example.test`,
+                });
+            state.idp = idp;
+            if (idp) {
+                await client()
+                    .insert(userAccessStates)
+                    .values({
+                        userId: memberId,
+                        issuer: "https://identity.example.test",
+                        subject: memberId,
+                        capabilities: ["use"],
+                        status: "active",
+                        verifiedAt: new Date(),
+                        source: "login",
+                    });
+            }
+            if (configuration === "defaults") {
+                await credential("speech", "ElevenLabs");
+                await credential("chat", "Codex");
+                await setDefaultProvider("org", "transcription", "speech");
+                await setDefaultProvider("org", "summary", "chat");
+            } else if (configuration !== "none") {
+                await credential("chat", configuration);
+            }
+            const organization = await read("org");
+            const member = await read(memberId);
+            for (const role of ["transcription", "summary"] as const) {
+                expect(organization.ai[role]).toEqual(member.ai[role]);
+            }
+            expect(organization.ai.mailSummary).toEqual(member.ai.summary);
+            expect(organization.ai.summary.status).toBe(
+                configuration === "none" ? "not-connected" : "ready",
+            );
+            expect(organization.ai.transcription.status).toBe(
+                configuration === "none" || configuration === "Codex"
+                    ? "not-connected"
+                    : "ready",
+            );
+        });
+    });
     it("reports Organization defaults, including the summary-only Codex bridge", async () => {
         await credential("speech", "ElevenLabs");
         await credential("chat", "Codex");
@@ -239,7 +315,7 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
                 .where(eq(userSettings.userId, "member")),
         ).toEqual([]);
     });
-    it("tracks the pipeline for Organization providers without defaults, including after the fallback merges", async () => {
+    it("tracks the pipeline for Organization providers without defaults", async () => {
         await credential("speech", "ElevenLabs");
         await credential("chat", "Claude Code");
         const result = await read();
@@ -248,19 +324,13 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
                 step: role,
                 pin: null,
                 actorUserId: "member",
-            }).catch(() => null);
-            expect(result.ai[role]).toEqual(
-                pipeline?.kind === "credential"
-                    ? {
-                          source: "organization",
-                          name:
-                              role === "transcription"
-                                  ? "ElevenLabs"
-                                  : "Claude Code",
-                          status: "ready",
-                      }
-                    : { source: "none", name: null, status: "not-connected" },
-            );
+            });
+            expect(pipeline.kind).toBe("credential");
+            expect(result.ai[role]).toEqual({
+                source: "organization",
+                name: role === "transcription" ? "ElevenLabs" : "Claude Code",
+                status: "ready",
+            });
         }
     });
     it("respects a personal explicit provider without leaking another user's credentials", async () => {
@@ -382,6 +452,28 @@ describe.skipIf(!url)("onboarding read-only readiness (PostgreSQL)", () => {
         expect(result.plaud).toBe("needs-reconnect");
         expect(result.google).toBe("needs-reconnect");
         expect(decrypt).not.toHaveBeenCalled();
+    });
+    it.each([
+        null,
+        { invalidatedAt: null },
+        { invalidatedAt: new Date() },
+    ])("reuses the supplied Plaud connection instead of reading it again: %s", async (plaudConnection) => {
+        await client().insert(plaudConnections).values({
+            userId: "member",
+            bearerToken: "secret-plaud",
+            invalidatedAt: new Date(),
+        });
+        const capabilities = await loadOnboardingCapabilities("member");
+        const result = await loadOnboardingReadiness("member", capabilities, {
+            plaudConnection,
+        });
+        expect(result.plaud).toBe(
+            plaudConnection
+                ? plaudConnection.invalidatedAt
+                    ? "needs-reconnect"
+                    : "connected"
+                : "not-connected",
+        );
     });
     it.each([
         0, 3600,

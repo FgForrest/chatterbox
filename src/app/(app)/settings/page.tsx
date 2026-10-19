@@ -24,6 +24,7 @@ export default async function SettingsPage() {
         <SettingsPageContent
             initialProviders={providers}
             isHosted={env.IS_HOSTED}
+            isOrgAccount={orgAccount}
             mailEnabled={isMailEnabled() && !orgAccount}
             accessManagement={accessManagementAvailable(actor)}
         />

@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, type userSettings } from "@/db/schema";
-import { loadDefaultProviderState } from "@/lib/ai/default-provider";
+import {
+    type DefaultProviderState,
+    loadDefaultProviderState,
+} from "@/lib/ai/default-provider";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -331,6 +334,7 @@ async function resolvePinnedOrganization(input: {
     credential?: CredentialRow;
     choice?: ProviderChoice;
     readOnly?: boolean;
+    organizationDefaultsOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
@@ -362,7 +366,14 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    if (isIdpAuthorization()) {
+    if (
+        isIdpAuthorization() &&
+        !(
+            input.readOnly &&
+            input.organizationDefaultsOnly &&
+            input.actorUserId === orgUserId
+        )
+    ) {
         const access = await holderAccess(input.actorUserId, {
             readOnly: input.readOnly,
         });
@@ -553,14 +564,28 @@ async function resolveUnpinned(
     step: ProcessingStep,
     actorUserId: string,
     readOnly: boolean,
+    organizationDefaultsOnly = false,
 ): Promise<ResolvedStepProviderSelection> {
-    const actorState = await loadDefaultProviderState(actorUserId);
+    const actorState: DefaultProviderState = organizationDefaultsOnly
+        ? {
+              pointers: {
+                  transcription: null,
+                  summary: null,
+                  learn: null,
+                  topics: null,
+                  title: null,
+              },
+              credentials: [],
+              settings: undefined,
+          }
+        : await loadDefaultProviderState(actorUserId);
     const orgUserId = await organizationDefaultOwner(actorUserId, readOnly);
     const organizationState = orgUserId
         ? await loadDefaultProviderState(orgUserId)
         : null;
     const hasSeparateOrganization =
-        Boolean(orgUserId) && orgUserId !== actorUserId;
+        Boolean(orgUserId) &&
+        (organizationDefaultsOnly || orgUserId !== actorUserId);
     const [candidate] = defaultProviderCandidates(
         step,
         actorState.pointers,
@@ -599,6 +624,7 @@ async function resolveUnpinned(
                 credential: organization,
                 choice,
                 readOnly,
+                organizationDefaultsOnly,
             });
             return { ...resolved, actorSettings: actorState.settings };
         }
@@ -646,6 +672,7 @@ export async function resolveStepProviderSelection(input: {
     pin: ProviderPin | null;
     actorUserId: string;
     readOnly?: boolean;
+    organizationDefaultsOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
@@ -657,6 +684,7 @@ export async function resolveStepProviderSelection(input: {
         input.step,
         input.actorUserId,
         input.readOnly === true,
+        input.readOnly === true && input.organizationDefaultsOnly === true,
     );
 }
 
