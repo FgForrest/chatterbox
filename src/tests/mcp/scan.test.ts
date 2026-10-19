@@ -84,6 +84,26 @@ describe("boundedScan", () => {
         expect(outcome.complete).toBe(true);
     });
 
+    it.each([
+        "items",
+        "results",
+    ])("does not load beyond the %s bound when requested", async (bound) => {
+        const source = batches();
+        const result = await boundedScan({
+            batches: source.next,
+            stampOf: String,
+            visit: (item) => (bound === "results" ? item : null),
+            limit: bound === "items" ? 10 : 100,
+            maxResults: 10,
+            deadlineMs: 10_000,
+            before: null,
+            stopBeforeBatch: true,
+        });
+        expect(result.scanned).toBe(10);
+        expect(result.complete).toBe(false);
+        expect(source.calls).toEqual([null]);
+    });
+
     it("stops at the deadline", async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-10-07T10:00:00Z"));

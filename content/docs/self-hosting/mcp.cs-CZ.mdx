@@ -29,7 +29,7 @@ nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
 | `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
 | `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
 | `tasks:write`      | `update_task` (pouze stav a zadání)                                                            |
-| `mail:read`        | `list_mail`, `get_mail`                                                                            |
+| `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders` a `list_recordings` jsou dostupné spolu s některou z
 `transcripts:read`, `summaries:read` nebo `tasks:read`.
@@ -63,7 +63,7 @@ Oprávnění se kombinují a některá pole vyžadují dvě:
   nenajde slova e-mailu.
 - Akční položky shrnutí v `get_summary` a v tom, co
   `search_summaries` vyhledává, vyžadují `tasks:read`.
-- Filtr `entity` u nástrojů nad nahrávkami vyžaduje `knowledge:read`.
+- Filtr `entity` u nástrojů nad nahrávkami a `search_mail` vyžaduje `knowledge:read`.
 - `tasks:write` zahrnuje `tasks:read`.
 
 Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla aplikace Klepna
@@ -328,7 +328,7 @@ jako `resolved`; nejasná odpoví až pěti kandidáty. Bez
 `knowledge:read` se rozpoznávají pouze lidé, které už volající zná
 (potvrzení mluvčí nahrávek, přiřazení úkolů), nikoli věci.
 
-**Vyhledávání má limity.** Názvy, přepisy, shrnutí a úkoly jsou při
+**Vyhledávání má limity.** Názvy, přepisy, shrnutí, úkoly a pošta jsou při
 uložení šifrovány (šifrování uložených dat), takže vyhledávání dešifruje za
 chodu vždy od nejnovějšího, s limitem:
 
@@ -337,6 +337,7 @@ chodu vždy od nejnovějšího, s limitem:
 | `list_recordings` s `title`      | 500 nahrávek    | 50                               |
 | `search_transcripts`                | 200 nahrávek    | 50 nahrávek, 3 úryvky na každou  |
 | `search_summaries`                  | 500 shrnutí      | 50 nahrávek, 3 úryvky na každou  |
+| `search_mail`                       | 500 e-mailů    | 50 e-mailů, 3 úryvky na každý |
 | `search_tasks`                      | 2000 úkolů      | 50                               |
 
 Každé také končí nejpozději za 10 sekund. Odpověď uvádí `scanned`,

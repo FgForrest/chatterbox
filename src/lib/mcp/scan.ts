@@ -28,6 +28,8 @@ export interface ScanOptions<Item, Result> {
     maxResults: number;
     /** Where to start: a stamp from an earlier scan, or null. */
     before: string | null;
+    /** Stop at a bound before loading another batch, without probing for exhaustion. */
+    stopBeforeBatch?: boolean;
 }
 
 /**
@@ -48,7 +50,7 @@ export async function boundedScan<Item, Result>(
         results.length >= options.maxResults ||
         late();
     for (;;) {
-        if (late()) {
+        if (options.stopBeforeBatch ? stopped() : late()) {
             return {
                 results,
                 scanned,
