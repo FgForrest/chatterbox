@@ -180,7 +180,7 @@ describe("AI cost summary", () => {
         });
         renderSummary();
         const trigger = await screen.findByRole("button", {
-            name: "Estimated AI spend: $0.45",
+            name: "Estimated AI spend: $0.45 + unknown",
         });
         expect(trigger.textContent).toBe("$0.45 + ?");
         const panel = await openBreakdown(trigger);

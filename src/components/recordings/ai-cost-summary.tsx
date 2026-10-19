@@ -96,8 +96,9 @@ export function AiCostSummary({
     const hasPricedTotal =
         summary.requestCount > summary.unknownCount &&
         Number.isFinite(summary.totalUsd);
+    const partlyUnpriced = hasPricedTotal && summary.unknownCount > 0;
     const total = hasPricedTotal ? dollars(summary.totalUsd) : "$??";
-    const label = `${i18n("Estimated AI spend")}: ${total}`;
+    const label = `${i18n("Estimated AI spend")}: ${total}${partlyUnpriced ? ` + ${i18n("unknown")}` : ""}`;
     const hasSubscriptionEstimate = [
         ...Object.keys(summary.byService),
         ...Object.keys(summary.unknownByService),
@@ -118,7 +119,7 @@ export function AiCostSummary({
                         className="inline-flex items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         {total}
-                        {hasPricedTotal && summary.unknownCount > 0 && " + ?"}
+                        {partlyUnpriced && " + ?"}
                         <ChevronDown className="size-3" aria-hidden="true" />
                     </button>
                 </DropdownMenuTrigger>
