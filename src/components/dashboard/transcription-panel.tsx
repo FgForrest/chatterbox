@@ -714,6 +714,18 @@ export function TranscriptionPanel({
             onTranscriptStale?.();
         },
     });
+    const learnSummaryHold = !heldForReview
+        ? null
+        : processing?.latestLearnRun?.status === "queued" ||
+            processing?.latestLearnRun?.status === "running"
+          ? "running"
+          : correcting ||
+              (processing?.phases.learn?.state === "running" &&
+                  processing.phases.learn.reason === "correcting")
+            ? "correcting"
+            : (processing?.learnFindingsWaiting ?? 0) > 0
+              ? "review"
+              : null;
     const handleReviewFinished = useCallback(() => {
         setReviewsFinished((count) => count + 1);
         followReleased();
@@ -1699,17 +1711,30 @@ export function TranscriptionPanel({
                                             ? i18n(
                                                   "No Plaud summary has been imported. It will appear after Plaud sync when available.",
                                               )
-                                            : summaryTranscript && heldForReview
+                                            : summaryTranscript &&
+                                                learnSummaryHold === "running"
                                               ? i18n(
-                                                    'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
+                                                    'The summary waits while Learn checks the transcript, then starts by itself. Click "Summarize" to make it now.',
                                                 )
-                                              : summaryTranscript
+                                              : summaryTranscript &&
+                                                  learnSummaryHold ===
+                                                      "correcting"
                                                 ? i18n(
-                                                      'No custom summary yet. Click "Summarize" to generate one.',
+                                                      'The summary waits while Learn corrects the transcript, then starts by itself. Click "Summarize" to make it now.',
                                                   )
-                                                : i18n(
-                                                      "A custom transcript is required before generating a custom summary.",
-                                                  )}
+                                                : summaryTranscript &&
+                                                    learnSummaryHold ===
+                                                        "review"
+                                                  ? i18n(
+                                                        'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
+                                                    )
+                                                  : summaryTranscript
+                                                    ? i18n(
+                                                          'No custom summary yet. Click "Summarize" to generate one.',
+                                                      )
+                                                    : i18n(
+                                                          "A custom transcript is required before generating a custom summary.",
+                                                      )}
                                     </p>
                                     {/* Tasks a replaced summary left, until a new one comes */}
                                     <div className="mt-6 w-full space-y-3 text-left">

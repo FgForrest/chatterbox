@@ -18,8 +18,27 @@ export interface TitleInputFence {
 export type TitleInput = {
     text: string;
     source: "summary" | "transcript";
+    contentLanguage: string | null;
     fence?: TitleInputFence;
 };
+
+async function readDetectedLanguage(
+    userId: string,
+    transcriptionId: string | null,
+): Promise<string | null> {
+    if (!transcriptionId) return null;
+    const [transcript] = await db
+        .select({ detectedLanguage: transcriptions.detectedLanguage })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.id, transcriptionId),
+                eq(transcriptions.userId, userId),
+            ),
+        )
+        .limit(1);
+    return transcript?.detectedLanguage ?? null;
+}
 
 /** Prefer the complete summary, then the corrected Riffado transcript. */
 export async function readTitleInput(
@@ -47,6 +66,10 @@ export async function readTitleInput(
         return {
             text: [summary.summary, ...summary.keyPoints].join("\n"),
             source: "summary",
+            contentLanguage: await readDetectedLanguage(
+                userId,
+                summary.transcriptionId,
+            ),
             ...(fence ? { fence } : {}),
         };
     }
@@ -75,6 +98,7 @@ export async function readTitleInput(
             ? {
                   text,
                   source: "transcript",
+                  contentLanguage: null,
                   fence: {
                       contentId: content.sourceId,
                       contentSourceId: "mail",
@@ -112,6 +136,7 @@ export async function readTitleInput(
         ? {
               text: input.text,
               source: "transcript",
+              contentLanguage: transcript.detectedLanguage ?? null,
               ...(fence ? { fence } : {}),
           }
         : null;

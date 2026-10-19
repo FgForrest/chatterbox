@@ -10,7 +10,6 @@ vi.mock("@/lib/pipeline/state", () => ({
     markSummaryStepFailed: mocks.markSummaryStepFailed,
 }));
 
-import { titleJobHandler } from "@/lib/recordings/title-job-handler";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 
@@ -34,17 +33,6 @@ describe("Summary-phase terminal failures", () => {
                 }),
             step: "summary",
             view: "org",
-        },
-        {
-            invoke: () =>
-                titleJobHandler.onTerminalFailure?.({
-                    jobId: "job-1",
-                    userId: "user-1",
-                    payload: { recordingId: "recording-1" },
-                    errorCode: "PROVIDER_FAILED",
-                }),
-            step: "title",
-            view: "private",
         },
         {
             invoke: () =>

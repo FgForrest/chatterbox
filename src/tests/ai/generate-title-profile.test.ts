@@ -65,8 +65,8 @@ describe("profile-backed title generation", () => {
         });
     });
 
-    it("generates a manual title when automatic titles are off", async () => {
-        selectRows([{ detectedLanguage: "cs" }]);
+    it("uses a resolved Czech directive and Czech capitalization for ces", async () => {
+        selectRows([{ detectedLanguage: "ces" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
 
         await generateTitleFromTranscription(
@@ -79,7 +79,10 @@ describe("profile-backed title generation", () => {
 
         const request = mocks.create.mock.calls[0]?.[0];
         expect(request.messages[0].content).toContain(
-            "the language the transcription is predominantly spoken in",
+            "Write all natural-language output in Czech",
+        );
+        expect(request.messages[0].content).toContain(
+            "Use English Title Case only for English; Czech and most other European languages use sentence case.",
         );
         expect(request.messages[1].content).toContain("Jste generátor názvů");
     });

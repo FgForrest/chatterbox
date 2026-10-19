@@ -199,6 +199,28 @@ describe("deriveWorkflowStatus", () => {
         expect(result.status).toMatchObject({ message });
     });
 
+    it("keeps an in-flight Learn run visible after a later phase stamp", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    learn: phase("waiting", "review_pending"),
+                },
+                latestLearnRun: {
+                    status: "running",
+                    errorCode: null,
+                    updatedAt: "2026-10-16T07:59:00.000Z",
+                },
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe("working");
+        expect(result.status).toMatchObject({
+            actor: "working",
+            message: "learnRunning",
+        });
+    });
+
     it("shows a newer failed Learn run as the retryable problem", () => {
         const result = deriveWorkflowStatus(
             processing({
@@ -364,14 +386,14 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
-    it("maps a manually started Learn run to review with no counted findings", () => {
+    it("maps a manually started Learn run with findings to review", () => {
         const result = deriveWorkflowStatus(
             processing({
                 phases: {
                     learn: phase("waiting", "manual_review_pending"),
                 },
                 outputs: { transcript: true, learn: false, summary: false },
-                learnFindingsWaiting: 0,
+                learnFindingsWaiting: 1,
             }),
             "audio",
         );
@@ -380,8 +402,41 @@ describe("deriveWorkflowStatus", () => {
         expect(result.status).toMatchObject({
             actor: "yours",
             message: "manualLearnReview",
-            params: { count: 0 },
+            params: { count: 1 },
             action: "reviewLearn",
+        });
+    });
+
+    it("renders a stored empty review hold as correction work", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: { learn: phase("waiting", "review_pending") },
+                outputs: { transcript: true, learn: false, summary: false },
+                learnFindingsWaiting: 0,
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe("working");
+        expect(result.status).toEqual({
+            actor: "working",
+            message: "learnCorrecting",
+        });
+    });
+
+    it("maps a correction pass to working", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: { learn: phase("running", "correcting") },
+                outputs: { transcript: true, learn: false, summary: false },
+            }),
+            "audio",
+        );
+
+        expect(stateOf(result.steps, "learn")).toBe("working");
+        expect(result.status).toEqual({
+            actor: "working",
+            message: "learnCorrecting",
         });
     });
 

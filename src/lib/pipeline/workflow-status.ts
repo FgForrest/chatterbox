@@ -40,6 +40,7 @@ export type WorkflowMessageCode =
     | "manualTranscription"
     | "learnQueued"
     | "learnRunning"
+    | "learnCorrecting"
     | "learnReview"
     | "manualLearnReview"
     | "learnTimedOut"
@@ -141,17 +142,12 @@ function recordState(record: PhaseRecord | undefined): WorkflowStepState {
 function currentLearnRun(data: ItemProcessingPresentation) {
     const run = data.latestLearnRun;
     if (!run) return null;
+    if (run.status === "queued" || run.status === "running") return run;
+    if (run.status !== "failed") return null;
     const phaseAt = data.phases.learn?.at;
-    if (phaseAt && Date.parse(run.updatedAt) <= Date.parse(phaseAt))
-        return null;
-    if (
-        run.status !== "queued" &&
-        run.status !== "running" &&
-        run.status !== "failed"
-    ) {
-        return null;
-    }
-    return run;
+    return !phaseAt || Date.parse(run.updatedAt) > Date.parse(phaseAt)
+        ? run
+        : null;
 }
 
 function displayState(
@@ -177,14 +173,8 @@ function displayState(
     if (learnRun?.status === "running") return "working";
     if (learnRun?.status === "failed") return "problem";
     if (phase === "learn" && record?.state === "waiting") {
-        if (
-            data.learnFindingsWaiting > 0 ||
-            record.reason === "review_pending" ||
-            record.reason === "review_pending_timeout" ||
-            record.reason === "manual_review_pending"
-        ) {
-            return "review";
-        }
+        if (data.learnFindingsWaiting > 0) return "review";
+        if (record.reason === "review_pending") return "working";
     }
     if (phase === "summary" && data.jobs.summary) {
         return data.jobs.summary === "queued" ? "queued" : "working";
@@ -493,14 +483,17 @@ function deriveStatus(
         return { actor: "working", message: "learnRunning" };
     }
     if (data.phases.learn?.state === "running") {
-        return { actor: "working", message: "learnRunning" };
+        return {
+            actor: "working",
+            message:
+                data.phases.learn.reason === "correcting"
+                    ? "learnCorrecting"
+                    : "learnRunning",
+        };
     }
     if (
         data.phases.learn?.state === "waiting" &&
-        (data.learnFindingsWaiting > 0 ||
-            data.phases.learn.reason === "review_pending" ||
-            data.phases.learn.reason === "review_pending_timeout" ||
-            data.phases.learn.reason === "manual_review_pending")
+        data.learnFindingsWaiting > 0
     ) {
         return {
             actor: "yours",
@@ -508,6 +501,12 @@ function deriveStatus(
             params: { count: data.learnFindingsWaiting },
             action: "reviewLearn",
         };
+    }
+    if (
+        data.phases.learn?.state === "waiting" &&
+        data.phases.learn.reason === "review_pending"
+    ) {
+        return { actor: "working", message: "learnCorrecting" };
     }
     if (data.jobs.summary === "queued") {
         return { actor: "queued", message: "summaryQueued" };
@@ -579,6 +578,7 @@ function currentStepId(
     if (
         status.message === "learnQueued" ||
         status.message === "learnRunning" ||
+        status.message === "learnCorrecting" ||
         status.message === "learnReview" ||
         status.message === "manualLearnReview" ||
         status.message === "learnTimedOut"
