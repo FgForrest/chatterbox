@@ -68,6 +68,17 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
 
+    if (new URL(request.url).searchParams.get("processing") === "1") {
+        const access = await requireRecordingView(
+            session.user.id,
+            id,
+            requestedRecordingView(request),
+        );
+        return NextResponse.json({
+            processing: await loadPrivateItemProcessing(access.ownerUserId, id),
+        });
+    }
+
     const [row] = await db
         .select(audioItemColumns)
         .from(recordings)
@@ -88,12 +99,6 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             "Recording not found",
             404,
         );
-    }
-
-    if (new URL(request.url).searchParams.get("processing") === "1") {
-        return NextResponse.json({
-            processing: await loadPrivateItemProcessing(session.user.id, id),
-        });
     }
 
     // Get transcription if exists. Defense-in-depth: scope by userId
@@ -173,10 +178,67 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         actorUserId,
         id,
         requestedRecordingView(request),
+        { kinds: ["audio", "mail"] },
     );
     const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, actorUserId, curates);
     const userId = access.ownerUserId;
+    const orgUserId = await sharingOrgUserId();
+
+    if (access.kind === "mail") {
+        const refusal = await contentWriterRefusal(undefined, {
+            recordingId: id,
+            ownerUserId: userId,
+            actorUserId,
+            orgUserId,
+            actsForOrganization: curates,
+        });
+        if (refusal) throw writerRefusalError(refusal);
+
+        let refused: ReturnType<typeof writerRefusalError> | null = null;
+        const renamed = await db.transaction(async (tx) => {
+            const [locked] = await tx
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, id),
+                        eq(chatterItems.userId, userId),
+                        eq(chatterItems.kind, "mail"),
+                        isNull(chatterItems.deletedAt),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked) return false;
+            const shared = await contentWriterRefusal(tx, {
+                recordingId: id,
+                ownerUserId: userId,
+                actorUserId,
+                orgUserId,
+                actsForOrganization: curates,
+            });
+            if (shared) {
+                refused = writerRefusalError(shared);
+                return false;
+            }
+            await setItemTitle(tx, {
+                id,
+                userId,
+                title: encryptText(filename),
+                editedAt: new Date(),
+            });
+            return true;
+        });
+        if (refused) throw refused;
+        if (!renamed) {
+            throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
+        }
+        await emitEvent("recording.updated", userId, id);
+        await notifyIfShared(id);
+        return NextResponse.json({ filename });
+    }
+
     const [recording] = await db
         .select({
             id: recordings.id,
@@ -202,7 +264,6 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
     }
     // Refused before any file is renamed, and again under the lock where
     // the title is written.
-    const orgUserId = await sharingOrgUserId();
     const refusal = await contentWriterRefusal(undefined, {
         recordingId: id,
         ownerUserId: userId,

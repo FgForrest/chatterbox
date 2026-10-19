@@ -85,6 +85,7 @@ export function NewRecordItem({
     names,
     entityTypes,
     seek,
+    evidence,
     onDecide,
     onLinked,
 }: {
@@ -102,6 +103,7 @@ export function NewRecordItem({
     /** The types a new thing may take. */
     entityTypes: { key: string; label: string }[];
     seek: (ms: number) => ReactNode;
+    evidence?: ReactNode;
     onDecide: (
         decision: "accepted" | "rejected" | null,
         choice: NewRecordChoice | null,
@@ -266,21 +268,23 @@ export function NewRecordItem({
                             {i18n("Only a first name: add the surname.")}
                         </div>
                     )}
-                <LearnEvidence>
-                    <div className="text-xs text-muted-foreground">
-                        {payload.kind === "person"
-                            ? i18n("Person")
-                            : typeLabel(current.typeKey)}
-                        {payload.speakerLabel &&
-                            ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}
-                        {payload.reason && ` · ${payload.reason}`}{" "}
-                        {payload.evidenceMs.map((ms) => (
-                            <span key={ms} className="mr-1">
-                                {seek(ms)}
-                            </span>
-                        ))}
-                    </div>
-                </LearnEvidence>
+                {evidence ?? (
+                    <LearnEvidence>
+                        <div className="text-xs text-muted-foreground">
+                            {payload.kind === "person"
+                                ? i18n("Person")
+                                : typeLabel(current.typeKey)}
+                            {payload.speakerLabel &&
+                                ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}
+                            {payload.reason && ` · ${payload.reason}`}{" "}
+                            {payload.evidenceMs.map((ms) => (
+                                <span key={ms} className="mr-1">
+                                    {seek(ms)}
+                                </span>
+                            ))}
+                        </div>
+                    </LearnEvidence>
+                )}
             </div>
             <Dialog open={picking} onOpenChange={setPicking}>
                 <DialogContent className="sm:max-w-md">

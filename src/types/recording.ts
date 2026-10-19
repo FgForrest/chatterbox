@@ -54,6 +54,9 @@ export type Recording = Omit<RecordingQueryResult, "startTime"> & {
      * there" -- otherwise the player renders and then fails on play.
      */
     audioReaped?: boolean;
+    audioReapedAt?: string | null;
+    transcriptReapedAt?: string | null;
+    summaryReapedAt?: string | null;
     /**
      * `org` marks an entry of the Organization library: a shared recording
      * read through its Organization view. Absent for the owner's own list.
@@ -75,6 +78,9 @@ export function serializeRecording(
         needsReview?: boolean;
         waveformPeaks?: number[] | null;
         audioReaped?: boolean;
+        audioReapedAt?: Date | null;
+        transcriptReapedAt?: Date | null;
+        summaryReapedAt?: Date | null;
         view?: RecordingView;
         isOwn?: boolean;
         ownerName?: string | null;
@@ -87,6 +93,9 @@ export function serializeRecording(
         hasSummary: flags?.hasSummary ?? false,
         ...(flags?.needsReview ? { needsReview: true } : {}),
         audioReaped: flags?.audioReaped ?? false,
+        audioReapedAt: flags?.audioReapedAt?.toISOString() ?? null,
+        transcriptReapedAt: flags?.transcriptReapedAt?.toISOString() ?? null,
+        summaryReapedAt: flags?.summaryReapedAt?.toISOString() ?? null,
         // Empty arrays would be invalid per the field contract ("null
         // when never decoded"); collapse them to null at the
         // serialization boundary so consumers never have to special-case

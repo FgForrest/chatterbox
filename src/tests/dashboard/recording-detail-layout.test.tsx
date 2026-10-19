@@ -139,6 +139,27 @@ describe("recording detail layout", () => {
         }
     });
 
+    it("uses the pile label and a kind-neutral empty state", () => {
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+
+        expect(
+            screen.getByRole("button", { name: "Back to the pile" }),
+        ).toBeTruthy();
+
+        rerender(
+            <WorkstationDetailPane {...sharedProps} currentRecording={null} />,
+        );
+        expect(
+            screen.getByText("Select an item to view its details"),
+        ).toBeTruthy();
+        expect(screen.queryByText(/Select a recording/)).toBeNull();
+    });
+
     it.each([
         ["a different recording", "recording=other&playFrom=12500", recording],
         [

@@ -3,8 +3,7 @@
 import { AudioWaveform, Loader2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
-import { AiCostSummary } from "@/components/recordings/ai-cost-summary";
-import { RecordingTitle } from "@/components/recordings/recording-title";
+import { ItemHeader } from "@/components/items/item-header";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
 import { formatDuration } from "@/lib/format-duration";
@@ -50,59 +49,54 @@ export function RecordingPlayerHeader({
         formatBytes(recording.filesize),
     ];
     if (recording.deviceSn && !NON_DEVICE_SOURCES.has(recording.deviceSn)) {
-        metaParts.push(`${i18n("Device")}: ${recording.deviceSn}`);
-    }
-    if (recording.view === "org") {
         metaParts.push(
-            recording.isOwn
-                ? i18n("Organization view")
-                : i18n("Shared by {owner}", {
-                      owner: recording.ownerName ?? i18n("a colleague"),
-                  }),
+            i18n("Device: {serial}", { serial: recording.deviceSn }),
         );
     }
+    const retentionNotes = [
+        recording.audioReapedAt
+            ? i18n("The audio was removed on {date}.", {
+                  date: formatDateTime(
+                      recording.audioReapedAt,
+                      "absolute",
+                      locale,
+                  ),
+              })
+            : null,
+        recording.transcriptReapedAt
+            ? i18n("Its transcript was removed on {date}.", {
+                  date: formatDateTime(
+                      recording.transcriptReapedAt,
+                      "absolute",
+                      locale,
+                  ),
+              })
+            : null,
+        recording.summaryReapedAt
+            ? i18n("Its summary was removed on {date}.", {
+                  date: formatDateTime(
+                      recording.summaryReapedAt,
+                      "absolute",
+                      locale,
+                  ),
+              })
+            : null,
+    ].filter((note): note is string => note !== null);
 
     return (
-        <header className="flex min-w-0 items-start justify-between gap-4 px-1">
-            <div className="min-w-0 flex-1">
-                <h1 className="min-w-0">
-                    <RecordingTitle
-                        recordingId={recording.id}
-                        filename={recording.filename}
-                        onRenamed={onRenamed}
-                        readOnly={
-                            titleReadOnly ??
-                            (recording.isOwn === false || shared)
-                        }
-                        view={recording.view}
-                        className="text-xl font-semibold tracking-tight sm:text-2xl"
-                    />
-                </h1>
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                    {metaParts.map((part, i) => (
-                        <span
-                            key={part}
-                            className="inline-flex items-center gap-2"
-                        >
-                            {i > 0 && (
-                                <span aria-hidden="true" className="opacity-40">
-                                    ·
-                                </span>
-                            )}
-                            <span>{part}</span>
-                        </span>
-                    ))}
-                </div>
-                <div className="mt-1.5">
-                    <AiCostSummary
-                        key={`${recording.id}:${recording.view ?? "private"}`}
-                        recordingId={recording.id}
-                        view={recording.view}
-                    />
-                </div>
-            </div>
-            {action && <div className="shrink-0">{action}</div>}
-        </header>
+        <ItemHeader
+            itemId={recording.id}
+            kind="audio"
+            title={recording.filename}
+            metadata={metaParts}
+            view={recording.view}
+            isOwn={recording.isOwn}
+            ownerName={recording.ownerName}
+            readOnly={titleReadOnly ?? (recording.isOwn === false || shared)}
+            onRenamed={onRenamed}
+            action={action}
+            retentionNotes={retentionNotes}
+        />
     );
 }
 

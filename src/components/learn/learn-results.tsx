@@ -96,6 +96,7 @@ export function useLearnFailure(): (code: string | null | undefined) => string {
  * item, that it found nothing, or why it failed; and Re-learn.
  */
 export function LearnResults({
+    kind = "audio",
     open,
     onOpenChange,
     status,
@@ -105,6 +106,7 @@ export function LearnResults({
     describe,
     onRelearn,
 }: {
+    kind?: "audio" | "mail";
     open: boolean;
     onOpenChange: (open: boolean) => void;
     status: "finished" | "failed";
@@ -116,7 +118,7 @@ export function LearnResults({
     describe: (item: LearnResultItem) => ReactNode;
     /**
      * Absent where Learn cannot run for this person now. `forget`: what
-     * was rejected on the recording may be proposed again.
+     * was rejected on the item may be proposed again.
      */
     onRelearn?: (forget: boolean) => void;
 }) {
@@ -127,11 +129,19 @@ export function LearnResults({
     const failure = useLearnFailure();
     let description = failure(errorCode);
     if (status === "finished" && items.length === 0) {
-        description = i18n("Learn found nothing new in this transcript.");
+        description =
+            kind === "mail"
+                ? i18n("Learn found nothing new in this message.")
+                : i18n("Learn found nothing new in this transcript.");
     } else if (status === "finished") {
-        description = i18n(
-            "What Learn proposed on this transcript, and what your review did with it.",
-        );
+        description =
+            kind === "mail"
+                ? i18n(
+                      "What Learn proposed on this message, and what your review did with it.",
+                  )
+                : i18n(
+                      "What Learn proposed on this transcript, and what your review did with it.",
+                  );
     }
 
     const sections = [
@@ -184,14 +194,23 @@ export function LearnResults({
                 {status === "finished" && items.length === 0 && known && (
                     <div className="space-y-2 text-sm">
                         <p>
-                            {i18n(
-                                "Learn names speakers, corrects misheard names and proposes facts about the people and things {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
-                                {
-                                    name,
-                                    people: known.people,
-                                    things: known.things,
-                                },
-                            )}
+                            {kind === "mail"
+                                ? i18n(
+                                      "Learn proposes people, things and facts from the message using what {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                      {
+                                          name,
+                                          people: known.people,
+                                          things: known.things,
+                                      },
+                                  )
+                                : i18n(
+                                      "Learn names speakers, corrects misheard names and proposes facts about the people and things {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                      {
+                                          name,
+                                          people: known.people,
+                                          things: known.things,
+                                      },
+                                  )}
                         </p>
                         <Link
                             href="/almanac/things"
@@ -249,9 +268,13 @@ export function LearnResults({
                             }
                         />
                         <span>
-                            {i18n(
-                                "Re-learn: also propose again what I rejected on this recording",
-                            )}
+                            {kind === "mail"
+                                ? i18n(
+                                      "Re-learn: also propose again what I rejected on this message",
+                                  )
+                                : i18n(
+                                      "Re-learn: also propose again what I rejected on this recording",
+                                  )}
                         </span>
                     </label>
                 )}

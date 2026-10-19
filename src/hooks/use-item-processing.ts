@@ -9,6 +9,7 @@ import {
 } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import { withRecordingView } from "@/lib/sharing/view";
 
 const ACTIVE_POLL_MS = 5_000;
 const INVALIDATED_POLL_MS = 2_000;
@@ -37,6 +38,7 @@ function hasActiveStep(
 interface UseItemProcessingOptions {
     itemId: string;
     kind: "audio" | "mail";
+    view?: "private" | "org";
     initialData?: ItemProcessingPresentation | null;
     enabled?: boolean;
 }
@@ -45,6 +47,7 @@ interface UseItemProcessingOptions {
 export function useItemProcessing({
     itemId,
     kind,
+    view = "private",
     initialData,
     enabled = true,
 }: UseItemProcessingOptions) {
@@ -97,10 +100,11 @@ export function useItemProcessing({
 
     const refresh = useCallback(async () => {
         if (!enabled) return;
-        const url =
+        const path =
             kind === "mail"
                 ? `/api/mail/${encodeURIComponent(itemId)}`
                 : `/api/recordings/${encodeURIComponent(itemId)}?processing=1`;
+        const url = withRecordingView(path, view);
         try {
             const response = await fetch(url);
             if (!response.ok) return;
@@ -121,7 +125,7 @@ export function useItemProcessing({
                 }
             }
         } catch {}
-    }, [enabled, itemId, kind]);
+    }, [enabled, itemId, kind, view]);
 
     const beginRevalidation = useCallback(
         (at = Date.now()) => {

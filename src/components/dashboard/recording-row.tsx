@@ -11,7 +11,9 @@ import {
     Trash2,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
+import { useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
+import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -37,6 +39,7 @@ export function RecordingRow({
     dateTimeFormat,
     onSelect,
     onDelete,
+    shared = false,
     registerRef,
 }: {
     recording: Recording;
@@ -48,11 +51,13 @@ export function RecordingRow({
     dateTimeFormat: DateTimeFormat;
     onSelect: (recording: Recording) => void;
     onDelete: (recording: Recording) => Promise<void>;
+    shared?: boolean;
     registerRef: (id: string, el: HTMLButtonElement | null) => void;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
     const confirm = useConfirm();
+    const [mailDeleteOpen, setMailDeleteOpen] = useState(false);
     return (
         <div
             className={cn(
@@ -157,61 +162,79 @@ export function RecordingRow({
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => {
-                                window.location.assign(
-                                    recording.kind === "mail"
-                                        ? `/api/mail/${encodeURIComponent(recording.id)}/raw`
-                                        : recordingAudioDownloadPath(
-                                              recording.id,
-                                          ),
-                                );
-                            }}
-                        >
-                            <Download />{" "}
-                            {recording.kind === "mail"
-                                ? i18n("Download the message")
-                                : i18n("Download audio")}
-                        </DropdownMenuItem>
-                        {recording.isOwn !== false &&
-                            recording.kind !== "mail" && (
-                                <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={(e) => {
-                                            // Keep menu mounted so confirm dialog can take focus.
-                                            e.preventDefault();
-                                            void confirm({
-                                                title: i18n(
-                                                    "Delete this recording?",
-                                                ),
-                                                description: (
-                                                    <>
-                                                        <span className="font-medium text-foreground">
-                                                            {recording.filename}
-                                                        </span>
-                                                        <br />{" "}
-                                                        {i18n(
-                                                            "The audio file and any transcript or summary will be removed. If the file is still on your Plaud device, the next sync will re-download it.",
-                                                        )}
-                                                    </>
-                                                ),
-                                                confirmLabel: i18n("Delete"),
-                                                pendingLabel: i18n("Deleting…"),
-                                                destructive: true,
-                                                onConfirm: () =>
-                                                    onDelete(recording),
-                                            });
-                                        }}
-                                    >
-                                        <Trash2 /> {i18n("Delete")}
-                                    </DropdownMenuItem>
-                                </>
-                            )}
+                        {(recording.kind !== "mail" ||
+                            recording.isOwn !== false) && (
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    window.location.assign(
+                                        recording.kind === "mail"
+                                            ? `/api/mail/${encodeURIComponent(recording.id)}/raw`
+                                            : recordingAudioDownloadPath(
+                                                  recording.id,
+                                              ),
+                                    );
+                                }}
+                            >
+                                <Download />{" "}
+                                {recording.kind === "mail"
+                                    ? i18n("Download the message")
+                                    : i18n("Download audio")}
+                            </DropdownMenuItem>
+                        )}
+                        {recording.isOwn !== false && (
+                            <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={(e) => {
+                                        // Keep menu mounted so confirm dialog can take focus.
+                                        e.preventDefault();
+                                        if (recording.kind === "mail") {
+                                            setMailDeleteOpen(true);
+                                            return;
+                                        }
+                                        void confirm({
+                                            title: i18n(
+                                                "Delete this recording?",
+                                            ),
+                                            description: (
+                                                <>
+                                                    <span className="font-medium text-foreground">
+                                                        {recording.filename}
+                                                    </span>
+                                                    <br />{" "}
+                                                    {i18n(
+                                                        "The audio file and any transcript or summary will be removed. If the file is still on your Plaud device, the next sync will re-download it.",
+                                                    )}
+                                                </>
+                                            ),
+                                            confirmLabel: i18n("Delete"),
+                                            pendingLabel: i18n("Deleting…"),
+                                            destructive: true,
+                                            onConfirm: () =>
+                                                onDelete(recording),
+                                        });
+                                    }}
+                                >
+                                    <Trash2 />
+                                    {recording.kind === "mail"
+                                        ? i18n("Delete mail")
+                                        : i18n("Delete")}
+                                </DropdownMenuItem>
+                            </>
+                        )}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
+            {recording.kind === "mail" && (
+                <MailDeleteDialog
+                    mail={recording}
+                    shared={shared}
+                    open={mailDeleteOpen}
+                    onOpenChange={setMailDeleteOpen}
+                    onDelete={onDelete}
+                />
+            )}
         </div>
     );
 }

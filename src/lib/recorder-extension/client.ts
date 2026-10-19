@@ -4,7 +4,7 @@
  * Three channels, tried in order:
  *  1. External messaging (`chrome.runtime.sendMessage(extensionId, ...)`):
  *     available when this page's origin is in the extension's
- *     `externally_connectable` list (the hosted origins). No content script,
+ *     `externally_connectable` list (localhost). No content script,
  *     no grant.
  *  2. The pairing content script's `postMessage` handshake: available on any
  *     origin the extension has been granted access to.

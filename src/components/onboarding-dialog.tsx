@@ -335,7 +335,7 @@ export function OnboardingDialog({
             id: "claude",
             label: i18n("Claude"),
             status: "skipped",
-            location: i18n("Menu → Run setup again"),
+            location: i18n("Menu → Re-run setup"),
         });
     }
 

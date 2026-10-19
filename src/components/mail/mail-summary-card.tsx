@@ -1,39 +1,38 @@
 "use client";
 
-import { ListChecks, Loader2, Sparkles } from "lucide-react";
-import { useExtracted } from "next-intl";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { Markdown } from "@/components/markdown";
-import {
-    WorkflowWidget,
-    WorkflowWidgetLine,
-    WorkflowWidgetRunLine,
-} from "@/components/pipeline/workflow-widget";
-import { RecordingTasks } from "@/components/tasks/recording-tasks";
-import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
-import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
-import { Button } from "@/components/ui/button";
-import { getApiErrorMessage } from "@/lib/api-errors";
-import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
-import {
-    isWorkflowWidgetLineVisible,
-    type WorkflowWidgetState,
-} from "@/lib/pipeline/workflow-widgets";
+import { SummaryWidget } from "@/components/summary/summary-widget";
+import type { MailDetail } from "@/lib/mail/detail";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
 import type { Recording } from "@/types/recording";
 
-interface StoredSummary {
-    summary: string | null;
-    keyPoints?: string[];
-    actionItems?: string[];
-    scopeChanged?: boolean;
+function mailText(detail: MailDetail): string {
+    return detail.segments.map((segment) => segment.text).join("\n");
 }
 
-const NO_SPEAKERS: never[] = [];
+function learnHold(
+    processing: ItemProcessingPresentation | null,
+): "running" | "correcting" | "review" | null {
+    if (
+        processing?.phases.learn?.state === "running" &&
+        processing.phases.learn.reason === "correcting"
+    ) {
+        return "correcting";
+    }
+    if (
+        processing?.latestLearnRun?.status === "queued" ||
+        processing?.latestLearnRun?.status === "running"
+    ) {
+        return "running";
+    }
+    return (processing?.learnFindingsWaiting ?? 0) > 0 ? "review" : null;
+}
 
-/** Render a mail summary and its accepted tasks in the workflow frame. */
+/** Connect a mail detail to the shared summary widget. */
 export function MailSummaryCard({
     mail,
+    detail,
+    processing,
     canChange,
     widget,
     taskWidget,
@@ -43,6 +42,8 @@ export function MailSummaryCard({
     taskWidgetId,
 }: {
     mail: Recording;
+    detail: MailDetail;
+    processing: ItemProcessingPresentation | null;
     canChange: boolean;
     widget?: WorkflowWidgetState;
     taskWidget?: WorkflowWidgetState;
@@ -51,246 +52,25 @@ export function MailSummaryCard({
     widgetId: string;
     taskWidgetId: string;
 }) {
-    const i18n = useExtracted();
-    const view = mail.view === "org" ? "org" : "private";
-    const query = view === "org" ? "?view=org" : "";
-    const [summary, setSummary] = useState<StoredSummary | null>(null);
-    const [loaded, setLoaded] = useState(false);
-    const [running, setRunning] = useState(false);
-    const [reloadKey, setReloadKey] = useState(0);
-    const [workflowSummaryExpanded, setWorkflowSummaryExpanded] =
-        useState(false);
-    const taskState = useRecordingTasks(mail.id, reloadKey);
-    const workflowRevision = `${widget?.active ?? false}:${widget?.tone ?? "quiet"}`;
-
-    useEffect(() => {
-        void workflowRevision;
-        const controller = new AbortController();
-        setSummary(null);
-        setLoaded(false);
-        fetch(
-            `/api/recordings/${encodeURIComponent(mail.id)}/summary${query}`,
-            { signal: controller.signal },
-        )
-            .then(async (response) => {
-                if (!response.ok) throw new Error(String(response.status));
-                setSummary((await response.json()) as StoredSummary);
-            })
-            .catch(() => undefined)
-            .finally(() => {
-                if (!controller.signal.aborted) setLoaded(true);
-            });
-        return () => controller.abort();
-    }, [mail.id, query, workflowRevision]);
-
-    const summarize = useCallback(async () => {
-        setRunning(true);
-        try {
-            const response = await fetch(
-                `/api/recordings/${encodeURIComponent(mail.id)}/summary${query}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: "{}",
-                },
-            );
-            if (!response.ok) {
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("The mail could not be summarized."),
-                    ),
-                );
-                return;
-            }
-            invalidateItemProcessing(mail.id);
-            if (response.status === 202) {
-                toast.info(i18n("The summary is still being made."));
-                return;
-            }
-            setSummary((await response.json()) as StoredSummary);
-            setReloadKey((key) => key + 1);
-        } finally {
-            setRunning(false);
-        }
-    }, [i18n, mail.id, query]);
-
-    if (mail.mail?.autoGenerated) return null;
-
-    const hasSummary = Boolean(summary?.summary);
-    const pipelineWorking = Boolean(
-        widget?.active && widget.tone === "working",
-    );
-    const working = running || pipelineWorking;
-    const widgetFrame = widget?.frame ?? "inline";
-    const summaryLine = isWorkflowWidgetLineVisible({
-        workflowVisible,
-        collapsed: widget?.collapsed ?? false,
-        expanded: workflowSummaryExpanded,
-        working,
-        frame: widgetFrame,
-    });
-    const tone = widget?.tone ?? "quiet";
-    const runSummary = () => {
-        void summarize();
-    };
-
-    const runButton = (
-        <Button
-            size="sm"
-            variant={hasSummary ? "outline" : "default"}
-            disabled={running}
-            onClick={runSummary}
-        >
-            {running ? (
-                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-            ) : (
-                <Sparkles className="size-4" />
-            )}
-            {hasSummary ? i18n("Summarize again") : i18n("Summarize")}
-        </Button>
-    );
-
-    let summaryContent: ReactNode = null;
-    if (!loaded) {
-        summaryContent = (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                {i18n("Loading…")}
-            </div>
-        );
-    } else if (working) {
-        summaryContent = (
-            <p className="text-sm text-muted-foreground">
-                {i18n(
-                    "Generating the summary. It continues in the background.",
-                )}
-            </p>
-        );
-    } else if (hasSummary) {
-        summaryContent = (
-            <div className="space-y-3">
-                <div className="rounded-lg bg-muted p-4 text-sm">
-                    <Markdown>{summary?.summary ?? ""}</Markdown>
-                </div>
-                {(summary?.keyPoints?.length ?? 0) > 0 && (
-                    <ul className="space-y-1">
-                        {summary?.keyPoints?.map((point) => (
-                            <li
-                                key={`kp-${point.slice(0, 32)}`}
-                                className="flex items-start gap-2 text-sm text-muted-foreground"
-                            >
-                                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-                                <Markdown inline>{point}</Markdown>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </div>
-        );
-    } else {
-        summaryContent = (
-            <p className="text-sm text-muted-foreground">
-                {canChange
-                    ? i18n("Ready when you are. Generate a summary.")
-                    : i18n("No summary yet.")}
-            </p>
-        );
-    }
-
-    const body = (
-        <div className="space-y-4">
-            {summaryContent}
-            {summary?.scopeChanged && canChange && (
-                <p className="text-sm text-amber-600 dark:text-amber-400">
-                    {i18n("Folders changed since this summary:")}{" "}
-                    <button
-                        type="button"
-                        className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
-                        disabled={running}
-                        onClick={runSummary}
-                    >
-                        {i18n("Match tasks again")}
-                    </button>
-                </p>
-            )}
-            <RecordingTasks
-                state={taskState}
-                speakers={NO_SPEAKERS}
-                organizationOnly={view === "org"}
-                fallback={null}
-                allowAdd={hasSummary}
-            />
-        </div>
-    );
-
-    const taskReview = taskWidget?.visible !== false && (
-        <TaskReviewLink
-            state={taskState}
-            speakers={NO_SPEAKERS}
-            organizationOnly={view === "org"}
-            allowAdd={hasSummary}
-            frame={taskWidget?.frame ?? "dialog"}
-            widgetId={taskWidgetId}
-            showTrigger={false}
-        />
-    );
-
-    const renderCompactLine = (id?: string) => {
-        const lineProps = {
-            id,
-            title: i18n("Summary"),
-            facts: working ? i18n("Generating the summary") : profileName,
-            icon: <ListChecks className="size-4" />,
-            tone,
-        };
-        if (loaded && canChange && !working && !hasSummary) {
-            return (
-                <WorkflowWidgetRunLine
-                    {...lineProps}
-                    runLabel={i18n("Summarize")}
-                    onRun={runSummary}
-                />
-            );
-        }
-        return (
-            <WorkflowWidgetLine
-                {...lineProps}
-                working={working}
-                expanded={working ? undefined : false}
-                onExpand={
-                    working ? undefined : () => setWorkflowSummaryExpanded(true)
-                }
-                expandLabel={working ? undefined : i18n("View summary")}
-                onOpen={() => setWorkflowSummaryExpanded(true)}
-            />
-        );
-    };
-
-    if (summaryLine) {
-        return (
-            <>
-                {renderCompactLine(widgetId)}
-                {taskReview}
-            </>
-        );
-    }
+    const text = mailText(detail);
+    if (detail.autoGenerated) return null;
 
     return (
-        <>
-            <WorkflowWidget
-                id={widgetId}
-                frame="inline"
-                tone={tone}
-                title={i18n("Summary")}
-                description={i18n(
-                    "The main points and tasks found in this message.",
-                )}
-                headerAction={canChange && !working ? runButton : undefined}
-            >
-                {body}
-            </WorkflowWidget>
-            {taskReview}
-        </>
+        <SummaryWidget
+            itemId={mail.id}
+            kind="mail"
+            canChange={canChange}
+            contentText={text}
+            canSummarize={text.trim().length > 0}
+            view={mail.view}
+            sourceLabel={profileName}
+            widget={widget}
+            taskWidget={taskWidget}
+            workflowVisible={workflowVisible}
+            profileName={profileName}
+            widgetId={widgetId}
+            taskWidgetId={taskWidgetId}
+            learnHold={learnHold(processing)}
+        />
     );
 }

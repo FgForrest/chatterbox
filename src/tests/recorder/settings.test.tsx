@@ -320,7 +320,7 @@ describe.each([
             ).toBeTruthy();
             expect(
                 screen.queryByText(
-                    "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Run setup again in the menu.",
+                    "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Re-run setup in the menu.",
                 ),
             ).toBeNull();
             return;
@@ -328,7 +328,7 @@ describe.each([
 
         expect(
             await screen.findByText(
-                "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Run setup again in the menu.",
+                "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Re-run setup in the menu.",
             ),
         ).toBeTruthy();
         expect(

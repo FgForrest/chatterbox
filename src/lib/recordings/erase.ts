@@ -5,6 +5,10 @@ import {
     aiEnhancements,
     asyncJobs,
     chatterItems,
+    itemProcessing,
+    learnDismissals,
+    learnRuns,
+    mailContents,
     plaudConnections,
     recordings,
     transcriptions,
@@ -18,11 +22,15 @@ import {
     orgTreeChanged,
     withdrawRecordingInTx,
 } from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import type { ContentRevisionInput } from "@/lib/pipeline/types";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { sidecarKey } from "@/lib/recordings/storage-files";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -418,6 +426,289 @@ export async function eraseLocalArtifact(
             500,
         );
     }
+}
+
+/** Erase a mail's generated summary and tasks derived only from it. */
+export async function eraseMailSummary(
+    userId: string,
+    itemId: string,
+    options: { withdraw?: boolean } = {},
+): Promise<void> {
+    const [item] = await db
+        .select({ id: chatterItems.id })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                eq(chatterItems.userId, userId),
+                eq(chatterItems.kind, "mail"),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!item) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
+    }
+
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            const scopes = new Set<string>();
+            if (orgUserId && options.withdraw) await lockOrgTree(tx);
+            await lockItemTaskGraphInTx(tx, {
+                itemId,
+                ownerUserId: userId,
+            });
+            const [locked] = await tx
+                .select({ deletedAt: chatterItems.deletedAt })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                        eq(chatterItems.kind, "mail"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked || locked.deletedAt) {
+                throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
+            }
+            if (orgUserId && (await isRecordingShared(itemId, orgUserId, tx))) {
+                if (!options.withdraw) throw recordingShared();
+                for (const scope of await withdrawRecordingInTx(
+                    tx,
+                    orgUserId,
+                    itemId,
+                    userId,
+                )) {
+                    scopes.add(scope);
+                }
+                withdrew = true;
+            }
+            await cancelArtifactJobs(tx, userId, itemId, ["summary"], now);
+            await tx
+                .delete(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, itemId),
+                        eq(aiEnhancements.userId, userId),
+                    ),
+                );
+            await dropTasksWithoutSummaryInTx(tx, {
+                recordingId: itemId,
+                ownerUserId: userId,
+            });
+            await tx
+                .update(chatterItems)
+                .set({ summaryReapedAt: now, updatedAt: now })
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                );
+            await bumpScopeInTx(tx, scopes);
+        }),
+    );
+    if (withdrew) await orgTreeChanged();
+}
+
+/** Remove one item's Learn run history without changing accepted Almanac data. */
+export async function eraseLearnResults(
+    userId: string,
+    itemId: string,
+    options: { withdraw?: boolean } = {},
+): Promise<void> {
+    const [item] = await db
+        .select({ id: chatterItems.id, kind: chatterItems.kind })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                eq(chatterItems.userId, userId),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!item) {
+        throw new AppError(
+            ErrorCode.RECORDING_NOT_FOUND,
+            "Recording not found",
+            404,
+        );
+    }
+
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
+    let requestedAdvance = false;
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            const scopes = new Set<string>();
+            if (orgUserId && options.withdraw) await lockOrgTree(tx);
+            const [locked] = await tx
+                .select({ deletedAt: chatterItems.deletedAt })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked || locked.deletedAt) {
+                throw new AppError(
+                    ErrorCode.RECORDING_NOT_FOUND,
+                    "Recording not found",
+                    404,
+                );
+            }
+            if (orgUserId && (await isRecordingShared(itemId, orgUserId, tx))) {
+                if (!options.withdraw) throw recordingShared();
+                for (const scope of await withdrawRecordingInTx(
+                    tx,
+                    orgUserId,
+                    itemId,
+                    userId,
+                )) {
+                    scopes.add(scope);
+                }
+                withdrew = true;
+            }
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            let learnInput: ContentRevisionInput | undefined =
+                processing?.phases.learn?.inputs;
+            if (processing && !learnInput && item.kind === "mail") {
+                const [content] = await tx
+                    .select({
+                        id: mailContents.id,
+                        revision: mailContents.revision,
+                    })
+                    .from(mailContents)
+                    .where(
+                        and(
+                            eq(mailContents.itemId, itemId),
+                            eq(mailContents.userId, userId),
+                        ),
+                    )
+                    .limit(1);
+                if (content) {
+                    learnInput = {
+                        contentId: content.id,
+                        contentSourceId: "mail",
+                        contentRevision: content.revision,
+                    };
+                }
+            }
+            if (processing && !learnInput && item.kind === "audio") {
+                const transcripts = await tx
+                    .select({
+                        id: transcriptions.id,
+                        revision: transcriptions.revision,
+                        source: transcriptions.source,
+                    })
+                    .from(transcriptions)
+                    .where(
+                        and(
+                            eq(transcriptions.recordingId, itemId),
+                            eq(transcriptions.userId, userId),
+                            inArray(transcriptions.source, [
+                                "riffado",
+                                "plaud",
+                            ]),
+                        ),
+                    );
+                const transcript =
+                    transcripts.find((row) => row.source === "riffado") ??
+                    transcripts.find((row) => row.source === "plaud");
+                if (transcript) {
+                    learnInput = {
+                        contentId: transcript.id,
+                        contentSourceId: transcript.source,
+                        contentRevision: transcript.revision,
+                    };
+                }
+            }
+            await cancelArtifactJobs(
+                tx,
+                userId,
+                itemId,
+                ["learn.run", "learn.release", "learn.correct"],
+                now,
+            );
+            await tx
+                .delete(learnRuns)
+                .where(
+                    and(
+                        eq(learnRuns.itemId, itemId),
+                        eq(learnRuns.userId, userId),
+                    ),
+                );
+            await tx
+                .delete(learnDismissals)
+                .where(
+                    and(
+                        eq(learnDismissals.itemId, itemId),
+                        eq(learnDismissals.userId, userId),
+                    ),
+                );
+            await tx
+                .update(chatterItems)
+                .set({ summaryDueAt: null, updatedAt: now })
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                );
+            if (learnInput) {
+                const advance = await requestAdvanceInTx(tx, {
+                    itemId,
+                    userId,
+                    view: "private",
+                    reason: "learn-settled",
+                });
+                if (advance) {
+                    await updatePhaseInTx(
+                        tx,
+                        itemId,
+                        "private",
+                        userId,
+                        "learn",
+                        {
+                            state: "skipped",
+                            reason: "erased",
+                            generation: advance.requestedGeneration,
+                            inputs: learnInput,
+                            at: now.toISOString(),
+                            profileRevisionId:
+                                processing?.phases.learn?.profileRevisionId,
+                        },
+                    );
+                    requestedAdvance = true;
+                }
+            }
+            await bumpScopeInTx(tx, scopes);
+        }),
+    );
+    if (requestedAdvance) nudge();
+    if (withdrew) await orgTreeChanged();
 }
 
 export async function allowManualArtifactGeneration(
