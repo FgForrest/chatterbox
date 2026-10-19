@@ -244,6 +244,7 @@ export function useTranscriptTopics(
         const controller = restart(topicSource);
         const { signal } = controller;
         const { failed, detected } = messagesRef.current;
+        let followed = false;
 
         try {
             const response = await fetch(
@@ -265,13 +266,14 @@ export function useTranscriptTopics(
                 return;
             }
             // The job outlived the request; follow it until it settles.
+            followed = true;
             await settle(topicSource, body.jobId, signal);
         } catch (error) {
             if (signal.aborted) return;
             console.error("Topic detection failed:", error);
             toast.error(failed);
         } finally {
-            invalidateItemProcessing(recordingId);
+            if (!followed) invalidateItemProcessing(recordingId);
             release(controller);
         }
     }, [recordingId, source, view, restart, release, settle]);

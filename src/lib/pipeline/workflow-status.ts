@@ -406,10 +406,19 @@ function failureMessage(reasonCode: string): WorkflowMessageCode {
     return "stepFailed";
 }
 
+function active(status: string | null | undefined): boolean {
+    return status === "queued" || status === "running";
+}
+
 function failureStatus(
     data: ItemProcessingPresentation,
 ): WorkflowStatusSentence | null {
     const learnRun = currentLearnRun(data);
+    const retrying: Partial<Record<PhaseName, boolean>> = {
+        transcribe: active(data.jobs.transcription),
+        learn: active(learnRun?.status),
+        summary: active(data.jobs.summary),
+    };
     const failure =
         learnRun?.status === "failed"
             ? {
@@ -419,7 +428,8 @@ function failureStatus(
               }
             : phaseOrder.flatMap((phase) =>
                   data.failures.filter(
-                      (candidate) => candidate.phase === phase,
+                      (candidate) =>
+                          candidate.phase === phase && !retrying[phase],
                   ),
               )[0];
     if (!failure || failure.reasonCode === "profile_unavailable") return null;
