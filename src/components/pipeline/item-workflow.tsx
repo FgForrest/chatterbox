@@ -589,6 +589,9 @@ export function ItemWorkflow({
             case "transcribe":
                 onTranscribe?.(false);
                 break;
+            case "summarize":
+                onSummary?.();
+                break;
             case "reviewTasks":
                 onReviewTasks?.();
                 break;

@@ -44,6 +44,7 @@ export type WorkflowMessageCode =
     | "learnReview"
     | "manualLearnReview"
     | "learnTimedOut"
+    | "manualSummary"
     | "summaryQueued"
     | "summaryRunning"
     | "taskReviewQueued"
@@ -67,6 +68,7 @@ export type WorkflowActionCode =
     | "file"
     | "chooseProfile"
     | "transcribe"
+    | "summarize"
     | "reviewLearn"
     | "reviewTasks"
     | "shareNow"
@@ -186,6 +188,15 @@ function displayState(
     ) {
         return "manual";
     }
+    if (
+        phase === "summary" &&
+        !data.outputs.summary &&
+        record?.state === "done" &&
+        Object.values(record.steps ?? {}).some(
+            (step) => step.state === "skipped" && step.reason === "no_provider",
+        )
+    )
+        return "next";
     if (
         data.failures.some(
             (failure) =>
@@ -473,15 +484,15 @@ function deriveStatus(
         return { actor: "others", message: "curatorProfile" };
     }
 
-    const failed = failureStatus(data);
-    if (failed) return failed;
-
     if (data.jobs.transcription === "queued") {
         return { actor: "queued", message: "transcriptionQueued" };
     }
     if (data.jobs.transcription === "running") {
         return { actor: "working", message: "transcribing" };
     }
+    const failed = failureStatus(data);
+    if (failed) return failed;
+
     const learnRun = currentLearnRun(data);
     if (learnRun?.status === "queued") {
         return { actor: "queued", message: "learnQueued" };
@@ -559,12 +570,36 @@ function deriveStatus(
             action: "transcribe",
         };
     }
+    if (learnBlockedByProvider(data)) {
+        return {
+            actor: "problem",
+            message: "failureNoProvider",
+            params: { step: "learn" },
+            action: "retry",
+        };
+    }
+    if (steps.find((step) => step.id === "summary")?.state === "next") {
+        return {
+            actor: "yours",
+            message: "manualSummary",
+            action: "summarize",
+        };
+    }
     const inferredQueued = steps.find((step) => step.state === "queued");
     if (inferredQueued) {
         const message = queuedMessage(inferredQueued.id);
         return { actor: "queued", message };
     }
     return null;
+}
+
+function learnBlockedByProvider(data: ItemProcessingPresentation): boolean {
+    return (
+        !data.manualOnly &&
+        data.phases.learn?.state === "skipped" &&
+        data.phases.learn.reason === "no_provider" &&
+        data.profile?.automatic.learn === true
+    );
 }
 
 function currentStepId(
@@ -599,6 +634,7 @@ function currentStepId(
         return "learn";
     }
     if (
+        status.message === "manualSummary" ||
         status.message === "summaryQueued" ||
         status.message === "summaryRunning"
     ) {
@@ -657,21 +693,28 @@ export function deriveWorkflowStatus(
     inferUpcomingStates(data, kind, steps);
     const status = deriveStatus(data, steps);
     const current = currentStepId(steps, status);
+    const summaryMissing =
+        !data.manualOnly &&
+        data.outputs.transcript &&
+        !data.outputs.summary &&
+        data.profile?.automatic.summary === true;
     const visible =
         !data.legacy &&
-        steps.some((step) =>
-            step.reason === "erased"
-                ? step.state === "manual"
-                : [
-                      "next",
-                      "review",
-                      "working",
-                      "queued",
-                      "others",
-                      "problem",
-                      "outdated",
-                  ].includes(step.state),
-        );
+        (summaryMissing ||
+            learnBlockedByProvider(data) ||
+            steps.some((step) =>
+                step.reason === "erased"
+                    ? step.state === "manual"
+                    : [
+                          "next",
+                          "review",
+                          "working",
+                          "queued",
+                          "others",
+                          "problem",
+                          "outdated",
+                      ].includes(step.state),
+            ));
     return {
         visible,
         steps: steps.map((step) => ({

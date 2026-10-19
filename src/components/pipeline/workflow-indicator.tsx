@@ -391,6 +391,8 @@ export function WorkflowStrip({
                 return i18n(
                     "The summary was written without your Learn review, which waited 3 days. You can still review it.",
                 );
+            case "manualSummary":
+                return i18n("Generate a summary when you are ready.");
             case "summaryQueued":
                 return i18n("Queued. Writing starts shortly.");
             case "summaryRunning":
@@ -469,6 +471,8 @@ export function WorkflowStrip({
                 return i18n("Choose profile");
             case "transcribe":
                 return i18n("Transcribe");
+            case "summarize":
+                return i18n("Summarize");
             case "reviewLearn":
                 return i18n("Review Learn");
             case "reviewTasks":

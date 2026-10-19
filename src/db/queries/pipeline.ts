@@ -24,6 +24,7 @@ export interface AutomaticTranscriptionRetryRow
     userId: string;
     view: "private";
     requestedGeneration: number;
+    reason: string;
 }
 
 export interface OrphanedPipelineStepRow extends Record<string, unknown> {
@@ -240,6 +241,7 @@ export async function listStalledPipelineRows(
 /** Failed automatic transcriptions eligible for a bounded delayed retry. */
 export async function listAutomaticTranscriptionRetryRows(
     limit: number,
+    scope?: { userId: string; itemId: string },
 ): Promise<AutomaticTranscriptionRetryRow[]> {
     const retryBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const rows = await db.execute<AutomaticTranscriptionRetryRow>(sql`
@@ -247,7 +249,8 @@ export async function listAutomaticTranscriptionRetryRows(
             item_processing.item_id as "itemId",
             item_processing.user_id as "userId",
             item_processing.view as "view",
-            item_processing.requested_generation as "requestedGeneration"
+            item_processing.requested_generation as "requestedGeneration",
+            item_processing.phases -> 'transcribe' ->> 'reason' as reason
         from item_processing
         inner join chatter_items
             on chatter_items.id = item_processing.item_id
@@ -256,6 +259,8 @@ export async function listAutomaticTranscriptionRetryRows(
             on recordings.id = item_processing.item_id
            and recordings.user_id = item_processing.user_id
         where item_processing.view = 'private'
+          and (${scope?.userId ?? null}::text is null or item_processing.user_id = ${scope?.userId ?? null})
+          and (${scope?.itemId ?? null}::text is null or item_processing.item_id = ${scope?.itemId ?? null})
           and chatter_items.deleted_at is null
           and chatter_items.content_reaped_at is null
           and recordings.deleted_at is null
@@ -411,4 +416,52 @@ export async function listOrphanedPipelineStepRows(
         limit ${limit}
     `);
     return rows;
+}
+
+export interface ProviderRecoveryRow extends Record<string, unknown> {
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+}
+
+/** Select recent provider-blocked items, taking equal bounded batches per owner. */
+export async function listProviderRecoveryRowsInTx(
+    tx: Tx,
+    userId: string,
+    organization: boolean,
+    limit = 200,
+    perUserLimit = 20,
+): Promise<ProviderRecoveryRow[]> {
+    return tx.execute<ProviderRecoveryRow>(sql`
+        with affected as (
+            select p.item_id as "itemId", p.user_id as "userId", p.view,
+                p.updated_at,
+                row_number() over (partition by p.user_id order by p.updated_at desc, p.item_id) as owner_rank
+            from item_processing p
+            inner join chatter_items i on i.id = p.item_id and i.user_id = p.user_id
+            where (p.user_id = ${userId} or (${organization} and exists (
+                select 1 from users organization_user
+                where organization_user.id = ${userId} and organization_user.role = 'org'
+            )))
+              and p.view = 'private'
+              and not p.manual_only
+              and i.deleted_at is null
+              and i.content_reaped_at is null
+              and p.updated_at >= now() - interval '30 days'
+              and exists (
+                  select 1 from jsonb_each(p.phases) phase
+                  where (phase.value ->> 'state' in ('skipped', 'failed')
+                      and phase.value ->> 'reason' in ('no_provider', 'NO_TRANSCRIPTION_PROVIDER', 'NO_PROVIDER'))
+                    or exists (
+                        select 1 from jsonb_each(coalesce(phase.value -> 'steps', '{}'::jsonb)) step
+                        where step.value ->> 'state' in ('skipped', 'failed')
+                          and step.value ->> 'reason' in ('no_provider', 'NO_TRANSCRIPTION_PROVIDER', 'NO_PROVIDER')
+                    )
+              )
+        )
+        select "itemId", "userId", view from affected
+        where owner_rank <= ${perUserLimit}
+        order by owner_rank, updated_at desc, "userId", "itemId"
+        limit ${limit}
+    `);
 }

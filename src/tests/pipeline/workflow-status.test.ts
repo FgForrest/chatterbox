@@ -762,6 +762,22 @@ describe("deriveWorkflowStatus", () => {
         expect(result.status).toBeNull();
     });
 
+    it("keeps the strip while an automatic Summary is still missing", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "transcribed"),
+                    learn: phase("done", "finished"),
+                },
+                outputs: { transcript: true, learn: true, summary: false },
+            }),
+            "audio",
+        );
+
+        expect(result.visible).toBe(true);
+    });
+
     it("keeps a Nothing automatic item visible for an unconfirmed Organization intent", () => {
         const result = deriveWorkflowStatus(
             processing({

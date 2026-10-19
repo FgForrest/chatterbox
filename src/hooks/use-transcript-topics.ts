@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 
@@ -128,6 +129,7 @@ export function useTranscriptTopics(
             signal: AbortSignal,
             jobKind?: string | null,
         ) => {
+            invalidateItemProcessing(recordingId);
             const deadline = new AbortController();
             const stop = () => deadline.abort();
             signal.addEventListener("abort", stop);
@@ -165,11 +167,12 @@ export function useTranscriptTopics(
                     currentJobKind = next.jobKind;
                 }
             } finally {
+                invalidateItemProcessing(recordingId);
                 clearTimeout(timer);
                 signal.removeEventListener("abort", stop);
             }
         },
-        [showStored],
+        [recordingId, showStored],
     );
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: probeRevision is an intentional re-check trigger
@@ -254,6 +257,7 @@ export function useTranscriptTopics(
                 toast.error(await getApiErrorMessage(response, failed));
                 return;
             }
+            invalidateItemProcessing(recordingId);
             const body = await response.json();
             if (response.status !== 202) {
                 const next: TranscriptTopic[] = body.topics ?? [];
@@ -268,6 +272,7 @@ export function useTranscriptTopics(
             console.error("Topic detection failed:", error);
             toast.error(failed);
         } finally {
+            invalidateItemProcessing(recordingId);
             release(controller);
         }
     }, [recordingId, source, view, restart, release, settle]);

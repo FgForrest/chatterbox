@@ -37,6 +37,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { Recording } from "@/types/recording";
 
 type EraseOperation =
@@ -84,6 +85,7 @@ async function postOperation(
         } | null;
         throw new Error(body?.error || "Erase operation failed");
     }
+    invalidateItemProcessing(recordingId);
 }
 
 export function MailDeleteDialog({

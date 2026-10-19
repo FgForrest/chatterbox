@@ -1,6 +1,10 @@
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+vi.mock("@/lib/pipeline/provider-recovery", () => ({
+    requestProviderRecoveryInTx: vi.fn().mockResolvedValue(0),
+}));
+
 vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
@@ -60,6 +64,25 @@ function queueTransaction(preferences: Record<string, unknown> | null) {
             .mockReturnValueOnce({
                 from: vi.fn().mockReturnValue({
                     where: vi.fn().mockReturnValue({ for: lock }),
+                }),
+            })
+            .mockReturnValueOnce({
+                from: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({
+                        limit: vi.fn().mockResolvedValue([]),
+                    }),
+                }),
+            })
+            .mockReturnValueOnce({
+                from: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({
+                        limit: vi.fn().mockResolvedValue([
+                            {
+                                defaultProviders: preferences,
+                                defaultTranscriptionProviderId: null,
+                            },
+                        ]),
+                    }),
                 }),
             })
             .mockReturnValueOnce({
