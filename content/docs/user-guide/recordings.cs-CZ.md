@@ -65,6 +65,8 @@ Přehrávač zobrazuje nahrávku jako zvukovou vlnu. Kliknutím kamkoli skočít
 
 Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá zpracování u této nahrávky: přepis, souhrn, témata, Učení i název. Dole pak vidíte, který poskytovatel a model danou operaci provedli. Ceny jsou dle oficiálního ceníku každého poskytovatele, nebo podle ceny, kterou jste zadali v nastavení poskytovatele (viz [Poskytovatelé AI](settings.md#ai-providers)). U Claude Code a Codex, které běží na základě předplatného, zobrazená částka ukazuje, kolik by to stálo přes API; není to poplatek. Požadavky uskutečněné před zavedením sledování nákladů nejsou započítány.
 
+Částka zahrnuje vše, co se za nahrávku utratilo, bez ohledu na to, kdo platil. Když vše hradil jeden plátce, panel ho uvede, například „Platí Organizace.“; když jich bylo víc, u každého řádku je uvedeno, kdo platí. **≥ $0.45** znamená nejméně tuto částku: některé požadavky nemají cenu a panel je vypíše. **bez ceny** znamená, že cenu nemá žádný z požadavků. Pokud u položky neproběhla žádná evidovaná práce AI, nezobrazí se nic.
+
 <span id="erasing" />
 
 ### Mazání

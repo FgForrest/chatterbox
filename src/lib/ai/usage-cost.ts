@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 import { db } from "@/db";
-import { aiUsageEvents, apiCredentials } from "@/db/schema";
+import { aiUsageEvents, apiCredentials, users } from "@/db/schema";
 import {
     type AiRate,
     PRICE_SOURCE,
@@ -196,10 +196,39 @@ export async function recordChatCompletionUsage(
     });
 }
 
-/** Count only spend paid by this account, including previous artefact runs. */
+export type AiCostPayer =
+    | { type: "you" }
+    | { type: "organization" }
+    | { type: "member"; name: string | null };
+
+interface PayerBreakdown {
+    payer: AiCostPayer;
+    byOperation: Record<string, number>;
+    byService: Record<string, number>;
+    unknownByService: Record<string, number>;
+}
+
+function addTo(record: Record<string, number>, key: string, amount: number) {
+    record[key] = (record[key] ?? 0) + amount;
+}
+
+function resolvePayer(
+    row: { payerUserId: string; payerRole: string; payerName: string | null },
+    viewerUserId: string,
+): AiCostPayer {
+    if (row.payerRole === "org") return { type: "organization" };
+    if (row.payerUserId === viewerUserId) return { type: "you" };
+    const name = row.payerName?.trim();
+    return {
+        type: "member",
+        name: name && !name.includes("@") ? name : null,
+    };
+}
+
+/** Aggregate every payer's usage for an item the caller has authorized viewing. */
 export async function recordingAiCost(
     recordingId: string,
-    payerUserId: string,
+    viewerUserId: string,
 ) {
     const rows = await db
         .select({
@@ -207,30 +236,43 @@ export async function recordingAiCost(
             provider: aiUsageEvents.provider,
             model: aiUsageEvents.model,
             costUsd: aiUsageEvents.costUsd,
+            payerUserId: aiUsageEvents.payerUserId,
+            payerRole: users.role,
+            payerName: users.name,
         })
         .from(aiUsageEvents)
-        .where(
-            and(
-                eq(aiUsageEvents.itemId, recordingId),
-                eq(aiUsageEvents.payerUserId, payerUserId),
-            ),
-        );
+        .innerJoin(users, eq(users.id, aiUsageEvents.payerUserId))
+        .where(eq(aiUsageEvents.itemId, recordingId));
     const byOperation: Record<string, number> = {};
     const byService: Record<string, number> = {};
     const unknownByService: Record<string, number> = {};
+    const payers = new Map<string, PayerBreakdown>();
     let totalUsd = 0;
     let unknownCount = 0;
     for (const row of rows) {
+        let breakdown = payers.get(row.payerUserId);
+        if (!breakdown) {
+            breakdown = {
+                payer: resolvePayer(row, viewerUserId),
+                byOperation: {},
+                byService: {},
+                unknownByService: {},
+            };
+            payers.set(row.payerUserId, breakdown);
+        }
         const service = `${row.provider} · ${row.model}`;
         if (row.costUsd === null) {
             unknownCount += 1;
-            unknownByService[service] = (unknownByService[service] ?? 0) + 1;
+            addTo(unknownByService, service, 1);
+            addTo(breakdown.unknownByService, service, 1);
             continue;
         }
         const amount = Number(row.costUsd);
         totalUsd += amount;
-        byOperation[row.operation] = (byOperation[row.operation] ?? 0) + amount;
-        byService[service] = (byService[service] ?? 0) + amount;
+        addTo(byOperation, row.operation, amount);
+        addTo(byService, service, amount);
+        addTo(breakdown.byOperation, row.operation, amount);
+        addTo(breakdown.byService, service, amount);
     }
     return {
         totalUsd,
@@ -239,5 +281,6 @@ export async function recordingAiCost(
         unknownByService,
         unknownCount,
         requestCount: rows.length,
+        payers: [...payers.values()],
     };
 }
