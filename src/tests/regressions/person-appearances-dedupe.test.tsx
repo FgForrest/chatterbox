@@ -53,6 +53,11 @@ describe("PersonDetail appearances", () => {
 
         const items = screen.getAllByRole("listitem");
         expect(items).toHaveLength(1);
+        expect(
+            screen
+                .getByRole("link", { name: /Board meeting/ })
+                .getAttribute("href"),
+        ).toBe("/dashboard?recording=rec-1");
     });
 
     it("counts the recordings, not the attributions", () => {
@@ -68,5 +73,20 @@ describe("PersonDetail appearances", () => {
 
         expect(screen.getByText("Heard in 1 recording")).toBeDefined();
         expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    });
+
+    it("opens an Organization appearance in the Organization pane", () => {
+        render(
+            <PersonDetail
+                person={person}
+                appearances={[{ ...twoTranscripts[0], view: "org" }]}
+            />,
+        );
+
+        expect(
+            screen
+                .getByRole("link", { name: /Board meeting/ })
+                .getAttribute("href"),
+        ).toBe("/dashboard?recording=rec-1&view=org");
     });
 });

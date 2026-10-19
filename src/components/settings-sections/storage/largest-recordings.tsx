@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { BREAKDOWN_COLORS } from "@/components/settings-sections/storage/breakdown-bar";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatDurationMs } from "@/lib/format-duration";
+import { itemDetailHref } from "@/lib/item-detail";
 
 interface LargestRecordingsProps {
     items: {
@@ -41,7 +42,7 @@ export function LargestRecordings({ items }: LargestRecordingsProps) {
                 {items.map((r, i) => (
                     <li key={r.id}>
                         <Link
-                            href={`/recordings/${r.id}`}
+                            href={itemDetailHref(r.id)}
                             className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors text-sm"
                         >
                             <span
