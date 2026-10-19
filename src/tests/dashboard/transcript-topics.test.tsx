@@ -20,9 +20,13 @@ import { IntlProvider } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import type * as JobClient from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
+vi.mock("@/lib/pipeline/item-processing-events", () => ({
+    invalidateItemProcessing: vi.fn(),
+}));
 vi.mock("@/lib/jobs/client", async (importOriginal) => {
     const actual = await importOriginal<typeof JobClient>();
     // Polls a few milliseconds apart instead of seconds.
@@ -488,10 +492,14 @@ describe("transcript topics", () => {
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 10));
         });
+        vi.mocked(invalidateItemProcessing).mockClear();
         await act(async () => {
             await hook.result.current.detect();
         });
         expect(hook.result.current.topics).toEqual(TOPICS);
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "rec-1",
+        );
 
         hook.rerender({ revision: 1 });
 

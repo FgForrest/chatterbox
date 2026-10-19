@@ -143,9 +143,11 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                         onTranscribeComplete();
                         return;
                     }
+                    invalidateItemProcessing(id);
                     toast.error(error.error || "Transcription failed");
                 }
             } catch {
+                invalidateItemProcessing(id);
                 toast.error("Failed to transcribe recording");
             } finally {
                 finishTracking(key);

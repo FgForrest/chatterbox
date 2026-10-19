@@ -257,6 +257,7 @@ export function LearnWidget({
     }, [recordingId, url]);
 
     useEffect(() => {
+        observedRun.current = null;
         void load();
     }, [load]);
 

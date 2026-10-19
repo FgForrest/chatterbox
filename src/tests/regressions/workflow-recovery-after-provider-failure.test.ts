@@ -9,6 +9,7 @@ import {
     vi,
 } from "vitest";
 import { POST } from "@/app/api/recordings/[id]/transcribe/route";
+import { PUT } from "@/app/api/settings/ai/providers/[id]/route";
 import { listProviderRecoveryRowsInTx } from "@/db/queries/pipeline";
 import {
     apiCredentials,
@@ -96,6 +97,9 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
     transcribeRecording: transcribe,
 }));
 vi.mock("@/lib/auth-server", () => ({
+    requireApiSession: async () => ({
+        user: { id: "member", email: "member@example.test" },
+    }),
     requireApiSessionActor: async () => ({
         session: { user: { id: "member" } },
         actor: {
@@ -585,7 +589,89 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
         ).toBe(1);
     });
 
-    it("uses the automatic retry path only after a provider exists and keeps its force flag false", async () => {
+    it("requests recovery only when a personal provider is re-enabled", async () => {
+        for (const userId of ["member", "other"]) {
+            const itemId = `personal-${userId}`;
+            await seed(itemId, userId);
+            await db()
+                .update(itemProcessing)
+                .set({ phases: blocked() })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, userId),
+                    ),
+                );
+        }
+        await credential();
+        await db()
+            .update(apiCredentials)
+            .set({ disabledAt: new Date() })
+            .where(
+                and(
+                    eq(apiCredentials.id, "provider"),
+                    eq(apiCredentials.userId, "member"),
+                ),
+            );
+        async function update(body: Record<string, unknown>) {
+            const response = await PUT(
+                new Request(
+                    "http://localhost/api/settings/ai/providers/provider",
+                    {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    },
+                ),
+                { params: Promise.resolve({ id: "provider" }) },
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ success: true });
+        }
+
+        await update({ defaultModel: "another-model" });
+        expect(await active("pipeline.advance")).toEqual([]);
+        await update({ disabled: true });
+        expect(await active("pipeline.advance")).toEqual([]);
+        expect((await processing("personal-member")).requestedGeneration).toBe(
+            1,
+        );
+
+        await update({ disabled: false });
+        const [driver] = await active("pipeline.advance");
+        expect(await active("pipeline.advance")).toHaveLength(1);
+        expect(driver).toMatchObject({
+            userId: "member",
+            subjectId: "personal-member",
+            payload: {
+                itemId: "personal-member",
+                view: "private",
+                reason: "provider-changed",
+            },
+        });
+        const generation = (await processing("personal-member"))
+            .requestedGeneration;
+        expect(generation).toBe(2);
+        expect(
+            (await processing("personal-other", "other")).requestedGeneration,
+        ).toBe(1);
+        await clearDrivers();
+
+        for (const body of [
+            { disabled: false },
+            { defaultModel: "test-model" },
+            { disabled: true },
+            { defaultModel: "another-model" },
+        ]) {
+            await update(body);
+            expect(await active("pipeline.advance")).toEqual([]);
+            expect(
+                (await processing("personal-member")).requestedGeneration,
+            ).toBe(generation);
+        }
+    });
+
+    it("drains provider recovery through the scoped automatic retry guard without a duplicate paid retry", async () => {
         await seed("retry");
         const phases = blocked();
         if (!phases.transcribe) throw new Error("Expected transcription phase");
@@ -597,13 +683,41 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
         expect(await sweepAutomaticTranscriptionRetries()).toBe(0);
         await credential();
         await setDefaultProvider("member", "transcription", "provider");
-        await run("retry", "transcript");
+        const [driver] = await active("pipeline.advance");
+        expect(await active("pipeline.advance")).toHaveLength(1);
+        expect(driver.payload).toMatchObject({
+            itemId: "retry",
+            reason: "provider-changed",
+        });
+        const generation = (await processing("retry")).requestedGeneration;
+        async function drain() {
+            return pipelineAdvanceJobHandler.run({
+                jobId: driver.id,
+                userId: driver.userId,
+                attempt: 1,
+                maxAttempts: driver.maxAttempts,
+                payload: pipelineAdvanceJobHandler.parsePayload(driver.payload),
+                signal: new AbortController().signal,
+                reportProgress: vi.fn(),
+            });
+        }
+        await drain();
         const jobs = await active("transcription");
         expect(jobs).toHaveLength(1);
         expect(jobs[0].payload).toMatchObject({
             trigger: "pipeline",
             force: false,
         });
+        expect((await processing("retry")).requestedGeneration).toBe(
+            generation + 1,
+        );
+        await drain();
+        expect((await active("transcription")).map((job) => job.id)).toEqual([
+            jobs[0].id,
+        ]);
+        expect((await processing("retry")).requestedGeneration).toBe(
+            generation + 1,
+        );
         expect(await sweepAutomaticTranscriptionRetries()).toBe(0);
     });
 

@@ -219,6 +219,79 @@ describe("useTranscribeQueue", () => {
             false,
         );
     });
+
+    it.each([
+        { code: "NO_TRANSCRIPTION_PROVIDER", status: 400 },
+        { code: "INTERNAL_ERROR", status: 500 },
+    ])("invalidates processing after a rejected request with $code", async ({
+        code,
+        status,
+    }) => {
+        vi.stubGlobal(
+            "fetch",
+            vi
+                .fn()
+                .mockResolvedValue(
+                    jsonResponse(
+                        { code, error: "Transcription unavailable" },
+                        status,
+                    ),
+                ),
+        );
+        const onTranscribeComplete = vi.fn();
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById("recording-1");
+        });
+
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "recording-1",
+        );
+        expect(toast.error).toHaveBeenCalledWith("Transcription unavailable");
+        expect(onTranscribeComplete).not.toHaveBeenCalled();
+        expect(followJob).not.toHaveBeenCalled();
+        expect(hook.result.current.inFlightActions.has("recording-1")).toBe(
+            false,
+        );
+    });
+
+    it.each([
+        "network",
+        "response",
+    ])("invalidates processing after a %s failure", async (failure) => {
+        const fetchMock = vi.fn();
+        if (failure === "network")
+            fetchMock.mockRejectedValue(new TypeError("Connection lost"));
+        else fetchMock.mockResolvedValue(new Response("{", { status: 202 }));
+        vi.stubGlobal("fetch", fetchMock);
+        const onTranscribeComplete = vi.fn();
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById(
+                "org-recording",
+                undefined,
+                "org",
+            );
+        });
+
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "org-recording",
+        );
+        expect(toast.error).toHaveBeenCalledWith(
+            "Failed to transcribe recording",
+        );
+        expect(onTranscribeComplete).not.toHaveBeenCalled();
+        expect(followJob).not.toHaveBeenCalled();
+        expect(
+            hook.result.current.inFlightActions.has("org:org-recording"),
+        ).toBe(false);
+    });
 });
 
 it("invalidates the item after a failed job on the Organization view", async () => {

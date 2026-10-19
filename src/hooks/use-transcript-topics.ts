@@ -257,7 +257,6 @@ export function useTranscriptTopics(
                 toast.error(await getApiErrorMessage(response, failed));
                 return;
             }
-            invalidateItemProcessing(recordingId);
             const body = await response.json();
             if (response.status !== 202) {
                 const next: TranscriptTopic[] = body.topics ?? [];
