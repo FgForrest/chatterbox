@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -44,6 +44,7 @@ import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
 } from "@/lib/recordings/filename-overrides";
+import type { ChatterSearchHit } from "@/lib/search/types";
 import type { InitialSettings } from "@/lib/settings/initial-settings";
 import { canChangeItem } from "@/lib/sharing/change-permission";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -166,10 +167,35 @@ export function Workstation({
 
     useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
+    const locationQuery = useSearchParams().toString();
     const handledLocationQuery = useRef<string | null>(null);
+    const selectRecordingByUser = useCallback((recording: Recording) => {
+        selectionRevisionRef.current += 1;
+        setPendingUploadSelection(null);
+        setCurrentRecording(recording);
+        setMobileView("detail");
+    }, []);
+    const openSearchHit = useCallback(
+        (hit: ChatterSearchHit): boolean => {
+            const organization =
+                new URL(hit.href, window.location.origin).searchParams.get(
+                    "view",
+                ) === "org";
+            const preferred = organization ? orgRecordings : recordings;
+            const fallback = organization ? recordings : orgRecordings;
+            const linked =
+                preferred.find((item) => item.id === hit.id) ??
+                fallback.find((item) => item.id === hit.id);
+            if (!linked || hiddenIds.has(linked.id)) return false;
+            selectRecordingByUser(linked);
+            setSelectedFolderId(null);
+            return true;
+        },
+        [orgRecordings, recordings, hiddenIds, selectRecordingByUser],
+    );
 
     useEffect(() => {
-        const query = window.location.search;
+        const query = locationQuery;
         if (handledLocationQuery.current === query) return;
         handledLocationQuery.current = query;
         const params = new URLSearchParams(query);
@@ -179,8 +205,8 @@ export function Workstation({
                 params.get("view") === "org" ? orgRecordings : recordings
             ).find((recording) => recording.id === recordingId);
             if (linked) {
-                setCurrentRecording(linked);
-                setMobileView("detail");
+                selectRecordingByUser(linked);
+                setSelectedFolderId(null);
                 return;
             }
         }
@@ -191,11 +217,19 @@ export function Workstation({
                 (folder) => folder.id === folderId,
             )
         ) {
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
             setLibraryMode("organize");
             setSelectedFolderId(folderId);
             setMobileView("detail");
         }
-    }, [initialFolderOrganization.folders, orgRecordings, recordings]);
+    }, [
+        locationQuery,
+        initialFolderOrganization.folders,
+        orgRecordings,
+        recordings,
+        selectRecordingByUser,
+    ]);
 
     useEffect(() => {
         setFolderOrganization(initialFolderOrganization);
@@ -437,13 +471,6 @@ export function Workstation({
                 folders: [...current.folders, folder],
             };
         });
-    }, []);
-
-    const selectRecordingByUser = useCallback((recording: Recording) => {
-        selectionRevisionRef.current += 1;
-        setPendingUploadSelection(null);
-        setCurrentRecording(recording);
-        setMobileView("detail");
     }, []);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
@@ -1257,6 +1284,7 @@ export function Workstation({
                 currentTheme={theme}
                 dateTimeFormat={initialSettings.dateTimeFormat}
                 onSelectRecording={selectRecordingByUser}
+                onOpenSearchHit={openSearchHit}
                 onSync={handleSync}
                 onUpload={triggerUpload}
                 onOpenSettings={() => setSettingsOpen(true)}

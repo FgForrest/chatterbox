@@ -11,7 +11,11 @@ import {
 import { useExtracted, useFormatter } from "next-intl";
 import { Row } from "@/components/dashboard/command-palette-parts";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
-import type { AppSearchResults, AppSearchScope } from "@/lib/search/types";
+import type {
+    AppSearchResults,
+    AppSearchScope,
+    ChatterSearchHit,
+} from "@/lib/search/types";
 
 /** Page search hits, with translated vocabulary and server-defined task order. */
 export function PaletteSearchResults({
@@ -19,11 +23,13 @@ export function PaletteSearchResults({
     scope,
     localRecordingIds,
     onSelect,
+    onSelectChatter,
 }: {
     results: AppSearchResults;
     scope: AppSearchScope;
     localRecordingIds: ReadonlySet<string>;
     onSelect: (href: string) => void;
+    onSelectChatter: (hit: ChatterSearchHit) => void;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -42,7 +48,7 @@ export function PaletteSearchResults({
                             keywords={["server-match"]}
                             key={hit.id}
                             value={`chatter:${hit.id}`}
-                            onSelect={() => onSelect(hit.href)}
+                            onSelect={() => onSelectChatter(hit)}
                         >
                             <Row
                                 icon={<FileText className="size-4" />}

@@ -12,6 +12,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { AppUploadButton } from "@/components/app-upload-button";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { ShortcutsDialog } from "@/components/dashboard/shortcuts-dialog";
 import {
@@ -107,7 +108,9 @@ function useChromeState(config: AppChromeConfig) {
     useEffect(() => {
         if (!settingsOpen) return;
         const controller = new AbortController();
-        void fetch("/api/settings/ai/providers", { signal: controller.signal })
+        void fetch("/api/settings/ai/providers?includeDisabled=true", {
+            signal: controller.signal,
+        })
             .then((response) => (response.ok ? response.json() : null))
             .then((data: { providers?: Provider[] } | null) => {
                 if (!controller.signal.aborted)
@@ -183,7 +186,7 @@ export function AppChromeProvider({
 }: AppChromeConfig & { children: ReactNode }) {
     const chrome = useChromeState(config);
     const pathname = usePathname();
-    const { refresh } = useRouter();
+    const { refresh, push } = useRouter();
     const workstation =
         pathname.startsWith("/dashboard") ||
         pathname.startsWith("/dev/demo-dashboard");
@@ -211,7 +214,13 @@ export function AppChromeProvider({
             />
             <SettingsDialog
                 open={chrome.settingsOpen}
-                onOpenChange={chrome.setSettingsOpen}
+                onOpenChange={(open) => {
+                    chrome.setSettingsOpen(open);
+                    if (!open && pathname === "/settings") push("/dashboard");
+                }}
+                headerAction={
+                    pathname === "/settings" ? <AppUploadButton /> : undefined
+                }
                 initialProviders={chrome.providers}
                 isHosted={config.isHosted}
                 mailEnabled={config.mailEnabled}

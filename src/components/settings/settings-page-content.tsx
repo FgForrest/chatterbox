@@ -1,45 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { AppUploadButton } from "@/components/app-upload-button";
-import { type Provider, SettingsDialog } from "@/components/settings-dialog";
+import { useEffect } from "react";
+import { useAppChrome } from "@/components/app-chrome-provider";
 
-const EMPTY_PROVIDERS: Provider[] = [];
-
-interface SettingsPageContentProps {
-    initialProviders?: Provider[];
-    isHosted?: boolean;
-    mailEnabled?: boolean;
-    accessManagement?: boolean;
-}
-
-export function SettingsPageContent({
-    initialProviders = EMPTY_PROVIDERS,
-    isHosted = false,
-    mailEnabled = false,
-    accessManagement = false,
-}: SettingsPageContentProps) {
-    const { push } = useRouter();
-    const [open, setOpen] = useState(true);
-
-    const handleOpenChange = (newOpen: boolean) => {
-        setOpen(newOpen);
-        if (!newOpen) {
-            // Navigate back to dashboard when dialog closes
-            push("/dashboard");
-        }
-    };
-
-    return (
-        <SettingsDialog
-            open={open}
-            onOpenChange={handleOpenChange}
-            initialProviders={initialProviders}
-            isHosted={isHosted}
-            mailEnabled={mailEnabled}
-            accessManagement={accessManagement}
-            headerAction={<AppUploadButton />}
-        />
-    );
+export function SettingsPageContent() {
+    const { setSettingsOpen } = useAppChrome();
+    useEffect(() => {
+        setSettingsOpen(true);
+        return () => setSettingsOpen(false);
+    }, [setSettingsOpen]);
+    return null;
 }

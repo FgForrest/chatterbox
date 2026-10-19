@@ -20,6 +20,7 @@ import { type CallerTaskQuery, listCallerTasks } from "@/lib/tasks/tasks";
 
 const RESULT_LIMIT = 50;
 const TASK_SCAN_LIMIT = 1000;
+const TASK_DEADLINE_MS = 5_000;
 
 function matches(text: string, query: string): boolean {
     const folded = foldForSearch(text);
@@ -33,16 +34,20 @@ function matches(text: string, query: string): boolean {
 export async function searchAlmanac(
     userId: string,
     query: string,
+    signal?: AbortSignal,
 ): Promise<{ hits: AlmanacSearchHit[]; limited: boolean }> {
+    signal?.throwIfAborted();
     const [view, vocabulary] = await Promise.all([
         knowledgeView({ kind: "pages", viewerUserId: userId }),
         vocabularyVisibleTo(userId),
     ]);
+    signal?.throwIfAborted();
     const labels = new Map(
         vocabulary.entityTypes.map((type) => [type.key, type.label]),
     );
     const hits: AlmanacSearchHit[] = [];
     for (const item of view.items) {
+        signal?.throwIfAborted();
         const href =
             item.kind === "person"
                 ? `/almanac/${encodeURIComponent(item.id)}`
@@ -87,7 +92,7 @@ export async function searchAlmanac(
     );
     return {
         hits: hits.slice(0, RESULT_LIMIT),
-        limited: hits.length > RESULT_LIMIT,
+        limited: Boolean(query) && hits.length > RESULT_LIMIT,
     };
 }
 
@@ -95,12 +100,17 @@ export async function searchAlmanac(
 export async function searchTasks(
     viewer: TaskViewer,
     query: string,
+    signal?: AbortSignal,
 ): Promise<{ hits: TaskSearchHit[]; limited: boolean }> {
     const hits: TaskSearchHit[] = [];
     let scanned = 0;
+    const started = Date.now();
     for (const status of ["open", "done"] as const) {
         let after: CallerTaskQuery["after"] = null;
         for (;;) {
+            signal?.throwIfAborted();
+            if (Date.now() - started >= TASK_DEADLINE_MS)
+                return { hits, limited: Boolean(query) };
             const rows = await listCallerTasks(viewer, {
                 status,
                 after,
@@ -110,7 +120,10 @@ export async function searchTasks(
                 dueBefore: null,
                 recordingCondition: null,
             });
+            signal?.throwIfAborted();
             for (const row of rows) {
+                if (Date.now() - started >= TASK_DEADLINE_MS)
+                    return { hits, limited: Boolean(query) };
                 scanned++;
                 if (matches(`${row.text} ${row.recording.title}`, query)) {
                     hits.push({
@@ -123,7 +136,7 @@ export async function searchTasks(
                     });
                 }
                 if (hits.length >= RESULT_LIMIT || scanned >= TASK_SCAN_LIMIT)
-                    return { hits, limited: true };
+                    return { hits, limited: Boolean(query) };
             }
             const last = rows.at(-1);
             if (rows.length < 100 || !last) break;
@@ -136,17 +149,32 @@ export async function searchTasks(
 async function searchChatter(
     userId: string,
     query: string,
+    signal?: AbortSignal,
 ): Promise<{ hits: ChatterSearchHit[]; limited: boolean }> {
+    signal?.throwIfAborted();
     const orgUserId = await getOrgUserId();
+    signal?.throwIfAborted();
     const visibility = or(
         eq(chatterItems.userId, userId),
         orgUserId ? sharedItemCondition(orgUserId, chatterItems.id) : undefined,
     );
     const searches = query
         ? await Promise.all([
-              searchItems({ viewerUserId: userId, view: "private", query }),
+              searchItems({
+                  viewerUserId: userId,
+                  view: "private",
+                  query,
+                  signal,
+              }),
               ...(orgUserId
-                  ? [searchItems({ viewerUserId: userId, view: "org", query })]
+                  ? [
+                        searchItems({
+                            viewerUserId: userId,
+                            view: "org",
+                            query,
+                            signal,
+                        }),
+                    ]
                   : []),
           ])
         : [];
@@ -158,6 +186,7 @@ async function searchChatter(
             hits: [],
             limited: searches.some((result) => !result.complete),
         };
+    signal?.throwIfAborted();
     const rows = await db
         .select({
             id: chatterItems.id,
@@ -175,6 +204,7 @@ async function searchChatter(
         )
         .orderBy(desc(chatterItems.occurredAt), desc(chatterItems.id))
         .limit(RESULT_LIMIT + 1);
+    signal?.throwIfAborted();
     const decoded = rows
         .slice(0, RESULT_LIMIT)
         .map((row) => ({ ...row, title: decryptText(row.title) }));
@@ -196,8 +226,9 @@ async function searchChatter(
             href: `/dashboard?recording=${encodeURIComponent(row.id)}${row.userId !== userId || row.userId === orgUserId ? "&view=org" : ""}`,
         })),
         limited:
-            rows.length > RESULT_LIMIT ||
-            searches.some((result) => !result.complete),
+            Boolean(query) &&
+            (rows.length > RESULT_LIMIT ||
+                searches.some((result) => !result.complete)),
     };
 }
 
@@ -206,16 +237,17 @@ export async function searchApp(
     viewer: TaskViewer,
     scope: AppSearchScope,
     query: string,
+    signal?: AbortSignal,
 ): Promise<AppSearchResults> {
     const [chatter, almanac, tasks] = await Promise.all([
         scope === "chatter" || scope === "all"
-            ? searchChatter(viewer.userId, query)
+            ? searchChatter(viewer.userId, query, signal)
             : null,
         scope === "almanac" || scope === "all"
-            ? searchAlmanac(viewer.userId, query)
+            ? searchAlmanac(viewer.userId, query, signal)
             : null,
         scope === "tasks" || scope === "all"
-            ? searchTasks(viewer, query)
+            ? searchTasks(viewer, query, signal)
             : null,
     ]);
     return {

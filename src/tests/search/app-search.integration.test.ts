@@ -1,10 +1,15 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+    accounts,
+    chatterItems,
     knowledgeAliases,
     knowledgeEntities,
     knowledgeEntityTypes,
+    mailContents,
+    mailMessages,
     recordingFolderAssignments,
+    recordingFolders,
     recordingTasks,
     transcriptCorrections,
     users,
@@ -45,6 +50,15 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
             KNOWLEDGE_MEMORY_MB: 32,
+            OIDC_ISSUER_URL: "https://id.example.test/realms/test",
+            OIDC_CLIENT_ID: "chatterbox",
+            OIDC_CLIENT_SECRET: "test-secret",
+            MAIL_DOMAIN: "mail.example.test",
+            MAIL_ORG_NICKNAME: "team",
+            MAIL_FORMER_ORG_NICKNAMES: [] as string[],
+            MAIL_ADDRESS_HASH_SECRET: "m".repeat(40),
+            MAIL_INGEST_SECRET: "i".repeat(40),
+            MAIL_INACTIVE_DAYS: 180,
         },
     };
 });
@@ -59,12 +73,15 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: vi.fn(),
 }));
 vi.mock("@/lib/folder-exports/jobs", () => ({
-    enqueueExportPlansForUser: vi.fn(),
+    enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { encryptText } from "@/lib/encryption/fields";
+import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { addRecordingToFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { domainLookupHash, lookupHash } from "@/lib/knowledge/lookup-hash";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
+import { createSecretAddress, ensureMailbox } from "@/lib/mail/addresses";
+import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { searchAlmanac, searchApp, searchTasks } from "@/lib/search/app-search";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
@@ -182,6 +199,7 @@ describeWithDatabase("page-scoped search (PostgreSQL)", () => {
             id: "deleted",
             userId: ALICE,
             deletedAt: new Date(),
+            title: "Deleted planning",
         });
         await shareRecording(db(), "bob-shared", orgId);
         const transcriptionId = await insertTranscript(
@@ -397,6 +415,131 @@ describeWithDatabase("page-scoped search (PostgreSQL)", () => {
             mockEnv.IS_HOSTED = false;
             mockEnv.SELF_HOST_MODE = "shared";
         }
+    });
+    it("excludes matching private and deleted Chatter items for non-empty queries", async () => {
+        const own = await searchApp(alice, "chatter", "planning");
+        expect(own.chatter.map((hit) => hit.id).sort()).toEqual([
+            "alice-private",
+            "bob-shared",
+        ]);
+        expect(
+            (await searchApp(alice, "chatter", "secret recording")).chatter,
+        ).toEqual([]);
+        expect(
+            (await searchApp(bob, "chatter", "secret recording")).chatter.map(
+                (hit) => hit.id,
+            ),
+        ).toEqual(["bob-private"]);
+        expect(
+            (await searchApp(alice, "chatter", "Deleted planning")).chatter,
+        ).toEqual([]);
+    });
+    it.each([
+        { hosted: false, mode: "local" },
+        { hosted: true, mode: "local" },
+        { hosted: true, mode: "shared" },
+    ])("matches Chatter list visibility with hosted=$hosted and mode=$mode", async ({
+        hosted,
+        mode,
+    }) => {
+        mockEnv.IS_HOSTED = hosted;
+        mockEnv.SELF_HOST_MODE = mode;
+        try {
+            const results = await searchApp(alice, "chatter", "planning");
+            expect(results.chatter.map((hit) => hit.id)).toEqual([
+                "alice-private",
+            ]);
+            expect(await loadSharedMailRows(ALICE, orgId)).toEqual([]);
+        } finally {
+            mockEnv.IS_HOSTED = false;
+            mockEnv.SELF_HOST_MODE = "shared";
+        }
+    });
+    it("masks a colleague's mail title and snippet like the list", async () => {
+        await db()
+            .update(users)
+            .set({ emailVerified: true, lastSsoLoginAt: new Date() })
+            .where(eq(users.id, BOB));
+        await db().insert(accounts).values({
+            userId: BOB,
+            accountId: "bob-subject",
+            providerId: "oidc",
+        });
+        const mailbox = await ensureMailbox(BOB);
+        const secret = await createSecretAddress({
+            userId: BOB,
+            baseAddressId: mailbox?.id ?? "",
+            label: null,
+        });
+        const address = `${secret.localPart}@mail.example.test`;
+        await db()
+            .insert(chatterItems)
+            .values({
+                id: "bob-mail",
+                userId: BOB,
+                kind: "mail",
+                title: encryptText(`Delivery to ${address}`),
+                occurredAt: new Date(),
+            });
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: "bob-mail",
+                userId: BOB,
+                addressId: mailbox?.id,
+                rawHash: "f".repeat(64),
+                receivedAt: new Date(),
+                sizeBytes: 120,
+                auth: encryptJsonField({}),
+                senderVerified: true,
+            });
+        await db()
+            .insert(mailContents)
+            .values({
+                itemId: "bob-mail",
+                userId: BOB,
+                parserVersion: 1,
+                segments: encryptJsonField([
+                    { role: "body", text: `Receipts go to ${address} please.` },
+                ]),
+            });
+        await ensureRootFolders(orgId);
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, orgId),
+                    isNull(recordingFolders.parentId),
+                ),
+            )
+            .limit(1);
+        await addRecordingToFolder({
+            userId: BOB,
+            recordingId: "bob-mail",
+            folderId: root?.id ?? "",
+        });
+        const result = await searchApp(alice, "chatter", "Receipts");
+        const hit = result.chatter.find((row) => row.id === "bob-mail");
+        const listed = (await loadSharedMailRows(ALICE, orgId)).find(
+            (row) => row.id === "bob-mail",
+        );
+        expect(hit?.title).toBe(listed?.filename);
+        expect(hit?.title).not.toContain(secret.localPart);
+        expect(hit?.snippet).toContain("Receipts");
+        expect(hit?.snippet).not.toContain(secret.localPart);
+        expect(
+            (await searchApp(alice, "chatter", secret.localPart.slice(0, 7)))
+                .chatter,
+        ).toEqual([]);
+        const own = await searchApp(bob, "chatter", "Receipts");
+        expect(
+            own.chatter.find((row) => row.id === "bob-mail")?.snippet,
+        ).toContain(secret.localPart);
+        expect(
+            (await loadMailListRows(BOB)).find((row) => row.id === "bob-mail")
+                ?.filename,
+        ).toContain(secret.localPart);
     });
     it("immediately stops returning a task after its source is withdrawn", async () => {
         await db()

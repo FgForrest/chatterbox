@@ -35,7 +35,7 @@ export function AppHeader({ upload }: { upload?: WorkstationUpload }) {
             ? i18n("Search the Almanac")
             : scope === "tasks"
               ? i18n({ id: "appHeader_searchTasks", message: "Search tasks" })
-              : i18n("Search Klepy");
+              : i18n("Search Chatter");
     return (
         <TooltipProvider delayDuration={200}>
             <header className="sticky top-0 z-30 -mx-4 mb-6 flex items-center gap-2 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 lg:gap-3">

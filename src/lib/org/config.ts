@@ -77,14 +77,14 @@ export function assertOrgScopeWritable(): void {
  * Checked by role, not by whether the scope is enabled: an org account left
  * behind by removed env vars must still never gain a private scope.
  */
-export async function isOrgAccount(userId: string): Promise<boolean> {
+export const isOrgAccount = cache(async (userId: string): Promise<boolean> => {
     const [row] = await db
         .select({ role: users.role })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
     return row?.role === "org";
-}
+});
 
 /** Reject actions that would give the organization account recordings of its own. */
 export async function assertNotOrgAccount(userId: string): Promise<void> {

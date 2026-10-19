@@ -20,6 +20,7 @@ import {
 import { AppHeader } from "@/components/app-header";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { HelpProvider } from "@/components/help/help-provider";
+import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import type { AppSearchResults } from "@/lib/search/types";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
 
@@ -29,6 +30,8 @@ const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
     signOut: vi.fn(),
     sync: vi.fn(),
+    pendingReviews: 0,
+    pendingTasks: 0,
 }));
 vi.mock("next/navigation", () => ({
     usePathname: () => mocks.pathname,
@@ -43,10 +46,10 @@ vi.mock("next-intl", () => ({
     }),
 }));
 vi.mock("@/components/learn/review-events", () => ({
-    usePendingReviews: () => 0,
+    usePendingReviews: () => mocks.pendingReviews,
 }));
 vi.mock("@/components/tasks/use-pending-tasks", () => ({
-    usePendingTasks: () => 0,
+    usePendingTasks: () => mocks.pendingTasks,
 }));
 vi.mock("@/components/product-name-provider", () => ({
     useProductName: () => "Chatterbox",
@@ -80,12 +83,17 @@ vi.mock("@/components/settings-dialog", () => ({
     }: {
         open: boolean;
         accessManagement: boolean;
-    }) =>
-        open ? (
-            <div role="dialog" aria-label="Settings">
-                {accessManagement ? "Organization access" : "Personal settings"}
-            </div>
-        ) : null,
+    }) => (
+        <div data-testid="settings-dialog-instance">
+            {open ? (
+                <div role="dialog" aria-label="Settings">
+                    {accessManagement
+                        ? "Organization access"
+                        : "Personal settings"}
+                </div>
+            ) : null}
+        </div>
+    ),
 }));
 vi.mock("@/components/onboarding-dialog", () => ({
     OnboardingDialog: ({ open }: { open: boolean }) =>
@@ -249,6 +257,8 @@ function openPalette(metaKey = true) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    mocks.pendingReviews = 0;
+    mocks.pendingTasks = 0;
     vi.stubGlobal(
         "ResizeObserver",
         class {
@@ -276,7 +286,7 @@ const pages = [
     {
         pathname: "/dashboard",
         scope: "chatter",
-        label: "Search Klepy",
+        label: "Search Chatter",
         pill: "Chatter",
     },
     {
@@ -310,6 +320,19 @@ describe.each(pages)("shared header on $pathname", ({
             .querySelector('[aria-current="page"]');
         expect(current?.textContent).toBe(pill);
         expect(current?.querySelector("span")?.className).toBe("inline");
+    });
+    it.each([
+        { key: ",", dialog: "Settings" },
+        { key: "?", dialog: "Keyboard shortcuts" },
+    ])("opens $dialog with $key from the shared provider", async ({
+        key,
+        dialog,
+    }) => {
+        renderPage(pathname);
+        fireEvent.keyDown(window, { key });
+        expect(
+            await screen.findByRole("dialog", { name: dialog }),
+        ).toBeTruthy();
     });
     it("opens Settings from the menu", async () => {
         renderPage(pathname);
@@ -600,5 +623,80 @@ describe("palette results and request lifetime", () => {
         expect(screen.getByText("Tasks · Open tasks")).toBeTruthy();
         expect(screen.getByText("2026-10-23")).toBeTruthy();
         expect(screen.getAllByText("Alpha recording")).toHaveLength(2);
+    });
+});
+
+describe("shared settings and mobile badges", () => {
+    it("mounts a single settings dialog on /settings", async () => {
+        mocks.pathname = "/settings";
+        const { rerender } = render(
+            <AppChromeProvider {...config}>
+                <SettingsPageContent />
+            </AppChromeProvider>,
+        );
+        expect(
+            await screen.findAllByRole("dialog", { name: "Settings" }),
+        ).toHaveLength(1);
+        expect(screen.getAllByTestId("settings-dialog-instance")).toHaveLength(
+            1,
+        );
+        rerender(<AppChromeProvider {...config}>{null}</AppChromeProvider>);
+        expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    });
+    it("names both badge counts and keeps their mobile presentation", () => {
+        mocks.pendingReviews = 3;
+        mocks.pendingTasks = 2;
+        renderPage("/dashboard");
+        for (const name of [
+            "Almanac, {count, plural, one {# review waits} other {# reviews wait}}",
+            "Tasks, {count, plural, one {# new task or proposal for you} other {# new tasks or proposals for you}}",
+        ]) {
+            const link = screen.getByRole("link", { name });
+            const badge = link.querySelector("span.rounded-full");
+            expect(badge).toBeTruthy();
+            expect(badge?.className).not.toMatch(/hidden/);
+        }
+    });
+    it("does not request a one-character search", async () => {
+        renderPage("/almanac");
+        openPalette();
+        fireEvent.change(screen.getByRole("combobox"), {
+            target: { value: "a" },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        expect(fetch).not.toHaveBeenCalled();
+        expect(screen.queryByText("Could not search. Try again.")).toBeNull();
+    });
+    it.each([
+        true,
+        false,
+    ])("uses the workstation's server-hit handler when handled=%s", async (handled) => {
+        vi.mocked(fetch).mockImplementation(
+            async () =>
+                new Response(
+                    JSON.stringify({ ...empty, chatter: hits.chatter }),
+                ),
+        );
+        const openHit = vi.fn(() => handled);
+        render(
+            <CommandPalette
+                open
+                onOpenChange={vi.fn()}
+                currentTheme="system"
+                dateTimeFormat="relative"
+                onOpenSearchHit={openHit}
+                onSetTheme={vi.fn()}
+                onSync={vi.fn()}
+                onUpload={vi.fn()}
+                onOpenSettings={vi.fn()}
+                onOpenShortcuts={vi.fn()}
+            />,
+        );
+        fireEvent.click(await screen.findByText("Alpha recording"));
+        await waitFor(() =>
+            expect(openHit).toHaveBeenCalledWith(hits.chatter[0]),
+        );
+        if (handled) expect(mocks.push).not.toHaveBeenCalled();
+        else expect(mocks.push).toHaveBeenCalledWith(hits.chatter[0]?.href);
     });
 });

@@ -8,7 +8,6 @@ import {
     plaudConnections,
     recordings,
     transcriptions,
-    userSettings,
     users,
 } from "@/db/schema";
 import { getSessionActor, requireAuth } from "@/lib/auth-server";
@@ -25,6 +24,7 @@ import { isMailEnabled } from "@/lib/mail/config";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
+import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -241,7 +241,7 @@ export default async function DashboardPage() {
         userRecordings,
         userTranscriptions,
         userSummaryRows,
-        [settingsRow],
+        settingsRow,
         [connectionRow],
         folderOrganization,
         orgUserId,
@@ -310,11 +310,7 @@ export default async function DashboardPage() {
         // player render with the user's preferences on first paint — no
         // waterfall of /api/settings/user fetches from three different
         // components.
-        db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, session.user.id))
-            .limit(1),
+        getUserSettings(session.user.id),
         db
             .select({ invalidatedAt: plaudConnections.invalidatedAt })
             .from(plaudConnections)

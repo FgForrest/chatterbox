@@ -28,6 +28,7 @@ export interface ScanOptions<Item, Result> {
     maxResults: number;
     /** Where to start: a stamp from an earlier scan, or null. */
     before: string | null;
+    signal?: AbortSignal;
 }
 
 /**
@@ -48,6 +49,7 @@ export async function boundedScan<Item, Result>(
         results.length >= options.maxResults ||
         late();
     for (;;) {
+        options.signal?.throwIfAborted();
         if (late()) {
             return {
                 results,
@@ -60,7 +62,9 @@ export async function boundedScan<Item, Result>(
         if (batch.length === 0) {
             return { results, scanned, complete: true, continueBefore: null };
         }
+        options.signal?.throwIfAborted();
         for (const item of batch) {
+            options.signal?.throwIfAborted();
             if (stopped()) {
                 return {
                     results,

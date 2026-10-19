@@ -107,6 +107,7 @@ async function loadBatch(
     scope: SQL,
     before: string | null,
     searchScopes: ReadonlySet<ItemSearchScope>,
+    signal?: AbortSignal,
 ): Promise<LoadedItem[]> {
     const after = before ? decodeKeyset(before) : null;
     const rows = await db
@@ -135,6 +136,7 @@ async function loadBatch(
         )
         .orderBy(desc(chatterItems.occurredAt), desc(chatterItems.id))
         .limit(BATCH);
+    signal?.throwIfAborted();
     if (rows.length === 0) return [];
     const ownerOf = new Map(rows.map((row) => [row.id, row.userId]));
     const ownerIds = [...new Set(rows.map((row) => row.userId))];
@@ -210,6 +212,7 @@ async function loadBatch(
                   )
             : [],
     ]);
+    signal?.throwIfAborted();
     const contentTexts = new Map<string, string[]>();
     const summaryTexts = new Map<string, string[]>();
     const add = (
@@ -272,13 +275,16 @@ export async function searchItems({
     query,
     before = null,
     scopes = ["title", "content", "summary"],
+    signal,
 }: {
     viewerUserId: string;
     view: RecordingView;
     query: string;
     before?: string | null;
     scopes?: readonly ItemSearchScope[];
+    signal?: AbortSignal;
 }): Promise<ItemSearchResult> {
+    signal?.throwIfAborted();
     const words = foldForSearch(query).split(/\s+/).filter(Boolean);
     const searchScopes = new Set(scopes);
     // A colleague's mail is searched as it reads to the viewer: matched
@@ -327,7 +333,7 @@ export async function searchItems({
     const found: ItemSearchHit[] = [];
     const scan = await boundedScan({
         batches: async (stamp) =>
-            masked(await loadBatch(scope, stamp, searchScopes)),
+            masked(await loadBatch(scope, stamp, searchScopes, signal)),
         stampOf: (item) => encodeKeyset({ at: item.occurredAt, id: item.id }),
         visit: (item) => {
             const all = [
@@ -353,6 +359,7 @@ export async function searchItems({
         deadlineMs: DEADLINE_MS,
         maxResults: MAX_RESULTS,
         before,
+        signal,
     });
     return {
         hits: found,

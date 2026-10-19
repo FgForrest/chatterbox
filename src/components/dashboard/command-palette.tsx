@@ -20,6 +20,7 @@ import type { DateTimeFormat } from "@/lib/format-date";
 import type {
     AppSearchResults,
     AppSearchScope,
+    ChatterSearchHit,
     PageSearchScope,
 } from "@/lib/search/types";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,7 @@ interface CommandPaletteProps {
     currentTheme: "light" | "dark" | "system";
     dateTimeFormat: DateTimeFormat;
     onSelectRecording?: (r: Recording) => void;
+    onOpenSearchHit?: (hit: ChatterSearchHit) => boolean;
     onSync: () => void;
     onUpload: () => void;
     onOpenSettings: () => void;
@@ -73,6 +75,7 @@ export function CommandPalette({
     currentTheme,
     dateTimeFormat,
     onSelectRecording = noop,
+    onOpenSearchHit,
     onSync,
     onUpload,
     onOpenSettings,
@@ -92,7 +95,10 @@ export function CommandPalette({
     const requestKey = `${scope}:${query.trim()}`;
     const results =
         response?.key === requestKey ? response.results : EMPTY_RESULTS;
-    const loading = response?.key !== requestKey && failedKey !== requestKey;
+    const loading =
+        query.trim().length !== 1 &&
+        response?.key !== requestKey &&
+        failedKey !== requestKey;
     const showChatter = scope === "chatter" || scope === "all";
     const scopeLabel =
         pageScope === "almanac"
@@ -109,7 +115,7 @@ export function CommandPalette({
         setFailedKey(null);
     }, [open, pageScope]);
     useEffect(() => {
-        if (!open) return;
+        if (!open || query.trim().length === 1) return;
         const controller = new AbortController();
         const timer = setTimeout(() => {
             const params = new URLSearchParams({ scope, q: query.trim() });
@@ -340,6 +346,11 @@ export function CommandPalette({
                                           ),
                                       )
                                     : new Set()
+                            }
+                            onSelectChatter={(hit) =>
+                                runAction(() => {
+                                    if (!onOpenSearchHit?.(hit)) push(hit.href);
+                                })()
                             }
                             onSelect={(href) => runAction(() => push(href))()}
                         />
