@@ -85,22 +85,22 @@ Then in Chatterbox, open **Settings → Meeting Recorder** and generate a record
 
 ## Packaging
 
-For an unlisted Chrome Web Store upload or manual distribution, from the
+For a Chrome Web Store upload or manual distribution, from the
 repository root:
 
 ```bash
 node extensions/recorder/pack.mjs
 ```
 
-This writes `dist/chatterbox-recorder-<version>.zip`.
+This writes `dist/chatterbox-recorder-<version>.zip`. The ZIP omits the
+development-only manifest `key`, which the Chrome Web Store rejects.
 
 The published Chrome Web Store extension ID is
 `pojdfnhpfijfolehkjidbomgjemonkge`, which Chatterbox detects by default.
-The development extension ID is pinned by the `key` in `manifest.json`:
+The `key` in `manifest.json` pins the unpacked development extension ID to
 `hiipabbdnlhdkgldhkdndmohejoaecnh`. The matching private key lives outside this
-folder in
-`extensions/signing-keys/` (git-ignored) so Chrome does not warn about a
-`.pem` inside the loaded extension; keep it if you ever sign a `.crx`
+folder in `extensions/signing-keys/` (git-ignored) so Chrome does not warn about
+a `.pem` inside the loaded extension; keep it if you ever sign a `.crx`
 yourself. Rebuilding with a different key changes the ID, in which case set
 `NEXT_PUBLIC_RECORDER_EXTENSION_ID` on the server.
 
