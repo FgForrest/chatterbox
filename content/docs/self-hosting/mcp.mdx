@@ -28,7 +28,7 @@ permissions allow; calling a known tool without its permission returns
 | `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
 | `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
 | `tasks:write`      | `update_task` (status and assignee only)                                                           |
-| `mail:read`        | `list_mail`, `get_mail`                                                                            |
+| `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders` and `list_recordings` come with any of `transcripts:read`,
 `summaries:read` or `tasks:read`.
@@ -62,7 +62,7 @@ Permissions combine, and some fields need two of them:
   a mail's words.
 - A summary's action items, in `get_summary` and in what
   `search_summaries` searches, need `tasks:read`.
-- The `entity` filter of the recording tools needs `knowledge:read`.
+- The `entity` filter of the recording tools and `search_mail` needs `knowledge:read`.
 - `tasks:write` includes `tasks:read`.
 
 A permission never widens what a caller already sees: Chatterbox's usual rules
@@ -321,7 +321,7 @@ an ambiguous one answers with up to five candidates. Without
 (confirmed speakers of its recordings, assignees of its tasks), never
 things.
 
-**Searches are bounded.** Titles, transcripts, summaries and tasks are
+**Searches are bounded.** Titles, transcripts, summaries, tasks and mail are
 encrypted at rest, so a search decrypts as it goes, newest first, and
 stops at a limit:
 
@@ -330,6 +330,7 @@ stops at a limit:
 | `list_recordings` with `title`      | 500 recordings | 50              |
 | `search_transcripts`                | 200 recordings | 50 recordings, 3 snippets each |
 | `search_summaries`                  | 500 summaries  | 50 recordings, 3 snippets each |
+| `search_mail`                       | 500 mails      | 50 mails, 3 snippets each |
 | `search_tasks`                      | 2000 tasks     | 50              |
 
 Each also stops after 10 seconds. The answer reports `scanned`,
