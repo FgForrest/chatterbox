@@ -611,6 +611,10 @@ export function SummaryWidget({
                 id={widgetId}
                 frame="inline"
                 tone={tone}
+                onOpenChange={(next) => {
+                    if (workflowVisible) setWorkflowExpanded(next);
+                    else setSummaryExpanded(next);
+                }}
                 title={
                     <>
                         <ListChecks className="size-5" /> {i18n("Summary")}

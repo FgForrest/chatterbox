@@ -67,6 +67,19 @@ async function openMicrophone(deviceId) {
     });
 }
 
+async function openAvailableMicrophone(deviceId) {
+    try {
+        return await openMicrophone(deviceId);
+    } catch (error) {
+        if (
+            deviceId &&
+            ["OverconstrainedError", "NotFoundError"].includes(error?.name)
+        )
+            return openMicrophone();
+        throw error;
+    }
+}
+
 function rmsToDb(analyser, buffer) {
     analyser.getFloatTimeDomainData(buffer);
     let sum = 0;
@@ -120,6 +133,7 @@ async function startCapture({
     streamId,
     systemStream: providedSystemStream,
     microphoneId,
+    withoutMicrophone = false,
 }, pending) {
     if (captureMode !== "tab" && !providedSystemStream) {
         throw new Error("Desktop audio must be opened in the picker window");
@@ -129,9 +143,6 @@ async function startCapture({
     const isTab = captureMode === "tab";
     const isSplit = channelMode === "split";
 
-    // The meeting audio is the point of the recording, so a failure to open
-    // it is fatal. The microphone is not: if it is denied, busy, or absent,
-    // record the meeting alone rather than losing the whole session.
     let systemStream = providedSystemStream;
     try {
         if (!systemStream) {
@@ -148,15 +159,14 @@ async function startCapture({
     }
 
     let micStream = null;
-    try {
-        micStream = await openMicrophone(microphoneId);
-        pending.streams.push(micStream);
-    } catch (error) {
-        send({
-            type: "mic-unavailable",
-            sessionId,
-            message: error?.message ?? String(error),
-        });
+    let micErrorName = null;
+    if (!withoutMicrophone) {
+        try {
+            micStream = await openAvailableMicrophone(microphoneId);
+            pending.streams.push(micStream);
+        } catch (error) {
+            micErrorName = error?.name || "UnknownError";
+        }
     }
 
     const context = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -283,7 +293,7 @@ async function startCapture({
     });
     micStream?.getAudioTracks()[0]?.addEventListener("ended", () => {
         if (active?.sessionId === sessionId) {
-            send({ type: "mic-unavailable", sessionId });
+            send({ type: "mic-unavailable", sessionId, errorName: "TrackEnded" });
         }
     });
 
@@ -301,6 +311,8 @@ async function startCapture({
 
     recorder.start(CHUNK_INTERVAL_MS);
     send({ type: "recording-started", sessionId });
+    if (micErrorName)
+        send({ type: "mic-unavailable", sessionId, errorName: micErrorName });
     if (pending.stopRequested) stop();
 }
 

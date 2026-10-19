@@ -9,20 +9,9 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
+import type { AiCostPayer, recordingAiCost } from "@/lib/ai/usage-cost";
 
-interface CostSummary {
-    totalUsd: number;
-    byOperation: Record<string, number>;
-    byService: Record<string, number>;
-    unknownByService: Record<string, number>;
-    unknownCount: number;
-    requestCount: number;
-}
+type CostSummary = Awaited<ReturnType<typeof recordingAiCost>>;
 
 function dollars(amount: number): string {
     if (amount > 0 && amount < 0.0001) return "<$0.0001";
@@ -36,11 +25,9 @@ function dollars(amount: number): string {
 
 export function AiCostSummary({
     recordingId,
-    kind = "audio",
     view,
 }: {
     recordingId: string;
-    kind?: "audio" | "mail";
     view?: "private" | "org";
 }) {
     const i18n = useExtracted();
@@ -69,36 +56,22 @@ export function AiCostSummary({
         };
     }, [recordingId, view]);
 
-    if (!summary) return null;
-    if (summary.requestCount === 0) {
-        const emptyLabel =
-            kind === "mail"
-                ? i18n("No AI spend tracked for this mail")
-                : i18n("No AI spend tracked for this recording");
-        return (
-            <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap">
-                <MetadataSeparator />
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <button
-                            type="button"
-                            aria-label={emptyLabel}
-                            className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            $??
-                        </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{emptyLabel}</TooltipContent>
-                </Tooltip>
-            </span>
-        );
-    }
+    if (!summary || summary.requestCount === 0) return null;
     const hasPricedTotal =
         summary.requestCount > summary.unknownCount &&
         Number.isFinite(summary.totalUsd);
     const partlyUnpriced = hasPricedTotal && summary.unknownCount > 0;
-    const total = hasPricedTotal ? dollars(summary.totalUsd) : "$??";
-    const label = `${i18n("Estimated AI spend")}: ${total}${partlyUnpriced ? ` + ${i18n("unknown")}` : ""}`;
+    let total = i18n("unpriced");
+    let spoken = i18n("no price available");
+    if (hasPricedTotal) {
+        total = partlyUnpriced
+            ? `≥ ${dollars(summary.totalUsd)}`
+            : dollars(summary.totalUsd);
+        spoken = partlyUnpriced
+            ? i18n("at least {amount}", { amount: dollars(summary.totalUsd) })
+            : total;
+    }
+    const label = `${i18n("Estimated AI spend")}: ${spoken}`;
     const hasSubscriptionEstimate = [
         ...Object.keys(summary.byService),
         ...Object.keys(summary.unknownByService),
@@ -107,6 +80,29 @@ export function AiCostSummary({
             service.startsWith("Claude Code · ") ||
             service.startsWith("Codex · "),
     );
+    const singlePayer =
+        summary.payers.length === 1 ? summary.payers[0].payer : null;
+    const breakdowns =
+        summary.payers.length > 1
+            ? summary.payers
+            : [{ ...summary, payer: null }];
+    function payerLabel(payer: AiCostPayer): string {
+        if (payer.type === "you") return i18n("you");
+        if (payer.type === "organization") return i18n("Organization");
+        return payer.name ?? i18n("another member");
+    }
+    function payerSuffix(payer: AiCostPayer | null, className: string) {
+        if (!payer) return null;
+        return <span className={className}>· {payerLabel(payer)}</span>;
+    }
+    function payerSentence(payer: AiCostPayer): string {
+        if (payer.type === "you") return i18n("Paid by you.");
+        if (payer.type === "organization")
+            return i18n("Paid by the Organization.");
+        return payer.name
+            ? i18n("Paid by {name}.", { name: payer.name })
+            : i18n("Paid by another member.");
+    }
     return (
         <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap">
             <MetadataSeparator />
@@ -119,7 +115,6 @@ export function AiCostSummary({
                         className="inline-flex items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         {total}
-                        {partlyUnpriced && " + ?"}
                         <ChevronDown className="size-3" aria-hidden="true" />
                     </button>
                 </DropdownMenuTrigger>
@@ -131,46 +126,74 @@ export function AiCostSummary({
                     className="max-h-(--radix-dropdown-menu-content-available-height) w-80 max-w-[calc(100vw-2rem)] overflow-y-auto p-3 text-sm text-muted-foreground"
                 >
                     <p className="mb-2 font-medium">{label}</p>
-                    {Object.entries(summary.byOperation).map(
-                        ([operation, amount]) => (
-                            <div
-                                key={operation}
-                                className="flex justify-between gap-4"
-                            >
-                                <span className="capitalize">{operation}</span>
-                                <span>{dollars(amount)}</span>
-                            </div>
+                    {singlePayer && (
+                        <p className="mb-2 text-xs">
+                            {payerSentence(singlePayer)}
+                        </p>
+                    )}
+                    {breakdowns.flatMap(({ payer, byOperation }, index) =>
+                        Object.entries(byOperation).map(
+                            ([operation, amount]) => (
+                                <div
+                                    key={`${index}:${operation}`}
+                                    className="flex justify-between gap-4"
+                                >
+                                    <span className="capitalize">
+                                        {operation}
+                                        {payerSuffix(
+                                            payer,
+                                            "ml-1 normal-case opacity-70",
+                                        )}
+                                    </span>
+                                    <span>{dollars(amount)}</span>
+                                </div>
+                            ),
                         ),
                     )}
                     <div className="my-2 border-t" />
-                    {Object.entries(summary.byService).map(
-                        ([service, amount]) => (
+                    {breakdowns.flatMap(({ payer, byService }, index) =>
+                        Object.entries(byService).map(([service, amount]) => (
                             <div
-                                key={service}
+                                key={`${index}:${service}`}
                                 className="flex justify-between gap-4"
                             >
-                                <span>{service}</span>
+                                <span>
+                                    {service}
+                                    {payerSuffix(payer, "ml-1 opacity-70")}
+                                </span>
                                 <span>{dollars(amount)}</span>
                             </div>
+                        )),
+                    )}
+                    {breakdowns.flatMap(({ payer, unknownByService }, index) =>
+                        Object.entries(unknownByService).map(
+                            ([service, count]) => (
+                                <div
+                                    key={`${index}:${service}`}
+                                    className="flex justify-between gap-4"
+                                >
+                                    <span>
+                                        {service}
+                                        {payerSuffix(payer, "ml-1 opacity-70")}
+                                    </span>
+                                    <span>
+                                        {count} {i18n("unpriced")}
+                                    </span>
+                                </div>
+                            ),
                         ),
                     )}
-                    {Object.entries(summary.unknownByService).map(
-                        ([service, count]) => (
-                            <div
-                                key={service}
-                                className="flex justify-between gap-4"
-                            >
-                                <span>{service}</span>
-                                <span>
-                                    {count} {i18n("unpriced")}
-                                </span>
-                            </div>
-                        ),
-                    )}
-                    {summary.unknownCount > 0 && (
+                    {partlyUnpriced && (
                         <p className="mt-2 text-xs">
                             {i18n(
                                 "Some requests lack usable cost data; the total is incomplete.",
+                            )}
+                        </p>
+                    )}
+                    {!hasPricedTotal && (
+                        <p className="mt-2 text-xs">
+                            {i18n(
+                                "No request has usable cost data, so there is no total.",
                             )}
                         </p>
                     )}

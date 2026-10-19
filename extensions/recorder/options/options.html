@@ -14,11 +14,13 @@
                 <h2 data-i18n="dataUseTitle">Before you connect or record</h2>
                 <p data-i18n="dataUseDisclosure">When you record, this extension captures your microphone and meeting audio, encrypts temporary audio chunks in this browser, and uploads them to the Chatterbox server you choose. That server decrypts them for storage and processing. Download a playable copy from your Chatterbox account after upload. The recorder key is encrypted in this browser. Your server operator controls data after upload. You must inform participants and obtain any required consent.</p>
                 <p><a href="https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="privacyPolicy">Read the extension privacy policy</a></p>
+                <p id="setup-origin"></p>
                 <label id="data-use-label" class="check">
                     <input id="data-use-check" type="checkbox" />
                     <span data-i18n="dataUseAgree">I understand and agree to this data handling.</span>
                 </label>
                 <button id="accept-data-use" class="primary" type="button" data-i18n="dataUseAccept">Agree and continue</button>
+                <button id="setup-connect" type="button" hidden data-i18n="setupConnect"></button>
                 <p id="data-use-status" class="status"></p>
             </section>
 
@@ -90,10 +92,16 @@
                 </label>
             </section>
 
-            <section>
+            <section id="mic-section">
                 <h2 data-i18n="microphone">Microphone</h2>
                 <p class="hint" data-i18n="micIntro">Grant microphone access once.</p>
                 <button id="grant-mic" type="button" data-i18n="grantMic">Grant microphone access</button>
+                <p id="mic-status" class="status" role="status"></p>
+                <label class="check">
+                    <input id="mic-reminder" type="checkbox" />
+                    <span data-i18n="micReminder"></span>
+                </label>
+                <button id="setup-return" type="button" hidden data-i18n="setupReturn"></button>
                 <label for="mic-device" data-i18n="inputDevice">Input device (override)</label>
                 <select id="mic-device"><option value="" data-i18n="defaultRecommended">Default (recommended)</option></select>
             </section>

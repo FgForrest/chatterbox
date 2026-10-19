@@ -14,9 +14,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemHeader } from "@/components/items/item-header";
 import { AiCostSummary } from "@/components/recordings/ai-cost-summary";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { AiCostPayer, recordingAiCost } from "@/lib/ai/usage-cost";
+
+type CostSummary = Awaited<ReturnType<typeof recordingAiCost>>;
 
 vi.mock("next-intl", () => ({
-    useExtracted: () => (message: string) => message,
+    useExtracted: () => (message: string, values?: Record<string, string>) =>
+        message.replace(
+            /\{(\w+)\}/g,
+            (match, key: string) => values?.[key] ?? match,
+        ),
 }));
 
 vi.mock("@/components/recordings/recording-title", () => ({
@@ -25,25 +32,34 @@ vi.mock("@/components/recordings/recording-title", () => ({
     ),
 }));
 
-const emptySummary = {
+const emptySummary: CostSummary = {
     totalUsd: 0,
     byOperation: {},
     byService: {},
     unknownByService: {},
     unknownCount: 0,
     requestCount: 0,
+    payers: [],
 };
 
-const pricedSummary = {
+const pricedSummary: CostSummary = {
     totalUsd: 0.45,
     byOperation: { summary: 0.3, title: 0.15 },
     byService: { "Codex · model": 0.45 },
     unknownByService: {},
     unknownCount: 0,
     requestCount: 2,
+    payers: [
+        {
+            payer: { type: "organization" },
+            byOperation: { summary: 0.3, title: 0.15 },
+            byService: { "Codex · model": 0.45 },
+            unknownByService: {},
+        },
+    ],
 };
 
-function mockSummary(summary: typeof emptySummary = pricedSummary) {
+function mockSummary(summary: CostSummary = pricedSummary) {
     const fetchMock = vi.fn().mockResolvedValue(Response.json(summary));
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -90,24 +106,15 @@ afterEach(() => {
 
 describe("AI cost summary", () => {
     it.each([
-        ["audio", "recording", "focus"],
-        ["mail", "mail", "focus"],
-        ["audio", "recording", "hover"],
-        ["mail", "mail", "hover"],
-    ] as const)("shows the %s empty tooltip for a %s on %s", async (kind, noun, interaction) => {
-        mockSummary(emptySummary);
-        renderSummary({ kind });
-        const text = `No AI spend tracked for this ${noun}`;
-        const trigger = await screen.findByRole("button", { name: text });
-        expect(trigger.textContent).toBe("$??");
-        expect(trigger.querySelector("svg")).toBeNull();
-        expect(trigger.hasAttribute("aria-haspopup")).toBe(false);
-        expect(screen.queryByText(text)).toBeNull();
-        if (interaction === "focus") act(() => trigger.focus());
-        else fireEvent.pointerMove(trigger, { pointerType: "mouse" });
-        expect((await screen.findByRole("tooltip")).textContent).toBe(text);
-        if (interaction === "focus")
-            expect(document.activeElement).toBe(trigger);
+        "private",
+        "org",
+    ] as const)("renders nothing in %s view when no AI usage is tracked", async (view) => {
+        const fetchMock = mockSummary(emptySummary);
+        const { container } = renderSummary({ view });
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        await act(async () => {});
+        expect(screen.queryByRole("button")).toBeNull();
+        expect(container.textContent).toBe("");
     });
 
     it("opens the labeled priced breakdown on click and closes on Escape", async () => {
@@ -145,6 +152,104 @@ describe("AI cost summary", () => {
         await waitFor(() => expect(document.activeElement).toBe(trigger));
     });
 
+    it.each([
+        ["audio", "private"],
+        ["audio", "org"],
+        ["mail", "private"],
+        ["mail", "org"],
+    ] as const)("names the single Organization payer once for %s in %s view", async (_kind, view) => {
+        mockSummary();
+        renderSummary({ view });
+        const trigger = await screen.findByRole("button", {
+            name: "Estimated AI spend: $0.45",
+        });
+        const panel = await openBreakdown(trigger);
+        expect(
+            within(panel).getAllByText("Paid by the Organization."),
+        ).toHaveLength(1);
+        expect(within(panel).queryByText("· Organization")).toBeNull();
+        expect(
+            within(panel).getByText("Codex · model").parentElement?.textContent,
+        ).toBe("Codex · model$0.45");
+    });
+
+    it.each([
+        [{ type: "you" }, "Paid by you."],
+        [{ type: "member", name: "Petra" }, "Paid by Petra."],
+        [{ type: "member", name: null }, "Paid by another member."],
+    ] satisfies [
+        AiCostPayer,
+        string,
+    ][])("names a single %j payer once", async (payer, sentence) => {
+        mockSummary({
+            ...pricedSummary,
+            payers: [{ ...pricedSummary.payers[0], payer }],
+        });
+        renderSummary();
+        const panel = await openBreakdown(
+            await screen.findByRole("button", {
+                name: "Estimated AI spend: $0.45",
+            }),
+        );
+        expect(within(panel).getAllByText(sentence)).toHaveLength(1);
+        expect(within(panel).queryByText(/^· /)).toBeNull();
+    });
+
+    it.each([
+        ["audio", "private"],
+        ["audio", "org"],
+        ["mail", "private"],
+        ["mail", "org"],
+    ] as const)("labels every mixed-payer line for %s in %s view", async (_kind, view) => {
+        const payers: AiCostPayer[] = [
+            { type: "you" },
+            { type: "organization" },
+            { type: "member", name: "Petra" },
+            { type: "member", name: null },
+        ];
+        mockSummary({
+            ...pricedSummary,
+            totalUsd: 0.4,
+            byOperation: { summary: 0.4 },
+            byService: { "Codex · model": 0.4 },
+            unknownByService: { "Local AI · model": 4 },
+            unknownCount: 4,
+            requestCount: 8,
+            payers: payers.map((payer) => ({
+                payer,
+                byOperation: { summary: 0.1 },
+                byService: { "Codex · model": 0.1 },
+                unknownByService: { "Local AI · model": 1 },
+            })),
+        });
+        renderSummary({ view });
+        const panel = await openBreakdown(
+            await screen.findByRole("button", {
+                name: "Estimated AI spend: at least $0.40",
+            }),
+        );
+        expect(within(panel).queryByText(/^Paid by/)).toBeNull();
+        for (const label of [
+            "you",
+            "Organization",
+            "Petra",
+            "another member",
+        ]) {
+            const suffixes = within(panel).getAllByText(`· ${label}`);
+            expect(suffixes).toHaveLength(3);
+            expect(
+                suffixes.map(
+                    (suffix) =>
+                        suffix.parentElement?.parentElement?.textContent,
+                ),
+            ).toEqual([
+                `summary· ${label}$0.10`,
+                `Codex · model· ${label}$0.10`,
+                `Local AI · model· ${label}1 unpriced`,
+            ]);
+        }
+    });
+
     it.each(["Enter", " "])("opens with the %s key", async (key) => {
         mockSummary();
         renderSummary();
@@ -171,7 +276,7 @@ describe("AI cost summary", () => {
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     });
 
-    it("appends + ? for partially unpriced requests and preserves the notes", async () => {
+    it("shows an at-least total for partially unpriced requests and preserves the notes", async () => {
         mockSummary({
             ...pricedSummary,
             unknownByService: { "Claude Code · model": 1 },
@@ -180,9 +285,9 @@ describe("AI cost summary", () => {
         });
         renderSummary();
         const trigger = await screen.findByRole("button", {
-            name: "Estimated AI spend: $0.45 + unknown",
+            name: "Estimated AI spend: at least $0.45",
         });
-        expect(trigger.textContent).toBe("$0.45 + ?");
+        expect(trigger.textContent).toBe("≥ $0.45");
         const panel = await openBreakdown(trigger);
         expect(within(panel).getByText("1 unpriced")).toBeTruthy();
         expect(within(panel).getByText("Claude Code · model")).toBeTruthy();
@@ -198,21 +303,41 @@ describe("AI cost summary", () => {
         ).toBeTruthy();
     });
 
-    it("shows $?? with a chevron and unpriced services when all requests are unpriced", async () => {
+    it("says unpriced with a chevron and lists the services when no request has a price", async () => {
         mockSummary({
             ...emptySummary,
             unknownByService: { "Local AI": 2 },
             unknownCount: 2,
             requestCount: 2,
+            payers: [
+                {
+                    payer: { type: "organization" },
+                    byOperation: {},
+                    byService: {},
+                    unknownByService: { "Local AI": 2 },
+                },
+            ],
         });
         renderSummary();
         const trigger = await screen.findByRole("button", {
-            name: "Estimated AI spend: $??",
+            name: "Estimated AI spend: no price available",
         });
-        expect(trigger.textContent).toBe("$??");
+        expect(trigger.textContent).toBe("unpriced");
         expect(trigger.querySelector("svg.lucide-chevron-down")).toBeTruthy();
         const panel = await openBreakdown(trigger);
-        expect(within(panel).getByText("Estimated AI spend: $??")).toBeTruthy();
+        expect(
+            within(panel).getByText("Estimated AI spend: no price available"),
+        ).toBeTruthy();
+        expect(
+            within(panel).getByText(
+                "No request has usable cost data, so there is no total.",
+            ),
+        ).toBeTruthy();
+        expect(
+            within(panel).queryByText(
+                "Some requests lack usable cost data; the total is incomplete.",
+            ),
+        ).toBeNull();
         expect(within(panel).getByText("Local AI")).toBeTruthy();
         expect(within(panel).getByText("2 unpriced")).toBeTruthy();
     });
