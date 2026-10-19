@@ -136,11 +136,13 @@ const config: AppChromeConfig = {
         autoSyncEnabled: false,
     },
     isAdmin: false,
+    isOrgAccount: false,
     userEmail: "alice@example.com",
     isHosted: false,
     mailEnabled: false,
     accessManagement: false,
     onboardingCapabilities: {
+        audience: "single-user",
         googleConfigured: false,
         mailAvailable: false,
         mcpConnectorUrl: null,

@@ -31,6 +31,7 @@ interface SettingsDialogProps {
     onOpenChange: (open: boolean) => void;
     initialProviders?: Provider[];
     isHosted?: boolean;
+    isOrgAccount?: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
     /** The viewer manages access at the identity provider. */
@@ -47,6 +48,7 @@ export function SettingsDialog({
     onOpenChange,
     initialProviders = EMPTY_PROVIDERS,
     isHosted = false,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
     onPlaudReconnected,
@@ -55,7 +57,14 @@ export function SettingsDialog({
     const i18n = useExtracted();
     const onClose = useCallback(() => onOpenChange(false), [onOpenChange]);
     const { activeSection, setActiveSection, keyboardSelectedIndex } =
-        useSettingsNav(open, onClose, isHosted, mailEnabled, accessManagement);
+        useSettingsNav(
+            open,
+            onClose,
+            isHosted,
+            mailEnabled,
+            accessManagement,
+            isOrgAccount,
+        );
 
     const handleSectionChange = useCallback(
         (section: SettingsSection) => setActiveSection(section),
@@ -91,6 +100,7 @@ export function SettingsDialog({
                         keyboardSelectedIndex={keyboardSelectedIndex}
                         onSectionChange={handleSectionChange}
                         isHosted={isHosted}
+                        isOrgAccount={isOrgAccount}
                         mailEnabled={mailEnabled}
                         accessManagement={accessManagement}
                     />
@@ -112,6 +122,7 @@ export function SettingsDialog({
                                 activeSection={activeSection}
                                 onSectionChange={handleSectionChange}
                                 isHosted={isHosted}
+                                isOrgAccount={isOrgAccount}
                                 mailEnabled={mailEnabled}
                                 accessManagement={accessManagement}
                             />
@@ -128,6 +139,7 @@ export function SettingsDialog({
                                     activeSection={activeSection}
                                     initialProviders={initialProviders}
                                     isHosted={isHosted}
+                                    isOrgAccount={isOrgAccount}
                                     mailEnabled={mailEnabled}
                                     accessManagement={accessManagement}
                                     onPlaudReconnected={onPlaudReconnected}

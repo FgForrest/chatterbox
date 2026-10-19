@@ -98,6 +98,7 @@ const baseSettingsNavGroups: { label: string; items: NavItem[] }[] = [
 /** What the deployment offers the viewer, deciding which sections exist. */
 export interface SettingsNavOptions {
     isHosted: boolean;
+    isOrgAccount?: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
     /** The viewer manages access at the identity provider (`access.manage`). */
@@ -126,7 +127,10 @@ export function buildSettingsNavGroups(
                                 },
                             ]
                           : []),
-                      ...group.items,
+                      ...group.items.filter(
+                          (item) =>
+                              !opts.isOrgAccount || item.id !== "recorder",
+                      ),
                       ...(opts.isHosted
                           ? []
                           : [

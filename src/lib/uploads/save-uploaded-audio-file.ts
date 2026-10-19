@@ -9,6 +9,7 @@ import { DEFAULT_BUCKETS } from "@/lib/audio/waveform";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
@@ -35,6 +36,7 @@ export async function saveUploadedAudioFile(input: {
     folderId?: string | null;
     deferredFolderFallback?: DeferredFolderFallback;
 }): Promise<SavedUploadedAudio> {
+    await assertNotOrgAccount(input.userId);
     const info = await stat(input.filePath);
     const durationMs = await readAudioFileDurationMs(input.filePath);
     if (durationMs <= 0) {

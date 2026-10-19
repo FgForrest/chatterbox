@@ -20,6 +20,7 @@ import {
     type OnboardingStepId,
 } from "@/components/onboarding-dialog";
 import { type Provider, SettingsDialog } from "@/components/settings-dialog";
+import { Button } from "@/components/ui/button";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useTheme } from "@/hooks/use-theme";
@@ -30,6 +31,7 @@ import {
 } from "@/lib/notifications/browser";
 import {
     type OnboardingCapabilities,
+    type OnboardingReadiness,
     shouldOpenOnboarding,
 } from "@/lib/onboarding/capabilities";
 import { pageSearchScope } from "@/lib/search/types";
@@ -39,11 +41,13 @@ import { SYNC_CONFIG } from "@/lib/sync-config";
 export interface AppChromeConfig {
     initialSettings: InitialSettings;
     isAdmin: boolean;
+    isOrgAccount: boolean;
     userEmail: string | null;
     isHosted: boolean;
     mailEnabled: boolean;
     accessManagement: boolean;
     onboardingCapabilities: OnboardingCapabilities;
+    onboardingReadiness?: OnboardingReadiness;
 }
 
 function useChromeState(config: AppChromeConfig) {
@@ -53,6 +57,11 @@ function useChromeState(config: AppChromeConfig) {
     const demo = pathname.startsWith("/dev/demo-dashboard");
     const { initialSettings } = config;
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [onboardingSettings, setOnboardingSettings] = useState(false);
+    const handleSettingsOpenChange = useCallback((open: boolean) => {
+        setSettingsOpen(open);
+        if (!open) setOnboardingSettings(false);
+    }, []);
     const [onboardingOpen, setOnboardingOpen] = useState(
         () =>
             !demo && shouldOpenOnboarding(initialSettings.onboardingCompleted),
@@ -160,7 +169,9 @@ function useChromeState(config: AppChromeConfig) {
         theme,
         setTheme,
         settingsOpen,
-        setSettingsOpen,
+        setSettingsOpen: handleSettingsOpenChange,
+        onboardingSettings,
+        setOnboardingSettings,
         onboardingOpen,
         setOnboardingOpen,
         onboardingInitialStep,
@@ -185,6 +196,7 @@ export function AppChromeProvider({
     ...config
 }: AppChromeConfig & { children: ReactNode }) {
     const chrome = useChromeState(config);
+    const i18n = useExtracted();
     const pathname = usePathname();
     const { refresh, push } = useRouter();
     const workstation =
@@ -216,13 +228,29 @@ export function AppChromeProvider({
                 open={chrome.settingsOpen}
                 onOpenChange={(open) => {
                     chrome.setSettingsOpen(open);
-                    if (!open && pathname === "/settings") push("/dashboard");
+                    if (
+                        !open &&
+                        !chrome.onboardingSettings &&
+                        pathname === "/settings"
+                    )
+                        push("/dashboard");
                 }}
                 headerAction={
-                    pathname === "/settings" ? <AppUploadButton /> : undefined
+                    chrome.onboardingSettings ? (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => chrome.setSettingsOpen(false)}
+                        >
+                            {i18n("Return to setup")}
+                        </Button>
+                    ) : pathname === "/settings" ? (
+                        <AppUploadButton />
+                    ) : undefined
                 }
                 initialProviders={chrome.providers}
                 isHosted={config.isHosted}
+                isOrgAccount={config.isOrgAccount}
                 mailEnabled={config.mailEnabled}
                 accessManagement={config.accessManagement}
                 onPlaudReconnected={chrome.handleReconnected}
@@ -236,6 +264,14 @@ export function AppChromeProvider({
                 }}
                 mandatory={!config.initialSettings.onboardingCompleted}
                 capabilities={config.onboardingCapabilities}
+                initialReadiness={config.onboardingReadiness}
+                suspended={chrome.onboardingSettings}
+                onOpenSettings={(section) => {
+                    window.location.hash = section;
+                    window.dispatchEvent(new HashChangeEvent("hashchange"));
+                    chrome.setOnboardingSettings(true);
+                    chrome.setSettingsOpen(true);
+                }}
                 initialStep={chrome.onboardingInitialStep}
             />
         </AppChromeContext.Provider>

@@ -72,10 +72,11 @@ export function toAddressView(row: MailAddressRow): MailAddressView {
 /** The user's live addresses: mailbox, personal folder addresses, secrets. */
 export async function loadMailSettings(
     userId: string,
+    options: { provision?: boolean } = {},
 ): Promise<MailSettingsView> {
     const mailUser = await mailUserById(userId);
     // Eligible since the last backfill: the mailbox comes now.
-    if (mailUser) await ensureMailbox(userId);
+    if (mailUser && options.provision !== false) await ensureMailbox(userId);
     const live = (await listUserAddresses(userId)).filter(
         (row) => row.status !== "blocked",
     );

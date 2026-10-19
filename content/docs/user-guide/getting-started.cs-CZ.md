@@ -15,20 +15,24 @@ Pokud vaše organizace používá jednotné přihlašování, na přihlašovací
 
 ## Průvodce prvním spuštěním
 
-Při prvním otevření Klepna vám krátký průvodce pomůže nastavit základní věci. Kroky s integracemi jsou nepovinné a zobrazí se jen tehdy, když je správce nastavil.
+Při prvním otevření Klepny Vám krátký průvodce pomůže připojit služby, které používáte. Všechny integrace jsou nepovinné. Google, pošta a Claude se zobrazí jen tehdy, když jsou na Vaší instanci povolené.
+
+Na instanci s vlastním hostingem a Organizací už máte k dispozici sdílené nahrávky a služby. Připojte jen své osobní zdroje. Pokud zvolení poskytovatelé Organizace pokrývají přepis a shrnutí, krok s AI se vynechá a závěrečný přehled uvede jejich názvy. Poskytovatel Claude Code nebo Codex z Organizace může vytvářet shrnutí, ale neumí přepisovat nahrávky. Pokud některá role chybí, průvodce ji pojmenuje a otevře nastavení poskytovatelů. Zavřením Nastavení nebo volbou **Zpět do průvodce** se vrátíte ke stejnému kroku a stav se znovu ověří.
+
+Účet Organizace při volbě **Spustit nastavení znovu** vidí jen sdílené poskytovatele AI, výchozí volby a profily zpracování. Členové připojují osobní integrace ze svých účtů.
 
 | Krok | Co dělá |
 | --- | --- |
 | ![Vítejte](images/onboarding-welcome.png) | **Vítejte.** Co Klepna umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
-| ![Připojení účtu Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Klepna začíná pravidelně stahovat vaše nahrávky. |
+| ![Připojení účtu Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Klepna začíná pravidelně stahovat Vaše nahrávky. Na vlastní doméně přidejte tento web ve vyskakovacím okně Plaud Connectoru a stránku znovu načtěte. |
 | ![Poskytovatel AI](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
 | Kalendář Google a Meet (pokud jsou nastavené) | **Připojte Kalendář Google a Meet.** Přístup jen pro čtení pomůže rozpoznat schůzky a navrhnout mluvčí podle pozvaných hostů a účastníků Meet. |
-| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Klepny. |
-| E-mail (pokud je nastavený) | **Posílejte e-maily do Klepny.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
-| Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Klepna jako vlastní konektor do Claude nebo Claude Code. |
+| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření, otevřete jeho ikonu na liště a povolte tento web. Zde klikněte na **Připojit**, potom v rozšíření na **Confirm**. Postupujte podle výzev k souhlasu a zjištěného stavu; současné rozšíření může po souhlasu vyžadovat další otevření ikony na liště. Pokud se zobrazí upozornění, povolte v rozšíření mikrofon, jinak se Váš hlas nenahraje. Ruční připojení pomocí URL a klíče zůstává k dispozici. |
+| E-mail (pokud je nastavený) | **Posílejte e-maily do Klepny.** Vaše adresa nepotřebuje nastavení. Posílejte nebo přeposílejte ze své firemní adresy. Pro automatické přeposílání od jiných odesílatelů použijte tajnou adresu v Nastavení → Pošta. Adresy se generují pro každou vlastní složku a mění se v jejím záhlaví. Pošta zaslaná v poli Komu nebo Kopie do složky Organizace čeká, až ji s Organizací nasdílíte. Průvodce ukáže i pozastavený příjem nebo nesplněné podmínky. |
+| Claude (pokud je nastavený) | **Připojte Claude.** V Claude na claude.ai nebo v desktopové aplikaci otevřete **Customize → Connectors**, najděte firemní konektor, klikněte na **Connect** a přihlaste se firemním účtem. V konverzaci ho zapněte přes **+ → Connectors**. Pokyny pro osobní tarify a Claude Code jsou pod **Není v seznamu?**. Volba **Už mám nastaveno** zaznamená Vaše potvrzení, nikoli ověřené připojení. Viz [Claude](claude.md). |
 | ![Hotovo](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
-Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje.
+Průvodce můžete znovu otevřít z Klepů, Almanachu i Úkolů z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje. Závěrečný přehled ověří existující připojení i po návratu z přihlášení ke Googlu, aniž byste museli znovu navštívit předchozí kroky. **Další** pokračuje; přeskočení zaznamená jen **Přeskočit**. Probíhající či neúspěšné ověření a nutnost opětovného připojení se zobrazují samostatně.
 
 <span id="finding-your-way-around" />
 

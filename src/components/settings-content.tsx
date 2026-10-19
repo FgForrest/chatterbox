@@ -37,6 +37,7 @@ interface SettingsContentProps {
     activeSection: SettingsSection;
     initialProviders?: Provider[];
     isHosted?: boolean;
+    isOrgAccount?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
     /** Forwarded to `PlaudAccountSection`; see its prop doc. */
@@ -47,6 +48,7 @@ export function SettingsContent({
     activeSection,
     initialProviders = EMPTY_PROVIDERS,
     isHosted = false,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
     onPlaudReconnected,
@@ -62,6 +64,7 @@ export function SettingsContent({
         case "api-keys":
             return <ApiKeysSection />;
         case "recorder":
+            if (isOrgAccount) return null;
             return <RecorderSection />;
         case "webhooks":
             return <WebhooksSection />;

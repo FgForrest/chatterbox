@@ -5,7 +5,6 @@ import { recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
     chatterItems,
-    plaudConnections,
     recordings,
     transcriptions,
     users,
@@ -24,6 +23,7 @@ import { isMailEnabled } from "@/lib/mail/config";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
+import { getPlaudConnection } from "@/lib/settings/plaud-connection";
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
@@ -242,7 +242,7 @@ export default async function DashboardPage() {
         userTranscriptions,
         userSummaryRows,
         settingsRow,
-        [connectionRow],
+        connectionRow,
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
@@ -311,11 +311,7 @@ export default async function DashboardPage() {
         // waterfall of /api/settings/user fetches from three different
         // components.
         getUserSettings(session.user.id),
-        db
-            .select({ invalidatedAt: plaudConnections.invalidatedAt })
-            .from(plaudConnections)
-            .where(eq(plaudConnections.userId, session.user.id))
-            .limit(1),
+        getPlaudConnection(session.user.id),
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),

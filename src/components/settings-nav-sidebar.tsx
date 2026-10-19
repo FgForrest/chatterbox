@@ -23,6 +23,7 @@ interface Props {
     keyboardSelectedIndex: number;
     onSectionChange: (section: SettingsSection) => void;
     isHosted: boolean;
+    isOrgAccount?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
 }
@@ -38,18 +39,30 @@ export function SettingsNavSidebar({
     keyboardSelectedIndex,
     onSectionChange,
     isHosted,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
 }: Props) {
     const i18n = useExtracted();
     const settingsNavGroups = useMemo(
         () =>
-            buildSettingsNavGroups({ isHosted, mailEnabled, accessManagement }),
-        [isHosted, mailEnabled, accessManagement],
+            buildSettingsNavGroups({
+                isHosted,
+                isOrgAccount,
+                mailEnabled,
+                accessManagement,
+            }),
+        [isHosted, isOrgAccount, mailEnabled, accessManagement],
     );
     const settingsNav = useMemo(
-        () => buildSettingsNav({ isHosted, mailEnabled, accessManagement }),
-        [isHosted, mailEnabled, accessManagement],
+        () =>
+            buildSettingsNav({
+                isHosted,
+                isOrgAccount,
+                mailEnabled,
+                accessManagement,
+            }),
+        [isHosted, isOrgAccount, mailEnabled, accessManagement],
     );
     const sectionName = (section: SettingsSection) => {
         switch (section) {

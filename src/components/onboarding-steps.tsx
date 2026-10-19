@@ -6,7 +6,6 @@ import {
     Check,
     CircleCheck,
     Clipboard,
-    LoaderCircle,
     Mail,
     Mic,
     Minus,
@@ -15,14 +14,18 @@ import {
     Video,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { MeetingRecorderSetup } from "@/components/meeting-recorder-setup";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
 import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useGoogleConnection } from "@/hooks/use-google-connection";
-import type { MailSettingsView } from "@/lib/mail/views";
+import type {
+    OnboardingCapabilities,
+    OnboardingReadiness,
+    OnboardingStatus,
+    ProviderReadiness,
+} from "@/lib/onboarding/capabilities";
 
 function StepHeading({
     icon: Icon,
@@ -54,16 +57,30 @@ function ConnectedLine({ children }: { children: React.ReactNode }) {
 }
 
 /** Welcome step for the setup wizard. */
-export function OnboardingStepWelcome() {
+export function OnboardingStepWelcome({
+    audience = "single-user",
+}: {
+    audience?: OnboardingCapabilities["audience"];
+}) {
     const i18n = useExtracted();
     const name = useProductName();
     return (
         <StepHeading
             icon={Sparkles}
             title={i18n("Set up {name}", { name })}
-            description={i18n(
-                "Connect the services you use for recordings, transcription, and follow-up. You can skip any integration and add it later.",
-            )}
+            description={
+                audience === "organization-member"
+                    ? i18n(
+                          "Your Organization has set up shared services. Connect the personal sources you use. You can skip any integration and add it later.",
+                      )
+                    : audience === "organization-account"
+                      ? i18n(
+                            "Review the Organization's AI providers, defaults, and processing profiles. Members connect their personal sources from their own accounts.",
+                        )
+                      : i18n(
+                            "Connect the services you use for recordings, transcription, and follow-up. You can skip any integration and add it later.",
+                        )
+            }
         />
     );
 }
@@ -71,10 +88,16 @@ export function OnboardingStepWelcome() {
 /** Plaud connection step for the setup wizard. */
 export function OnboardingStepPlaud({
     hasPlaudConnection,
+    employee = false,
+    needsReconnect = false,
+    status,
     onReconnect,
     onConnected,
 }: {
     hasPlaudConnection: boolean;
+    employee?: boolean;
+    needsReconnect?: boolean;
+    status?: OnboardingStatus;
     onReconnect: () => void;
     onConnected: () => void;
 }) {
@@ -84,12 +107,41 @@ export function OnboardingStepPlaud({
         <div className="space-y-4">
             <StepHeading
                 icon={Mic}
-                title={i18n("Connect your Plaud account")}
-                description={i18n(
-                    "Bring recordings from your voice recorder into {name} automatically.",
-                    { name },
-                )}
+                title={
+                    employee
+                        ? i18n("Connect your own Plaud account")
+                        : i18n("Connect your Plaud account")
+                }
+                description={
+                    employee
+                        ? i18n(
+                              "Recordings shared with your Organization are already available without connecting Plaud. Connect only if you use your own recorder.",
+                          )
+                        : i18n(
+                              "Bring recordings from your voice recorder into {name} automatically.",
+                              { name },
+                          )
+                }
             />
+            {(status === "checking" || status === "error") && (
+                <p className="text-center text-sm">
+                    {status === "checking"
+                        ? i18n("Checking…")
+                        : i18n("Could not check")}
+                </p>
+            )}
+            {needsReconnect && (
+                <p className="text-center text-sm">
+                    {i18n("Plaud needs reconnecting")}
+                </p>
+            )}
+            {employee && (
+                <p className="text-sm text-muted-foreground">
+                    {i18n(
+                        "Using the Plaud Connector on this site? Add this site in the Connector's popup, then reload this page.",
+                    )}
+                </p>
+            )}
             {hasPlaudConnection ? (
                 <div className="space-y-3 text-center">
                     <ConnectedLine>{i18n("Plaud is connected")}</ConnectedLine>
@@ -110,72 +162,143 @@ export function OnboardingStepPlaud({
 
 /** AI provider step for the setup wizard. */
 export function OnboardingStepAiProvider({
-    hasOwnProvider,
-    hasIncludedProvider,
+    ai,
+    audience,
+    checking = false,
     onGoToSettings,
+    profiles,
+    onOpenProfiles,
 }: {
-    hasOwnProvider: boolean;
-    hasIncludedProvider: boolean;
+    ai: OnboardingReadiness["ai"] | null;
+    audience: OnboardingCapabilities["audience"];
+    checking?: boolean;
     onGoToSettings: () => void;
+    profiles?: OnboardingReadiness["profiles"];
+    onOpenProfiles: () => void;
 }) {
     const i18n = useExtracted();
-    let description = i18n(
-        "Add the service that will transcribe and summarize your recordings.",
-    );
-    if (hasIncludedProvider) {
-        description = i18n(
-            "Mynah transcription is included with your plan. Add your own provider only if you want another transcription or summary service.",
-        );
-    }
+    const transcriptionMissing = ai?.transcription.status === "not-connected";
+    const summaryMissing = ai?.summary.status === "not-connected";
     return (
         <div className="space-y-4 text-center">
             <StepHeading
                 icon={Bot}
-                title={i18n("Set up an AI provider")}
-                description={description}
+                title={
+                    audience === "organization-account"
+                        ? i18n("Organization AI providers and defaults")
+                        : i18n("Set up an AI provider")
+                }
+                description={
+                    audience === "organization-account"
+                        ? i18n(
+                              "Review shared transcription, summaries, and default processing profiles for members.",
+                          )
+                        : ai?.transcription.source === "managed" &&
+                            ai.transcription.status === "ready"
+                          ? i18n(
+                                "Mynah transcription is included with your plan. Add your own provider only if you want another transcription or summary service.",
+                            )
+                          : i18n(
+                                "Review what can transcribe and summarize recordings. You can add a personal provider in Settings → Providers.",
+                            )
+                }
             />
-            {hasOwnProvider && (
-                <ConnectedLine>{i18n("AI provider connected")}</ConnectedLine>
+            {checking ? (
+                <p>{i18n("Checking…")}</p>
+            ) : (
+                <>
+                    <p>
+                        {i18n("Transcription")}:{" "}
+                        <ProviderReadinessText provider={ai?.transcription} />
+                    </p>
+                    <p>
+                        {i18n("Summaries")}:{" "}
+                        <ProviderReadinessText provider={ai?.summary} />
+                    </p>
+                    {ai?.mailSummary && (
+                        <p>
+                            {i18n("Mail summaries")}:{" "}
+                            <ProviderReadinessText provider={ai.mailSummary} />
+                        </p>
+                    )}
+                    {ai?.mailSummary &&
+                        ai.mailSummary.status === "not-connected" && (
+                            <p>{i18n("Still needed: mail summaries.")}</p>
+                        )}
+                    {(transcriptionMissing || summaryMissing) && (
+                        <p>
+                            {transcriptionMissing && summaryMissing
+                                ? i18n(
+                                      "Still needed: transcription and summaries.",
+                                  )
+                                : transcriptionMissing
+                                  ? i18n("Still needed: transcription.")
+                                  : i18n("Still needed: summaries.")}
+                        </p>
+                    )}
+                </>
             )}
-            {!hasOwnProvider && hasIncludedProvider && (
-                <ConnectedLine>{i18n("Mynah is ready")}</ConnectedLine>
-            )}
-            {!hasOwnProvider && (
-                <Button variant="outline" onClick={onGoToSettings}>
-                    {hasIncludedProvider
-                        ? i18n("Add your own provider")
-                        : i18n("Open provider settings")}
-                </Button>
+            {ai?.transcription.source === "managed" &&
+                ai.transcription.status === "ready" && (
+                    <ConnectedLine>{i18n("Mynah is ready")}</ConnectedLine>
+                )}
+            <Button variant="outline" onClick={onGoToSettings}>
+                {ai?.transcription.source === "managed" &&
+                ai.transcription.status === "ready"
+                    ? i18n("Add your own provider")
+                    : i18n("Open provider settings")}
+            </Button>
+            {audience === "organization-account" && (
+                <div className="space-y-2">
+                    <p>
+                        {i18n("Audio profile")}:{" "}
+                        {profiles?.audio.name ??
+                            (checking
+                                ? i18n("Checking…")
+                                : !ai || profiles?.audio.status === "error"
+                                  ? i18n("Could not check")
+                                  : i18n("No default profile"))}
+                    </p>
+                    <p>
+                        {i18n("Mail profile")}:{" "}
+                        {profiles?.mail?.name ??
+                            (checking
+                                ? i18n("Checking…")
+                                : !ai || profiles?.mail?.status === "error"
+                                  ? i18n("Could not check")
+                                  : i18n("No default profile"))}
+                    </p>
+                    <Button variant="outline" onClick={onOpenProfiles}>
+                        {i18n("Open profile settings")}
+                    </Button>
+                </div>
             )}
         </div>
     );
 }
 
-/** Google access selected during onboarding. */
-export type OnboardingGoogleState =
-    | "calendar-meet"
-    | "calendar-only"
-    | "not-connected";
-
-/** Google Calendar and Meet step for the setup wizard. */
-export function OnboardingStepGoogle({
-    onConnectionChange,
+/** Present sanitized effective provider coverage. */
+export function ProviderReadinessText({
+    provider,
 }: {
-    onConnectionChange: (state: OnboardingGoogleState) => void;
+    provider: ProviderReadiness | undefined;
 }) {
     const i18n = useExtracted();
-    const { state } = useGoogleConnection();
-    const calendarGranted = state?.connection?.calendarGranted === true;
-    const meetGranted = state?.connection?.meetGranted === true;
-    let connectionState: OnboardingGoogleState = "not-connected";
-    if (state?.connection?.status === "active" && calendarGranted) {
-        connectionState = meetGranted ? "calendar-meet" : "calendar-only";
-    }
-    const connected = connectionState === "calendar-meet";
+    if (!provider || provider.status === "error")
+        return i18n("Could not check");
+    if (provider.status !== "ready") return i18n("Not ready");
+    const name = provider.name ?? "";
+    return provider.source === "organization"
+        ? i18n("provided by your Organization ({name})", { name })
+        : i18n("Ready ({name})", { name });
+}
 
-    useEffect(() => {
-        onConnectionChange(connectionState);
-    }, [connectionState, onConnectionChange]);
+/** Google Calendar and Meet step for the setup wizard. */
+export function OnboardingStepGoogle({ status }: { status: OnboardingStatus }) {
+    const i18n = useExtracted();
+    const connected = status === "connected";
+    const calendarGranted = connected || status === "calendar-only";
+    const meetGranted = connected;
 
     const connect = useCallback((purpose: "calendar" | "calendar-meet") => {
         const returnTo = "/dashboard?onboarding=google";
@@ -193,6 +316,16 @@ export function OnboardingStepGoogle({
                     "Learn can suggest speakers from the invited guests and Meet attendee list. Access is read-only and limited to event times, titles, and attendees, never mail or files.",
                 )}
             />
+            {(status === "checking" || status === "error") && (
+                <p>
+                    {status === "checking"
+                        ? i18n("Checking…")
+                        : i18n("Could not check")}
+                </p>
+            )}
+            {status === "needs-reconnect" && (
+                <p>{i18n("Google needs reconnecting")}</p>
+            )}
             {connected && (
                 <ConnectedLine>
                     {i18n("Calendar and Meet are connected")}
@@ -249,107 +382,70 @@ export function OnboardingStepRecorder({
     );
 }
 
-/** Inbound mail step for the setup wizard. */
+/** Inbound mail introduction for the setup wizard. */
 export function OnboardingStepMail({
     onOpenSettings,
-    onReady,
+    mail,
 }: {
     onOpenSettings: () => void;
-    onReady: (ready: boolean) => void;
+    mail: OnboardingReadiness["mail"];
 }) {
     const i18n = useExtracted();
     const name = useProductName();
-    const [address, setAddress] = useState<string | null>(null);
-    const [hasFolderAddresses, setHasFolderAddresses] = useState(false);
-    const [loading, setLoading] = useState(true);
     const [copied, setCopied] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
-        fetch("/api/mail/addresses")
-            .then(async (response) => {
-                if (!response.ok) throw new Error("mail address load failed");
-                return (await response.json()) as MailSettingsView;
-            })
-            .then((settings: MailSettingsView) => {
-                if (cancelled) return;
-                const mailbox =
-                    settings.addresses.find((item) => item.kind === "mailbox")
-                        ?.address ?? null;
-                setAddress(mailbox);
-                setHasFolderAddresses(
-                    settings.addresses.some((item) => item.kind === "folder"),
-                );
-                onReady(mailbox !== null);
-            })
-            .catch(() => {
-                if (!cancelled) onReady(false);
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [onReady]);
-
     const copyAddress = async () => {
-        if (!address) return;
-        await navigator.clipboard.writeText(address);
+        if (!mail.address) return;
+        await navigator.clipboard.writeText(mail.address);
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
     };
-
     return (
         <div className="space-y-4 text-center">
             <StepHeading
                 icon={Mail}
                 title={i18n("Send email to {name}", { name })}
                 description={i18n(
-                    "Send or forward email to this address and it lands in your Chatter, ready to file like a recording.",
+                    "Your address needs no setup. Send or forward from your company email address. For automatic forwarding from other senders, use a secret address in Settings → Mail.",
                 )}
             />
-            {loading && (
-                <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <LoaderCircle className="size-4 animate-spin" />
-                    {i18n("Loading your mail address…")}
-                </p>
-            )}
-            {!loading && address && (
-                <div className="space-y-3">
-                    <ConnectedLine>
-                        {i18n("Your address is ready")}
-                    </ConnectedLine>
-                    <div className="mx-auto flex max-w-md items-center gap-2 rounded-lg border p-2">
-                        <code className="min-w-0 flex-1 break-all text-sm">
-                            {address}
-                        </code>
-                        <Button
-                            size="icon"
-                            variant="outline"
-                            aria-label={i18n("Copy email address")}
-                            onClick={() => void copyAddress()}
-                        >
-                            {copied ? <Check /> : <Clipboard />}
-                        </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                        {hasFolderAddresses
-                            ? i18n(
-                                  "Folders can have their own addresses in Settings → Mail.",
-                              )
-                            : i18n(
-                                  "Create folder addresses later in Settings → Mail.",
-                              )}
-                    </p>
+            <p>
+                {mail.status === "ready"
+                    ? i18n("Your address is ready")
+                    : mail.status === "paused"
+                      ? i18n(
+                            "Mail receiving is paused. Sign in with your company account again.",
+                        )
+                      : mail.status === "ineligible"
+                        ? i18n(
+                              "Mail is available only to eligible company accounts signed in with single sign-on.",
+                          )
+                        : mail.status === "checking"
+                          ? i18n("Checking…")
+                          : i18n("Could not check")}
+            </p>
+            {mail.address && (
+                <div className="mx-auto flex max-w-md items-center gap-2 rounded-lg border p-2">
+                    <code className="min-w-0 flex-1 break-all text-sm">
+                        {mail.address}
+                    </code>
+                    <Button
+                        size="icon"
+                        variant="outline"
+                        aria-label={i18n("Copy email address")}
+                        onClick={() => void copyAddress()}
+                    >
+                        {copied ? <Check /> : <Clipboard />}
+                    </Button>
                 </div>
             )}
-            {!loading && !address && (
-                <Button variant="outline" onClick={onOpenSettings}>
-                    {i18n("Open mail settings")}
-                </Button>
-            )}
+            <p className="text-sm text-muted-foreground">
+                {i18n(
+                    "Folder addresses are generated for each custom folder. Change them in the folder header. Mail sent To or Cc an Organization folder waits for you to share it with the Organization.",
+                )}
+            </p>
+            <Button variant="outline" onClick={onOpenSettings}>
+                {i18n("Open mail settings")}
+            </Button>
         </div>
     );
 }
@@ -357,8 +453,12 @@ export function OnboardingStepMail({
 /** Claude connector step for the setup wizard. */
 export function OnboardingStepClaude({
     connectorUrl,
+    confirmed,
+    onConfirm,
 }: {
     connectorUrl: string;
+    confirmed: boolean;
+    onConfirm: () => void;
 }) {
     const i18n = useExtracted();
     const name = useProductName();
@@ -378,49 +478,80 @@ export function OnboardingStepClaude({
                     "Ask Claude about your recordings, summaries, people, and tasks without leaving the conversation.",
                 )}
             />
-            <div className="flex items-center gap-2 rounded-lg border p-2">
-                <code className="min-w-0 flex-1 break-all text-xs">
-                    {connectorUrl}
-                </code>
-                <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label={i18n("Copy connector address")}
-                    onClick={() => void copy("url", connectorUrl)}
-                >
-                    {copied === "url" ? <Check /> : <Clipboard />}
-                </Button>
-            </div>
             <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                 <li>
                     {i18n(
-                        "Open Customize → Connectors → Add custom connector.",
+                        "Open Claude on claude.ai or in the desktop app, then Customize → Connectors.",
                     )}
                 </li>
                 <li>
-                    {i18n("Name it {name} and paste the connector address.", {
-                        name,
-                    })}
+                    {i18n(
+                        "Find {name}, marked Custom, and click Connect. Sign in with your company account.",
+                        { name },
+                    )}
                 </li>
-                <li>{i18n("Add it, choose Connect, and sign in.")}</li>
+                <li>
+                    {i18n(
+                        "In a conversation, click + in the message box, choose Connectors, and turn {name} on.",
+                        { name },
+                    )}
+                </li>
             </ol>
+            <Button variant="outline" onClick={onConfirm}>
+                {confirmed
+                    ? i18n("Set up (you confirmed)")
+                    : i18n("Already set up")}
+            </Button>
             <details className="rounded-lg border px-3 py-2 text-sm">
                 <summary className="cursor-pointer font-medium">
-                    {i18n("Claude Code")}
+                    {i18n("Not in your list?")}
                 </summary>
-                <div className="mt-2 flex items-start gap-2">
+                <p className="mt-2">
+                    {i18n(
+                        "On Claude Team or Enterprise, ask your administrator to add the connector. On a personal plan, open Customize → Connectors → Add custom connector.",
+                    )}
+                </p>
+                <p>
+                    {i18n(
+                        "Name it {name} and paste the connector address. Under Advanced settings, enter the client ID and secret from your administrator. If given a key, add it under Request headers as x-api-key. Click Add, then Connect, and sign in.",
+                        { name },
+                    )}
+                </p>
+                <div className="my-2 flex items-center gap-2 rounded-lg border p-2">
                     <code className="min-w-0 flex-1 break-all text-xs">
-                        {command}
+                        {connectorUrl}
                     </code>
                     <Button
                         size="icon"
                         variant="outline"
-                        aria-label={i18n("Copy Claude Code command")}
-                        onClick={() => void copy("command", command)}
+                        aria-label={i18n("Copy connector address")}
+                        onClick={() => void copy("url", connectorUrl)}
                     >
-                        {copied === "command" ? <Check /> : <Clipboard />}
+                        {copied === "url" ? <Check /> : <Clipboard />}
                     </Button>
                 </div>
+                <details>
+                    <summary>{i18n("Claude Code")}</summary>
+                    <div className="mt-2 flex items-start gap-2">
+                        <code className="min-w-0 flex-1 break-all text-xs">
+                            {command}
+                        </code>
+                        <Button
+                            size="icon"
+                            variant="outline"
+                            aria-label={i18n("Copy Claude Code command")}
+                            onClick={() => void copy("command", command)}
+                        >
+                            {copied === "command" ? <Check /> : <Clipboard />}
+                        </Button>
+                    </div>
+                    <p>
+                        {i18n(
+                            "Then type /mcp in Claude Code, choose {connector}, and sign in in the browser window.",
+                            { connector: "chatterbox" },
+                        )}
+                    </p>
+                </details>
             </details>
             <a
                 href="/docs/user-guide/claude"
@@ -438,7 +569,8 @@ export function OnboardingStepClaude({
 export interface OnboardingSummaryItem {
     id: string;
     label: string;
-    status: "connected" | "calendar-only" | "skipped";
+    status: OnboardingStatus;
+    detail?: string;
     location: string;
 }
 
@@ -449,6 +581,34 @@ export function OnboardingStepComplete({
     items: OnboardingSummaryItem[];
 }) {
     const i18n = useExtracted();
+    const statusText = (status: OnboardingStatus) => {
+        switch (status) {
+            case "checking":
+                return i18n("Checking…");
+            case "error":
+                return i18n("Could not check");
+            case "connected":
+                return i18n("Connected");
+            case "calendar-only":
+                return i18n("Calendar only");
+            case "needs-reconnect":
+                return i18n("Reconnect needed");
+            case "not-connected":
+                return i18n("Not set up");
+            case "ready":
+                return i18n("Ready");
+            case "paused":
+                return i18n("Paused");
+            case "ineligible":
+                return i18n("Not eligible");
+            case "available":
+                return i18n("Available");
+            case "confirmed":
+                return i18n("Set up (you confirmed)");
+            case "skipped":
+                return i18n("Skipped");
+        }
+    };
     return (
         <div className="space-y-4 text-center">
             <StepHeading
@@ -460,7 +620,12 @@ export function OnboardingStepComplete({
             />
             <ul className="mx-auto w-fit space-y-2 text-left text-xs sm:text-sm">
                 {items.map((item) => {
-                    const ready = item.status !== "skipped";
+                    const ready = [
+                        "connected",
+                        "calendar-only",
+                        "ready",
+                        "confirmed",
+                    ].includes(item.status);
                     return (
                         <li
                             key={item.id}
@@ -476,20 +641,15 @@ export function OnboardingStepComplete({
                                 <Minus className="size-4 shrink-0" />
                             )}
                             <span>
-                                {item.status === "connected" &&
-                                    i18n("{step}: Connected", {
-                                        step: item.label,
-                                    })}
-                                {item.status === "calendar-only" && (
-                                    <>
-                                        {item.label}: {i18n("Calendar only")}
-                                    </>
-                                )}
-                                {item.status === "skipped" &&
-                                    i18n("{step}: Skipped · {location}", {
-                                        step: item.label,
-                                        location: item.location,
-                                    })}
+                                {item.label}:{" "}
+                                {item.detail ?? statusText(item.status)}
+                                {![
+                                    "connected",
+                                    "calendar-only",
+                                    "ready",
+                                    "confirmed",
+                                ].includes(item.status) &&
+                                    ` · ${item.location}`}
                             </span>
                         </li>
                     );

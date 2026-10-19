@@ -73,3 +73,21 @@ describe("Settings -> Access", () => {
         mockEnv.AUTHZ_MODE = "idp";
     });
 });
+
+describe("Settings -> Meeting Recorder", () => {
+    it.each([
+        false,
+        true,
+    ])("hides the section for the Organization account (hosted: %s)", (isHosted) => {
+        expect(
+            buildSettingsNav({ isHosted, isOrgAccount: true }).some(
+                (item) => item.id === "recorder",
+            ),
+        ).toBe(false);
+        expect(
+            buildSettingsNav({ isHosted, isOrgAccount: false }).some(
+                (item) => item.id === "recorder",
+            ),
+        ).toBe(true);
+    });
+});
