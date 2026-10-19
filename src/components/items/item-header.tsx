@@ -3,6 +3,7 @@
 import { Users } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
+import { MetadataSeparator } from "@/components/items/metadata-separator";
 import { AiCostSummary } from "@/components/recordings/ai-cost-summary";
 import { RecordingTitle } from "@/components/recordings/recording-title";
 import type { RecordingView } from "@/lib/sharing/view";
@@ -59,27 +60,28 @@ export function ItemHeader({
                         className="text-xl font-semibold tracking-tight sm:text-2xl"
                     />
                 </h1>
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                <div
+                    data-slot="item-metadata"
+                    className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground [&>span:first-child>[data-slot=metadata-separator]]:hidden"
+                >
                     {metadata.map((part, index) => (
                         <span
                             key={`${index}:${part}`}
                             className="inline-flex items-center gap-2"
                         >
-                            {index > 0 && (
-                                <span aria-hidden="true" className="opacity-40">
-                                    ·
-                                </span>
-                            )}
+                            <MetadataSeparator />
                             <span>{part}</span>
                         </span>
                     ))}
+                    <AiCostSummary
+                        key={`${itemId}:${view ?? "private"}`}
+                        recordingId={itemId}
+                        kind={kind}
+                        view={view}
+                    />
                     {organization && (
                         <span className="inline-flex items-center gap-2 text-primary">
-                            {metadata.length > 0 && (
-                                <span aria-hidden="true" className="opacity-40">
-                                    ·
-                                </span>
-                            )}
+                            <MetadataSeparator />
                             <Users
                                 className="size-4"
                                 aria-label={i18n("Organization")}
@@ -93,14 +95,6 @@ export function ItemHeader({
                             )}
                         </span>
                     )}
-                </div>
-                <div className="mt-1.5">
-                    <AiCostSummary
-                        key={`${itemId}:${view ?? "private"}`}
-                        recordingId={itemId}
-                        kind={kind}
-                        view={view}
-                    />
                 </div>
                 {retentionNotes.map((note) => (
                     <p
