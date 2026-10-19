@@ -98,10 +98,18 @@ const baseSettingsNavGroups: { label: string; items: NavItem[] }[] = [
 /** What the deployment offers the viewer, deciding which sections exist. */
 export interface SettingsNavOptions {
     isHosted: boolean;
+    isOrgAccount?: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
     /** The viewer manages access at the identity provider (`access.manage`). */
     accessManagement?: boolean;
+}
+
+/** Whether a settings section configures a personal recording source. */
+export function isPersonalSettingsSection(section: SettingsSection): boolean {
+    return ["plaud-account", "google-account", "recorder", "mail"].includes(
+        section,
+    );
 }
 
 /**
@@ -169,7 +177,16 @@ export function buildSettingsNavGroups(
                   },
               ]
             : []),
-        ...groups,
+        ...groups
+            .map((group) => ({
+                ...group,
+                items: group.items.filter(
+                    (item) =>
+                        !opts.isOrgAccount ||
+                        !isPersonalSettingsSection(item.id),
+                ),
+            }))
+            .filter((group) => group.items.length > 0),
     ];
 }
 

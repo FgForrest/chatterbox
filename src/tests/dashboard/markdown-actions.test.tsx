@@ -49,6 +49,32 @@ describe("MarkdownActions", () => {
         ).toBe("/api/recordings/rec-1/markdown/transcript?source=plaud");
     });
 
+    it("uses summary labels and container for compact summary actions", () => {
+        render(
+            <MarkdownActions
+                recordingId="rec-1"
+                kind="summary"
+                source="riffado"
+                collapseAtNarrowWidth
+            />,
+        );
+        const actions = screen.getByRole("button", { name: "Summary actions" });
+        expect(actions.title).toBe("Summary actions");
+        expect(actions.parentElement?.className).toBe(
+            "@min-[560px]/summary:hidden",
+        );
+        expect(
+            screen.getByRole("link", { name: "Download summary Markdown" })
+                .parentElement?.className,
+        ).toContain("@min-[560px]/summary:flex");
+        fireEvent.keyDown(actions, { key: "Enter" });
+        expect(
+            screen
+                .getByRole("menuitem", { name: "Download summary Markdown" })
+                .getAttribute("href"),
+        ).toContain("/markdown/summary?");
+    });
+
     it("copies the same summary Markdown returned by the download route", async () => {
         const markdown = "---\ntitle: Summary\n---\n";
         vi.stubGlobal(

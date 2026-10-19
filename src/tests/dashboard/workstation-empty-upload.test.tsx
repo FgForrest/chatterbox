@@ -215,6 +215,7 @@ const baseProps: ComponentProps<typeof WorkstationComponent> = {
     plaudNeedsReconnect: false,
     isHosted: false,
     onboardingCapabilities: {
+        audience: "single-user",
         googleConfigured: false,
         mailAvailable: false,
         mcpConnectorUrl: null,

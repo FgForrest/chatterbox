@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Workstation } from "@/components/dashboard/workstation";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
@@ -55,18 +62,50 @@ vi.mock("@/components/mail/mail-detail-pane", () => ({
     MailDetailPane: () => null,
 }));
 vi.mock("@/components/settings-dialog", () => ({
-    SettingsDialog: () => null,
+    SettingsDialog: ({
+        open,
+        onOpenChange,
+        headerAction,
+    }: {
+        open: boolean;
+        onOpenChange: (open: boolean) => void;
+        headerAction?: ReactNode;
+    }) =>
+        open ? (
+            <div data-testid="settings-dialog">
+                {headerAction}
+                <button type="button" onClick={() => onOpenChange(false)}>
+                    Close settings
+                </button>
+            </div>
+        ) : null,
 }));
 vi.mock("@/components/onboarding-dialog", () => ({
     OnboardingDialog: ({
         open,
         initialStep,
+        suspended,
+        onOpenSettings,
     }: {
         open: boolean;
         initialStep: string;
+        suspended: boolean;
+        onOpenSettings: (section: "providers" | "mail") => void;
     }) => (
         <div data-testid="onboarding-dialog">
-            {open ? `open:${initialStep}` : `closed:${initialStep}`}
+            <span>
+                {open
+                    ? suspended
+                        ? `suspended:${initialStep}`
+                        : `open:${initialStep}`
+                    : `closed:${initialStep}`}
+            </span>
+            <button type="button" onClick={() => onOpenSettings("providers")}>
+                Set up providers
+            </button>
+            <button type="button" onClick={() => onOpenSettings("mail")}>
+                Set up mail
+            </button>
         </div>
     ),
 }));
@@ -134,6 +173,7 @@ describe("workstation onboarding resume", () => {
                 plaudNeedsReconnect={false}
                 isHosted={false}
                 onboardingCapabilities={{
+                    audience: "single-user",
                     googleConfigured: true,
                     mailAvailable: false,
                     mcpConnectorUrl: null,
@@ -149,10 +189,65 @@ describe("workstation onboarding resume", () => {
         );
 
         await waitFor(() =>
-            expect(screen.getByTestId("onboarding-dialog").textContent).toBe(
-                "open:google",
-            ),
+            expect(
+                screen.getByTestId("onboarding-dialog").querySelector("span")
+                    ?.textContent,
+            ).toBe("open:google"),
         );
         expect(window.location.search).toBe("");
+    });
+});
+
+describe("workstation Settings handoff", () => {
+    it.each([
+        "providers",
+        "mail",
+    ] as const)("opens %s in-app and resumes setup on close", async (section) => {
+        window.history.replaceState({}, "", "/dashboard?onboarding=google");
+        render(
+            <Workstation
+                recordings={[]}
+                transcriptions={new Map()}
+                initialSettings={{
+                    ...INITIAL_SETTINGS_DEFAULTS,
+                    onboardingCompleted: false,
+                }}
+                plaudNeedsReconnect={false}
+                isHosted={false}
+                mailEnabled
+                onboardingCapabilities={{
+                    audience: "organization-member",
+                    googleConfigured: true,
+                    mailAvailable: true,
+                    mcpConnectorUrl: null,
+                    recorderStoreUrl: "https://store.example",
+                }}
+                exportProviders={{
+                    filesystem: false,
+                    googleDrive: false,
+                    mail: false,
+                }}
+                initialFolderOrganization={{ folders: [], assignments: [] }}
+            />,
+        );
+        fireEvent.click(
+            screen.getByRole("button", {
+                name:
+                    section === "providers"
+                        ? "Set up providers"
+                        : "Set up mail",
+            }),
+        );
+        expect(window.location.hash).toBe(`#${section}`);
+        expect(screen.getByTestId("settings-dialog")).toBeTruthy();
+        expect(screen.getByText("suspended:google")).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Return to setup" }),
+        );
+        expect(screen.queryByTestId("settings-dialog")).toBeNull();
+        expect(screen.getByText("open:google")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Set up mail" }));
+        fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+        expect(screen.getByText("open:google")).toBeTruthy();
     });
 });

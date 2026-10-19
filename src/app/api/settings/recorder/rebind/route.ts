@@ -4,10 +4,14 @@ import { db } from "@/db";
 import { apiKeys, recordingCaptureKeys, recordingSessions } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 
 /** Let the signed-in capture owner bind unfinished ciphertext to a new recorder key. */
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
+    await assertNotOrgAccount(session.user.id, {
+        surface: "settings/recorder/rebind",
+    });
     const body = (await request.json().catch(() => null)) as Record<
         string,
         unknown

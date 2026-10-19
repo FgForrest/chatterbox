@@ -25,11 +25,11 @@ Sign in to Chatterbox itself once, in your browser. Claude cannot connect for so
 
 ## Connecting Claude
 
-If Chatterbox offers Claude during first-run setup, that step shows the connector address and the same instructions below.
+If Chatterbox offers Claude during first-run setup, it starts with the company connector instructions below. **Not in your list?** holds the personal-plan setup, connector address, and Claude Code command. If you have already connected and enabled it, choose **Already set up**. The final summary says **Set up (you confirmed)**; Chatterbox cannot verify your Claude connection.
 
 **If your organization uses Claude Team or Enterprise**, your administrator has added Chatterbox for everyone:
 
-1. In Claude, open **Customize → Connectors**.
+1. Open Claude on claude.ai or in the desktop app, then **Customize → Connectors**.
 2. Find **Chatterbox**, marked **Custom**, and click **Connect**.
 3. Your organization's sign-in page opens. Sign in as you do for Chatterbox.
 

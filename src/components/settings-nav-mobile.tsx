@@ -16,6 +16,7 @@ interface Props {
     activeSection: SettingsSection;
     onSectionChange: (section: SettingsSection) => void;
     isHosted: boolean;
+    isOrgAccount?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
 }
@@ -29,13 +30,20 @@ export function SettingsNavMobile({
     activeSection,
     onSectionChange,
     isHosted,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
 }: Props) {
     const i18n = useExtracted();
     const settingsNav = useMemo(
-        () => buildSettingsNav({ isHosted, mailEnabled, accessManagement }),
-        [isHosted, mailEnabled, accessManagement],
+        () =>
+            buildSettingsNav({
+                isHosted,
+                isOrgAccount,
+                mailEnabled,
+                accessManagement,
+            }),
+        [isHosted, isOrgAccount, mailEnabled, accessManagement],
     );
     const activeNavItem = settingsNav.find((item) => item.id === activeSection);
     const sectionName = (section: SettingsSection) => {
