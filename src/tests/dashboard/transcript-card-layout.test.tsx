@@ -98,6 +98,15 @@ describe("transcript card narrow controls", () => {
                 "@max-[560px]/transcription:hidden",
             );
         }
+        for (const name of [
+            "Re-transcribe",
+            "Transcript source",
+            "Transcript actions",
+        ]) {
+            expect(
+                screen.getByRole("button", { name }).getAttribute("title"),
+            ).toBe(name);
+        }
         const actions = screen.getByRole("button", {
             name: "Transcript actions",
         });

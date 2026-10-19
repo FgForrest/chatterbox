@@ -4,8 +4,12 @@ import { useExtracted } from "next-intl";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import { Switch } from "@/components/ui/switch";
-import { transcriptReadingLine } from "@/hooks/use-transcript-follow";
-import type { TranscriptTopic } from "@/lib/topics/timeline";
+import {
+    type PlaybackState,
+    type TranscriptPlayback,
+    transcriptReadingLine,
+} from "@/hooks/use-transcript-follow";
+import { activeTopicIndex, type TranscriptTopic } from "@/lib/topics/timeline";
 
 interface TranscriptChapterBarProps {
     topics: TranscriptTopic[] | null;
@@ -19,6 +23,9 @@ interface TranscriptChapterBarProps {
     showOriginal: boolean;
     onShowOriginalChange: (show: boolean) => void;
     widgetId: string;
+    playback?: TranscriptPlayback;
+    getPlaybackMs?: () => number;
+    expanded?: boolean;
 }
 
 /** Sticky topic navigation and original-text control inside the transcript scroll box. */
@@ -34,49 +41,106 @@ export function TranscriptChapterBar({
     showOriginal,
     onShowOriginalChange,
     widgetId,
+    playback,
+    getPlaybackMs,
+    expanded = true,
 }: TranscriptChapterBarProps) {
     const i18n = useExtracted();
     const switchId = useId();
     const barRef = useRef<HTMLDivElement>(null);
-    const [activeIndex, setActiveIndex] = useState(0);
+    const [readingIndex, setReadingIndex] = useState(0);
+    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+    const [playbackState, setPlaybackState] = useState<PlaybackState>({
+        ms: getPlaybackMs?.() ?? 0,
+        playing: false,
+    });
+
+    const playbackRef = useRef(playback);
+    playbackRef.current = playback;
+    const subscribed = playback !== undefined;
+
+    useEffect(() => {
+        if (!subscribed) return;
+        return playbackRef.current?.subscribe((state) => {
+            setPlaybackState(state);
+            if (state.playing) setSelectedIndex(null);
+        });
+    }, [subscribed]);
 
     useEffect(() => {
         const box = scrollRef.current;
-        if (!box || !topics?.length) return;
+        if (!box || !topics?.length || !expanded) return;
+        let headings = box.querySelectorAll<HTMLElement>("[data-topic-index]");
         const update = () => {
             const line = transcriptReadingLine(box) + 8;
             let current = 0;
-            for (const heading of box.querySelectorAll<HTMLElement>(
-                "[data-topic-index]",
-            )) {
+            for (const heading of headings) {
                 const rect = heading.getBoundingClientRect();
                 if (rect.height === 0) continue;
                 if (rect.top > line) break;
                 current = Number(heading.dataset.topicIndex);
             }
-            setActiveIndex(current);
+            setReadingIndex(current);
         };
         update();
         box.addEventListener("scroll", update, { passive: true });
-        window.addEventListener("resize", update);
+        const read = () => setSelectedIndex(null);
+        const onKey = (event: KeyboardEvent) => {
+            if (
+                [
+                    "PageUp",
+                    "PageDown",
+                    "Home",
+                    "End",
+                    "ArrowUp",
+                    "ArrowDown",
+                    " ",
+                ].includes(event.key)
+            )
+                read();
+        };
+        box.addEventListener("wheel", read, { passive: true });
+        box.addEventListener("touchmove", read, { passive: true });
+        const onPointerDown = (event: PointerEvent) => {
+            if (event.target === box) read();
+        };
+        box.addEventListener("pointerdown", onPointerDown);
+        box.addEventListener("keydown", onKey);
         const observer =
             typeof ResizeObserver === "undefined"
                 ? null
-                : new ResizeObserver(update);
+                : new ResizeObserver(() => {
+                      headings =
+                          box.querySelectorAll<HTMLElement>(
+                              "[data-topic-index]",
+                          );
+                      update();
+                  });
         observer?.observe(box);
         if (barRef.current) observer?.observe(barRef.current);
         const content = barRef.current?.nextElementSibling;
         if (content) observer?.observe(content);
-        for (const heading of box.querySelectorAll<HTMLElement>(
-            "[data-topic-index]",
-        ))
-            observer?.observe(heading);
         return () => {
             box.removeEventListener("scroll", update);
-            window.removeEventListener("resize", update);
+            box.removeEventListener("wheel", read);
+            box.removeEventListener("touchmove", read);
+            box.removeEventListener("pointerdown", onPointerDown);
+            box.removeEventListener("keydown", onKey);
             observer?.disconnect();
         };
-    }, [scrollRef, topics]);
+    }, [scrollRef, topics, expanded]);
+
+    const activeIndex =
+        selectedIndex ??
+        (playbackState.playing
+            ? Math.max(
+                  0,
+                  activeTopicIndex(
+                      topics ?? [],
+                      getPlaybackMs?.() ?? playbackState.ms,
+                  ),
+              )
+            : readingIndex);
 
     if (!topics?.length && !canDetect && !hasCorrections) return null;
 
@@ -84,7 +148,7 @@ export function TranscriptChapterBar({
         <div
             ref={barRef}
             data-chapter-bar
-            className="sticky top-0 z-20 flex min-h-12 min-w-0 items-center justify-between gap-3 border-b bg-muted px-4 py-2"
+            className={`${expanded ? "sticky top-0 z-20" : ""} flex min-h-12 min-w-0 items-center justify-between gap-3 border-b bg-muted px-4 py-2`}
         >
             <TranscriptTopicsMenu
                 widgetId={widgetId}
@@ -97,7 +161,10 @@ export function TranscriptChapterBar({
                 waitingForReview={waitingForReview}
                 detecting={detecting}
                 onDetect={onDetect}
-                onSelect={onSelect}
+                onSelect={(index) => {
+                    onSelect(index);
+                    setSelectedIndex(index);
+                }}
             />
             {hasCorrections && (
                 <label

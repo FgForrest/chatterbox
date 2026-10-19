@@ -43,9 +43,9 @@ A transcript with speakers reads as a conversation, one coloured block per turn,
 The chips above the transcript are the speakers.
 
 - Click the name on a chip such as **Speaker 2** and choose who it is from your [Almanac](almanac.md), create a new person, or mark the speaker **Unknown**.
-- A dashed chip ending in **?**, such as **Priya Raman?**, is a suggestion. Click **✓** to confirm it or **×** to reject it; a rejected name is never suggested for that speaker again. **▷** plays the moment the suggestion is based on.
+- A dashed chip ending in **?**, such as **Priya Raman?**, is a suggestion. Click **✓** to confirm it or **×** to reject it; a rejected name is never suggested for that speaker again. **▶** plays the moment the suggestion is based on, or the speaker’s next turn if there is no evidence clip.
 - **Speaker guesses** above the transcript are Learn's suggestions. See [Learn](learn.md).
-- Click the coloured **▶** at the start of a confirmed or unknown speaker’s chip to hear their next turn. Right-click remains a shortcut. Click a confirmed name to choose another person, or **×** to unlink it. An unknown speaker’s name opens the same picker.
+- Every chip has a coloured **▶**, including an unanswered one. Click it to hear that speaker’s next turn. Right-click remains a shortcut. Click a confirmed name to choose another person or **Open in Almanac**, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
 
@@ -53,7 +53,7 @@ Names you give appear everywhere the transcript does: in the summary, in exports
 
 ![The topics menu](images/topics-menu.png)
 
-**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then click the chapter bar pinned above the text. It shows the current topic’s number, the total and its title as you scroll or follow playback. Pick a topic from its list of numbers, titles and times to jump there: the transcript scrolls to the heading and the player moves to its start. A processing profile with **Run automatically** on for topics detects them after each new transcript. **Re-detect topics** stays in the list when you can run it. While Learn needs a review, the bar says **Topics follow the Learn review**.
+**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then click the chapter bar pinned above the text. It shows the current topic’s number, the total and its title as you scroll or follow playback. Pick a topic from its list of numbers, titles and times to jump there: the transcript scrolls to the heading and the player moves to its start. A processing profile with **Run automatically** on for topics detects them after each new transcript. **Re-detect topics** stays in the list when you can run it. The bar remains available when the transcript is collapsed; choosing a topic expands it. While Learn needs a review, the bar says **Topics follow the Learn review**.
 
 ### Long talks
 

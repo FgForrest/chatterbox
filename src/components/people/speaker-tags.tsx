@@ -339,9 +339,10 @@ export function SpeakerTags({
                     const accent = speakerAccent(index).text;
                     const name = attribution?.name ?? speaker.label;
                     const evidenceMs = suggestion?.evidenceStartMs;
-                    const canListen = suggestion
-                        ? Boolean(onSeek && evidenceMs != null)
-                        : Boolean(onPlaySpeaker);
+                    const canPlayEvidence = Boolean(
+                        suggestion && onSeek && evidenceMs != null,
+                    );
+                    const canListen = canPlayEvidence || Boolean(onPlaySpeaker);
                     const label =
                         attribution?.name ??
                         (suggestion
@@ -374,9 +375,8 @@ export function SpeakerTags({
                                 }
                                 title={suggestion ? i18n("Listen") : undefined}
                                 onClick={() => {
-                                    if (suggestion) {
-                                        if (evidenceMs != null)
-                                            onSeek?.(evidenceMs);
+                                    if (canPlayEvidence && evidenceMs != null) {
+                                        onSeek?.(evidenceMs);
                                     } else onPlaySpeaker?.(speaker.speaker);
                                 }}
                             >
@@ -400,6 +400,7 @@ export function SpeakerTags({
                                     type="button"
                                     className={`${segmentClass} min-w-0 break-words text-left`}
                                     disabled={saving}
+                                    aria-haspopup="dialog"
                                     onClick={() =>
                                         setOpenLabel(speaker.speaker)
                                     }
@@ -513,6 +514,7 @@ export function SpeakerTags({
             {!readOnly && openSpeaker && (
                 <SpeakerPicker
                     label={openSpeaker.label}
+                    personId={attributions[openSpeaker.speaker]?.personId}
                     organizationOnly={view === "org"}
                     onPick={(choice) => attribute(openSpeaker.speaker, choice)}
                     onMarkUnknown={() =>

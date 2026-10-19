@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Loader2, Search, UserPlus } from "lucide-react";
+import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export interface PickablePerson {
 export interface SpeakerPickerProps {
     /** The raw provider label being named, e.g. `speaker_0`. */
     label: string;
+    personId?: string;
     /** Resolves true only after the attribution was persisted. */
     onPick: (
         choice: { personId: string } | { displayName: string },
@@ -51,6 +53,7 @@ export interface SpeakerPickerProps {
  */
 export function SpeakerPicker({
     label,
+    personId,
     onPick,
     onMarkUnknown,
     onClose,
@@ -143,6 +146,13 @@ export function SpeakerPicker({
                     </DialogDescription>
                 </DialogHeader>
 
+                {personId && (
+                    <Button asChild variant="outline">
+                        <Link href={`/almanac/${personId}`} onClick={onClose}>
+                            {i18n("Open in Almanac")}
+                        </Link>
+                    </Button>
+                )}
                 <div className="space-y-2">
                     <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

@@ -46,6 +46,12 @@ export function MarkdownActions({
     const documentLabel =
         kind === "transcript" ? i18n("transcript") : i18n("summary");
 
+    const narrowContainer = kind === "transcript" ? "transcription" : "summary";
+    const actionsLabel =
+        kind === "transcript"
+            ? i18n("Transcript actions")
+            : i18n("Summary actions");
+
     const copyMarkdown = async () => {
         setCopyState("copying");
         try {
@@ -74,7 +80,9 @@ export function MarkdownActions({
             <div
                 className={
                     collapseAtNarrowWidth
-                        ? "hidden items-center gap-1 @min-[560px]/transcription:flex"
+                        ? narrowContainer === "transcription"
+                            ? "hidden items-center gap-1 @min-[560px]/transcription:flex"
+                            : "hidden items-center gap-1 @min-[560px]/summary:flex"
                         : "flex items-center gap-1"
                 }
             >
@@ -114,14 +122,21 @@ export function MarkdownActions({
                 </Button>
             </div>
             {collapseAtNarrowWidth && (
-                <div className="@min-[560px]/transcription:hidden">
+                <div
+                    className={
+                        narrowContainer === "transcription"
+                            ? "@min-[560px]/transcription:hidden"
+                            : "@min-[560px]/summary:hidden"
+                    }
+                >
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button
                                 type="button"
                                 size="icon-sm"
                                 variant="ghost"
-                                aria-label={i18n("Transcript actions")}
+                                aria-label={actionsLabel}
+                                title={actionsLabel}
                             >
                                 <MoreHorizontal className="size-4" />
                             </Button>

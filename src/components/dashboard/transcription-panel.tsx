@@ -208,6 +208,7 @@ export function TranscriptionPanel({
     onTranscriptStale,
     onSeekToTurn,
     onPlayFromTurn,
+    getPlaybackMs,
     playback,
     readOnly = false,
     processing = null,
@@ -782,7 +783,7 @@ export function TranscriptionPanel({
                                                         ? i18n(
                                                               "Audio was removed by your retention policy",
                                                           )
-                                                        : undefined
+                                                        : i18n("Re-transcribe")
                                                 }
                                             >
                                                 <RefreshCw className="size-4 mr-2 @max-[560px]/transcription:mr-0" />
@@ -849,6 +850,9 @@ export function TranscriptionPanel({
                                                             size="icon-sm"
                                                             variant="ghost"
                                                             aria-label={i18n(
+                                                                "Transcript source",
+                                                            )}
+                                                            title={i18n(
                                                                 "Transcript source",
                                                             )}
                                                         >
@@ -1017,95 +1021,85 @@ export function TranscriptionPanel({
                             </div>
                         ) : activeTranscript?.text ? (
                             <div className="space-y-4">
-                                {transcriptOpen && (
-                                    <div className="space-y-4">
-                                        <section
-                                            ref={transcriptSectionRef}
-                                            aria-label={i18n(
-                                                "Transcript content",
-                                            )}
-                                            className="relative max-h-96 overflow-y-auto rounded-lg bg-muted"
-                                        >
-                                            <TranscriptChapterBar
-                                                key={`${attributionKey}:${activeTranscriptKey}`}
-                                                widgetId={`recording-topics-${recording.id}`}
-                                                topics={topics}
+                                <section
+                                    ref={transcriptSectionRef}
+                                    aria-label={i18n("Transcript content")}
+                                    className={
+                                        transcriptOpen
+                                            ? "relative max-h-96 overflow-y-auto rounded-lg bg-muted"
+                                            : "rounded-lg bg-muted"
+                                    }
+                                >
+                                    <TranscriptChapterBar
+                                        key={`${attributionKey}:${activeTranscriptKey}`}
+                                        widgetId={`recording-topics-${recording.id}`}
+                                        topics={topics}
+                                        playback={playback}
+                                        getPlaybackMs={getPlaybackMs}
+                                        expanded={transcriptOpen}
+                                        scrollRef={transcriptSectionRef}
+                                        canDetect={canDetectTopics}
+                                        waitingForReview={heldForReview}
+                                        detecting={detectingTopics}
+                                        onDetect={() => void detectTopics()}
+                                        onSelect={handleSelectTopic}
+                                        hasCorrections={
+                                            (shownCorrections?.list.length ??
+                                                0) > 0
+                                        }
+                                        showOriginal={showOriginal}
+                                        onShowOriginalChange={setShowOriginal}
+                                    />
+                                    {transcriptOpen && (
+                                        <div className="p-4">
+                                            <TranscriptView
+                                                text={activeTranscript.text}
+                                                source={activeTranscript.source}
+                                                model={activeTranscript.model}
+                                                storedTurns={
+                                                    activeTranscript.turns
+                                                }
+                                                speakerAttributions={
+                                                    speakerAttributions
+                                                }
+                                                onSeekToTurn={onSeekToTurn}
+                                                playback={playback}
                                                 scrollRef={transcriptSectionRef}
-                                                canDetect={canDetectTopics}
-                                                waitingForReview={heldForReview}
-                                                detecting={detectingTopics}
-                                                onDetect={() =>
-                                                    void detectTopics()
+                                                topics={topics}
+                                                highlightedTopic={
+                                                    topicJump?.index ?? null
                                                 }
-                                                onSelect={handleSelectTopic}
-                                                hasCorrections={
-                                                    (shownCorrections?.list
-                                                        .length ?? 0) > 0
+                                                highlightedTurnIndex={
+                                                    speakerJump?.index ?? null
                                                 }
-                                                showOriginal={showOriginal}
-                                                onShowOriginalChange={
-                                                    setShowOriginal
+                                                // A mix is not the transcript
+                                                // Learn read.
+                                                corrections={
+                                                    shownCorrections &&
+                                                    !showOriginal
+                                                        ? {
+                                                              list: shownCorrections.list,
+                                                              canUndo:
+                                                                  shownCorrections.canUndo &&
+                                                                  !readOnly,
+                                                              onUndo: (id) =>
+                                                                  void undoCorrection(
+                                                                      id,
+                                                                  ),
+                                                          }
+                                                        : null
+                                                }
+                                                learnMarks={
+                                                    canLearn &&
+                                                    activeTranscript.source !==
+                                                        "mixed"
+                                                        ? learnMarks
+                                                        : null
                                                 }
                                             />
-                                            <div className="p-4">
-                                                <TranscriptView
-                                                    text={activeTranscript.text}
-                                                    source={
-                                                        activeTranscript.source
-                                                    }
-                                                    model={
-                                                        activeTranscript.model
-                                                    }
-                                                    storedTurns={
-                                                        activeTranscript.turns
-                                                    }
-                                                    speakerAttributions={
-                                                        speakerAttributions
-                                                    }
-                                                    onSeekToTurn={onSeekToTurn}
-                                                    playback={playback}
-                                                    scrollRef={
-                                                        transcriptSectionRef
-                                                    }
-                                                    topics={topics}
-                                                    highlightedTopic={
-                                                        topicJump?.index ?? null
-                                                    }
-                                                    highlightedTurnIndex={
-                                                        speakerJump?.index ??
-                                                        null
-                                                    }
-                                                    // A mix is not the transcript
-                                                    // Learn read.
-                                                    corrections={
-                                                        shownCorrections &&
-                                                        !showOriginal
-                                                            ? {
-                                                                  list: shownCorrections.list,
-                                                                  canUndo:
-                                                                      shownCorrections.canUndo &&
-                                                                      !readOnly,
-                                                                  onUndo: (
-                                                                      id,
-                                                                  ) =>
-                                                                      void undoCorrection(
-                                                                          id,
-                                                                      ),
-                                                              }
-                                                            : null
-                                                    }
-                                                    learnMarks={
-                                                        canLearn &&
-                                                        activeTranscript.source !==
-                                                            "mixed"
-                                                            ? learnMarks
-                                                            : null
-                                                    }
-                                                />
-                                            </div>
-                                        </section>
-                                    </div>
-                                )}
+                                        </div>
+                                    )}
+                                </section>
                             </div>
                         ) : null}
                     </WorkflowWidget>

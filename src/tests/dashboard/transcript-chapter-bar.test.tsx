@@ -58,6 +58,7 @@ function Harness({
         >
             <TranscriptChapterBar
                 topics={hasTopics ? topics : null}
+                playback={playback}
                 scrollRef={scrollRef}
                 canDetect={canDetect}
                 waitingForReview={waitingForReview}
@@ -219,6 +220,43 @@ describe("transcript chapter bar", () => {
         expect(playback.seek).not.toHaveBeenCalled();
     });
 
+    it("uses playback before follow scrolling moves, then returns to paused reading", () => {
+        const listeners = new Set<(state: PlaybackState) => void>();
+        const playback: TranscriptPlayback = {
+            play: vi.fn(),
+            pause: vi.fn(),
+            seek: vi.fn(),
+            subscribe: (listener) => {
+                listeners.add(listener);
+                return () => {
+                    listeners.delete(listener);
+                };
+            },
+        };
+        HTMLElement.prototype.scrollTo = vi.fn();
+        render(<Harness playback={playback} />);
+        act(() => {
+            for (const listener of listeners)
+                listener({ ms: 11000, playing: true });
+        });
+        const box = screen.getByRole("region", { name: "Transcript content" });
+        expect(box.scrollTop).toBe(0);
+        expect(
+            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+        ).toBeTruthy();
+        fireEvent.scroll(box);
+        expect(
+            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+        ).toBeTruthy();
+        act(() => {
+            for (const listener of listeners)
+                listener({ ms: 11000, playing: false });
+        });
+        expect(
+            screen.getByRole("button", { name: "1 / 2 Opening" }),
+        ).toBeTruthy();
+    });
+
     it("lists topic numbers and times, selects a topic and keeps re-detection", () => {
         const onSelect = vi.fn();
         const onDetect = vi.fn();
@@ -230,7 +268,10 @@ describe("transcript chapter bar", () => {
         fireEvent.click(item);
         expect(onSelect).toHaveBeenCalledWith(1);
         expect(screen.queryByRole("menu")).toBeNull();
-        openList();
+        fireEvent.keyDown(
+            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            { key: "Enter" },
+        );
         fireEvent.click(
             screen.getByRole("menuitem", { name: "Re-detect topics" }),
         );
