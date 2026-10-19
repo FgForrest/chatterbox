@@ -1,10 +1,22 @@
 "use client";
 
-import { Check, Clipboard, Download, Loader2 } from "lucide-react";
+import {
+    Check,
+    Clipboard,
+    Download,
+    Loader2,
+    MoreHorizontal,
+} from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { SidecarKind } from "@/lib/export/document-sidecars";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
@@ -13,6 +25,7 @@ interface MarkdownActionsProps {
     recordingId: string;
     source: string;
     view?: RecordingView;
+    collapseAtNarrowWidth?: boolean;
 }
 
 export function MarkdownActions({
@@ -20,6 +33,7 @@ export function MarkdownActions({
     recordingId,
     source,
     view,
+    collapseAtNarrowWidth = false,
 }: MarkdownActionsProps) {
     const i18n = useExtracted();
     const [copyState, setCopyState] = useState<"idle" | "copying" | "copied">(
@@ -56,41 +70,84 @@ export function MarkdownActions({
     };
 
     return (
-        <div className="flex items-center gap-1">
-            <Button asChild size="icon-sm" variant="ghost">
-                <a
-                    href={endpoint}
-                    aria-label={i18n("Download {document} Markdown", {
+        <>
+            <div
+                className={
+                    collapseAtNarrowWidth
+                        ? "hidden items-center gap-1 @min-[560px]/transcription:flex"
+                        : "flex items-center gap-1"
+                }
+            >
+                <Button asChild size="icon-sm" variant="ghost">
+                    <a
+                        href={endpoint}
+                        aria-label={i18n("Download {document} Markdown", {
+                            document: documentLabel,
+                        })}
+                        title={i18n("Download {document} Markdown", {
+                            document: documentLabel,
+                        })}
+                    >
+                        <Download className="size-4" />
+                    </a>
+                </Button>
+                <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={copyMarkdown}
+                    disabled={copyState === "copying"}
+                    aria-label={i18n("Copy {document} Markdown", {
                         document: documentLabel,
                     })}
-                    title={i18n("Download {document} Markdown", {
+                    title={i18n("Copy {document} Markdown", {
                         document: documentLabel,
                     })}
                 >
-                    <Download className="size-4" />
-                </a>
-            </Button>
-            <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={copyMarkdown}
-                disabled={copyState === "copying"}
-                aria-label={i18n("Copy {document} Markdown", {
-                    document: documentLabel,
-                })}
-                title={i18n("Copy {document} Markdown", {
-                    document: documentLabel,
-                })}
-            >
-                {copyState === "copying" ? (
-                    <Loader2 className="size-4 animate-spin" />
-                ) : copyState === "copied" ? (
-                    <Check className="size-4" />
-                ) : (
-                    <Clipboard className="size-4" />
-                )}
-            </Button>
-        </div>
+                    {copyState === "copying" ? (
+                        <Loader2 className="size-4 animate-spin" />
+                    ) : copyState === "copied" ? (
+                        <Check className="size-4" />
+                    ) : (
+                        <Clipboard className="size-4" />
+                    )}
+                </Button>
+            </div>
+            {collapseAtNarrowWidth && (
+                <div className="@min-[560px]/transcription:hidden">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={i18n("Transcript actions")}
+                            >
+                                <MoreHorizontal className="size-4" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                                <a href={endpoint}>
+                                    <Download className="size-4" />
+                                    {i18n("Download {document} Markdown", {
+                                        document: documentLabel,
+                                    })}
+                                </a>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => void copyMarkdown()}
+                                disabled={copyState === "copying"}
+                            >
+                                <Clipboard className="size-4" />
+                                {i18n("Copy {document} Markdown", {
+                                    document: documentLabel,
+                                })}
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            )}
+        </>
     );
 }

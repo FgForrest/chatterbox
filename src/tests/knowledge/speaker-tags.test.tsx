@@ -67,6 +67,7 @@ function stubFetch(scenario: FetchScenario) {
 function SpeakerTagsHarness({
     onAttributionsChange,
     onSeek,
+    onPlaySpeaker,
     shownVersion,
     onStale,
     onUnknownLabelsChange,
@@ -75,6 +76,7 @@ function SpeakerTagsHarness({
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
     onSeek?: (ms: number) => void;
+    onPlaySpeaker?: (speaker: string) => boolean;
     shownVersion?: { transcriptionId: string; revision: number };
     onStale?: () => void;
     onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
@@ -98,6 +100,7 @@ function SpeakerTagsHarness({
             attributions={attributions}
             onAttributionsChange={handleAttributionsChange}
             onSeek={onSeek}
+            onPlaySpeaker={onPlaySpeaker}
             shownVersion={shownVersion}
             onStale={onStale}
             onUnknownLabelsChange={onUnknownLabelsChange}
@@ -149,7 +152,7 @@ describe("SpeakerTags", () => {
         vi.unstubAllGlobals();
     });
 
-    it("links a confirmed person and unlinks them from the cross button", async () => {
+    it("opens a confirmed person in the picker and unlinks them from the cross button", async () => {
         const fetchMock = stubFetch({
             initialSpeakers: [
                 {
@@ -162,8 +165,10 @@ describe("SpeakerTags", () => {
         });
         renderTags();
 
-        const personLink = await screen.findByRole("link", { name: "Jan" });
-        expect(personLink.getAttribute("href")).toBe("/almanac/person-1");
+        const personName = await screen.findByRole("button", { name: "Jan" });
+        fireEvent.click(personName);
+        expect(await screen.findByRole("combobox")).toBeDefined();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
         fireEvent.click(
             screen.getByRole("button", {
@@ -225,7 +230,9 @@ describe("SpeakerTags", () => {
         );
         expect(screen.getByText("Speaker 2")).toBeDefined();
         expect(screen.getByText("Managed by the Organization")).toBeDefined();
-        expect(screen.queryAllByRole("button")).toEqual([]);
+        expect(screen.queryAllByRole("button")).toHaveLength(3);
+        for (const button of screen.getAllByRole("button"))
+            expect(button).toHaveProperty("disabled", true);
         expect(
             fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
         ).toBe(false);
@@ -453,7 +460,7 @@ describe("SpeakerTags", () => {
                 }),
             );
 
-            await screen.findByRole("link", { name: "Jan Novotný" });
+            await screen.findByRole("button", { name: "Jan Novotný" });
             const put = fetchMock.mock.calls.find(
                 ([, init]) => init?.method === "PUT",
             );
@@ -501,6 +508,71 @@ describe("SpeakerTags", () => {
         });
     });
 
+    it.each([
+        ["confirmed", "Jan", false],
+        ["confirmed", null, true],
+        ["suggested", "Jan", false],
+    ])("separates playback, picker and right-click for %s, %s, unknown=%s", async (status, personName, markedUnknown) => {
+        stubFetch({
+            initialSpeakers: [
+                {
+                    label: "speaker_0",
+                    personId: personName ? "p-1" : null,
+                    personName,
+                    status,
+                    markedUnknown,
+                    evidenceStartMs: 42000,
+                },
+            ],
+        });
+        const onPlaySpeaker = vi.fn(() => true);
+        const onSeek = vi.fn();
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                onPlaySpeaker={onPlaySpeaker}
+                onSeek={onSeek}
+            />,
+        );
+        const name = personName
+            ? status === "suggested"
+                ? "Jan?"
+                : "Jan"
+            : "Speaker 0: unknown";
+        const nameButton = await screen.findByRole("button", {
+            name,
+        });
+        const play = screen.getByRole("button", {
+            name:
+                status === "suggested"
+                    ? "Play where Speaker 0 speaks"
+                    : `Play the next turn of ${personName ?? "Speaker 0"}`,
+        });
+        expect(play.className).toContain("text-primary");
+        expect(play.className).toContain("min-h-7");
+        expect(play.className).toContain("focus-visible:ring-2");
+        fireEvent.click(play);
+        if (status === "suggested") {
+            expect(onSeek).toHaveBeenCalledWith(42000);
+            expect(onPlaySpeaker).not.toHaveBeenCalled();
+        } else expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_0");
+        expect(screen.queryByRole("combobox")).toBeNull();
+        onPlaySpeaker.mockClear();
+        expect(fireEvent.contextMenu(nameButton)).toBe(false);
+        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_0");
+        onPlaySpeaker.mockReturnValue(false);
+        expect(fireEvent.contextMenu(play)).toBe(true);
+        fireEvent.click(nameButton);
+        expect(await screen.findByRole("combobox")).toBeDefined();
+        expect(
+            document.querySelector("fieldset[aria-label='Transcript speakers']")
+                ?.children,
+        ).toHaveLength(1);
+        expect(
+            screen.queryByText("Right-click a speaker to hear their next turn"),
+        ).toBeNull();
+    });
+
     it("selects an existing person through the modal", async () => {
         const fetchMock = stubFetch({
             people: [
@@ -529,7 +601,7 @@ describe("SpeakerTags", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Select" }));
 
-        await screen.findByRole("link", { name: "Petra" });
+        await screen.findByRole("button", { name: "Petra" });
         const put = fetchMock.mock.calls.find(
             ([, init]) => init?.method === "PUT",
         );
@@ -567,7 +639,7 @@ describe("SpeakerTags", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-        await screen.findByRole("link", { name: "Nova" });
+        await screen.findByRole("button", { name: "Nova" });
         const put = fetchMock.mock.calls.find(
             ([, init]) => init?.method === "PUT",
         );
@@ -599,12 +671,12 @@ describe("SpeakerTags", () => {
         const refreshedChange = vi.fn();
 
         const { rerender } = renderTags(initialChange);
-        await screen.findByRole("link", { name: "Jan" });
+        await screen.findByRole("button", { name: "Jan" });
 
         rerender(<SpeakerTagsHarness onAttributionsChange={refreshedChange} />);
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-        expect(screen.getByRole("link", { name: "Jan" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "Jan" })).toBeDefined();
         expect(refreshedChange).not.toHaveBeenCalledWith({});
     });
 
@@ -625,7 +697,10 @@ describe("SpeakerTags", () => {
         await waitFor(() => {
             expect(
                 screen.getAllByRole("link", { name: "Jakub Kosař" }),
-            ).toHaveLength(2);
+            ).toHaveLength(1);
+            expect(
+                screen.getByRole("button", { name: "Jakub Kosař" }),
+            ).toBeDefined();
         });
         expect(screen.queryByRole("link", { name: "Speaker 0" })).toBeNull();
     });

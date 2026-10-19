@@ -42,10 +42,10 @@ A transcript with speakers reads as a conversation, one coloured block per turn,
 
 The chips above the transcript are the speakers.
 
-- Click a chip such as **Speaker 2** and choose who it is from your [Almanac](almanac.md), create a new person, or mark the speaker **Unknown**.
+- Click the name on a chip such as **Speaker 2** and choose who it is from your [Almanac](almanac.md), create a new person, or mark the speaker **Unknown**.
 - A dashed chip ending in **?**, such as **Priya Raman?**, is a suggestion. Click **✓** to confirm it or **×** to reject it; a rejected name is never suggested for that speaker again. **▷** plays the moment the suggestion is based on.
 - **Speaker guesses** above the transcript are Learn's suggestions. See [Learn](learn.md).
-- Right-click a chip to hear that speaker's next turn.
+- Click the coloured **▶** at the start of a confirmed or unknown speaker’s chip to hear their next turn. Right-click remains a shortcut. Click a confirmed name to choose another person, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
 
@@ -53,7 +53,7 @@ Names you give appear everywhere the transcript does: in the summary, in exports
 
 ![The topics menu](images/topics-menu.png)
 
-**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then pick one from the **Topics** menu to jump there: the transcript scrolls to the heading and the player moves to its start. A processing profile with **Run automatically** on for topics detects them after each new transcript.
+**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then click the chapter bar pinned above the text. It shows the current topic’s number, the total and its title as you scroll or follow playback. Pick a topic from its list of numbers, titles and times to jump there: the transcript scrolls to the heading and the player moves to its start. A processing profile with **Run automatically** on for topics detects them after each new transcript. **Re-detect topics** stays in the list when you can run it. While Learn needs a review, the bar says **Topics follow the Learn review**.
 
 ### Long talks
 
@@ -71,13 +71,13 @@ A lecture or a long monologue is split into paragraphs of about half a minute, a
 
 ## Corrected words
 
-When Learn has corrected a misheard name, the transcript reads corrected. Corrected words are underlined.
+When Learn has corrected a misheard name, the transcript reads corrected. Corrected words have a dotted underline.
 
 | Corrected | Original |
 | --- | --- |
 | ![Corrected transcript](images/transcript-corrected.png) | ![Original transcript](images/transcript-original.png) |
 
-- **Show original** shows what the provider heard; **Show edited** goes back.
+- Turn on **Original text** at the end of the chapter bar to read what the provider heard; turn it off to return to the corrected text. The switch appears only when Learn has corrections, even if there are no topics. On a narrow card its label is **Original**, and the header uses icon buttons with copying and downloading in the transcript actions menu.
 - Click a corrected word to undo that one correction.
 - Summaries, topics, search, exports and the API all use the corrected text.
 
