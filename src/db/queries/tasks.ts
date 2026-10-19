@@ -31,7 +31,13 @@ export function liveFollowUpCondition(): SQL {
     );
 }
 
-/** PostgreSQL's plan for the folder-first candidate join used by task matching. */
+/**
+ * PostgreSQL's plan for the folder-first candidate join used by task matching.
+ * Both tables are analyzed first, so the plan does not depend on when
+ * autovacuum last ran. Sequential scans, hash joins and merge joins are
+ * disabled, so the plan shows the index path from the scope's mentions to
+ * their tasks even where scanning a small table would be cheaper.
+ */
 export async function explainScopedTaskCandidatePlan(
     itemIds: readonly string[],
 ): Promise<string[]> {
@@ -40,14 +46,20 @@ export async function explainScopedTaskCandidatePlan(
         itemIds.map((itemId) => sql`${itemId}`),
         sql`, `,
     );
-    const rows = await db.execute<{ "QUERY PLAN": string }>(sql`
-        explain (format text)
-        select task.id
-        from task_mentions mention
-        inner join recording_tasks task on task.id = mention.task_id
-        where mention.item_id in (${values})
-          and mention.match_decision in ('home', 'accepted')
-          and task.status = 'open'
-    `);
-    return rows.map((row) => row["QUERY PLAN"]);
+    return db.transaction(async (tx) => {
+        await tx.execute(sql`analyze recording_tasks, task_mentions`);
+        await tx.execute(sql`set local enable_seqscan = off`);
+        await tx.execute(sql`set local enable_hashjoin = off`);
+        await tx.execute(sql`set local enable_mergejoin = off`);
+        const rows = await tx.execute<{ "QUERY PLAN": string }>(sql`
+            explain (format text)
+            select task.id
+            from task_mentions mention
+            inner join recording_tasks task on task.id = mention.task_id
+            where mention.item_id in (${values})
+              and mention.match_decision in ('home', 'accepted')
+              and task.status = 'open'
+        `);
+        return rows.map((row) => row["QUERY PLAN"]);
+    });
 }
