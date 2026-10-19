@@ -127,6 +127,8 @@ export function NewRecordItem({
     useEffect(() => setTypeKey(current.typeKey), [current.typeKey]);
     const [picking, setPicking] = useState(false);
     const linked = linkedRecordId(choice);
+    const typeLabel = (key: string | null) =>
+        entityTypes.find((type) => type.key === key)?.label ?? key ?? "";
 
     const keep = (next: { name: string; typeKey: string | null }) =>
         onDecide("accepted", next);
@@ -318,6 +320,14 @@ export function NewRecordItem({
                 {evidence ?? (
                     <LearnEvidence quote={quote}>
                         <div className="text-xs text-muted-foreground">
+                            {linked && (
+                                <>
+                                    {payload.kind === "person"
+                                        ? i18n("Person")
+                                        : typeLabel(current.typeKey)}
+                                    {" · "}
+                                </>
+                            )}
                             {payload.reason}
                             {payload.speakerLabel &&
                                 ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}{" "}

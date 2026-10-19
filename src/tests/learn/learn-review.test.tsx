@@ -227,6 +227,10 @@ describe("LearnReview", () => {
                     .map((button) => button.textContent),
             ).toEqual(titles.map((title) => `${title} 1`));
             for (const title of titles) {
+                const chip = within(nav).getByRole("button", {
+                    name: `${title} 1`,
+                });
+                expect(chip.hasAttribute("aria-controls")).toBe(false);
                 const section = screen.getByRole("region", { name: title });
                 const heading = within(section).getByRole("heading");
                 expect(
@@ -244,9 +248,7 @@ describe("LearnReview", () => {
                     "matchMedia",
                     vi.fn(() => ({ matches: true })),
                 );
-                fireEvent.click(
-                    within(nav).getByRole("button", { name: `${title} 1` }),
-                );
+                fireEvent.click(chip);
                 expect(scrollIntoView).toHaveBeenCalledWith({
                     block: "start",
                     behavior: "auto",
@@ -255,9 +257,7 @@ describe("LearnReview", () => {
                     "matchMedia",
                     vi.fn(() => ({ matches: false })),
                 );
-                fireEvent.click(
-                    within(nav).getByRole("button", { name: `${title} 1` }),
-                );
+                fireEvent.click(chip);
                 expect(scrollIntoView).toHaveBeenLastCalledWith({
                     block: "start",
                     behavior: "smooth",
@@ -1518,6 +1518,65 @@ describe("LearnReview", () => {
             { key: "organization", label: "Organization" },
             { key: "product", label: "Product or system" },
         ];
+
+        it.each([
+            false,
+            true,
+        ])("shows the kind before the evidence reason only when linked: %s", async (linked) => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [
+                        {
+                            ...records[0],
+                            choice: linked ? { entityId: "e-tavesi" } : null,
+                        },
+                        {
+                            ...records[1],
+                            choice: linked ? { personId: "p-jan" } : null,
+                        },
+                    ],
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (2)" }),
+            );
+            for (const [name, kind, reason] of [
+                ["Veltrix", "Organization", "the client"],
+                ["Petra Kolářová", "Person", "introduces herself"],
+            ]) {
+                const row = screen
+                    .getByRole("checkbox", {
+                        name: `Add ${name} to the Almanac`,
+                    })
+                    .closest('[data-shared-learn-row="new_record"]');
+                const line = row?.querySelector(
+                    "[data-shared-learn-evidence] > div",
+                );
+                expect(
+                    line?.textContent?.startsWith(
+                        linked ? `${kind} · ${reason}` : reason,
+                    ),
+                ).toBe(true);
+                expect(line?.classList.contains("text-muted-foreground")).toBe(
+                    true,
+                );
+            }
+            expect(
+                screen.queryAllByRole("textbox", { name: "Name" }),
+            ).toHaveLength(linked ? 0 : 2);
+            expect(
+                screen.queryAllByRole("combobox", { name: "Kind of thing" }),
+            ).toHaveLength(linked ? 0 : 1);
+        });
 
         it("lists them after the speakers, and holds what refers to one until it is ticked", async () => {
             const fetch = respond({

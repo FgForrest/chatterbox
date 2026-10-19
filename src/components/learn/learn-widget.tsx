@@ -1233,7 +1233,6 @@ export function LearnWidget({
                                         <button
                                             key={section.key}
                                             type="button"
-                                            aria-controls={`${sectionPrefix}-${section.key}`}
                                             className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs hover:bg-muted"
                                             onClick={() =>
                                                 scrollToSection(
