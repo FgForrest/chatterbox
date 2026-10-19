@@ -12,6 +12,7 @@ import {
     recordingFolders,
 } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { notifyMailAccepted } from "@/lib/events/personal";
 import { nudge } from "@/lib/jobs/nudge";
 import { touchAddress } from "@/lib/mail/addresses";
 import { summarizeAuth } from "@/lib/mail/dkim";
@@ -191,6 +192,7 @@ export async function storeMailForOwner(input: {
                 reason: "placement",
             });
         });
+        await notifyMailAccepted(owner);
         if (advance) nudge();
         return { itemId, duplicate: true };
     };
@@ -321,6 +323,7 @@ export async function storeMailForOwner(input: {
                 manualOnly: arrivalProfile?.manualOnly ?? false,
             });
         });
+        await notifyMailAccepted(owner);
         if (advance) nudge();
     } catch (error) {
         await deleteRawMail(owner, rawStoragePath).catch(() => undefined);
