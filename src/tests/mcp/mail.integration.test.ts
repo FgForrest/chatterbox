@@ -1050,6 +1050,25 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             }
         });
 
+        it("reads the Chatterbox summary over the Plaud one, as get_mail does", async () => {
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    itemId: "search-shared",
+                    userId: OWNER,
+                    source: "plaud",
+                    provider: "test",
+                    model: "test",
+                    summary: encryptText("Plaudonlymarker"),
+                });
+            expect(
+                (await search(reader(), { query: "Plaudonlymarker" })).results,
+            ).toEqual([]);
+            expect(
+                ids(await search(reader(), { query: "Summarymarker" })),
+            ).toEqual(["search-shared"]);
+        });
+
         it("hides entity without knowledge:read and reads only caller-readable facts", async () => {
             const tool = ALL_TOOLS.find((tool) => tool.name === "search_mail");
             expect(tool?.input(reader(["mail:read"]))).not.toHaveProperty(

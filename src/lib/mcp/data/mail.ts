@@ -1,4 +1,5 @@
 import {
+    type AnyColumn,
     and,
     asc,
     eq,
@@ -15,6 +16,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    aiEnhancements,
     chatterItems,
     knowledgeFactEvidence,
     knowledgeFacts,
@@ -46,7 +48,10 @@ import {
     mcpItemCondition,
     recordingViewFor,
 } from "@/lib/mcp/scope";
-import { readStoredSummary } from "@/lib/summary/read-summary";
+import {
+    type StoredSummary,
+    storedSummaryOf,
+} from "@/lib/summary/read-summary";
 
 interface MailPersonFilter {
     id: string;
@@ -258,16 +263,13 @@ export async function searchableMailBatch(
     personFilter: MailPersonFilter | null = null,
 ): Promise<Map<string, SearchableMail>> {
     if (!rows.length) return new Map();
-    const ownerCondition = (
-        itemId: typeof mailContents.itemId | typeof mailParticipants.itemId,
-        userId: typeof mailContents.userId | typeof mailParticipants.userId,
-    ) =>
+    const ownerCondition = (itemId: AnyColumn, userId: AnyColumn) =>
         or(
             ...rows.map((row) =>
                 and(eq(itemId, row.id), eq(userId, row.userId)),
             ),
         );
-    const [contents, participants, summaries] = await Promise.all([
+    const [contents, participants, enhancements] = await Promise.all([
         db
             .select()
             .from(mailContents)
@@ -283,15 +285,15 @@ export async function searchableMailBatch(
             )
             .orderBy(asc(mailParticipants.position)),
         caller.roles.has("summaries:read")
-            ? Promise.all(
-                  rows.map(
-                      async (row) =>
-                          [
-                              row.id,
-                              await readStoredSummary(row.userId, row.id),
-                          ] as const,
-                  ),
-              )
+            ? db
+                  .select()
+                  .from(aiEnhancements)
+                  .where(
+                      ownerCondition(
+                          aiEnhancements.itemId,
+                          aiEnhancements.userId,
+                      ),
+                  )
             : Promise.resolve([]),
     ]);
     const segments = new Map(
@@ -329,7 +331,12 @@ export async function searchableMailBatch(
               )
         : [];
     const visible = new Set(originals.map((row) => row.id));
-    const stored = new Map(summaries);
+    const stored = new Map<string, StoredSummary>();
+    for (const enhancement of enhancements) {
+        if (stored.has(enhancement.itemId) && enhancement.source !== "riffado")
+            continue;
+        stored.set(enhancement.itemId, storedSummaryOf(enhancement));
+    }
     const mails = new Map<string, SearchableMail>();
     const personAddresses = new Map<string, (string | null)[]>();
     for (const row of rows) {
