@@ -58,6 +58,7 @@ import {
 import { isFinalLearnError } from "@/lib/learn/errors";
 import { mayStillRun } from "@/lib/learn/learn-job-handler";
 import { chooseLearnPath } from "@/lib/learn/provider";
+import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
 import { issueCorrectionPassToken } from "@/lib/learn/run-token";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -266,6 +267,7 @@ async function runPass({
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
+        const reviewLocale = await resolveLearnReviewLocale(db, pass);
         reportProgress({ phase: "reading" });
         const result = await runCorrectionPass({
             path,
@@ -274,6 +276,7 @@ async function runPass({
             token: issueCorrectionPassToken(pass.id),
             turns,
             language: transcript.detectedLanguage,
+            reviewLocale,
             almanac,
             corrected,
             signal,
