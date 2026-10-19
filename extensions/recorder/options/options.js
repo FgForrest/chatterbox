@@ -3,10 +3,11 @@
 
 import {
     clearPairing,
+    connectOrigin,
     grantHostAccess,
     originOf,
-    registerPairingScript,
     storePairing,
+    unregisterPairingScripts,
 } from "../lib/pairing.js";
 import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
 import { PLATFORMS } from "../lib/platforms.js";
@@ -17,7 +18,9 @@ import {
     saveSettings,
 } from "../lib/settings.js";
 import { localizeDocument, t } from "../lib/i18n.js";
-import { PENDING_PAIR_KEY } from "../lib/pairing-request.js";
+import { PENDING_PAIR_KEY, SETUP_FLOW_KEY } from "../lib/pairing-request.js";
+import { microphonePermission, requestMicrophone } from "../lib/microphone.js";
+import { prepareOriginSetup, returnToSetupTab } from "../lib/setup.js";
 
 localizeDocument();
 if (chrome.i18n.getUILanguage().toLowerCase().startsWith("cs")) {
@@ -27,6 +30,48 @@ if (chrome.i18n.getUILanguage().toLowerCase().startsWith("cs")) {
 
 const el = (id) => document.getElementById(id);
 let dataUseConsentGranted = false;
+let displayedPending = null;
+let setupComplete = false;
+let setupConnected = false;
+const editedPlatforms = new Set();
+const params = new URLSearchParams(location.search);
+const setupOrigin = originOf(params.get("origin") ?? "");
+const setupTabId = Number(params.get("tabId"));
+const hasSetup = Boolean(
+    setupOrigin && params.has("tabId") && Number.isInteger(setupTabId),
+);
+
+async function continueSetup(acknowledge = false) {
+    try {
+        await prepareOriginSetup(
+            { origin: setupOrigin, tabId: setupTabId },
+            acknowledge,
+        );
+        dataUseConsentGranted = true;
+        setupConnected = true;
+        el("data-use-label").hidden = true;
+        el("accept-data-use").hidden = true;
+        el("setup-connect").hidden = true;
+        setStatus(el("data-use-status"), t("siteConnected"), true);
+        await askMicrophone();
+        el("setup-return").hidden = false;
+    } catch (error) {
+        setStatus(
+            el("data-use-status"),
+            error?.message ?? String(error),
+            false,
+        );
+    }
+}
+
+el("setup-connect").addEventListener("click", () => {
+    if (requireDataUseConsent()) void continueSetup();
+});
+el("setup-return").addEventListener("click", () => {
+    void returnToSetupTab(setupOrigin, setupTabId).catch((error) =>
+        setStatus(el("data-use-status"), error.message, false),
+    );
+});
 
 function requireDataUseConsent() {
     if (dataUseConsentGranted) return true;
@@ -38,6 +83,10 @@ function requireDataUseConsent() {
 el("accept-data-use").addEventListener("click", async () => {
     if (!el("data-use-check").checked) {
         setStatus(el("data-use-status"), t("dataUseRequired"), false);
+        return;
+    }
+    if (hasSetup) {
+        await continueSetup(true);
         return;
     }
     await saveSettings({ dataUseAcknowledgedAt: new Date().toISOString() });
@@ -52,41 +101,65 @@ async function renderPendingPair() {
     const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
         PENDING_PAIR_KEY
     ];
+    displayedPending = pending;
     const origin = pending ? originOf(pending.serverUrl) : null;
+    const foreign = pending && hasSetup &&
+        (origin !== setupOrigin || pending.senderTabId !== setupTabId);
+    el("confirm-pair").disabled = Boolean(foreign);
+    setStatus(el("pending-status"), foreign ? t("setupProposalMismatch") : "", false);
     el("pending-pair").hidden = !origin || !pending.apiKey;
-    if (origin) el("pending-origin").textContent = origin;
+    if (origin) {
+        el("pending-origin").textContent = origin;
+        el("pending-pair").scrollIntoView({ behavior: "smooth" });
+    }
 }
 
 el("confirm-pair").addEventListener("click", async () => {
     if (!requireDataUseConsent()) return;
-    const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
-        PENDING_PAIR_KEY
-    ];
-    const origin = pending ? originOf(pending.serverUrl) : null;
-    if (!origin || !pending.apiKey) {
+    const proposal = displayedPending;
+    const origin = proposal ? originOf(proposal.serverUrl) : null;
+    if (!origin || !proposal.apiKey) {
         await renderPendingPair();
         return;
     }
-    const granted = await grantHostAccess(origin);
-    if (!granted) {
-        setStatus(el("pending-status"), t("serverAccessDenied"), false);
+    if (hasSetup && (origin !== setupOrigin || proposal.senderTabId !== setupTabId)) {
+        setStatus(el("pending-status"), t("setupProposalMismatch"), false);
         return;
     }
     try {
+        const access = grantHostAccess(origin);
+        const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
+            PENDING_PAIR_KEY
+        ];
+        const granted = await access;
+        if (
+            pending?.serverUrl !== proposal.serverUrl ||
+            pending?.apiKey !== proposal.apiKey ||
+            pending?.senderTabId !== proposal.senderTabId
+        ) {
+            await renderPendingPair();
+            return;
+        }
+        if (!granted) {
+            setStatus(el("pending-status"), t("serverAccessDenied"), false);
+            return;
+        }
         await storePairing({
             serverUrl: origin,
-            apiKey: pending.apiKey,
+            apiKey: proposal.apiKey,
             allowPendingRecovery: el("allow-pending-recovery").checked,
         });
+        await connectOrigin(origin);
+        await chrome.storage.session.remove([PENDING_PAIR_KEY, SETUP_FLOW_KEY]);
+        await unregisterPairingScripts();
+        setupComplete = hasSetup;
+        await renderPendingPair();
+        await restore();
+        if (hasSetup) await returnToSetupTab(setupOrigin, setupTabId);
+        chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
     } catch (error) {
         setStatus(el("pending-status"), error?.message ?? String(error), false);
-        return;
     }
-    await registerPairingScript(origin);
-    await chrome.storage.session.remove(PENDING_PAIR_KEY);
-    await renderPendingPair();
-    await restore();
-    chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
 });
 
 el("reject-pair").addEventListener("click", async () => {
@@ -136,12 +209,12 @@ el("save-connection").addEventListener("click", async () => {
             apiKey,
             allowPendingRecovery: el("allow-pending-recovery").checked,
         });
+        await connectOrigin(origin);
     } catch (error) {
         setStatus(el("connection-status"), error?.message ?? String(error), false);
         return;
     }
     el("api-key").value = "";
-    await registerPairingScript(origin);
     setStatus(el("connection-status"), t("connected"), true);
     await renderServerDefaults();
     await renderPlatformTable();
@@ -271,7 +344,10 @@ async function renderPlatformTable() {
         }
         select.value = entry.mode;
         select.disabled = entry.source === "locked";
-        select.addEventListener("change", updateAckVisibility);
+        select.addEventListener("change", () => {
+            editedPlatforms.add(platform.id);
+            void updateAckVisibility();
+        });
         modeCell.append(select);
 
         const source = document.createElement("td");
@@ -341,15 +417,42 @@ async function loadMicList() {
     select.value = settings.microphoneId || "";
 }
 
-el("grant-mic").addEventListener("click", async () => {
+async function renderMicrophone() {
+    const state = await microphonePermission();
+    el("grant-mic").hidden = state === "denied" || state === "granted";
+    el("mic-status").textContent = t(
+        state === "granted"
+            ? "micGranted"
+            : state === "denied"
+              ? "micReallow"
+              : "micWarning",
+    );
+    if (state === "denied")
+        el("mic-status").textContent += ` (${chrome.runtime.id})`;
+    return state;
+}
+
+async function askMicrophone() {
     if (!requireDataUseConsent()) return;
+    el("mic-section").scrollIntoView({ behavior: "smooth" });
+    if ((await renderMicrophone()) === "denied") return;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        for (const track of stream.getTracks()) track.stop();
+        await requestMicrophone();
+        setStatus(el("mic-status"), t("micGranted"), true);
         await loadMicList();
     } catch {
-        setStatus(el("save-status"), t("micDenied"), false);
+        const state = await renderMicrophone();
+        if (state !== "denied")
+            setStatus(el("mic-status"), t("micDenied"), false);
     }
+    await chrome.runtime
+        .sendMessage({ type: "reevaluate-tabs" })
+        .catch(() => {});
+}
+
+el("grant-mic").addEventListener("click", askMicrophone);
+window.addEventListener("focus", () => {
+    void renderMicrophone();
 });
 
 // ---- Save ---------------------------------------------------------------
@@ -374,13 +477,14 @@ el("save-all").addEventListener("click", async () => {
         autoModeAcknowledgedAt = new Date().toISOString();
     }
 
-    // Store only choices that differ from what the server or default would
-    // give, so a later server change still flows through for untouched rows.
     const effective = effectivePlatformModes({ ...settings, platformModes: {} });
     const platformModes = {};
     for (const [id, mode] of Object.entries(modes)) {
         if (effective[id]?.source === "locked") continue;
-        if (mode !== effective[id]?.mode) platformModes[id] = mode;
+        if (mode !== effective[id]?.mode ||
+            settings.platformModes[id] ||
+            editedPlatforms.has(id)
+        ) platformModes[id] = mode;
     }
 
     const quietRaw = el("quiet-seconds").value.trim();
@@ -388,6 +492,7 @@ el("save-all").addEventListener("click", async () => {
 
     await saveSettings({
         microphoneId: el("mic-device").value,
+        micReminderDismissed: !el("mic-reminder").checked,
         channelMode: el("channel-mode").value === "split" ? "split" : "mixed",
         noticeText: el("notice-text").value.trim() || null,
         platformModes,
@@ -398,6 +503,7 @@ el("save-all").addEventListener("click", async () => {
                 : null,
         autoModeAcknowledgedAt,
     });
+    editedPlatforms.clear();
     setStatus(el("save-status"), t("saved"), true);
     await renderPlatformTable();
     chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
@@ -421,6 +527,7 @@ async function restore() {
     el("notice-text").value = settings.noticeText ?? "";
     el("notice-text").placeholder = effectiveNoticeText(settings);
     el("nudge").checked = settings.nudgeEnabled;
+    el("mic-reminder").checked = !settings.micReminderDismissed;
     el("quiet-seconds").value = settings.autoStopQuietSeconds ?? "";
     el("quiet-seconds").placeholder = String(
         settings.serverDefaults?.autoStopQuietSeconds ?? 180,
@@ -435,6 +542,25 @@ async function restore() {
         renderPlatformTable(),
         renderShortcut(),
     ]);
+    setupComplete ||= hasSetup && settings.serverUrl === setupOrigin && settings.hasApiKey;
+    if (hasSetup && !setupComplete && !setupConnected) {
+        const flow = (await chrome.storage.session.get(SETUP_FLOW_KEY))[SETUP_FLOW_KEY];
+        if (flow?.origin === setupOrigin && flow.tabId === setupTabId && Date.now() - flow.createdAt < 15 * 60 * 1000) {
+            setupConnected = flow.connected === true;
+        } else {
+            const surface = await chrome.tabs.getCurrent();
+            await chrome.storage.session.set({
+                [SETUP_FLOW_KEY]: { origin: setupOrigin, tabId: setupTabId, surfaceTabId: surface.id, createdAt: Date.now() },
+            });
+        }
+    }
+    el("setup-connect").hidden = !hasSetup || !dataUseConsentGranted || setupConnected || setupComplete;
+    el("setup-return").hidden = !setupConnected || setupComplete;
+    el("setup-origin").textContent = hasSetup
+        ? t("connectTo", setupOrigin)
+        : "";
+    await renderMicrophone();
+    if (params.has("microphone")) el("mic-section").scrollIntoView();
     if (settings.dataUseAcknowledgedAt) await loadMicList();
 }
 

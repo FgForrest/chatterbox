@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clearPairing } from "../../../extensions/recorder/lib/pairing.js";
+import { createRecorderExtensionClient } from "../../lib/recorder-extension/client";
 
 const harness = vi.hoisted(() => {
     const listeners = {};
@@ -8,17 +10,28 @@ const harness = vi.hoisted(() => {
             listeners[name] = listener;
         }),
     });
+    Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: {
+            permissions: { query: vi.fn(async () => ({ state: "granted" })) },
+        },
+    });
     globalThis.chrome = {
         i18n: { getMessage: (key) => key },
         storage: {
-            local: { setAccessLevel: vi.fn(async () => {}) },
+            local: {
+                get: vi.fn(async () => ({ installationId: "installation-1" })),
+                remove: vi.fn(async () => {}),
+                setAccessLevel: vi.fn(async () => {}),
+            },
             session: {
                 get: vi.fn(async (key) => ({ [key]: sessionValues[key] })),
                 set: vi.fn(async (values) =>
                     Object.assign(sessionValues, values),
                 ),
                 remove: vi.fn(async (key) => {
-                    delete sessionValues[key];
+                    for (const entry of [key].flat())
+                        delete sessionValues[entry];
                 }),
             },
             onChanged: event("storageChanged"),
@@ -35,13 +48,31 @@ const harness = vi.hoisted(() => {
         },
         action: {
             onClicked: event("actionClicked"),
+            setPopup: vi.fn(async () => {}),
             setTitle: vi.fn(async () => {}),
             setBadgeText: vi.fn(async () => {}),
             setBadgeBackgroundColor: vi.fn(async () => {}),
         },
         commands: { onCommand: event("command") },
-        alarms: { onAlarm: event("alarm"), create: vi.fn(async () => {}) },
+        alarms: {
+            clear: vi.fn(async () => {}),
+            onAlarm: event("alarm"),
+            create: vi.fn(async () => {}),
+        },
+        permissions: {
+            onAdded: event("permissionsAdded"),
+            onRemoved: event("permissionsRemoved"),
+            contains: vi.fn(async () => true),
+        },
+        scripting: {
+            getRegisteredContentScripts: vi.fn(async () => []),
+            unregisterContentScripts: vi.fn(async () => {}),
+            registerContentScripts: vi.fn(async () => {}),
+            updateContentScripts: vi.fn(async () => {}),
+            executeScript: vi.fn(async () => {}),
+        },
         notifications: {
+            onButtonClicked: event("notificationButton"),
             onClicked: event("notificationClicked"),
             clear: vi.fn(async () => {}),
             create: vi.fn(async () => "notice"),
@@ -69,6 +100,7 @@ const harness = vi.hoisted(() => {
         sessionValues,
         readToken: vi.fn(),
         getSettings: vi.fn(),
+        platformModes: vi.fn(() => ({})),
         saveSettings: vi.fn(),
         listChunkIndices: vi.fn(),
         createSession: vi.fn(),
@@ -81,19 +113,21 @@ const harness = vi.hoisted(() => {
 
 vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
     readToken: harness.readToken,
+    clearToken: vi.fn(async () => {}),
 }));
 vi.mock("../../../extensions/recorder/lib/settings.js", () => ({
     getSettings: harness.getSettings,
     saveSettings: harness.saveSettings,
     isPaired: vi.fn(async () => true),
     anyPlatformAuto: vi.fn(() => false),
-    effectivePlatformModes: vi.fn(() => ({})),
+    effectivePlatformModes: harness.platformModes,
     effectiveQuietSeconds: vi.fn(() => 30),
 }));
 
 const defaultSettings = {
     dataUseAcknowledgedAt: "2026-10-13T00:00:00.000Z",
     serverUrl: "https://example.com",
+    hasApiKey: true,
     serverDefaults: { encryptedRecordingProtocol: 1 },
     folderId: null,
 };
@@ -107,7 +141,7 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     totalBufferedBytes: vi.fn(async () => 0),
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
-    abortSession: vi.fn(),
+    abortSession: vi.fn(async () => {}),
     completeSession: harness.completeSession,
     createSession: harness.createSession,
     getSession: harness.getSession,
@@ -131,6 +165,22 @@ async function pickerMessage(type, error) {
 }
 
 beforeEach(() => {
+    navigator.permissions.query.mockResolvedValue({ state: "granted" });
+    for (const key of Object.keys(harness.sessionValues))
+        delete harness.sessionValues[key];
+    chrome.scripting.getRegisteredContentScripts
+        .mockReset()
+        .mockResolvedValue([]);
+    chrome.scripting.unregisterContentScripts.mockClear();
+    chrome.permissions.contains.mockReset().mockResolvedValue(true);
+    chrome.action.setBadgeText.mockClear();
+    delete harness.sessionValues.recorderStartRequest;
+    delete harness.sessionValues.armedTabs;
+    harness.platformModes.mockReset().mockReturnValue({});
+    chrome.tabs.get.mockReset().mockImplementation(async (id) => ({
+        id,
+        url: "http://localhost:3555",
+    }));
     delete harness.sessionValues.recordingState;
     delete chrome.runtime.lastError;
     harness.readToken.mockReset();
@@ -181,9 +231,13 @@ describe("recorder token-vault failures", () => {
             harness.listeners.message(
                 {
                     type: "start-recording",
-                    payload: { tabId: 7, platformHint: "meet" },
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                        platformHint: "meet",
+                    },
                 },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -220,8 +274,14 @@ describe("recorder token-vault failures", () => {
 
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -244,7 +304,7 @@ describe("recorder token-vault failures", () => {
         const response = await new Promise((resolve) => {
             harness.listeners.message(
                 { type: "start-recording", payload: {} },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -299,7 +359,7 @@ describe("recorder token-vault failures", () => {
         const first = new Promise((resolve) => {
             harness.listeners.message(
                 { type: "start-recording", payload: {} },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -309,7 +369,7 @@ describe("recorder token-vault failures", () => {
         const second = await new Promise((resolve) => {
             harness.listeners.message(
                 { type: "start-recording", payload: {} },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -334,9 +394,13 @@ describe("recorder token-vault failures", () => {
             harness.listeners.message(
                 {
                     type: "start-recording",
-                    payload: { tabId: 7, platformHint: "meet" },
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                        platformHint: "meet",
+                    },
                 },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -354,8 +418,14 @@ describe("recorder token-vault failures", () => {
 
         const response = await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -381,8 +451,14 @@ describe("recorder token-vault failures", () => {
         harness.readToken.mockResolvedValue("recorder-token");
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -407,8 +483,14 @@ describe("recorder token-vault failures", () => {
         });
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -503,8 +585,14 @@ describe("recorder token-vault failures", () => {
         });
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -528,8 +616,14 @@ describe("recorder token-vault failures", () => {
         harness.readToken.mockResolvedValue("recorder-token");
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -545,8 +639,14 @@ describe("recorder token-vault failures", () => {
         harness.readToken.mockResolvedValue("recorder-token");
         await new Promise((resolve) => {
             harness.listeners.message(
-                { type: "start-recording", payload: { tabId: 7 } },
-                {},
+                {
+                    type: "start-recording",
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                    },
+                },
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -573,9 +673,13 @@ describe("recorder token-vault failures", () => {
             harness.listeners.message(
                 {
                     type: "start-recording",
-                    payload: { tabId: 7, platformHint: "google-meet" },
+                    payload: {
+                        noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+                        tabId: 7,
+                        platformHint: "google-meet",
+                    },
                 },
-                {},
+                { url: "chrome-extension://test/popup/popup.html" },
                 resolve,
             );
         });
@@ -617,7 +721,7 @@ describe("recorder token-vault failures", () => {
             const waiting = new Promise((resolve) => {
                 harness.listeners.message(
                     { type: "check-finalization" },
-                    {},
+                    { url: "chrome-extension://test/popup/popup.html" },
                     resolve,
                 );
             });
@@ -633,7 +737,7 @@ describe("recorder token-vault failures", () => {
             const finished = new Promise((resolve) => {
                 harness.listeners.message(
                     { type: "check-finalization" },
-                    {},
+                    { url: "chrome-extension://test/popup/popup.html" },
                     resolve,
                 );
             });
@@ -685,5 +789,620 @@ describe("recorder token-vault failures", () => {
         expect(harness.sessionValues.recordingState.state).toBe("error");
         expect(harness.deleteLocalSession).not.toHaveBeenCalled();
         expect(chrome.tabs.update).not.toHaveBeenCalled();
+    });
+});
+
+function message(
+    input,
+    sender = { url: "chrome-extension://test/popup/popup.html" },
+) {
+    return new Promise((resolve) =>
+        harness.listeners.message(input, sender, resolve),
+    );
+}
+
+async function requestStart() {
+    navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+    harness.readToken.mockResolvedValue("recorder-token");
+    expect(
+        await message({
+            type: "start-recording",
+            payload: {
+                tabId: 7,
+                platformHint: "google-meet",
+                noticeAcknowledgedAt: "2026-10-19T00:00:00Z",
+            },
+        }),
+    ).toEqual({ ok: true, pending: true });
+    return harness.sessionValues.recorderStartRequest;
+}
+
+async function resumeRequest(request, withoutMicrophone = false) {
+    return message(
+        { type: "resume-recording", requestId: request.id, withoutMicrophone },
+        {
+            url: `chrome-extension://test/request/request.html?requestId=${request.id}`,
+            tab: { windowId: 77 },
+        },
+    );
+}
+
+describe("microphone start gate", () => {
+    it("opens a visible request before creating any server session and resumes after grant", async () => {
+        const request = await requestStart();
+        expect(chrome.windows.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: expect.stringContaining(
+                    "/request/request.html?requestId=",
+                ),
+            }),
+        );
+        expect(harness.createSession).not.toHaveBeenCalled();
+        expect(chrome.tabCapture.getMediaStreamId).not.toHaveBeenCalled();
+        navigator.permissions.query.mockResolvedValue({ state: "granted" });
+        expect(await resumeRequest(request)).toEqual({
+            ok: true,
+            pending: true,
+        });
+        expect(chrome.windows.create).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                url: expect.stringContaining("/picker/picker.html?requestId="),
+            }),
+        );
+        harness.createSession.mockResolvedValue({
+            id: "mic-session",
+            encryption: { protocol: 1, key: "capture-key" },
+        });
+        expect(await pickerMessage("desktop-capture-ready")).toEqual({
+            ok: true,
+        });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                target: "desktop-recorder",
+                type: "start",
+                payload: expect.objectContaining({ withoutMicrophone: false }),
+            }),
+        );
+    });
+
+    it("requires an explicit choice before recording without a microphone", async () => {
+        const request = await requestStart();
+        expect(await resumeRequest(request)).toEqual({
+            ok: false,
+            error: "micWarning",
+        });
+        expect(await resumeRequest(request, true)).toEqual({
+            ok: true,
+            pending: true,
+        });
+        harness.createSession.mockResolvedValue({
+            id: "no-mic-session",
+            encryption: { protocol: 1, key: "capture-key" },
+        });
+        expect(await pickerMessage("desktop-capture-ready")).toEqual({
+            ok: true,
+        });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                target: "desktop-recorder",
+                type: "start",
+                payload: expect.objectContaining({ withoutMicrophone: true }),
+            }),
+        );
+    });
+
+    it("refuses an unrelated page or a navigated meeting tab when resuming", async () => {
+        const request = await requestStart();
+        expect(
+            (
+                await message(
+                    {
+                        type: "resume-recording",
+                        requestId: request.id,
+                        withoutMicrophone: true,
+                    },
+                    { url: "https://attacker.example", tab: { windowId: 77 } },
+                )
+            ).ok,
+        ).toBe(false);
+        chrome.tabs.get.mockResolvedValue({
+            id: 7,
+            url: "https://attacker.example",
+        });
+        expect((await resumeRequest(request, true)).ok).toBe(false);
+    });
+
+    it("includes the live microphone permission in both ping channels", async () => {
+        navigator.permissions.query.mockResolvedValue({ state: "denied" });
+        expect(await message({ type: "riffado-recorder-ping" })).toMatchObject({
+            micPermission: "denied",
+            installed: true,
+            channel: "content",
+        });
+        const reply = await new Promise((resolve) =>
+            harness.listeners.externalMessage(
+                { type: "riffado-recorder-ping" },
+                { url: "http://localhost" },
+                resolve,
+            ),
+        );
+        expect(reply).toMatchObject({
+            micPermission: "denied",
+            channel: "external",
+        });
+    });
+
+    it("rejects pairing before consent on both channels", async () => {
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            dataUseAcknowledgedAt: null,
+        });
+        const pair = {
+            type: "riffado-recorder-pair",
+            serverUrl: "https://example.com",
+            apiKey: "op_test",
+        };
+        expect(await message(pair, { url: "https://example.com" })).toEqual({
+            ok: false,
+            error: "dataUseRequired",
+        });
+        const reply = await new Promise((resolve) =>
+            harness.listeners.externalMessage(
+                pair,
+                { url: "https://example.com" },
+                resolve,
+            ),
+        );
+        expect(reply).toEqual({ ok: false, error: "dataUseRequired" });
+        expect(harness.sessionValues.pendingPairing).toBeUndefined();
+    });
+});
+
+describe("meeting notification actions", () => {
+    async function detectMeeting() {
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            nudgeEnabled: true,
+        });
+        harness.platformModes.mockReturnValue({
+            "google-meet": { mode: "prompt" },
+        });
+        const tab = {
+            id: 7,
+            url: "https://meet.google.com/abc-defg-hij",
+            audible: true,
+        };
+        chrome.tabs.get.mockResolvedValue(tab);
+        await harness.listeners.tabUpdated(7, { status: "complete" }, tab);
+        return tab;
+    }
+
+    it("offers Record and Not now, and Record opens the notice/microphone surface", async () => {
+        await detectMeeting();
+        expect(chrome.notifications.create).toHaveBeenCalledWith(
+            "nudge:7",
+            expect.objectContaining({
+                title: "meetingRecordQuestion",
+                buttons: [{ title: "record" }, { title: "notNow" }],
+            }),
+        );
+        harness.listeners.notificationButton("nudge:7", 0);
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.recorderStartRequest).toBeDefined(),
+        );
+        const request = harness.sessionValues.recorderStartRequest;
+        expect(request.input.noticeAcknowledgedAt).toBeUndefined();
+        expect(await resumeRequest(request)).toEqual({
+            ok: false,
+            error: "participantAckRequired",
+        });
+        expect(harness.createSession).not.toHaveBeenCalled();
+    });
+
+    it("Not now suppresses further prompts for this tab", async () => {
+        const tab = await detectMeeting();
+        chrome.notifications.create.mockClear();
+        harness.listeners.notificationButton("nudge:7", 1);
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.armedTabs[7].dismissed).toBe(true),
+        );
+        await harness.listeners.tabUpdated(7, { status: "complete" }, tab);
+        await harness.listeners.tabUpdated(7, { audible: true }, tab);
+        expect(chrome.notifications.create).not.toHaveBeenCalled();
+        expect(chrome.windows.create).not.toHaveBeenCalled();
+    });
+});
+
+describe("Chrome site access event", () => {
+    it("registers and injects on permissions.onAdded without toolbar invocation", async () => {
+        chrome.tabs.query.mockResolvedValue([
+            { id: 7, url: "https://example.com/dashboard" },
+        ]);
+        chrome.scripting.registerContentScripts.mockClear();
+        chrome.scripting.executeScript.mockClear();
+        harness.listeners.permissionsAdded({
+            origins: ["https://example.com/*"],
+        });
+        await vi.waitFor(() =>
+            expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
+                target: { tabId: 7 },
+                files: ["content-pairing.js"],
+            }),
+        );
+        expect(chrome.scripting.registerContentScripts).toHaveBeenCalledWith([
+            expect.objectContaining({ matches: ["https://example.com/*"] }),
+        ]);
+    });
+});
+
+describe("review recording lifecycle fixes", () => {
+    it.each([
+        "unavailable",
+        "unknown",
+    ])("accepts a recent page grant when the worker permission query is %s", async (state) => {
+        const request = await requestStart();
+        if (state === "unavailable")
+            navigator.permissions.query.mockRejectedValue(
+                new Error("Unavailable in worker"),
+            );
+        else
+            navigator.permissions.query.mockResolvedValue({ state: "unknown" });
+        expect(await resumeRequest(request)).toMatchObject({
+            ok: false,
+            error: "micWarning",
+        });
+        harness.sessionValues.microphoneGrantAt = Date.now();
+        expect(await resumeRequest(request)).toMatchObject({ ok: true });
+        expect(harness.sessionValues.recordingState.withoutMicrophone).toBe(
+            false,
+        );
+    });
+    it.each([
+        "expired",
+        "denied",
+        "prompt",
+    ])("does not accept a page marker when %s", async (reason) => {
+        const request = await requestStart();
+        harness.sessionValues.microphoneGrantAt =
+            Date.now() - (reason === "expired" ? 6 * 60 * 1000 : 0);
+        if (reason === "expired")
+            navigator.permissions.query.mockRejectedValue(new Error("worker"));
+        else navigator.permissions.query.mockResolvedValue({ state: reason });
+        expect(await resumeRequest(request)).toMatchObject({
+            ok: false,
+            error: "micWarning",
+        });
+    });
+    it.each([
+        [
+            "https://app.zoom.us/wc/123/join?pwd=SECRET",
+            "https://app.zoom.us/wc/123/start?pwd=SECRET",
+        ],
+        [
+            "https://teams.microsoft.com/meet/123?prejoin=true",
+            "https://teams.microsoft.com/meet/123?joined=true",
+        ],
+    ])("resumes after joining the same meeting: %s", async (before, after) => {
+        chrome.tabs.get.mockResolvedValue({ id: 7, url: before });
+        const request = await requestStart();
+        chrome.tabs.get.mockResolvedValue({ id: 7, url: after });
+        expect(await resumeRequest(request, true)).toMatchObject({ ok: true });
+    });
+    it("localizes a closed meeting tab", async () => {
+        const request = await requestStart();
+        chrome.tabs.get.mockRejectedValue(new Error("No tab with id: 7"));
+        expect(await resumeRequest(request, true)).toEqual({
+            ok: false,
+            error: "meetingTabClosed",
+        });
+    });
+    it("keeps a failed start request retryable until it succeeds", async () => {
+        const request = await requestStart();
+        chrome.windows.create.mockRejectedValueOnce(
+            new Error("Temporary failure"),
+        );
+        expect(await resumeRequest(request, true)).toEqual({
+            ok: false,
+            error: "Temporary failure",
+        });
+        expect(harness.sessionValues.recorderStartRequest).toEqual(request);
+        expect(await resumeRequest(request, true)).toMatchObject({ ok: true });
+        expect(harness.sessionValues.recorderStartRequest).toBeUndefined();
+    });
+    it("keeps the mic gate for auto invocation", async () => {
+        navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            autoModeAcknowledgedAt: "2026-10-19T00:00:00Z",
+        });
+        harness.readToken.mockResolvedValue("token");
+        harness.listeners.actionClicked({
+            id: 7,
+            url: "https://meet.google.com/abc-defg-hij",
+        });
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.recorderStartRequest).toBeDefined(),
+        );
+        expect(harness.sessionValues.recorderStartRequest.input.auto).toBe(
+            true,
+        );
+        expect(harness.createSession).not.toHaveBeenCalled();
+    });
+    it("omits micPermission and installationId before consent on both ping channels", async () => {
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            dataUseAcknowledgedAt: null,
+        });
+        expect(await message({ type: "riffado-recorder-ping" })).toMatchObject({
+            micPermission: undefined,
+            installationId: undefined,
+        });
+        const reply = await new Promise((resolve) =>
+            harness.listeners.externalMessage(
+                { type: "riffado-recorder-ping" },
+                { url: "http://localhost" },
+                resolve,
+            ),
+        );
+        expect(reply.micPermission).toBeUndefined();
+        expect(reply.installationId).toBeUndefined();
+    });
+    it("blocks presence details and proposals from unrelated or stale relays", async () => {
+        const sender = { url: "https://unrelated.example/", tab: { id: 7 } };
+        expect(
+            await message({ type: "riffado-recorder-ping" }, sender),
+        ).toEqual({ installed: true, unreachable: true, channel: "content" });
+        expect(
+            await message(
+                {
+                    type: "riffado-recorder-pair",
+                    serverUrl: "https://unrelated.example",
+                    apiKey: "key",
+                },
+                sender,
+            ),
+        ).toEqual({ ok: false, error: "serverAccessDenied" });
+        chrome.permissions.contains.mockResolvedValue(false);
+        expect(
+            await message(
+                { type: "riffado-recorder-ping" },
+                { url: "https://example.com" },
+            ),
+        ).toEqual({ installed: true, unreachable: true, channel: "content" });
+    });
+    it("persists a named microphone failure and requests a persistent notification", async () => {
+        harness.sessionValues.recordingState = {
+            state: "recording",
+            sessionId: "mic-fail",
+            tabId: 7,
+        };
+        harness.listeners.message(
+            {
+                type: "mic-unavailable",
+                sessionId: "mic-fail",
+                errorName: "NotReadableError",
+            },
+            {},
+            () => {},
+        );
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.recordingState.micWarning).toBe(
+                "micUnavailableBody",
+            ),
+        );
+        expect(chrome.notifications.create).toHaveBeenCalledWith(
+            "mic:mic-fail",
+            expect.objectContaining({
+                requireInteraction: true,
+                message: "micUnavailableBody",
+            }),
+        );
+        expect(harness.sessionValues.recordingState.state).toBe("recording");
+    });
+});
+
+describe("relay ping availability", () => {
+    const origin = "https://example.com";
+    const sender = { url: `${origin}/dashboard`, tab: { id: 7 } };
+    const ping = { type: "riffado-recorder-ping" };
+
+    it.each([
+        "disconnect",
+        "expired setup",
+    ])("detects installed-unreachable and offers no pairing after %s", async (reason) => {
+        vi.useFakeTimers();
+        try {
+            const disconnected = {
+                ...defaultSettings,
+                serverUrl: "",
+                hasApiKey: false,
+            };
+            if (reason === "expired setup")
+                harness.getSettings.mockResolvedValue(disconnected);
+            chrome.tabs.get.mockResolvedValue({ id: 7, url: sender.url });
+            harness.sessionValues.recorderSetupFlow = {
+                origin,
+                tabId: 7,
+                createdAt: Date.now(),
+            };
+            expect(await message(ping, sender)).toMatchObject({
+                installed: true,
+                installationId: "installation-1",
+            });
+            if (reason === "disconnect") {
+                chrome.storage.local.remove.mockImplementationOnce(async () => {
+                    harness.getSettings.mockResolvedValue(disconnected);
+                });
+                await clearPairing();
+                expect(harness.sessionValues.recorderSetupFlow).toBeUndefined();
+            } else {
+                harness.getSettings.mockResolvedValue(disconnected);
+                harness.sessionValues.recorderSetupFlow.createdAt -=
+                    15 * 60 * 1000;
+            }
+            expect(await message(ping, sender)).toEqual({
+                installed: true,
+                unreachable: true,
+                channel: "content",
+            });
+            let listener;
+            const postMessage = vi.fn((input) => {
+                void message(input, sender).then((reply) =>
+                    listener({
+                        origin,
+                        data: { type: "riffado-recorder-present", ...reply },
+                    }),
+                );
+            });
+            const client = createRecorderExtensionClient({
+                origin,
+                postMessage,
+                addMessageListener(callback) {
+                    listener = callback;
+                    return () => {};
+                },
+                probeImage: async () => true,
+            });
+            expect(await client.detect("test")).toEqual({
+                kind: "installed-unreachable",
+            });
+            expect(postMessage).toHaveBeenCalledExactlyOnceWith(ping, origin);
+            expect(harness.sessionValues.pendingPairing).toBeUndefined();
+        } finally {
+            vi.clearAllTimers();
+            vi.useRealTimers();
+        }
+    });
+
+    it.each([
+        {},
+        { url: "about:blank" },
+        { url: "file:///tmp/page.html" },
+        { url: "chrome-extension://other/popup/popup.html" },
+        { url: "chrome-extension://test.evil/popup/popup.html" },
+        { url: "malformed" },
+    ])("withholds presence details from an unrecognized non-web sender: %j", async (sender) => {
+        expect(await message(ping, sender)).toEqual({
+            installed: true,
+            unreachable: true,
+            channel: "content",
+        });
+    });
+
+    it("allows the extension's own pages", async () => {
+        expect(
+            await message(ping, {
+                url: chrome.runtime.getURL("options/options.html"),
+            }),
+        ).toMatchObject({
+            installed: true,
+            installationId: "installation-1",
+            micPermission: "granted",
+        });
+    });
+});
+
+describe("badge and notification review", () => {
+    const meeting = {
+        id: 7,
+        windowId: 3,
+        url: "https://meet.google.com/abc-defg-hij",
+        audible: false,
+    };
+    it("shows no microphone badge before consent", async () => {
+        navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            dataUseAcknowledgedAt: null,
+        });
+        await harness.listeners.tabUpdated(7, { status: "complete" }, meeting);
+        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
+            tabId: 7,
+            text: "",
+        });
+        expect(chrome.action.setBadgeText).not.toHaveBeenCalledWith(
+            expect.objectContaining({ text: "MIC!" }),
+        );
+    });
+    it("keeps REC? on armed meeting tabs even without a mic", async () => {
+        navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+        harness.platformModes.mockReturnValue({
+            "google-meet": { mode: "prompt" },
+        });
+        await harness.listeners.tabUpdated(7, { status: "complete" }, meeting);
+        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
+            tabId: 7,
+            text: "REC?",
+        });
+        expect(chrome.action.setBadgeText).not.toHaveBeenCalledWith(
+            expect.objectContaining({ text: "MIC!" }),
+        );
+    });
+    it.each([
+        false,
+        true,
+    ])("honors persisted reminder dismissal=%s on ordinary tabs", async (dismissed) => {
+        navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+        harness.getSettings.mockResolvedValue({
+            ...defaultSettings,
+            micReminderDismissed: dismissed,
+        });
+        await harness.listeners.tabUpdated(
+            7,
+            { status: "complete" },
+            { ...meeting, url: "https://other.example" },
+        );
+        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
+            tabId: 7,
+            text: dismissed ? "" : "MIC!",
+        });
+    });
+    it("preserves a recording badge during reevaluation", async () => {
+        harness.sessionValues.recordingState = {
+            state: "finalizing",
+            tabId: 7,
+        };
+        await harness.listeners.tabUpdated(7, { status: "complete" }, meeting);
+        expect(chrome.action.setBadgeText).not.toHaveBeenCalled();
+    });
+    it("focuses the meeting on notification body click without opening a recording window", async () => {
+        chrome.tabs.get.mockResolvedValue(meeting);
+        await harness.listeners.notificationClicked("nudge:7");
+        expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+        expect(chrome.windows.update).toHaveBeenCalledWith(3, {
+            focused: true,
+        });
+        expect(chrome.windows.create).not.toHaveBeenCalled();
+        expect(harness.sessionValues.recorderStartRequest).toBeUndefined();
+    });
+});
+
+describe("restricted Chrome site access events", () => {
+    it.each([
+        "https://*/*",
+        "https://*.example.com/*",
+        "https://unrelated.example/*",
+    ])("ignores %s without querying unrelated tabs", async (pattern) => {
+        chrome.scripting.registerContentScripts.mockClear();
+        chrome.scripting.executeScript.mockClear();
+        await harness.listeners.permissionsAdded({ origins: [pattern] });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(chrome.scripting.registerContentScripts).not.toHaveBeenCalled();
+        expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+        expect(chrome.tabs.query).not.toHaveBeenCalled();
+    });
+    it("unregisters relays when host access is removed", async () => {
+        chrome.permissions.contains.mockResolvedValue(false);
+        chrome.scripting.getRegisteredContentScripts.mockResolvedValue([
+            { id: "riffado-pairing-https", matches: ["https://example.com/*"] },
+        ]);
+        harness.listeners.permissionsRemoved({
+            origins: ["https://example.com/*"],
+        });
+        await vi.waitFor(() =>
+            expect(
+                chrome.scripting.unregisterContentScripts,
+            ).toHaveBeenCalledWith({ ids: ["riffado-pairing-https"] }),
+        );
     });
 });

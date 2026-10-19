@@ -37,3 +37,12 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.3.0
+
+- Self-hosted setup continues from data-use consent to access for the selected server and a microphone prompt. Return to the original dashboard tab, click Connect, then explicitly confirm the server in the same setup tab.
+- Site access granted through Chrome activates pairing only for the current setup or paired server origin. Wildcard grants and unrelated sites never install a relay. Manual connection no longer needs a page reload.
+- Meet, Teams and Zoom web now default to Prompt, including existing installations with no saved platform choice. The previous implicit Off default changes to Prompt on these three platforms. Other platforms stay Off unless chosen by the user or server. Saved choices and server recording defaults keep precedence.
+- Meeting notifications offer Record and Not now. Record opens the participant notice, microphone check and Chrome audio picker. Select the meeting tab and enable Share tab audio.
+- Missing microphone permission shows a toolbar warning and pauses starts until you allow access or explicitly choose recording without your microphone. Blocked access shows Chrome instructions.
+- The web setup page can read microphone permission status. No new extension permissions or broader external messaging origins.

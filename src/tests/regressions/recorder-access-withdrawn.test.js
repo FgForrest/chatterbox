@@ -41,7 +41,12 @@ const harness = vi.hoisted(() => {
         },
         commands: { onCommand: event("command") },
         alarms: { onAlarm: event("alarm"), create: vi.fn(async () => {}) },
+        permissions: {
+            onAdded: event("permissionsAdded"),
+            onRemoved: event("permissionsRemoved"),
+        },
         notifications: {
+            onButtonClicked: event("notificationButton"),
             onClicked: event("notificationClicked"),
             clear: vi.fn(async () => {}),
             create: vi.fn(async () => "notice"),
