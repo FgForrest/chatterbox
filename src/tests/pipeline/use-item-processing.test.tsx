@@ -250,11 +250,13 @@ describe("useItemProcessing", () => {
             invalidateItemProcessing(review.itemId);
             await Promise.resolve();
         });
-        expect(result.current.workflow?.status?.message).toBe("learnReview");
+        expect(result.current.workflow?.status?.message).toBe(
+            "learnCorrecting",
+        );
         expect(result.current.data?.learnFindingsWaiting).toBe(0);
 
         await act(async () => {
-            vi.advanceTimersByTime(2_000);
+            vi.advanceTimersByTime(5_000);
             await Promise.resolve();
         });
         expect(result.current.workflow?.status?.message).toBe("learnRunning");

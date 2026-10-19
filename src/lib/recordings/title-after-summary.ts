@@ -1,13 +1,17 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { recordings, userSettings } from "@/db/schema";
+import { chatterItems, recordings, userSettings } from "@/db/schema";
+import {
+    markAutomaticTitleSkipped,
+    readProcessing,
+} from "@/lib/pipeline/state";
+import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
-import { titleStillGenerated } from "@/lib/recordings/generated-title";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { emitEvent } from "@/lib/webhooks/emit";
 
-/** Retitle a private recording from its completed summary when enabled. */
+/** Generate the one automatic title from an item's first completed summary. */
 export async function updateTitleAfterSummary(input: {
     userId: string;
     recordingId: string;
@@ -15,48 +19,100 @@ export async function updateTitleAfterSummary(input: {
     keyPoints: string[];
     fence?: TitleInputFence;
 }): Promise<void> {
-    if (!input.summary.trim()) return;
-    const [settings] = await db
-        .select({
-            syncTitleToPlaud: userSettings.syncTitleToPlaud,
-        })
-        .from(userSettings)
-        .where(eq(userSettings.userId, input.userId))
-        .limit(1);
+    const processing = await readProcessing(
+        input.recordingId,
+        "private",
+        input.userId,
+    );
+    if (processing && automaticTitleSettled(processing.phases)) return;
     const profile = await resolveItemProfile(
         input.recordingId,
         "private",
         input.userId,
     );
     const title = profile.settings.steps.title;
-    if (
-        !title.automatic ||
-        !(await titleStillGenerated(input.userId, input.recordingId))
-    ) {
+    const fenceInput = input.fence ?? processing?.phases.summary?.inputs;
+    const fence = fenceInput
+        ? {
+              ...fenceInput,
+              profileRevisionId: profile.assigned ? profile.revisionId : null,
+          }
+        : undefined;
+    const settleSkipped = async (
+        reason:
+            | "first_summary_title_disabled"
+            | "first_summary_title_edited"
+            | "first_summary_title_failed",
+    ) => {
+        if (!fence) return;
+        await markAutomaticTitleSkipped({
+            itemId: input.recordingId,
+            userId: input.userId,
+            content: fence,
+            reason,
+        });
+    };
+    if (!title.automatic) {
+        await settleSkipped("first_summary_title_disabled");
         return;
     }
-    const [recording] = await db
-        .select({ plaudFileId: recordings.plaudFileId })
-        .from(recordings)
+    const [item] = await db
+        .select({
+            kind: chatterItems.kind,
+            titleEditedAt: chatterItems.titleEditedAt,
+            plaudFileId: recordings.plaudFileId,
+        })
+        .from(chatterItems)
+        .leftJoin(
+            recordings,
+            and(
+                eq(recordings.id, chatterItems.id),
+                eq(recordings.userId, chatterItems.userId),
+            ),
+        )
         .where(
             and(
-                eq(recordings.id, input.recordingId),
-                eq(recordings.userId, input.userId),
-                isNull(recordings.deletedAt),
+                eq(chatterItems.id, input.recordingId),
+                eq(chatterItems.userId, input.userId),
+                isNull(chatterItems.deletedAt),
             ),
         )
         .limit(1);
-    if (!recording) return;
-    const retitled = await applyGeneratedTitle({
-        userId: input.userId,
-        recordingId: input.recordingId,
-        text: [input.summary, ...input.keyPoints].join("\n"),
-        source: "summary",
-        plaudFileId: recording.plaudFileId,
-        syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
-        ...(input.fence ? { fence: input.fence } : {}),
-    });
+    if (!item) return;
+    if (item.titleEditedAt) {
+        await settleSkipped("first_summary_title_edited");
+        return;
+    }
+    const [settings] =
+        item.kind === "audio"
+            ? await db
+                  .select({
+                      syncTitleToPlaud: userSettings.syncTitleToPlaud,
+                  })
+                  .from(userSettings)
+                  .where(eq(userSettings.userId, input.userId))
+                  .limit(1)
+            : [];
+    let retitled: boolean;
+    try {
+        retitled = await applyGeneratedTitle({
+            userId: input.userId,
+            recordingId: input.recordingId,
+            text: [input.summary, ...input.keyPoints].join("\n"),
+            source: "summary",
+            kind: item.kind,
+            plaudFileId: item.plaudFileId ?? undefined,
+            syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
+            ...(fence ? { fence } : {}),
+            skipIfAutomaticTitleSettled: true,
+        });
+    } catch (error) {
+        await settleSkipped("first_summary_title_failed");
+        throw error;
+    }
     if (retitled) {
         await emitEvent("recording.updated", input.userId, input.recordingId);
+    } else {
+        await settleSkipped("first_summary_title_failed");
     }
 }

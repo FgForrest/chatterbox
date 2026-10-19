@@ -5,16 +5,106 @@
  * automatic Learn held back wait for it too (`releaseAutoLearnHold`).
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import { type learnRuns, transcriptCorrectionPasses } from "@/db/schema";
+import {
+    asyncJobs,
+    type learnRuns,
+    transcriptCorrectionPasses,
+    transcriptions,
+} from "@/db/schema";
 import { recordingJobSubject } from "@/lib/sharing/view";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export const LEARN_CORRECT_JOB_KIND = "learn.correct";
 export const LEARN_CORRECT_MAX_ATTEMPTS = 2;
+
+/** Supersede correction work that belongs to an older transcript revision. */
+export async function supersedeCorrectionPassesInTx(
+    tx: Tx,
+    userId: string,
+    transcriptionId: string,
+): Promise<void> {
+    const [transcript] = await tx
+        .select({ revision: transcriptions.revision })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.id, transcriptionId),
+                eq(transcriptions.userId, userId),
+            ),
+        )
+        .limit(1);
+    if (!transcript) return;
+    const passes = await tx
+        .select({
+            id: transcriptCorrectionPasses.id,
+            actorUserId: transcriptCorrectionPasses.actorUserId,
+        })
+        .from(transcriptCorrectionPasses)
+        .where(
+            and(
+                eq(transcriptCorrectionPasses.userId, userId),
+                eq(transcriptCorrectionPasses.transcriptionId, transcriptionId),
+                ne(
+                    transcriptCorrectionPasses.transcriptRevision,
+                    transcript.revision,
+                ),
+                inArray(transcriptCorrectionPasses.status, [
+                    "queued",
+                    "running",
+                ]),
+            ),
+        );
+    const passIds = passes.map((pass) => pass.id);
+    if (passIds.length === 0) return;
+    const actorUserIds = [
+        ...new Set(
+            passes.flatMap((pass) =>
+                pass.actorUserId ? [pass.actorUserId] : [],
+            ),
+        ),
+    ];
+    const now = new Date();
+    if (actorUserIds.length > 0) {
+        await tx
+            .update(asyncJobs)
+            .set({
+                status: "failed",
+                completedAt: now,
+                updatedAt: now,
+                heartbeatAt: null,
+                claimToken: null,
+                lastError: "Cancelled because the transcript was rewritten",
+            })
+            .where(
+                and(
+                    inArray(asyncJobs.userId, actorUserIds),
+                    eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                    inArray(
+                        sql<string>`${asyncJobs.payload} ->> 'passId'`,
+                        passIds,
+                    ),
+                ),
+            );
+    }
+    await tx
+        .update(transcriptCorrectionPasses)
+        .set({ status: "superseded", finishedAt: now, updatedAt: now })
+        .where(
+            and(
+                eq(transcriptCorrectionPasses.userId, userId),
+                inArray(transcriptCorrectionPasses.id, passIds),
+                inArray(transcriptCorrectionPasses.status, [
+                    "queued",
+                    "running",
+                ]),
+            ),
+        );
+}
 
 /**
  * Queue the correction pass after `run` finished, unless the person who

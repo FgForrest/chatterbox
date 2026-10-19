@@ -27,7 +27,7 @@ A processing profile is a recipe for one kind of item. Open **Settings → Profi
 
 ![The processing profiles list](images/profiles.png)
 
-Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. A step that is off can still be run by hand.
+Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. An automatic title is generated once, from the first completed summary. Re-summarizing, re-transcribing, correcting with Learn, changing the profile, or choosing **Process again** does not replace it. A step that is off can still be run by hand.
 
 A profile also holds the choices for that work: provider and model, transcription language, summary instructions, output language and output format, and multi-pass settings. **Auto (match content)** keeps the output in the item's language. Editing a profile creates a new revision; items already in progress keep the revision they started with.
 
@@ -69,7 +69,7 @@ The strip under an item's title shows every step in one row and what needs atten
 | **Categorize** | Waits for folders and resolves the profile. |
 | **Transcribe** | Produces the recording's transcript. Mail does not show this phase. |
 | **Learn** | Finds names, corrections, and facts for review. |
-| **Summarize** | Generates the title, summary, and topics selected by the profile. |
+| **Summarize** | Generates the summary and topics selected by the profile. The first completed summary can generate the item's one automatic title. |
 | **Task review** | Waits for proposed tasks and changes to be reviewed. |
 | **Share** | Shares an intended Organization placement after its gates pass. |
 

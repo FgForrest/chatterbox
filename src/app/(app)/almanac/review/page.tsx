@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { SuggestedRelations } from "@/components/people/suggested-relations";
 import { requireAuth } from "@/lib/auth-server";
+import { itemDetailHref } from "@/lib/item-detail";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { groupPhrases } from "@/lib/knowledge/phrase-groups";
 import {
@@ -70,21 +71,16 @@ export default async function ReviewQueuePage() {
                                 <span className="min-w-0 truncate">
                                     {row.filename}
                                 </span>
-                                {organization ? (
-                                    <Link
-                                        href="/dashboard"
-                                        className="shrink-0 text-primary hover:underline"
-                                    >
-                                        {i18n("Open the Organization library")}
-                                    </Link>
-                                ) : (
-                                    <Link
-                                        href={`/recordings/${row.id}`}
-                                        className="shrink-0 text-primary hover:underline"
-                                    >
-                                        {i18n("Review")}
-                                    </Link>
-                                )}
+                                <Link
+                                    href={itemDetailHref(row.id, {
+                                        view: organization ? "org" : "private",
+                                    })}
+                                    className="shrink-0 text-primary hover:underline"
+                                >
+                                    {organization
+                                        ? i18n("Open the Organization library")
+                                        : i18n("Review")}
+                                </Link>
                             </li>
                         ))}
                     </ul>
@@ -112,13 +108,11 @@ export default async function ReviewQueuePage() {
                                         )}
                                     </span>
                                     <Link
-                                        href={
-                                            organization
-                                                ? "/dashboard"
-                                                : row.kind === "mail"
-                                                  ? `/dashboard?recording=${encodeURIComponent(row.recordingId)}`
-                                                  : `/recordings/${row.recordingId}`
-                                        }
+                                        href={itemDetailHref(row.recordingId, {
+                                            view: organization
+                                                ? "org"
+                                                : "private",
+                                        })}
                                         className="text-primary hover:underline"
                                     >
                                         {organization

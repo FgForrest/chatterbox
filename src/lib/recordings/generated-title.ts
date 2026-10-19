@@ -11,6 +11,7 @@ import {
 import { encryptText } from "@/lib/encryption/fields";
 import { nudge } from "@/lib/jobs/nudge";
 import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
+import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { titleStepDoneForFence } from "@/lib/recordings/title-fence";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
@@ -20,6 +21,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type GeneratedTitleStoreOptions = {
     skipIfTitleStepDoneForFence?: boolean;
     actsForOrganization?: boolean;
+    skipIfAutomaticTitleSettled?: boolean;
 };
 
 async function readTitleProcessingInTx(tx: Tx, userId: string, itemId: string) {
@@ -211,8 +213,11 @@ export async function storeGeneratedTitle(
                 recordingId,
             );
             if (
-                options?.skipIfTitleStepDoneForFence &&
-                titleStepDoneForFence(processing, fence)
+                (options?.skipIfTitleStepDoneForFence &&
+                    titleStepDoneForFence(processing, fence)) ||
+                (options?.skipIfAutomaticTitleSettled &&
+                    processing !== undefined &&
+                    automaticTitleSettled(processing.phases))
             ) {
                 return { stored: false, advance: false };
             }
@@ -314,8 +319,11 @@ export async function storeGeneratedMailTitle(
                 itemId,
             );
             if (
-                options?.skipIfTitleStepDoneForFence &&
-                titleStepDoneForFence(processing, fence)
+                (options?.skipIfTitleStepDoneForFence &&
+                    titleStepDoneForFence(processing, fence)) ||
+                (options?.skipIfAutomaticTitleSettled &&
+                    processing !== undefined &&
+                    automaticTitleSettled(processing.phases))
             ) {
                 return { stored: false, advance: false };
             }

@@ -101,6 +101,7 @@ import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { AUTO_LEARN_HOLD_MS } from "@/lib/learn/auto-learn";
 import { correctionPassJobHandler } from "@/lib/learn/correction-pass-job";
@@ -215,7 +216,7 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
         ).id;
     });
 
-    const readyRun = () =>
+    const readyRun = (transcriptRevision = 0) =>
         db()
             .insert(learnRuns)
             .values({
@@ -226,7 +227,7 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
                 view: "private",
                 actorUserId: OWNER,
                 trigger: "auto",
-                transcriptRevision: 0,
+                transcriptRevision,
                 vocabularyVersion: 0,
                 status: "ready",
             })
@@ -354,6 +355,80 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
         const finished = await finish();
         expect(finished.correcting).toBe(false);
         expect(await passJob()).toBeUndefined();
+        expect(await held()).toBeNull();
+    });
+
+    it("supersedes an old queued pass so the rewritten transcript gets its own pass", async () => {
+        await finish();
+        const oldJob = await passJob();
+        const oldPassId = (oldJob?.payload as { passId: string }).passId;
+
+        await db().transaction(async (tx) => {
+            await tx
+                .update(transcriptions)
+                .set({ revision: 1 })
+                .where(
+                    and(
+                        eq(transcriptions.id, transcriptId),
+                        eq(transcriptions.userId, OWNER),
+                    ),
+                );
+            await transcriptRewrittenInTx(tx, {
+                userId: OWNER,
+                transcriptionId: transcriptId,
+                previous: {
+                    turns: TURNS,
+                    labels: ["speaker_0", "speaker_1"],
+                },
+                next: {
+                    turns: TURNS,
+                    labels: ["speaker_0", "speaker_1"],
+                },
+            });
+        });
+
+        const [cancelledJob] = await db()
+            .select({ status: asyncJobs.status })
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, oldJob?.id ?? ""));
+        const [supersededPass] = await db()
+            .select({ status: transcriptCorrectionPasses.status })
+            .from(transcriptCorrectionPasses)
+            .where(eq(transcriptCorrectionPasses.id, oldPassId));
+        expect(cancelledJob?.status).toBe("failed");
+        expect(supersededPass?.status).toBe("superseded");
+
+        await db()
+            .update(chatterItems)
+            .set({ summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS) })
+            .where(
+                and(eq(chatterItems.id, REC), eq(chatterItems.userId, OWNER)),
+            );
+        await readyRun(1);
+        const access = await requireRecordingView(OWNER, REC, "private");
+        const finished = await finishReview(access, OWNER, { versions: {} });
+        expect(finished).toMatchObject({
+            status: "finished",
+            correcting: true,
+        });
+
+        const [newJob] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
+                    eq(asyncJobs.status, "pending"),
+                ),
+            );
+        const newPassId = (newJob?.payload as { passId: string }).passId;
+        expect(newPassId).not.toBe(oldPassId);
+        expect(await held()).not.toBeNull();
+
+        createCompletion.mockResolvedValueOnce(reply({ fixes: [] }));
+        await expect(
+            runPass(newPassId, newJob?.id ?? ""),
+        ).resolves.toMatchObject({ status: "finished", written: 0 });
         expect(await held()).toBeNull();
     });
 

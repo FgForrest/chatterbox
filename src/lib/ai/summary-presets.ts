@@ -311,6 +311,7 @@ export const AI_OUTPUT_LANGUAGES: readonly AiOutputLanguageOption[] = [
     { code: "tr", label: "Turkish" },
     { code: "uk", label: "Ukrainian" },
     { code: "cs", label: "Czech" },
+    { code: "sk", label: "Slovak" },
     { code: "sv", label: "Swedish" },
     { code: "da", label: "Danish" },
     { code: "no", label: "Norwegian" },
@@ -331,6 +332,46 @@ export const AI_OUTPUT_LANGUAGES: readonly AiOutputLanguageOption[] = [
 
 const LANGUAGE_CODES = new Set(AI_OUTPUT_LANGUAGES.map((l) => l.code));
 
+const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+    eng: "en",
+    spa: "es",
+    fra: "fr",
+    fre: "fr",
+    deu: "de",
+    ger: "de",
+    ita: "it",
+    por: "pt",
+    nld: "nl",
+    dut: "nl",
+    pol: "pl",
+    rus: "ru",
+    tur: "tr",
+    ukr: "uk",
+    ces: "cs",
+    cze: "cs",
+    slk: "sk",
+    slo: "sk",
+    swe: "sv",
+    dan: "da",
+    nor: "no",
+    fin: "fi",
+    ell: "el",
+    gre: "el",
+    ron: "ro",
+    rum: "ro",
+    hun: "hu",
+    jpn: "ja",
+    zho: "zh",
+    chi: "zh",
+    kor: "ko",
+    ara: "ar",
+    heb: "he",
+    hin: "hi",
+    ind: "id",
+    vie: "vi",
+    tha: "th",
+};
+
 /** Resolve an explicit output preference or a recognized transcription language. */
 export function resolveAiOutputLanguage(
     preference: string | null | undefined,
@@ -342,6 +383,8 @@ export function resolveAiOutputLanguage(
     const detected = detectedLanguage?.trim().toLowerCase().split(/[-_]/)[0];
     if (!detected) return null;
     if (LANGUAGE_CODES.has(detected)) return detected;
+    const alias = DETECTED_LANGUAGE_ALIASES[detected];
+    if (alias && LANGUAGE_CODES.has(alias)) return alias;
     return (
         AI_OUTPUT_LANGUAGES.find(
             (language) => language.label.toLowerCase() === detected,
