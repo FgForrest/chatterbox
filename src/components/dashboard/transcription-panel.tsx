@@ -731,6 +731,7 @@ export function TranscriptionPanel({
                         id={transcriptWidgetId}
                         frame="inline"
                         tone={widgets?.transcript.tone ?? "quiet"}
+                        bodyClassName="space-y-3"
                         title={i18n("Transcription")}
                         helpLink={
                             <HelpLink
@@ -941,7 +942,7 @@ export function TranscriptionPanel({
                                             onClick={() =>
                                                 setShowOriginal(!showOriginal)
                                             }
-                                            className="text-sm font-medium transition-colors hover:text-primary"
+                                            className="rounded-sm text-sm font-medium text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {showOriginal
                                                 ? i18n("Show edited")
