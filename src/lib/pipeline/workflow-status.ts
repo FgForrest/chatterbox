@@ -415,7 +415,6 @@ function failureStatus(
 ): WorkflowStatusSentence | null {
     const learnRun = currentLearnRun(data);
     const retrying: Partial<Record<PhaseName, boolean>> = {
-        transcribe: active(data.jobs.transcription),
         learn: active(learnRun?.status),
         summary: active(data.jobs.summary),
     };
@@ -703,15 +702,9 @@ export function deriveWorkflowStatus(
     inferUpcomingStates(data, kind, steps);
     const status = deriveStatus(data, steps);
     const current = currentStepId(steps, status);
-    const summaryMissing =
-        !data.manualOnly &&
-        data.outputs.transcript &&
-        !data.outputs.summary &&
-        data.profile?.automatic.summary === true;
     const visible =
         !data.legacy &&
-        (summaryMissing ||
-            learnBlockedByProvider(data) ||
+        (learnBlockedByProvider(data) ||
             steps.some((step) =>
                 step.reason === "erased"
                     ? step.state === "manual"

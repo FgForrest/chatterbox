@@ -115,7 +115,10 @@ describe("workflow recovery presentation", () => {
         expect(deriveWorkflowStatus(data, "audio").visible).toBe(true);
     });
 
-    it("offers Summarize when Summary completed with only provider skips", () => {
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("offers Summarize for %s when Summary completed with only provider skips", (kind) => {
         const data = processing();
         data.phases.learn = {
             generation: 1,
@@ -123,7 +126,17 @@ describe("workflow recovery presentation", () => {
             state: "done",
             reason: "released",
         };
-        const workflow = deriveWorkflowStatus(data, "audio");
+        if (kind === "mail") {
+            data.kind = "mail";
+            delete data.phases.transcribe;
+            data.outputs.transcript = false;
+        }
+        const workflow = deriveWorkflowStatus(data, kind);
+        expect(workflow.visible).toBe(true);
+        expect(workflow.status).toMatchObject({
+            message: "manualSummary",
+            action: "summarize",
+        });
         expect(
             workflow.steps.find((step) => step.id === "summary"),
         ).toMatchObject({ state: "next", current: true });
