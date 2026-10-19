@@ -242,7 +242,8 @@ export async function recordingAiCost(
         })
         .from(aiUsageEvents)
         .innerJoin(users, eq(users.id, aiUsageEvents.payerUserId))
-        .where(eq(aiUsageEvents.itemId, recordingId));
+        .where(eq(aiUsageEvents.itemId, recordingId))
+        .orderBy(aiUsageEvents.createdAt, aiUsageEvents.id);
     const byOperation: Record<string, number> = {};
     const byService: Record<string, number> = {};
     const unknownByService: Record<string, number> = {};

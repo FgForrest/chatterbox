@@ -63,20 +63,19 @@ describeWithDatabase(
             operation = "summary",
             provider = "Codex",
             itemId = ITEM,
+            createdAt = new Date("2026-01-01T00:00:00Z"),
         ) {
-            await db()
-                .insert(aiUsageEvents)
-                .values({
-                    itemId,
-                    userId: VIEWER,
-                    actorUserId: VIEWER,
-                    payerUserId,
-                    operation,
-                    provider,
-                    model: "model",
-                    costUsd,
-                    createdAt: new Date("2026-01-01T00:00:00Z"),
-                });
+            await db().insert(aiUsageEvents).values({
+                itemId,
+                userId: VIEWER,
+                actorUserId: VIEWER,
+                payerUserId,
+                operation,
+                provider,
+                model: "model",
+                costUsd,
+                createdAt,
+            });
         }
 
         beforeAll(async () => {
@@ -281,6 +280,23 @@ describeWithDatabase(
             expect(result.payers.map(({ payer }) => payer)).toEqual([
                 { type: "member", name: "Viewer" },
                 { type: "member", name: "Viewer" },
+            ]);
+        });
+
+        it("lists payers in the order they first spent", async () => {
+            const at = (minute: number) =>
+                new Date(
+                    `2026-01-01T00:${String(minute).padStart(2, "0")}:00Z`,
+                );
+            await usage(ORGANIZATION, "0.3", "summary", "Codex", ITEM, at(3));
+            await usage(MEMBER, "0.2", "learn", "Codex", ITEM, at(2));
+            await usage(VIEWER, "0.1", "title", "Codex", ITEM, at(1));
+            await usage(MEMBER, "0.4", "summary", "Codex", ITEM, at(4));
+            const result = await recordingAiCost(ITEM, VIEWER);
+            expect(result.payers.map(({ payer }) => payer.type)).toEqual([
+                "you",
+                "member",
+                "organization",
             ]);
         });
 
