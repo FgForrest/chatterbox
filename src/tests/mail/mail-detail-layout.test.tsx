@@ -85,13 +85,21 @@ const mail: Recording = {
     },
 };
 
-const emptySummary = {
-    totalUsd: 0,
-    byOperation: {},
-    byService: {},
+const spendSummary = {
+    totalUsd: 0.0123,
+    byOperation: { summary: 0.0123 },
+    byService: { "OpenAI · gpt-test": 0.0123 },
     unknownByService: {},
     unknownCount: 0,
-    requestCount: 0,
+    requestCount: 1,
+    payers: [
+        {
+            payer: { type: "you" },
+            byOperation: { summary: 0.0123 },
+            byService: { "OpenAI · gpt-test": 0.0123 },
+            unknownByService: {},
+        },
+    ],
 };
 
 function render(ui: ReactNode) {
@@ -114,7 +122,7 @@ function stubMailFetch(overrides: Record<string, unknown> = {}) {
             ok: true,
             json: async () =>
                 String(input).includes("/ai-cost?")
-                    ? emptySummary
+                    ? spendSummary
                     : {
                           id: mail.id,
                           isOwn: true,
@@ -231,9 +239,9 @@ describe("mail detail layout", () => {
         expect(screen.getByText("Alice <alice@example.test>")).toBeTruthy();
         expect(screen.getByText("512 B")).toBeTruthy();
         const spend = await screen.findByRole("button", {
-            name: "No AI spend tracked for this mail",
+            name: "Estimated AI spend: $0.0123",
         });
-        expect(spend.textContent).toBe("$??");
+        expect(spend.textContent).toBe("$0.0123");
         const row = screen
             .getByText("512 B")
             .closest('[data-slot="item-metadata"]');
@@ -418,7 +426,7 @@ describe("mail detail layout", () => {
 
         await screen.findByTestId("mail-summary");
         const spend = await screen.findByRole("button", {
-            name: "No AI spend tracked for this mail",
+            name: "Estimated AI spend: $0.0123",
         });
         const organization = screen.getByLabelText("Organization");
         const row = organization.closest('[data-slot="item-metadata"]');
