@@ -115,7 +115,7 @@ async function renderReview(variant: Variant, frame: WorkflowWidgetFrame) {
             />,
         );
     }
-    if (frame === "dialog") {
+    if (frame === "dialog" || variant === "mail") {
         fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     }
     await screen.findByRole("heading", { name: /Review what Learn found/ });

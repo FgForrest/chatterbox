@@ -62,13 +62,13 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                       ...(input.actsForOrganization === undefined
                           ? {}
                           : {
                                 actsForOrganization: input.actsForOrganization,
                             }),
-                      skipIfAutomaticTitleSettled:
-                          input.skipIfAutomaticTitleSettled,
                   },
               )
             : await storeGeneratedTitle(
@@ -81,13 +81,13 @@ export async function applyGeneratedTitle(input: {
                   {
                       skipIfTitleStepDoneForFence:
                           input.skipIfTitleStepDoneForFence,
+                      skipIfAutomaticTitleSettled:
+                          input.skipIfAutomaticTitleSettled,
                       ...(input.actsForOrganization === undefined
                           ? {}
                           : {
                                 actsForOrganization: input.actsForOrganization,
                             }),
-                      skipIfAutomaticTitleSettled:
-                          input.skipIfAutomaticTitleSettled,
                   },
               )
         : false;

@@ -115,13 +115,7 @@ interface UseTranscriptionSummaryOptions {
 }
 
 /**
- * Shared summary state for the transcription views. The dashboard and the
- * recording detail page both render `TranscriptionPanel`, which is the only
- * consumer.
- *
- * Returns flat state + handlers; callers compose their own JSX so the
- * dashboard's shadcn `Card`/`Button` look and the recording page's
- * `Panel`/`MetalButton` look stay distinct on purpose.
+ * Shared summary state for recording and mail views.
  */
 export function useTranscriptionSummary({
     recordingId,
@@ -147,6 +141,12 @@ export function useTranscriptionSummary({
     const summaryData = summaryViewKey
         ? (summaryDataByKey[summaryViewKey] ?? null)
         : null;
+    const [loadedSummaryKeys, setLoadedSummaryKeys] = useState<Set<string>>(
+        () => new Set(),
+    );
+    const summaryLoaded = summaryViewKey
+        ? loadedSummaryKeys.has(summaryViewKey)
+        : false;
     const setSummaryFor = useCallback(
         (
             targetId: string,
@@ -307,6 +307,13 @@ export function useTranscriptionSummary({
                 ),
             );
         });
+        setLoadedSummaryKeys((current) => {
+            if (!recordingId) return new Set();
+            const prefix = `${recordingId}:`;
+            return new Set(
+                [...current].filter((key) => key.startsWith(prefix)),
+            );
+        });
     }, [recordingId]);
 
     useEffect(() => {
@@ -459,10 +466,16 @@ export function useTranscriptionSummary({
     useEffect(() => {
         if (!recordingId) return;
         const requestedId = recordingId;
+        const requestedKey = `${requestedId}:${summarySource}`;
         const generation = ++fetchGenerationRef.current;
         const controller = new AbortController();
         getAbortRef.current = controller;
         const requestedSource = summarySource;
+        setLoadedSummaryKeys((current) => {
+            const next = new Set(current);
+            next.delete(requestedKey);
+            return next;
+        });
         fetch(summaryUrl(requestedId, `?source=${requestedSource}`), {
             signal: controller.signal,
         })
@@ -510,7 +523,24 @@ export function useTranscriptionSummary({
                     void attachToActiveJob(requestedId, active);
                 }
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+                if (
+                    controller.signal.aborted ||
+                    !shouldApplyFetchedSummary(
+                        recordingIdRef.current,
+                        requestedId,
+                        fetchGenerationRef.current,
+                        generation,
+                    ) ||
+                    summarySourceRef.current !== requestedSource
+                ) {
+                    return;
+                }
+                setLoadedSummaryKeys((current) =>
+                    new Set(current).add(requestedKey),
+                );
+            });
         return () => {
             controller.abort();
             if (getAbortRef.current === controller) {
@@ -798,6 +828,7 @@ export function useTranscriptionSummary({
 
     return {
         summaryData,
+        summaryLoaded,
         availableSummarySources,
         isSummarizing: summarySource === "riffado" && isSummarizing,
         summaryProgress,

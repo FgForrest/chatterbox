@@ -1,4 +1,5 @@
 import { requireApiSession } from "@/lib/auth-server";
+import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     getRecordingMarkdownDocument,
@@ -32,7 +33,9 @@ export const GET = apiHandler<MarkdownContext>(async (request, context) => {
     }
 
     const view = requestedRecordingView(request);
-    const access = await requireRecordingView(session.user.id, id, view);
+    const access = await requireRecordingView(session.user.id, id, view, {
+        kinds: ALL_ITEM_KINDS,
+    });
     const document = await getRecordingMarkdownDocument(
         access.ownerUserId,
         id,

@@ -1,0 +1,666 @@
+"use client";
+
+import {
+    ChevronDown,
+    ChevronUp,
+    ListChecks,
+    Loader2,
+    RefreshCw,
+    Sparkles,
+} from "lucide-react";
+import { useExtracted } from "next-intl";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { MarkdownActions } from "@/components/dashboard/markdown-actions";
+import { HelpLink } from "@/components/help/help-button";
+import { Markdown } from "@/components/markdown";
+import {
+    WorkflowWidget,
+    WorkflowWidgetLine,
+    WorkflowWidgetRunLine,
+} from "@/components/pipeline/workflow-widget";
+import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
+import { RecordingTasks } from "@/components/tasks/recording-tasks";
+import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
+import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
+import { Button } from "@/components/ui/button";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
+import {
+    type SummarySource,
+    useTranscriptionSummary,
+} from "@/hooks/use-transcription-summary";
+import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
+import { inferSummarySpeakerNumberOffset } from "@/lib/knowledge/speaker-references";
+import {
+    isWorkflowWidgetLineVisible,
+    type WorkflowWidgetState,
+} from "@/lib/pipeline/workflow-widgets";
+import type { RecordingView } from "@/lib/sharing/view";
+import { describeMultiPass } from "@/lib/summary/multi-pass";
+import { formatElapsed } from "@/lib/summary/progress-stream";
+
+export type SummaryLearnHold = "running" | "correcting" | "review" | null;
+
+interface SummaryWidgetProps {
+    itemId: string;
+    kind: "audio" | "mail";
+    canChange: boolean;
+    contentText?: string | null;
+    canSummarize?: boolean;
+    view?: RecordingView;
+    source?: SummarySource;
+    canSwitchSource?: boolean;
+    onSourceChange?: (source: SummarySource) => void;
+    sourceLabel?: string;
+    speakerAttributions?: SpeakerAttributions;
+    speakerLabels?: readonly string[];
+    onPlay?: (startMs: number) => void;
+    playback?: TranscriptPlayback;
+    widget?: WorkflowWidgetState;
+    taskWidget?: WorkflowWidgetState;
+    workflowVisible: boolean;
+    profileName?: string;
+    widgetId: string;
+    taskWidgetId: string;
+    learnHold?: SummaryLearnHold;
+    refreshKey?: string | number;
+}
+
+function SummarySourceSwitcher({
+    value,
+    onSelect,
+}: {
+    value: SummarySource;
+    onSelect: (source: SummarySource) => void;
+}) {
+    const i18n = useExtracted();
+    return (
+        <fieldset
+            className="inline-flex shrink-0 rounded-lg bg-muted/70 p-1"
+            aria-label={i18n("Summary source")}
+        >
+            {(["plaud", "riffado"] as const).map((source) => (
+                <button
+                    key={source}
+                    type="button"
+                    onClick={() => onSelect(source)}
+                    aria-pressed={source === value}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
+                        source === value
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
+                    }`}
+                >
+                    {source === "plaud" ? "Plaud" : i18n("Custom")}
+                </button>
+            ))}
+        </fieldset>
+    );
+}
+
+/** One summary body and action set for recordings and mail. */
+export function SummaryWidget({
+    itemId,
+    kind,
+    canChange,
+    contentText,
+    canSummarize = Boolean(contentText),
+    view,
+    source = "riffado",
+    canSwitchSource = false,
+    onSourceChange,
+    sourceLabel,
+    speakerAttributions = {},
+    speakerLabels = [],
+    onPlay,
+    playback,
+    widget,
+    taskWidget,
+    workflowVisible,
+    profileName,
+    widgetId,
+    taskWidgetId,
+    learnHold = null,
+    refreshKey = 0,
+}: SummaryWidgetProps) {
+    const i18n = useExtracted();
+    const {
+        summaryData,
+        summaryLoaded = true,
+        isSummarizing,
+        summaryProgress,
+        summaryElapsedMs,
+        summaryExpanded,
+        setSummaryExpanded,
+        summaryProfileId = "",
+        setSummaryProfileId,
+        summaryProfileOptions = [],
+        summaryProfilesLoading = false,
+        handleSummarize,
+        recheckSummary,
+    } = useTranscriptionSummary({
+        recordingId: itemId,
+        summarySource: source,
+        transcriptionText: contentText,
+        view,
+        profileChannel: kind,
+    });
+    const [workflowExpanded, setWorkflowExpanded] = useState(false);
+    const previousRefreshKey = useRef(refreshKey);
+    useEffect(() => {
+        if (previousRefreshKey.current === refreshKey) return;
+        previousRefreshKey.current = refreshKey;
+        recheckSummary();
+    }, [recheckSummary, refreshKey]);
+
+    const pipelineWorking = Boolean(
+        widget?.active && widget.tone === "working",
+    );
+    const working = isSummarizing || pipelineWorking;
+    const hasSummary = Boolean(summaryData?.summary);
+    const summaryOpen = workflowVisible
+        ? !(widget?.collapsed ?? false) || workflowExpanded
+        : summaryExpanded;
+    const summaryLine = isWorkflowWidgetLineVisible({
+        workflowVisible,
+        collapsed: widget?.collapsed ?? false,
+        expanded: workflowExpanded,
+        working,
+        frame: widget?.frame ?? "inline",
+    });
+    const tone = widget?.tone ?? "quiet";
+    const runSummary = () => {
+        void handleSummarize();
+    };
+
+    const summaryStatusLabel = !summaryProgress
+        ? i18n("Generating summary…")
+        : summaryProgress.phase === "merging"
+          ? i18n("Merging {count, plural, one {# pass} other {# passes}}…", {
+                count: summaryProgress.total,
+            })
+          : i18n("Summarizing — {completed}/{total} passes", {
+                completed: String(summaryProgress.completed),
+                total: String(summaryProgress.total),
+            });
+    const summaryStatus =
+        summaryElapsedMs > 0
+            ? `${summaryStatusLabel} · ${formatElapsed(summaryElapsedMs)}`
+            : summaryStatusLabel;
+
+    const baseMultiPassBadge = describeMultiPass(summaryData?.multiPass);
+    const multiPassBadge = (() => {
+        const provenance = summaryData?.multiPass;
+        if (!baseMultiPassBadge || !provenance) return null;
+        const { roundsRequested, passesUsed, merged } = provenance;
+        let title: string;
+        if (merged && passesUsed === roundsRequested) {
+            title = i18n("{used} of {requested} passes merged", {
+                used: String(passesUsed),
+                requested: String(roundsRequested),
+            });
+        } else if (passesUsed === 0) {
+            title = i18n(
+                "No pass returned usable output; showing the raw reply of {requested}.",
+                { requested: String(roundsRequested) },
+            );
+        } else if (!merged && passesUsed === 1) {
+            title = i18n(
+                "Only 1 of {requested} passes succeeded, so it is shown unmerged.",
+                { requested: String(roundsRequested) },
+            );
+        } else if (!merged) {
+            title = i18n(
+                "{used} of {requested} passes succeeded, but the merge failed; showing the most complete single pass.",
+                {
+                    used: String(passesUsed),
+                    requested: String(roundsRequested),
+                },
+            );
+        } else {
+            title = i18n(
+                "{used} of {requested} passes succeeded and were merged.",
+                {
+                    used: String(passesUsed),
+                    requested: String(roundsRequested),
+                },
+            );
+        }
+        return {
+            ...baseMultiPassBadge,
+            label: i18n("multi-pass · {passes}", {
+                passes:
+                    passesUsed === roundsRequested
+                        ? String(roundsRequested)
+                        : `${passesUsed}/${roundsRequested}`,
+            }),
+            title,
+        };
+    })();
+
+    const summarySpeakerNumberOffset = useMemo(() => {
+        if (!summaryData) return 0;
+        return inferSummarySpeakerNumberOffset(
+            [
+                summaryData.summary,
+                ...(summaryData.keyPoints ?? []),
+                ...(summaryData.actionItems ?? []),
+            ].join("\n"),
+            speakerLabels,
+        );
+    }, [speakerLabels, summaryData]);
+    const taskSpeakers = useMemo<SpeakerChoice[]>(() => {
+        const seen = new Map<string, SpeakerChoice>();
+        for (const attribution of Object.values(speakerAttributions)) {
+            seen.set(attribution.personId, {
+                personId: attribution.personId,
+                name: attribution.name,
+            });
+        }
+        return [...seen.values()];
+    }, [speakerAttributions]);
+
+    const [summariesMade, setSummariesMade] = useState(0);
+    const wasSummarizing = useRef(false);
+    useEffect(() => {
+        if (wasSummarizing.current && !isSummarizing) {
+            setSummariesMade((count) => count + 1);
+        }
+        wasSummarizing.current = isSummarizing;
+    }, [isSummarizing]);
+    const taskState = useRecordingTasks(itemId, `${source}:${summariesMade}`);
+
+    const selectedProfileName = summaryProfileOptions.find(
+        (profile) => profile.id === summaryProfileId,
+    )?.name;
+    const lineFacts = working
+        ? i18n("Generating the summary")
+        : (profileName ??
+          selectedProfileName ??
+          (source === "plaud" ? "Plaud" : sourceLabel));
+    const lineProps = {
+        id: widgetId,
+        title: i18n("Summary"),
+        facts: lineFacts,
+        icon: <ListChecks className="size-4" />,
+        tone,
+    };
+
+    const taskReview = taskWidget?.visible !== false && (
+        <TaskReviewLink
+            state={taskState}
+            speakers={taskSpeakers}
+            organizationOnly={view === "org"}
+            onPlay={onPlay}
+            playback={playback}
+            frame={taskWidget?.frame ?? "dialog"}
+            widgetId={taskWidgetId}
+            showTrigger={false}
+            allowAdd={hasSummary}
+        />
+    );
+
+    if (summaryLine) {
+        const line =
+            summaryLoaded &&
+            canChange &&
+            !working &&
+            !hasSummary &&
+            source === "riffado" ? (
+                <WorkflowWidgetRunLine
+                    {...lineProps}
+                    runLabel={i18n("Summarize")}
+                    onRun={runSummary}
+                    disabled={summaryProfilesLoading || !canSummarize}
+                />
+            ) : (
+                <WorkflowWidgetLine
+                    {...lineProps}
+                    working={working}
+                    expanded={working ? undefined : false}
+                    onExpand={
+                        working ? undefined : () => setWorkflowExpanded(true)
+                    }
+                    expandLabel={working ? undefined : i18n("View summary")}
+                    onOpen={() => setWorkflowExpanded(true)}
+                />
+            );
+        return (
+            <>
+                {line}
+                {taskReview}
+            </>
+        );
+    }
+
+    const headerActions = (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+            {source === "riffado" && canChange && (
+                <Button
+                    onClick={runSummary}
+                    size="sm"
+                    variant={hasSummary ? "outline" : "default"}
+                    disabled={
+                        working ||
+                        !summaryLoaded ||
+                        summaryProfilesLoading ||
+                        !summaryProfileId ||
+                        !canSummarize
+                    }
+                >
+                    {working ? (
+                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                    ) : hasSummary ? (
+                        <RefreshCw className="size-4" />
+                    ) : (
+                        <Sparkles className="size-4" />
+                    )}
+                    {working
+                        ? i18n("Generating…")
+                        : hasSummary
+                          ? i18n("Re-summarize")
+                          : i18n("Summarize")}
+                </Button>
+            )}
+            {canSwitchSource && onSourceChange && (
+                <SummarySourceSwitcher
+                    value={source}
+                    onSelect={onSourceChange}
+                />
+            )}
+            {hasSummary && (
+                <MarkdownActions
+                    recordingId={itemId}
+                    kind="summary"
+                    source={source}
+                    view={view}
+                />
+            )}
+            {source === "riffado" &&
+                canChange &&
+                !working &&
+                summaryProfileOptions.length > 0 && (
+                    <Select
+                        value={summaryProfileId}
+                        onValueChange={setSummaryProfileId}
+                    >
+                        <SelectTrigger
+                            className="h-8 w-[180px] text-xs"
+                            aria-label={i18n("Processing profile")}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {summaryProfileOptions.map((profile) => (
+                                <SelectItem key={profile.id} value={profile.id}>
+                                    {profile.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+            {hasSummary && (
+                <button
+                    type="button"
+                    aria-expanded={summaryOpen}
+                    onClick={() => {
+                        if (workflowVisible) {
+                            setWorkflowExpanded(false);
+                        } else {
+                            setSummaryExpanded(!summaryExpanded);
+                        }
+                    }}
+                    className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+                >
+                    {summaryOpen ? (
+                        <ChevronUp className="size-4" />
+                    ) : (
+                        <ChevronDown className="size-4" />
+                    )}
+                    {summaryOpen
+                        ? i18n("Collapse summary")
+                        : i18n("Expand summary")}
+                </button>
+            )}
+        </div>
+    );
+
+    let summaryContent: ReactNode;
+    if (!summaryLoaded) {
+        summaryContent = (
+            <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                {i18n("Loading…")}
+            </p>
+        );
+    } else if (working) {
+        summaryContent = (
+            <div className="flex flex-col items-center justify-center py-8">
+                <Loader2 className="mb-4 size-8 animate-spin text-primary motion-reduce:animate-none" />
+                <p className="text-sm text-muted-foreground">{summaryStatus}</p>
+            </div>
+        );
+    } else if (hasSummary && summaryData) {
+        summaryContent = (
+            <div className="space-y-4">
+                {summaryOpen && (
+                    <section
+                        aria-label={i18n("Summary content")}
+                        className="max-h-96 space-y-4 overflow-y-auto pr-2"
+                    >
+                        <div className="rounded-lg bg-muted p-4 text-sm">
+                            <Markdown
+                                speakerAttributions={speakerAttributions}
+                                speakerNumberOffset={summarySpeakerNumberOffset}
+                            >
+                                {summaryData.summary ?? ""}
+                            </Markdown>
+                        </div>
+                        {(summaryData.keyPoints?.length ?? 0) > 0 && (
+                            <div>
+                                <h4 className="mb-2 text-sm font-medium">
+                                    {i18n("Key Points")}
+                                </h4>
+                                <ul className="space-y-1">
+                                    {summaryData.keyPoints?.map((point) => (
+                                        <li
+                                            key={`kp-${point.slice(0, 32)}`}
+                                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                                        >
+                                            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                                            <Markdown
+                                                inline
+                                                speakerAttributions={
+                                                    speakerAttributions
+                                                }
+                                                speakerNumberOffset={
+                                                    summarySpeakerNumberOffset
+                                                }
+                                            >
+                                                {point}
+                                            </Markdown>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-3 border-t pt-2 text-xs text-muted-foreground">
+                            {kind === "audio" && (
+                                <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                                    {source === "plaud"
+                                        ? "Plaud"
+                                        : i18n("Custom")}
+                                </span>
+                            )}
+                            {summaryData.provider && (
+                                <span className="rounded bg-muted px-2 py-0.5">
+                                    {summaryData.provider}
+                                </span>
+                            )}
+                            {summaryData.model && (
+                                <span className="rounded bg-muted px-2 py-0.5 font-mono">
+                                    {summaryData.model}
+                                </span>
+                            )}
+                            {multiPassBadge && (
+                                <span
+                                    className={
+                                        multiPassBadge.degraded
+                                            ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
+                                            : "rounded bg-muted px-2 py-0.5"
+                                    }
+                                    title={multiPassBadge.title}
+                                >
+                                    {multiPassBadge.label}
+                                </span>
+                            )}
+                            {summaryData.stale && source === "riffado" && (
+                                <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                    {i18n("May contain stale names or terms")}
+                                    {canChange && (
+                                        <button
+                                            type="button"
+                                            className="font-medium underline-offset-2 hover:underline"
+                                            onClick={runSummary}
+                                        >
+                                            {i18n("Regenerate")}
+                                        </button>
+                                    )}
+                                </span>
+                            )}
+                            {summaryData.scopeChanged &&
+                                source === "riffado" && (
+                                    <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                        {i18n(
+                                            "Folders changed since this summary:",
+                                        )}
+                                        {canChange && (
+                                            <button
+                                                type="button"
+                                                className="font-medium underline-offset-2 hover:underline"
+                                                onClick={runSummary}
+                                            >
+                                                {i18n("Match tasks again")}
+                                            </button>
+                                        )}
+                                    </span>
+                                )}
+                        </div>
+                    </section>
+                )}
+            </div>
+        );
+    } else {
+        let empty = i18n("No summary yet.");
+        if (canChange && source === "plaud") {
+            empty = i18n(
+                "No Plaud summary has been imported. It will appear after Plaud sync when available.",
+            );
+        } else if (canChange && contentText && learnHold === "running") {
+            empty =
+                kind === "mail"
+                    ? i18n(
+                          'The summary waits while Learn checks the message, then starts by itself. Click "Summarize" to make it now.',
+                      )
+                    : i18n(
+                          'The summary waits while Learn checks the transcript, then starts by itself. Click "Summarize" to make it now.',
+                      );
+        } else if (canChange && contentText && learnHold === "correcting") {
+            empty =
+                kind === "mail"
+                    ? i18n(
+                          'The summary waits while Learn corrects names and terms in the message, then starts by itself. Click "Summarize" to make it now.',
+                      )
+                    : i18n(
+                          'The summary waits while Learn corrects the transcript, then starts by itself. Click "Summarize" to make it now.',
+                      );
+        } else if (canChange && contentText && learnHold === "review") {
+            empty =
+                kind === "mail"
+                    ? i18n(
+                          'The summary waits for your Learn review, so it reads the corrected message. Finish the review, or click "Summarize" to make it now.',
+                      )
+                    : i18n(
+                          'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
+                      );
+        } else if (canChange && contentText) {
+            empty = i18n(
+                'No custom summary yet. Click "Summarize" to generate one.',
+            );
+        } else if (canChange && kind === "audio") {
+            empty = i18n(
+                "A custom transcript is required before generating a custom summary.",
+            );
+        }
+        summaryContent = (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+                <ListChecks className="mb-3 size-10 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">{empty}</p>
+            </div>
+        );
+    }
+
+    const actionItemFallback =
+        summaryData?.actionItems && summaryData.actionItems.length > 0 ? (
+            <div>
+                <h4 className="mb-2 text-sm font-medium">
+                    {i18n("Action Items")}
+                </h4>
+                <ul className="space-y-1">
+                    {summaryData.actionItems.map((item) => (
+                        <li
+                            key={`ai-${item.slice(0, 32)}`}
+                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                        >
+                            <ListChecks className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                            <Markdown
+                                inline
+                                speakerAttributions={speakerAttributions}
+                                speakerNumberOffset={summarySpeakerNumberOffset}
+                            >
+                                {item}
+                            </Markdown>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        ) : null;
+
+    return (
+        <>
+            <WorkflowWidget
+                id={widgetId}
+                frame="inline"
+                tone={tone}
+                title={
+                    <>
+                        <ListChecks className="size-5" /> {i18n("Summary")}
+                    </>
+                }
+                helpLink={
+                    <HelpLink topic="summaries" label={i18n("summaries")} />
+                }
+                headerAction={headerActions}
+            >
+                <div className="space-y-4">
+                    {summaryContent}
+                    <RecordingTasks
+                        state={taskState}
+                        speakers={taskSpeakers}
+                        organizationOnly={view === "org"}
+                        onPlay={onPlay}
+                        fallback={actionItemFallback}
+                        allowAdd={hasSummary}
+                    />
+                </div>
+            </WorkflowWidget>
+            {taskReview}
+        </>
+    );
+}
