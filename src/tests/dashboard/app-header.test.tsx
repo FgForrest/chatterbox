@@ -659,6 +659,22 @@ describe("shared settings and mobile badges", () => {
             expect(badge?.className).not.toMatch(/hidden/);
         }
     });
+    it("hides administrator items on the demo screenshot route", () => {
+        renderPage("/dev/demo-dashboard", { isAdmin: true });
+        openMenu();
+        expect(screen.getByText("Settings")).toBeTruthy();
+        expect(screen.queryByText("Admin dashboard")).toBeNull();
+    });
+    it("announces a scope switch to screen readers", () => {
+        renderPage("/almanac/things");
+        openPalette();
+        const status = screen
+            .getByRole("group", { name: "Search scope" })
+            .querySelector('[aria-live="polite"]');
+        expect(status?.textContent).toBe("Search scope: Almanac");
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Tab" });
+        expect(status?.textContent).toBe("Search scope: Everywhere");
+    });
     it("does not request a one-character search", async () => {
         renderPage("/almanac");
         openPalette();

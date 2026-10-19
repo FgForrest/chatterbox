@@ -42,7 +42,7 @@ The bar at the top has three sections:
 
 On the right of the bar:
 
-- **Search Klepy**, **Search the Almanac** or **Search tasks** (or `Ctrl`/`⌘` + `K`) opens search for the current section.
+- **Search Chatter**, **Search the Almanac** or **Search tasks** (or `Ctrl`/`⌘` + `K`) opens search for the current section.
 - **Upload** adds an audio or video file from your computer. It remains available on Tasks, Almanac, and Settings too. After an upload, Recordings opens with the new item selected and its workflow at the start.
 - The **≡** account menu is available in all three sections: **Settings**, **Keyboard shortcuts**, **Help**, **Re-run setup**, **Sync device**, the light/dark theme, and **Log out**. Organization settings appear when available. **Sync device** fetches new recordings now instead of waiting for automatic sync.
 

@@ -272,6 +272,10 @@ export function CommandPalette({
                         <span className="ml-auto text-xs text-muted-foreground">
                             <Kbd>Tab</Kbd> {i18n("switch scope")}
                         </span>
+                        <span className="sr-only" aria-live="polite">
+                            {i18n("Search scope")}:{" "}
+                            {scope === "all" ? i18n("Everywhere") : scopeLabel}
+                        </span>
                     </fieldset>
                     <Command.List className="max-h-[60vh] overflow-y-auto p-2">
                         <output className="px-3 text-xs text-muted-foreground">

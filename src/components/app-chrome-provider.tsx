@@ -165,6 +165,7 @@ function useChromeState(config: AppChromeConfig) {
     }, [settingsOpen, onboardingOpen, shortcutsOpen, paletteOpen]);
     return {
         ...config,
+        isAdmin: !demo && config.isAdmin,
         ...sync,
         theme,
         setTheme,
