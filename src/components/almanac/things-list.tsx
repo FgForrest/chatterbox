@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 export interface ThingSummary {
     id: string;
@@ -38,6 +39,7 @@ export function ThingsList({
     types: { key: string; label: string }[];
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState("");
@@ -70,9 +72,11 @@ export function ThingsList({
     const typesInUse = useMemo(
         () =>
             [...new Set(things.map((thing) => thing.typeKey))].sort((a, b) =>
-                (typeLabels[a] ?? a).localeCompare(typeLabels[b] ?? b),
+                labels
+                    .entityType(a, typeLabels[a])
+                    .localeCompare(labels.entityType(b, typeLabels[b])),
             ),
-        [things, typeLabels],
+        [things, typeLabels, labels.entityType],
     );
 
     async function create() {
@@ -130,7 +134,7 @@ export function ThingsList({
                 >
                     {types.map((type) => (
                         <option key={type.key} value={type.key}>
-                            {type.label}
+                            {labels.entityType(type.key, type.label)}
                         </option>
                     ))}
                 </NativeSelect>
@@ -254,7 +258,10 @@ export function ThingsList({
                                 <option value="">{i18n("All types")}</option>
                                 {typesInUse.map((key) => (
                                     <option key={key} value={key}>
-                                        {typeLabels[key] ?? key}
+                                        {labels.entityType(
+                                            key,
+                                            typeLabels[key],
+                                        )}
                                     </option>
                                 ))}
                             </NativeSelect>
@@ -285,8 +292,10 @@ export function ThingsList({
                                             )}
                                         </span>
                                         <span className="shrink-0 text-xs text-muted-foreground">
-                                            {typeLabels[thing.typeKey] ??
-                                                thing.typeKey}
+                                            {labels.entityType(
+                                                thing.typeKey,
+                                                typeLabels[thing.typeKey],
+                                            )}
                                             {thing.scope === "org" &&
                                                 ` · ${i18n("Organization")}`}
                                         </span>

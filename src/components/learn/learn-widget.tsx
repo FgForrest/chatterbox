@@ -64,6 +64,7 @@ import {
     labelsFromTurns,
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 import type {
     MailNewRecordPayload,
     MailPhrasePayload,
@@ -194,6 +195,7 @@ export function LearnWidget({
     collapseReady?: boolean;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const [state, setState] = useState<ReviewState | null>(null);
     const [open, setOpen] = useState(false);
     const resolvedWidgetId = widgetId ?? `${kind}-learn-review-${recordingId}`;
@@ -658,7 +660,7 @@ export function LearnWidget({
                 return `"${String(payload.phrase)}"`;
             default: {
                 const key = String(payload.relationKey);
-                return `${nameOf(payload.subject as Side)} — ${state?.relations[key] ?? key} — ${nameOf(payload.object as Side)}`;
+                return `${nameOf(payload.subject as Side)} — ${labels.relation(key, state?.relations[key])} — ${nameOf(payload.object as Side)}`;
             }
         }
     }
@@ -684,16 +686,18 @@ export function LearnWidget({
         }
         if (item.kind === "new_record") {
             const record = newRecordView(item);
+            const typeKey = newRecordAs(record, item.choice).typeKey;
             const kind =
                 record.kind === "person"
-                    ? i18n("Person")
-                    : (state?.entityTypes?.find(
-                          (type) =>
-                              type.key ===
-                              newRecordAs(record, item.choice).typeKey,
-                      )?.label ??
-                      newRecordAs(record, item.choice).typeKey ??
-                      "");
+                    ? labels.entityType("person")
+                    : typeKey
+                      ? labels.entityType(
+                            typeKey,
+                            state?.entityTypes?.find(
+                                (type) => type.key === typeKey,
+                            )?.label,
+                        )
+                      : "";
             return `${recordName(record.ref)} (${kind})`;
         }
         if (item.kind === "correction") {
@@ -1518,12 +1522,14 @@ export function LearnWidget({
                                                                         };
                                                                     };
                                                                 const relation =
-                                                                    state
-                                                                        ?.relations[
-                                                                        payload
-                                                                            .relationKey
-                                                                    ] ??
-                                                                    payload.relationKey;
+                                                                    labels.relation(
+                                                                        payload.relationKey,
+                                                                        state
+                                                                            ?.relations[
+                                                                            payload
+                                                                                .relationKey
+                                                                        ],
+                                                                    );
                                                                 return (
                                                                     <LearnReviewRow
                                                                         key={

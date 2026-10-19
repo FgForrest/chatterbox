@@ -16,6 +16,7 @@ import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
 import { factsForPage } from "@/lib/knowledge/fact-page";
 import { getPerson } from "@/lib/knowledge/people";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { getOrgUserId } from "@/lib/org/config";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
@@ -25,6 +26,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export default async function PersonPage({ params }: Params) {
     const session = await requireAuth();
+    const labels = await getVocabularyLabels();
 
     const { id } = await params;
     const userId = session.user.id;
@@ -45,7 +47,7 @@ export default async function PersonPage({ params }: Params) {
         listAliases(userId, { personId: id }),
         vocabularyVisibleTo(userId),
     ]);
-    const almanac = almanacVocabulary(vocabulary);
+    const almanac = almanacVocabulary(vocabulary, labels);
 
     // Where this person has been heard. Joined through the transcript rather
     // than the recording, because an attribution belongs to one transcript

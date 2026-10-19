@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 interface Candidate {
     id: string;
@@ -52,6 +53,7 @@ export function EntityActions({
     relationLabels?: Record<string, string>;
 }) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     const router = useRouter();
     const [editing, setEditing] = useState<Editing>(null);
     const [name, setName] = useState(entity.name);
@@ -181,8 +183,10 @@ export function EntityActions({
                         ? i18n(
                               "A fact “{relation}” about it would no longer fit. Change or erase it first.",
                               {
-                                  relation:
-                                      relationLabels[relation] ?? relation,
+                                  relation: labels.relation(
+                                      relation,
+                                      relationLabels[relation],
+                                  ),
                               },
                           )
                         : error.error || i18n("Could not change the type"),
@@ -357,7 +361,10 @@ export function EntityActions({
                             >
                                 {types.map((type) => (
                                     <option key={type.key} value={type.key}>
-                                        {type.label}
+                                        {labels.entityType(
+                                            type.key,
+                                            type.label,
+                                        )}
                                     </option>
                                 ))}
                             </NativeSelect>

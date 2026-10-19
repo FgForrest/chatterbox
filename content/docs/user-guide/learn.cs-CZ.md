@@ -35,7 +35,7 @@ Obsah kontroly je stejný, ať je vložený v položce, nebo otevřený v okně.
 - **Mluvčí**: koho Učení považuje za každého nepojmenovaného mluvčího a proč. **▷** přehraje důkaz. **Někdo jiný…** vybere jinou osobu, **Neznámý** označí mluvčího za neznámého.
 - **Nové v Almanachu**: osoby a věci, které Učení rozpoznalo, ale Almanach je nezná. Začínají nezaškrtnuté. Opravte jméno nebo typ před zaškrtnutím, zvolte **Je to něco známého…**, pokud záznam už máte pod jiným jménem, nebo **Nikdy nenavrhovat**, pokud jej nechcete navrhovat v žádné nahrávce.
 - **Opravy**: špatně rozpoznaná jména, četnost a výskyt. Tyto návrhy jsou předem zaškrtnuté.
-- **Nová fakta** a **Známá fakta** zmiňovaná znovu.
+- **Nová fakta** a **Známá fakta** zmiňovaná znovu. Vztahy se zobrazují česky, například „Jan Novák — pracuje pro — Bluefin Logistics“ nebo „Jan Novák — má roli — provozní ředitel“. Základní typy v nabídce jsou například **Pojem**, **Místo** a **Produkt nebo systém**. Vlastní typy a vztahy si ponechávají Vámi zadaný název.
 
 Zaškrtněte, co je správně, a klikněte na **Dokončit kontrolu**. **Uložit a pokračovat později** zachová Vaše zaškrtnutí bez použití změn. Nezaškrtnuté návrhy již na této nahrávce nebudou navrženy.
 

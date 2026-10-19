@@ -32,7 +32,7 @@ Kliknutím na osobu otevřete její stránku:
 
 ![Věci](images/almanac-things.png)
 
-Věci jsou organizace, týmy, projekty, produkty, pojmy, lokality a dokumenty. Můžete je vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**.
+Almanach používá základní typy **Osoba**, **Organizace**, **Tým**, **Projekt**, **Produkt nebo systém**, **Pojem**, **Místo** a **Dokument**. Věci můžete vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**.
 
 ![Věc](images/almanac-thing.png)
 
@@ -49,6 +49,8 @@ project: Harbor phase 2
 product: Pathfinder Lite (PF Lite)
 location: Rotterdam depot, Antwerp depot
 ```
+
+V seznamu pro import zůstávají anglické klíče `project`, `product` a `location`. V náhledu se jejich typy zobrazí jako **Projekt**, **Produkt nebo systém** a **Místo**.
 
 Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte:
 

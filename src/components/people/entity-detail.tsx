@@ -11,6 +11,7 @@ import {
     OtherNames,
 } from "@/components/people/known-facts";
 import type { PageRelation } from "@/lib/knowledge/fact-page";
+import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
 export interface EntityDetailProps {
     entity: {
@@ -47,6 +48,7 @@ export function EntityDetail({
     editing,
 }: EntityDetailProps) {
     const i18n = useExtracted();
+    const labels = useVocabularyLabels();
     return (
         <div className="space-y-8 pb-12">
             <Link
@@ -65,7 +67,10 @@ export function EntityDetail({
                         {entity.name}
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        {entity.typeLabel ?? i18n("Unknown type")}
+                        {labels.entityType(
+                            entity.typeKey,
+                            entity.typeLabel ?? i18n("Unknown type"),
+                        )}
                         {entity.scope === "org" && ` · ${i18n("Organization")}`}
                     </p>
                 </div>
