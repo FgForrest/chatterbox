@@ -393,6 +393,7 @@ export interface TranscribeOptions {
 
 export interface TranscribeResult {
     success: boolean;
+    organizationProviderMissing?: boolean;
     error?: string;
     errorCode?: TranscribeErrorCode;
     /** Present on success. Plaintext transcript. */
@@ -592,8 +593,14 @@ async function transcribeRecordingInner(
             ) {
                 return {
                     success: false,
-                    error: "No transcription API configured",
+                    error:
+                        error.details?.organizationProviderMissing === true
+                            ? error.message
+                            : "No transcription API configured",
                     errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                    ...(error.details?.organizationProviderMissing === true
+                        ? { organizationProviderMissing: true }
+                        : {}),
                 };
             }
             throw error;

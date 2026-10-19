@@ -105,7 +105,7 @@ const messageAllowlist = [
     },
     {
         reason: "hosted-only transcription fallback in the profile editor",
-        ids: ["lGtM5k"],
+        ids: ["QG7vRu"],
     },
 ] as const;
 

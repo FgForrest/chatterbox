@@ -171,6 +171,22 @@ describe("automatic upload transcription", () => {
         expect(transcriptionJobHandler.isRetryable?.(failure)).toBe(false);
     });
 
+    it("stores a fixed Organization-aware message when provider resolution reports no suitable provider", async () => {
+        mocks.transcribeRecording.mockResolvedValue({
+            success: false,
+            error: "provider detail must not reach the job row",
+            errorCode: "NO_TRANSCRIPTION_PROVIDER",
+            organizationProviderMissing: true,
+        });
+        await expect(
+            transcriptionJobHandler.run(handlerContext()),
+        ).rejects.toMatchObject({
+            code: ErrorCode.NO_TRANSCRIPTION_PROVIDER,
+            message:
+                "Neither you nor the Organization has a provider for transcription. Add a provider in Settings or ask an administrator.",
+        });
+    });
+
     it("requests the private pipeline after a pipeline transcription fails", async () => {
         await transcriptionJobHandler.onTerminalFailure?.({
             jobId: "job-1",

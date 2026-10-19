@@ -166,6 +166,23 @@ function installFetch() {
                     };
                 }
             }
+            if (method === "PUT" && url.includes("organization-providers")) {
+                organization = organization.map((provider) => ({
+                    ...provider,
+                    ...(request.body?.isDefaultTranscription === true
+                        ? {
+                              isDefaultTranscription:
+                                  provider.id === url.split("/").at(-1),
+                          }
+                        : {}),
+                    ...(request.body?.isDefaultEnhancement === true
+                        ? {
+                              isDefaultEnhancement:
+                                  provider.id === url.split("/").at(-1),
+                          }
+                        : {}),
+                }));
+            }
             if (mutationGate && (method === "PUT" || method === "DELETE")) {
                 return mutationGate;
             }
@@ -607,5 +624,98 @@ describe("Organization provider permissions and usage", () => {
         ).toBeTruthy();
         expect(within(card).getByText("12")).toBeTruthy();
         expect(within(card).getByText("$1.25")).toBeTruthy();
+    });
+});
+
+describe("Organization fallback notices", () => {
+    function withoutDefaults() {
+        personal = [];
+        organization = [
+            {
+                ...organizationProvider,
+                isDefaultTranscription: false,
+                isDefaultEnhancement: false,
+                isDefaultLearn: false,
+                isDefaultTopics: false,
+                isDefaultTitle: false,
+            },
+        ];
+    }
+
+    it.each([
+        ["transcription", "isDefaultTranscription"],
+        ["summaries", "isDefaultEnhancement"],
+    ] as const)("shows the manager notice and makes the fallback the default for %s", async (role, field) => {
+        withoutDefaults();
+        renderSection();
+        const card = await cardFor("organization");
+        const notice = `No Organization default for ${role}. Members without their own choice use OpenAI · gpt-4o-mini.`;
+        expect(await within(card).findByText(notice)).toBeTruthy();
+        fireEvent.click(
+            within(card).getByRole("button", {
+                name: `Make Organization default for ${role}`,
+            }),
+        );
+        await waitFor(() => {
+            expect(requests).toContainEqual({
+                url: `${collections.organization}/org-provider`,
+                method: "PUT",
+                body: { [field]: true },
+            });
+            expect(within(card).queryByText(notice)).toBeNull();
+        });
+    });
+
+    it("warns managers when neither role has a suitable enabled provider", async () => {
+        withoutDefaults();
+        organization[0].disabledAt = new Date();
+        renderSection();
+        const card = await cardFor("organization");
+        expect(
+            await within(card).findByText(
+                "Members without their own provider cannot transcribe. Add an Organization provider or choose a default.",
+            ),
+        ).toBeTruthy();
+        expect(
+            within(card).getByText(
+                "Members without their own provider cannot summarize. Add an Organization provider or choose a default.",
+            ),
+        ).toBeTruthy();
+        expect(
+            within(card).queryByRole("button", {
+                name: /Make Organization default/,
+            }),
+        ).toBeNull();
+    });
+
+    it("shows the actual fallback badges to members without manager notices", async () => {
+        withoutDefaults();
+        manager = false;
+        renderSection();
+        const card = await cardFor("organization");
+        expect(
+            await within(card).findByText("Used for your transcription"),
+        ).toBeTruthy();
+        expect(within(card).getByText("Used for your summaries")).toBeTruthy();
+        expect(within(card).queryByText(/No Organization default/)).toBeNull();
+        expect(within(card).queryByRole("button")).toBeNull();
+    });
+
+    it("does not label an Organization chat fallback when the member's own implicit chat provider wins", async () => {
+        withoutDefaults();
+        personal = [
+            {
+                ...personalProvider,
+                isDefaultTranscription: false,
+                isDefaultEnhancement: false,
+            },
+        ];
+        manager = false;
+        renderSection();
+        const card = await cardFor("organization");
+        expect(
+            await within(card).findByText("Used for your transcription"),
+        ).toBeTruthy();
+        expect(within(card).queryByText("Used for your summaries")).toBeNull();
     });
 });

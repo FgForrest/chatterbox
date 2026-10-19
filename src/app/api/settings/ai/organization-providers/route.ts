@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { loadDefaultProviderPointers } from "@/lib/ai/default-provider";
 import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
 import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
 import { parseProviderRates } from "@/lib/ai/provider-rate-input";
@@ -49,9 +50,11 @@ export const GET = apiHandler(async (request: Request) => {
     const context = await organizationProviderReadContext(
         await actorFrom(request),
     );
-    return NextResponse.json({
-        providers: await listOrganizationProviders(context),
-    });
+    const [providers, defaults] = await Promise.all([
+        listOrganizationProviders(context),
+        loadDefaultProviderPointers(context.orgUserId),
+    ]);
+    return NextResponse.json({ providers, defaults });
 });
 
 export const POST = apiHandler(async (request: Request) => {

@@ -17,6 +17,11 @@ import {
 import { useExtracted } from "next-intl";
 import { ProviderPriceLine } from "@/components/settings/provider-pricing-fields";
 import { Button } from "@/components/ui/button";
+import type { DefaultProviderPointers } from "@/lib/ai/default-provider";
+import {
+    oldestSuitableProvider,
+    providerPointersFromFlags,
+} from "@/lib/ai/provider-resolution-order";
 import type { AiRate } from "@/lib/ai/published-rates";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +59,12 @@ interface ProviderCardProps {
     busyId: string | null;
     usage?: ProviderMemberUsage[];
     locale: string;
+    organizationDefaults?: DefaultProviderPointers;
+    fallbackUsage?: Partial<Record<"transcription" | "summary", string>>;
+    onMakeDefault?: (
+        provider: ProviderCardItem,
+        role: "transcription" | "summary",
+    ) => void;
     onAdd: () => void;
     onDuplicate: (provider: ProviderCardItem) => void;
     onEdit: (provider: ProviderCardItem) => void;
@@ -106,6 +117,7 @@ function ProviderRow({
     provider,
     canManage,
     busy,
+    fallbackUsage,
     onDuplicate,
     onEdit,
     onToggleDisabled,
@@ -115,6 +127,7 @@ function ProviderRow({
     provider: ProviderCardItem;
     canManage: boolean;
     busy: boolean;
+    fallbackUsage?: Partial<Record<"transcription" | "summary", string>>;
     onDuplicate: (provider: ProviderCardItem) => void;
     onEdit: (provider: ProviderCardItem) => void;
     onToggleDisabled: (provider: ProviderCardItem) => void;
@@ -172,6 +185,22 @@ function ProviderRow({
                     />
                 )}
                 <div className="flex flex-wrap gap-1.5">
+                    {scope === "organization" &&
+                        !canManage &&
+                        fallbackUsage?.transcription === provider.id && (
+                            <RoleChip
+                                icon={FileText}
+                                label={i18n("Used for your transcription")}
+                            />
+                        )}
+                    {scope === "organization" &&
+                        !canManage &&
+                        fallbackUsage?.summary === provider.id && (
+                            <RoleChip
+                                icon={ListChecks}
+                                label={i18n("Used for your summaries")}
+                            />
+                        )}
                     {provider.isDefaultTranscription && (
                         <RoleChip
                             icon={FileText}
@@ -317,6 +346,9 @@ export function ProviderCard({
     busyId,
     usage = [],
     locale,
+    organizationDefaults,
+    fallbackUsage,
+    onMakeDefault,
     onAdd,
     onDuplicate,
     onEdit,
@@ -337,6 +369,12 @@ export function ProviderCard({
         ? i18n("No Organization providers yet.")
         : i18n("No providers yet. Add one to transcribe and summarize.");
     const Icon = organization ? Users : UserRound;
+    const pointers =
+        organizationDefaults ?? providerPointersFromFlags(providers);
+    const credentials = providers.map((provider) => ({
+        ...provider,
+        createdAt: provider.createdAt ?? new Date(0),
+    }));
 
     return (
         <section
@@ -384,6 +422,80 @@ export function ProviderCard({
                     </Button>
                 )}
             </div>
+            {organization && canManage && (
+                <div className="space-y-2 pb-3">
+                    {(["transcription", "summary"] as const).map((role) => {
+                        if (pointers[role]) return null;
+                        const fallback = oldestSuitableProvider(
+                            role,
+                            credentials,
+                        );
+                        return (
+                            <div
+                                key={role}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs"
+                            >
+                                <p>
+                                    {fallback
+                                        ? role === "transcription"
+                                            ? i18n(
+                                                  "No Organization default for transcription. Members without their own choice use {name}.",
+                                                  {
+                                                      name: providerLabel(
+                                                          fallback,
+                                                      ),
+                                                  },
+                                              )
+                                            : i18n(
+                                                  "No Organization default for summaries. Members without their own choice use {name}.",
+                                                  {
+                                                      name: providerLabel(
+                                                          fallback,
+                                                      ),
+                                                  },
+                                              )
+                                        : role === "transcription"
+                                          ? i18n(
+                                                "Members without their own provider cannot transcribe. Add an Organization provider or choose a default.",
+                                            )
+                                          : i18n(
+                                                "Members without their own provider cannot summarize. Add an Organization provider or choose a default.",
+                                            )}
+                                </p>
+                                {fallback && onMakeDefault && (
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={busyId !== null}
+                                        aria-label={
+                                            role === "transcription"
+                                                ? i18n(
+                                                      "Make Organization default for transcription",
+                                                  )
+                                                : i18n(
+                                                      "Make Organization default for summaries",
+                                                  )
+                                        }
+                                        onClick={() =>
+                                            onMakeDefault(fallback, role)
+                                        }
+                                    >
+                                        {i18n("Make default")}
+                                    </Button>
+                                )}
+                            </div>
+                        );
+                    })}
+                    {!pointers.summary && (
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Learn, topics and titles follow summaries unless chosen separately.",
+                            )}
+                        </p>
+                    )}
+                </div>
+            )}
             {providers.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
                     {empty}
@@ -397,6 +509,7 @@ export function ProviderCard({
                             provider={provider}
                             canManage={canManage}
                             busy={busyId === provider.id}
+                            fallbackUsage={fallbackUsage}
                             onDuplicate={onDuplicate}
                             onEdit={onEdit}
                             onToggleDisabled={onToggleDisabled}
