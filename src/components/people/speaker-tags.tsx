@@ -365,7 +365,7 @@ export function SpeakerTags({
                                 className={`${segmentClass} shrink-0 ${accent}`}
                                 disabled={!canListen}
                                 aria-label={
-                                    suggestion
+                                    canPlayEvidence
                                         ? i18n("Play where {speaker} speaks", {
                                               speaker: speaker.label,
                                           })
@@ -373,7 +373,9 @@ export function SpeakerTags({
                                               name,
                                           })
                                 }
-                                title={suggestion ? i18n("Listen") : undefined}
+                                title={
+                                    canPlayEvidence ? i18n("Listen") : undefined
+                                }
                                 onClick={() => {
                                     if (canPlayEvidence && evidenceMs != null) {
                                         onSeek?.(evidenceMs);

@@ -25,6 +25,10 @@ interface MarkdownActionsProps {
     recordingId: string;
     source: string;
     view?: RecordingView;
+    /**
+     * Collapse copy/download into one menu below 560px. The enclosing card must be a
+     * `@container/transcription` (transcript) or `@container/summary` (summary).
+     */
     collapseAtNarrowWidth?: boolean;
 }
 

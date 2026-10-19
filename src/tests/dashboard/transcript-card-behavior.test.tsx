@@ -260,7 +260,7 @@ describe("transcript card behavior", () => {
         const name = await screen.findByRole("button", { name: "Jan?" });
         expect(name.getAttribute("aria-haspopup")).toBe("dialog");
         const button = screen.getByRole("button", {
-            name: "Play where Speaker 1 speaks",
+            name: "Play the next turn of Speaker 1",
         });
         expect(button).toHaveProperty("disabled", false);
         fireEvent.click(button);

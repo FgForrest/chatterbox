@@ -25,6 +25,7 @@ export interface PickablePerson {
 export interface SpeakerPickerProps {
     /** The raw provider label being named, e.g. `speaker_0`. */
     label: string;
+    /** The confirmed person, whose Almanac page the picker links to. */
     personId?: string;
     /** Resolves true only after the attribution was persisted. */
     onPick: (
