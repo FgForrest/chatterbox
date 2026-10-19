@@ -289,6 +289,34 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             expect(jobs).toHaveLength(0);
         });
 
+        it("re-runs an own transcript only on request, and transcribes beside a Plaud one", async () => {
+            const plain = await call(
+                postTranscribe,
+                OWNER,
+                `/api/recordings/${REC}/transcribe`,
+                { method: "POST" },
+            );
+            expect(plain.status).toBe(409);
+            await expect(plain.json()).resolves.toMatchObject({
+                code: "TRANSCRIPT_ALREADY_EXISTS",
+            });
+            expect(await db().select().from(asyncJobs)).toHaveLength(0);
+
+            await db()
+                .update(transcriptions)
+                .set({ source: "plaud" })
+                .where(eq(transcriptions.recordingId, REC));
+            const beside = await call(
+                postTranscribe,
+                OWNER,
+                `/api/recordings/${REC}/transcribe`,
+                { method: "POST" },
+            );
+            expect(beside.status).toBe(202);
+            const [job] = await db().select().from(asyncJobs);
+            expect(job?.payload).toMatchObject({ force: false });
+        });
+
         it("has no Organization view even for its owner", async () => {
             expect(
                 (
@@ -527,7 +555,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 postTranscribe,
                 orgUserId,
                 `/api/recordings/${REC}/transcribe?view=org`,
-                { method: "POST" },
+                { method: "POST", ...json({ retranscribe: true }) },
             );
             expect(queued.status).toBe(202);
             const { jobId } = (await queued.json()) as { jobId: string };
@@ -537,7 +565,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 .where(eq(asyncJobs.id, jobId));
             expect(job?.userId).toBe(orgUserId);
             expect(job?.subjectId).toBe(`org:${REC}`);
-            expect(job?.payload).toMatchObject({ view: "org" });
+            expect(job?.payload).toMatchObject({ force: true, view: "org" });
 
             const owner = await call(
                 getTranscribe,

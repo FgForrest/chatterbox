@@ -351,11 +351,23 @@ export async function embedScope(
     for (let start = 0; start < stale.length; start += chunkSize) {
         signal?.throwIfAborted();
         const chunk = stale.slice(start, start + chunkSize);
-        const vectors = await client.embed(
+        await client.embed(
             chunk.map((item) => item.text),
-            { signal },
+            {
+                signal,
+                onBatch: async (batch) => {
+                    embedded += await writeChunk(
+                        scope,
+                        generation,
+                        chunk.slice(
+                            batch.start,
+                            batch.start + batch.vectors.length,
+                        ),
+                        batch.vectors,
+                    );
+                },
+            },
         );
-        embedded += await writeChunk(scope, generation, chunk, vectors);
     }
     signal?.throwIfAborted();
 

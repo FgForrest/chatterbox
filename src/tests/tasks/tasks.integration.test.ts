@@ -651,6 +651,18 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the partner email",
             status: "open",
         });
+        await db()
+            .update(recordingTasks)
+            .set({
+                quote: encryptText("I will send the partner email"),
+                evidenceStartMs: 7_000,
+            })
+            .where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    eq(recordingTasks.userId, ALICE),
+                ),
+            );
         await summarize(LATER, [], {
             matches: [match(task.id, { quote: "the same partner email" })],
         });
@@ -665,6 +677,9 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     id: task.id,
                     text: "Send the partner email",
                     homeItem: expect.objectContaining({ id: REC }),
+                    quote: "I will send the partner email",
+                    evidenceStartMs: 7_000,
+                    evidenceText: null,
                 }),
             }),
         ]);

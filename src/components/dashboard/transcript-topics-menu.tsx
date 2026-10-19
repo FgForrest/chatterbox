@@ -3,10 +3,7 @@
 import { Loader2, RefreshCw, Sparkles, Tag } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import {
-    WorkflowWidget,
-    WorkflowWidgetLine,
-} from "@/components/pipeline/workflow-widget";
+import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -33,7 +30,6 @@ interface TranscriptTopicsMenuProps {
     onSelect: (index: number) => void;
     /** Playback position, to mark the topic being played. */
     getPlaybackMs?: () => number;
-    personStarted?: boolean;
     widgetId: string;
 }
 
@@ -50,7 +46,6 @@ export function TranscriptTopicsMenu({
     onDetect,
     onSelect,
     getPlaybackMs,
-    personStarted = false,
     widgetId,
 }: TranscriptTopicsMenuProps) {
     const i18n = useExtracted();
@@ -75,12 +70,7 @@ export function TranscriptTopicsMenu({
         return () => clearInterval(timer);
     }, [open, topics]);
 
-    useEffect(() => {
-        if (detecting && personStarted) setRunOpen(true);
-    }, [detecting, personStarted]);
-
     const runDetect = () => {
-        setRunOpen(true);
         onDetect();
     };
     let runTitle = i18n("Topic detection");
@@ -145,16 +135,6 @@ export function TranscriptTopicsMenu({
             title={runTitle}
             description={runDescription}
             dialogWidth="lg"
-            dialogLine={
-                personStarted && detecting ? (
-                    <WorkflowWidgetLine
-                        title={i18n("Topics")}
-                        facts={i18n("Detecting topics…")}
-                        tone="working"
-                        working
-                    />
-                ) : undefined
-            }
         >
             {runBody}
         </WorkflowWidget>

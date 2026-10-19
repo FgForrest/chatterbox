@@ -23,6 +23,7 @@ import {
     users,
 } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import type { EmbeddingBatch } from "@/lib/knowledge/embeddings";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import type { TaskViewer } from "@/lib/tasks/access";
 import {
@@ -80,6 +81,7 @@ vi.mock("@/lib/mail/addresses", () => ({
 
 import {
     loadTasksPromptContext,
+    persistContentVectors,
     searchMergeCandidates,
 } from "@/lib/tasks/proposals";
 import { TASK_CANDIDATE_LIMIT } from "@/lib/tasks/ranking";
@@ -821,6 +823,153 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
                 })
                 .from(taskContentVectors),
         ).toEqual([{ revision: 3, generation: "candidate-model#r1" }]);
+    });
+
+    it("keeps successful content and task vector batches after a later batch fails", async () => {
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: TARGET,
+                userId: OWNER,
+                rawHash: "partial-target-mail",
+                receivedAt: new Date("2026-10-01T00:00:00.000Z"),
+                sizeBytes: 1,
+                auth: {},
+                senderVerified: true,
+            });
+        await db()
+            .insert(mailContents)
+            .values({
+                id: "partial-content",
+                itemId: TARGET,
+                userId: OWNER,
+                revision: 1,
+                parserVersion: 1,
+                segments: encryptJsonField([
+                    {
+                        index: 0,
+                        role: "body",
+                        participantRef: null,
+                        depth: 0,
+                        at: null,
+                        text: "Prepare the launch brief",
+                    },
+                ]),
+            });
+        await item("partial-source", OWNER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "partial-source",
+            userId: OWNER,
+            folderId: "private-a-child",
+        });
+        await candidate({
+            id: "partial-task-a",
+            itemId: "partial-source",
+            userId: OWNER,
+            text: "Prepare the launch brief",
+            view: "private",
+        });
+        await candidate({
+            id: "partial-task-b",
+            itemId: "partial-source",
+            userId: OWNER,
+            text: "Book the launch venue",
+            view: "private",
+        });
+        let invocation = 0;
+        const embed = vi.fn(
+            async (
+                texts: readonly string[],
+                options: {
+                    onBatch?: (batch: EmbeddingBatch) => void | Promise<void>;
+                } = {},
+            ) => {
+                invocation++;
+                const vectors = texts.map(() => Float32Array.from([1, 0]));
+                if (invocation === 1) {
+                    await options.onBatch?.({
+                        start: 0,
+                        texts: texts.slice(0, 2),
+                        vectors: vectors.slice(0, 2),
+                    });
+                    throw new Error("second request failed");
+                }
+                await options.onBatch?.({ start: 0, texts, vectors });
+                return vectors;
+            },
+        );
+        embeddingClientMock.mockReturnValue({
+            model: "candidate-model",
+            available: true,
+            embed,
+        });
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const search = () =>
+            searchMergeCandidates(reviewer, TARGET, {
+                text: "",
+                offset: 0,
+                limit: 20,
+            });
+
+        await search();
+        warning.mockRestore();
+
+        expect(await db().select().from(taskContentVectors)).toHaveLength(1);
+        expect(await db().select().from(taskVectors)).toHaveLength(1);
+
+        await search();
+
+        expect(embed).toHaveBeenCalledTimes(2);
+        expect(embed.mock.calls[1]?.[0]).toHaveLength(1);
+        expect(await db().select().from(taskContentVectors)).toHaveLength(1);
+        expect(await db().select().from(taskVectors)).toHaveLength(2);
+    });
+
+    it("does not transfer content vector ownership on conflict", async () => {
+        const generation = "candidate-model#r1";
+        const key = {
+            itemId: TARGET,
+            userId: OWNER,
+            sourceId: "shared-content",
+            revision: 1,
+        };
+        await persistContentVectors(
+            key,
+            generation,
+            ["Owner content"],
+            new Map([[0, Float32Array.from([1, 0])]]),
+        );
+        const selectVector = () =>
+            db()
+                .select({
+                    userId: taskContentVectors.userId,
+                    inputHmac: taskContentVectors.inputHmac,
+                    dim: taskContentVectors.dim,
+                })
+                .from(taskContentVectors);
+        const ownerRows = await selectVector();
+
+        await persistContentVectors(
+            { ...key, userId: OTHER },
+            generation,
+            ["Other user content"],
+            new Map([[0, Float32Array.from([0, 1, 0])]]),
+        );
+
+        expect(await selectVector()).toEqual(ownerRows);
+
+        await persistContentVectors(
+            key,
+            generation,
+            ["Changed owner content"],
+            new Map([[0, Float32Array.from([1, 0, 0, 1])]]),
+        );
+
+        const updatedRows = await selectVector();
+        expect(updatedRows).toHaveLength(1);
+        expect(updatedRows[0]?.userId).toBe(OWNER);
+        expect(updatedRows[0]?.inputHmac).not.toBe(ownerRows[0]?.inputHmac);
+        expect(updatedRows[0]?.dim).toBe(4);
     });
 
     it("keeps private and Organization merge targets in their matching scope", async () => {

@@ -26,10 +26,10 @@ type WorkflowDensity = "full" | "focused" | "compact";
 
 const STRIP_PADDING = 24;
 const FULL_CIRCLE = 28;
-const FULL_CONNECTOR = 16;
+const FULL_CONNECTOR = 24;
 const FULL_COPY_GAP = 6;
 const COMPACT_CIRCLE = 24;
-const COMPACT_CONNECTOR = 6;
+const COMPACT_CONNECTOR = 16;
 const COMPACT_COPY_GAP = 4;
 
 function estimateCopyWidth(label: string): number {
@@ -41,25 +41,20 @@ function chooseDensity(
     copyWidths: number[],
     focused: Set<number>,
 ): WorkflowDensity {
-    const columnWidth =
-        (width - STRIP_PADDING) / Math.max(copyWidths.length, 1);
-    const fullFits = copyWidths.every(
-        (copyWidth, index) =>
-            (index > 0 ? FULL_CONNECTOR : 0) +
-                FULL_CIRCLE +
-                FULL_COPY_GAP +
-                copyWidth <=
-            columnWidth,
+    const connectors = Math.max(copyWidths.length - 1, 0);
+    const fullWidth = copyWidths.reduce(
+        (sum, copyWidth) => sum + FULL_CIRCLE + FULL_COPY_GAP + copyWidth,
+        STRIP_PADDING + connectors * FULL_CONNECTOR,
     );
-    if (fullFits) return "full";
-    const focusedFits = copyWidths.every(
-        (copyWidth, index) =>
-            (index > 0 ? COMPACT_CONNECTOR : 0) +
-                COMPACT_CIRCLE +
-                (focused.has(index) ? COMPACT_COPY_GAP + copyWidth : 0) <=
-            columnWidth,
+    if (fullWidth <= width) return "full";
+    const focusedWidth = copyWidths.reduce(
+        (sum, copyWidth, index) =>
+            sum +
+            COMPACT_CIRCLE +
+            (focused.has(index) ? COMPACT_COPY_GAP + copyWidth : 0),
+        STRIP_PADDING + connectors * COMPACT_CONNECTOR,
     );
-    return focusedFits ? "focused" : "compact";
+    return focusedWidth <= width ? "focused" : "compact";
 }
 
 function stateColor(state: WorkflowStep["state"]): string {
@@ -361,6 +356,10 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                 return i18n(
                     "Learn is reading the transcript with your Almanac.",
                 );
+            case "learnCorrecting":
+                return i18n(
+                    "Learn is correcting misheard words in the transcript. The summary follows.",
+                );
             case "learnReview":
                 return i18n(
                     "Learn found {count, plural, one {# suggestion} other {# suggestions}}. The summary waits for your review, at most 3 days.",
@@ -488,10 +487,11 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
         const focused = new Set(focusedKey.split(",").map(Number));
         const estimates = labelsKey.split(";").map(estimateCopyWidth);
         const measure = (width: number) => {
-            const copyWidths = estimates.map(
-                (estimate, index) =>
+            const copyWidths = estimates.map((estimate, index) =>
+                Math.ceil(
                     copyMeasureRefs.current[index]?.getBoundingClientRect()
                         .width || estimate,
+                ),
             );
             setDensity(chooseDensity(width, copyWidths, focused));
         };
@@ -549,10 +549,8 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                             <li
                                 key={`${step.id}-${index}`}
                                 className={cn(
-                                    "workflow-step flex min-w-0 flex-1 items-start",
-                                    density !== "full" &&
-                                        index === workflow.steps.length - 1 &&
-                                        "flex-none",
+                                    "workflow-step flex min-w-0 items-start",
+                                    index === 0 ? "flex-none" : "flex-auto",
                                     step.state === "skipped" &&
                                         "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                 )}
@@ -566,11 +564,12 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                                 {index > 0 && (
                                     <span
                                         className={cn(
-                                            "h-px shrink-0 bg-border",
+                                            "h-px flex-1 bg-border",
                                             density === "full"
-                                                ? "mt-3.5 w-4"
-                                                : "mt-3 w-1.5",
+                                                ? "mx-1.5 mt-3.5 min-w-3"
+                                                : "mx-1 mt-3 min-w-2",
                                         )}
+                                        aria-hidden
                                     />
                                 )}
                                 <StepCircle

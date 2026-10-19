@@ -44,7 +44,7 @@ interface Props {
     transcripts: TranscriptOption[] | undefined;
     isCurrentTranscribing: boolean;
     visibleRecordings: Recording[];
-    onTranscribe: (attributionSource?: string) => void;
+    onTranscribe: (attributionSource?: string, retranscribe?: boolean) => void;
     /** Called after a browser-side transcription completes (refresh data). */
     onTranscribeComplete?: () => void;
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
@@ -241,7 +241,9 @@ export function WorkstationDetailPane({
                         onMoveBetweenFolders={onMoveBetweenFolders}
                         onChanged={onArtifactsChanged}
                         onFolderCreated={onFolderCreated}
-                        onTranscribe={() => onTranscribe()}
+                        onTranscribe={(retranscribe) =>
+                            onTranscribe(undefined, retranscribe)
+                        }
                         onLearn={() =>
                             openWidget(
                                 `recording-learn-review-${currentRecording.id}`,

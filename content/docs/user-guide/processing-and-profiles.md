@@ -27,7 +27,7 @@ A processing profile is a recipe for one kind of item. Open **Settings → Profi
 
 ![The processing profiles list](images/profiles.png)
 
-Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. A step that is off can still be run by hand.
+Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. An automatic title is generated once, from the first completed summary. Re-summarizing, re-transcribing, correcting with Learn, changing the profile, or choosing **Process again** does not replace it. A step that is off can still be run by hand.
 
 A profile also holds the choices for that work: provider and model, transcription language, summary instructions, output language and output format, and multi-pass settings. **Auto (match content)** keeps the output in the item's language. Editing a profile creates a new revision; items already in progress keep the revision they started with.
 
@@ -69,7 +69,7 @@ The strip under an item's title shows every step in one row and what needs atten
 | **Categorize** | Waits for folders and resolves the profile. |
 | **Transcribe** | Produces the recording's transcript. Mail does not show this phase. |
 | **Learn** | Finds names, corrections, and facts for review. |
-| **Summarize** | Generates the title, summary, and topics selected by the profile. |
+| **Summarize** | Generates the summary and topics selected by the profile. The first completed summary can generate the item's one automatic title. |
 | **Task review** | Waits for proposed tasks and changes to be reviewed. |
 | **Share** | Shares an intended Organization placement after its gates pass. |
 
@@ -77,7 +77,7 @@ Each step says **Done**, **Next**, **Review needed**, **Running**, **Queued**, *
 
 One sentence below the steps begins **Your turn.**, **Working.**, **Queued.**, **Problem.**, or **Waiting for someone else.** It explains what happens next and shows the one action expected from you, such as **Review Learn**, **Review tasks**, or **Share now**.
 
-Widgets appear in order as the workflow reaches them: transcription, the Learn review, the summary, and Task review. Finished widgets fold to one line while later work continues. When the workflow is done, the strip disappears and the item looks as it did before. A step you start yourself after that, such as **Learn**, **Re-summarize** (or **Summarize again** on mail), **Re-transcribe**, or **Detect topics**, opens in a window with the same contents. The strip's action jumps to the inline widget or reopens that window.
+Widgets appear in order as the workflow reaches them: transcription, the Learn review, the summary, and Task review. Finished widgets fold to one line while later work continues. When the workflow is done, the strip disappears and the item looks as it did before. A step you start yourself after that, such as **Learn**, **Re-summarize** (or **Summarize again** on mail), **Re-transcribe**, or **Detect topics**, shows its running state in place without opening a window. **Review**, **View results**, and the strip's review actions open a review window only when you ask for it.
 
 For a **Nothing automatic** item, the workflow ends after **Categorize** and the strip disappears. The exception is an intended Organization placement, which keeps the strip visible until you use **Share now** or cancel it.
 

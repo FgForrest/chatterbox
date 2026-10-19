@@ -2,7 +2,7 @@
 
 /**
  * Following what automatic Learn held back once its review is finished:
- * the title, topics and summary are made by jobs nothing on the page
+ * topics and summary are made by jobs nothing on the page
  * started, so without this the page keeps the old title and idle
  * "Generate" buttons while they run.
  */
@@ -71,7 +71,7 @@ describe("useLearnFollowUps", () => {
         const fetchMock = answering(
             { held: true, pending: [] },
             { held: false, pending: ["pipeline.advance"] },
-            { held: false, pending: ["summary", "title.generate", "topics"] },
+            { held: false, pending: ["summary", "topics"] },
             { held: false, pending: ["summary"] },
             { held: false, pending: [] },
         );
@@ -92,8 +92,8 @@ describe("useLearnFollowUps", () => {
         });
 
         expect(hook.result.current.held).toBe(false);
-        // The release queued, what it queued, the title made, the summary
-        // made: each a reason to look again.
+        // The release queued, its jobs started, then the summary finished:
+        // each is a reason to look again.
         expect(onChange).toHaveBeenCalledTimes(4);
         expect(fetchMock).toHaveBeenCalledTimes(5);
     });
@@ -196,7 +196,7 @@ describe("useLearnFollowUps", () => {
 
     it("follows jobs already queued when the page opens", async () => {
         const fetchMock = answering(
-            { held: false, pending: ["title.generate"] },
+            { held: false, pending: ["summary"] },
             { held: false, pending: [] },
         );
         vi.stubGlobal("fetch", fetchMock);

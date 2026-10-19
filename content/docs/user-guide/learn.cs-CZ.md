@@ -18,15 +18,17 @@ Učení je dostupné u přepisů s časovými údaji na instancích s vlastním 
 
 ## Spuštění Učení
 
-U ručního kroku prvek Učení uvádí, že je připravený, a nabízí tlačítko **Učení**. Po spuštění se otevře okno. Zatímco **Learn čte přepis**, můžete okno zavřít a stránku opustit. Po dokončení se v témže okně zobrazí kontrola.
+U ručního kroku prvek Učení uvádí, že je připravený, a nabízí tlačítko **Učení**. Po spuštění se bez otevření okna přepne na stav **Learn čte přepis**. Během zpracování můžete stránku opustit. Po dokončení prvek nabídne akci **Zkontrolovat**.
 
-Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat Learn** přeskočí ke kontrole. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
+Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Když najde návrhy, jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat Learn** přeskočí ke kontrole. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
+
+Pokud Učení nenajde nic ke kontrole a je zapnutá volba **Opravit přepis po Učení**, krok Učení zůstane ve stavu **Běží**, zatímco přepis znovu čte a opravuje špatně rozpoznaná slova. U shrnutí se zobrazí, že čeká na tuto opravu, a po jejím dokončení se samo spustí. Kliknutím na **Shrnout** jej můžete spustit ihned.
 
 <span id="reviewing" />
 
 ## Kontrola návrhů
 
-Obsah kontroly je stejný, ať je vložená v položce, nebo otevřená v okně běhu, který jste spustili sami. Pokud čekající okno zavřete, akce **Zkontrolovat Learn** v pruhu pracovního postupu je znovu otevře:
+Obsah kontroly je stejný, ať je vložený v položce, nebo otevřený v okně. Akce **Zkontrolovat** u prvku a **Zkontrolovat Learn** v pruhu pracovního postupu toto okno výslovně otevřou:
 
 ![Přehled návrhů Učení](images/learn-review.png)
 
@@ -45,7 +47,7 @@ Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh
 
 ![Co kontrola provedla](images/learn-results.png)
 
-Po kontrole se během dalšího zpracování prvek složí na řádek **Učení dokončeno** s akcí **Zobrazit výsledky**. Ve výsledcích zjistíte, zda byl každý návrh použit, zamítnut nebo přeskočen. **Učit se znovu** spustí další běh v okně; pokud jste si některý návrh rozmysleli, zaškrtněte **Učit se znovu: navrhnout znovu i to, co jsem u této nahrávky odmítl(a)**.
+Po kontrole se během dalšího zpracování prvek složí na řádek **Učení dokončeno** s akcí **Zobrazit výsledky**. Ve výsledcích zjistíte, zda byl každý návrh použit, zamítnut nebo přeskočen. **Učit se znovu** spustí další běh a ukáže jeho průběh na místě; pokud jste si některý návrh rozmysleli, zaškrtněte **Učit se znovu: navrhnout znovu i to, co jsem u této nahrávky odmítl(a)**.
 
 Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, takže je lze vždy vrátit zpět. Viz [Opravená slova](transcripts.md#corrected-words).
 

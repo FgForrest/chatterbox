@@ -143,6 +143,45 @@ describe("mail summary workflow presentation", () => {
         );
     });
 
+    it("keeps a manually started summary inline while it runs", async () => {
+        let finishSummary = (_response: Response) => {};
+        const fetch = vi.fn((_url: string, init?: RequestInit) => {
+            if (init?.method === "POST") {
+                return new Promise<Response>((resolve) => {
+                    finishSummary = resolve;
+                });
+            }
+            return Promise.resolve(
+                Response.json({
+                    summary: null,
+                    keyPoints: [],
+                    actionItems: [],
+                }),
+            );
+        });
+        vi.stubGlobal("fetch", fetch);
+        renderSummary({ state: widget(), workflowVisible: false });
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Summarize" }),
+        );
+
+        expect(
+            screen.getByText(
+                "Generating the summary. It continues in the background.",
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
+        finishSummary(
+            Response.json({
+                summary: "Proposal summary",
+                keyPoints: [],
+                actionItems: [],
+            }),
+        );
+        await screen.findByText("Proposal summary");
+    });
+
     it.each([
         ["with a summary", "Proposal summary"],
         ["without a summary", null],
@@ -168,7 +207,7 @@ describe("mail summary workflow presentation", () => {
         }
     });
 
-    it("uses a line while a dialog-frame run is working", async () => {
+    it("uses an inline line while a dialog-frame run is working", async () => {
         stubSummary(null);
         renderSummary({
             state: widget({
@@ -185,5 +224,6 @@ describe("mail summary workflow presentation", () => {
             ).toBeTruthy(),
         );
         expect(screen.getByText("Generating the summary")).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
     });
 });

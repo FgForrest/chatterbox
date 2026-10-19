@@ -2,6 +2,7 @@ import {
     markPhasesOutdatedForInputs,
     processAgainPending,
 } from "@/lib/pipeline/outdated";
+import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import type {
     ContentRevisionInput,
     PhaseRecord,
@@ -103,6 +104,19 @@ function summaryStepMarker(
     steps: NonNullable<PhaseRecord["steps"]>,
     reason: string,
 ): PipelineAction {
+    if (
+        step === "summary" &&
+        facts.profile?.automatic.title &&
+        !automaticTitleSettled(facts.phases)
+    ) {
+        steps.title = {
+            contentId: input.contentId,
+            contentSourceId: input.contentSourceId,
+            contentRevision: input.contentRevision,
+            generation: facts.generation,
+            profileRevisionId: facts.profile.revisionId,
+        };
+    }
     steps[step] = {
         contentId: input.contentId,
         contentSourceId: input.contentSourceId,
@@ -292,7 +306,7 @@ function planMail(
 
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
-    for (const step of ["title", "summary"] as const) {
+    for (const step of ["summary"] as const) {
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -308,16 +322,6 @@ function planMail(
                 ),
             );
         }
-    }
-    if (
-        facts.profile?.automatic.title &&
-        stepProviderAvailable(facts, "title") &&
-        !stepRequested(facts.phases.summary, "title", input, minimumGeneration)
-    ) {
-        actions.push({ type: "queueTitleJob" });
-        actions.push(
-            summaryStepMarker(facts, input, "title", steps, "mail-arrival"),
-        );
     }
     if (
         facts.profile?.automatic.summary &&
@@ -444,7 +448,7 @@ function planReleasedAudio(
                 ? releaseGeneration
                 : Math.max(releaseGeneration, minimumGeneration),
         );
-    for (const step of ["title", "topics", "summary"] as const) {
+    for (const step of ["topics", "summary"] as const) {
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -466,17 +470,6 @@ function planReleasedAudio(
                 ),
             );
         }
-    }
-
-    if (
-        facts.profile?.automatic.title &&
-        stepProviderAvailable(facts, "title") &&
-        notRequested("title")
-    ) {
-        actions.push({ type: "queueTitleJob" });
-        actions.push(
-            summaryStepMarker(facts, input, "title", steps, "learn-released"),
-        );
     }
 
     if (
@@ -525,8 +518,8 @@ function planTranscriptAudio(
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
     const providerSteps = input.timed
-        ? (["title", "topics", "summary"] as const)
-        : (["title", "summary"] as const);
+        ? (["topics", "summary"] as const)
+        : (["summary"] as const);
     for (const step of providerSteps) {
         if (
             facts.profile?.automatic[step] &&
@@ -549,17 +542,6 @@ function planTranscriptAudio(
                 ),
             );
         }
-    }
-
-    if (
-        facts.profile?.automatic.title &&
-        stepProviderAvailable(facts, "title") &&
-        !stepRequested(facts.phases.summary, "title", input, minimumGeneration)
-    ) {
-        actions.push({ type: "queueTitleJob" });
-        actions.push(
-            summaryStepMarker(facts, input, "title", steps, "transcript"),
-        );
     }
 
     if (!input.timed) {
@@ -1113,19 +1095,61 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             actions.push({ type: "releaseLearnTimeout" });
             return { actions };
         }
-        if (
-            !phaseMatches(
-                learn,
-                "waiting",
-                "review_pending",
-                minimumGeneration,
-                input,
-            )
-        ) {
-            actions.push(
-                markPhase(facts, "learn", "waiting", "review_pending", input),
-            );
+        if (facts.learnRunReadyForReview) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "waiting",
+                    "review_pending",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(
+                        facts,
+                        "learn",
+                        "waiting",
+                        "review_pending",
+                        input,
+                    ),
+                );
+            }
+            return { actions };
         }
+        if (facts.learnRunInFlight) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "running",
+                    "started",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(facts, "learn", "running", "started", input),
+                );
+            }
+            return { actions };
+        }
+        if (facts.learnCorrectionInFlight) {
+            if (
+                !phaseMatches(
+                    learn,
+                    "running",
+                    "correcting",
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push(
+                    markPhase(facts, "learn", "running", "correcting", input),
+                );
+            }
+            return { actions };
+        }
+        actions.push({ type: "releaseLearnHold" });
         return { actions };
     }
 

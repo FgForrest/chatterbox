@@ -10,7 +10,10 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { ProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/view";
 import { buildChatCompletionParams } from "./chat-completion-params";
-import { getAiOutputLanguageDirective } from "./summary-presets";
+import {
+    getAiOutputLanguageDirective,
+    resolveAiOutputLanguage,
+} from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
 function isAbsentProviderSelection(error: unknown): boolean {
@@ -33,6 +36,7 @@ export async function generateTitleFromTranscription(
     source: "summary" | "transcript" = "transcript",
     ownerUserId = userId,
     view: RecordingView = "private",
+    detectedLanguage?: string | null,
 ): Promise<string | null> {
     const profile = await resolveItemProfile(
         recordingId,
@@ -41,26 +45,34 @@ export async function generateTitleFromTranscription(
         userId,
     );
     const settings = profile.settings as ProfileSettings;
-    const [transcript] = await db
-        .select({ detectedLanguage: transcriptions.detectedLanguage })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, ownerUserId),
-                eq(transcriptions.source, "riffado"),
-            ),
-        )
-        .limit(1);
+    let contentLanguage = detectedLanguage;
+    if (contentLanguage === undefined) {
+        const [transcript] = await db
+            .select({ detectedLanguage: transcriptions.detectedLanguage })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, recordingId),
+                    eq(transcriptions.userId, ownerUserId),
+                    eq(transcriptions.source, "riffado"),
+                ),
+            )
+            .limit(1);
+        contentLanguage = transcript?.detectedLanguage ?? null;
+    }
     const [owner] = await db
         .select({ uiLocale: users.uiLocale })
         .from(users)
         .where(eq(users.id, ownerUserId))
         .limit(1);
+    const outputLanguage = resolveAiOutputLanguage(
+        settings.steps.summary.outputLanguage,
+        contentLanguage,
+    );
     const promptTemplate = resolveTitlePrompt({
         settings: settings.steps.title,
-        outputLanguage: settings.steps.summary.outputLanguage,
-        contentLanguage: transcript?.detectedLanguage ?? null,
+        outputLanguage: outputLanguage ?? settings.steps.summary.outputLanguage,
+        contentLanguage,
         uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
     }).text;
     let resolved: Awaited<ReturnType<typeof resolveStepProvider>>;
@@ -102,9 +114,9 @@ export async function generateTitleFromTranscription(
         // Apply the AI output language directive via the system
         // message rather than the user prompt, so it doesn't compete with
         // the title-format rules in the user prompt.
-        const languageDirective = getAiOutputLanguageDirective(
-            settings.steps.summary.outputLanguage,
-        );
+        const languageDirective = getAiOutputLanguageDirective(outputLanguage);
+        const capitalizationDirective =
+            "Use the capitalization conventions of the output language. Use English Title Case only for English; Czech and most other European languages use sentence case.";
 
         // Replacement function so `$` sequences in the transcript are
         // inserted verbatim, not treated as `String.prototype.replace`
@@ -118,7 +130,7 @@ export async function generateTitleFromTranscription(
             source === "summary"
                 ? "You are a helpful assistant that generates concise, descriptive titles. The supplied text is a summary of the complete item; title it by its main subject. Always follow the rules strictly."
                 : "You are a helpful assistant that generates concise, descriptive titles from supplied content. Always follow the rules strictly.";
-        const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective}`;
+        const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective} ${capitalizationDirective}`;
 
         await resolved.reserveCall();
         const response = await openai.chat.completions.create(

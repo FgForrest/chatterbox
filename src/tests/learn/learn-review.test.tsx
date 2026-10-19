@@ -1232,8 +1232,14 @@ describe("LearnReview", () => {
             fireEvent.click(
                 await screen.findByRole("button", { name: "Learn" }),
             );
+            expect(screen.queryByRole("dialog")).toBeNull();
             await waitFor(told);
             if (button === "Review (2)") {
+                const review = await screen.findByRole("button", {
+                    name: "Review (2)",
+                });
+                expect(screen.queryByRole("dialog")).toBeNull();
+                fireEvent.click(review);
                 expect(
                     await screen.findByRole("heading", {
                         name: /Review what Learn found/,

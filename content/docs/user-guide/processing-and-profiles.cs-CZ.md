@@ -27,7 +27,7 @@ Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upra
 
 ![Seznam profilů zpracování](images/profiles.png)
 
-Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Vypnutý krok lze stále spustit ručně.
+Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Automatický název se vytvoří jen jednou, z prvního dokončeného shrnutí. Opakované shrnutí či přepis, oprava pomocí Učení, změna profilu ani volba **Zpracovat znovu** jej nenahradí. Vypnutý krok lze stále spustit ručně.
 
 Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přepisu, instrukce shrnutí, jazyk a formát výstupu a nastavení funkce **Vícenásobné shrnování**. **Automaticky (podle obsahu)** zachová jazyk položky. Úprava profilu vytvoří novou revizi; rozpracované položky si ponechají revizi, se kterou začaly.
 
@@ -69,7 +69,7 @@ Pruh pod názvem položky zobrazuje všechny kroky v jednom řádku a potřebné
 | **Zařazení** | Čeká na složky a určí profil. |
 | **Přepis** | Vytvoří přepis nahrávky. U pošty se tato fáze nezobrazuje. |
 | **Učení** | Najde jména, opravy a fakta ke kontrole. |
-| **Shrnout** | Vytvoří název, shrnutí a témata zvolená profilem. |
+| **Shrnout** | Vytvoří shrnutí a témata zvolená profilem. První dokončené shrnutí může vytvořit jediný automatický název položky. |
 | **Kontrola úkolů** | Čeká na kontrolu navržených úkolů a jejich změn. |
 | **Sdílet** | Po splnění kontrol nasdílí zamýšlené umístění v Organizaci. |
 
@@ -77,7 +77,7 @@ U každého kroku je stav **Hotovo**, **Další**, **Ke kontrole**, **Běží**,
 
 Věta pod kroky začíná **Na vás.**, **Pracuje se.**, **Ve frontě.**, **Problém.** nebo **Čeká na ostatní.** Vysvětluje, co bude následovat, a nabízí jedinou očekávanou akci, například **Zkontrolovat Learn**, **Zkontrolovat úkoly** nebo **Sdílet nyní**.
 
-S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, se otevře v okně se stejným obsahem. Akce v pruhu přeskočí k vloženému prvku nebo toto okno znovu otevře.
+S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, ukazuje svůj průběh na místě a žádné okno sám neotevře. Akce **Zkontrolovat**, **Zobrazit výsledky** a kontrolní akce v pruhu otevřou okno až na Vaše výslovné kliknutí.
 
 U položky s volbou **Bez automatického zpracování** končí pracovní postup po kroku **Zařazení** a pruh zmizí. Výjimkou je zamýšlené umístění v Organizaci: pruh zůstane, dokud nepoužijete **Sdílet nyní** nebo umístění nezrušíte.
 
