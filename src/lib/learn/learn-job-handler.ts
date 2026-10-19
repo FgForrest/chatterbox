@@ -70,6 +70,7 @@ import {
 import { mailLearnParts } from "@/lib/learn/mail-parts";
 import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
+import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
 import { runBridgePass } from "@/lib/learn/run-bridge";
 import {
     type LearnEntityTypeChoice,
@@ -835,6 +836,7 @@ async function runLearnJob({
             ...calendarSpeakerCandidates,
             ...meetSpeakerCandidates,
         ];
+        const reviewLocale = await resolveLearnReviewLocale(db, run);
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"
@@ -843,6 +845,7 @@ async function runLearnJob({
                       token: issueLearnRunToken(run.id),
                       turns,
                       language: transcript.detectedLanguage,
+                      reviewLocale,
                       relations,
                       entityTypes,
                       unnamedLabels,
@@ -860,6 +863,7 @@ async function runLearnJob({
                       lookupBudget: TOOL_BUDGET,
                       turns,
                       language: transcript.detectedLanguage,
+                      reviewLocale,
                       relations,
                       entityTypes,
                       unnamedLabels,
@@ -1224,6 +1228,7 @@ async function runMailLearnJob(
                 updatedAt: new Date(),
             })
             .where(eq(learnRuns.id, run.id));
+        const reviewLocale = await resolveLearnReviewLocale(db, run);
         reportProgress({ phase: "reading" });
         const pass =
             turns.length > 0
@@ -1235,6 +1240,7 @@ async function runMailLearnJob(
                       lookupBudget: TOOL_BUDGET,
                       turns,
                       language: content.language,
+                      reviewLocale,
                       relations,
                       entityTypes,
                       unnamedLabels: [],
