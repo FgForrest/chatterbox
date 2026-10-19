@@ -4,6 +4,7 @@ import { apiKeys } from "@/db/schema";
 import { createApiKey, getApiKeyPrefix, hashApiKey } from "@/lib/auth-request";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import {
@@ -23,6 +24,7 @@ const PAIR_LIMIT_PER_HOUR = 10;
  */
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
+    await assertNotOrgAccount(session.user.id);
 
     const limit = await consumeRateLimitBucket(
         `recorder:pair:user:${session.user.id}`,

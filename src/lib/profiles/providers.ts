@@ -326,6 +326,7 @@ async function resolvePinnedOrganization(input: {
     actorUserId: string;
     credential?: CredentialRow;
     choice?: ProviderChoice;
+    readOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
@@ -358,7 +359,9 @@ async function resolvePinnedOrganization(input: {
         );
     }
     if (isIdpAuthorization()) {
-        const access = await holderAccess(input.actorUserId);
+        const access = await holderAccess(input.actorUserId, {
+            readOnly: input.readOnly,
+        });
         if (!access.ok || !access.capabilities.has("use")) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
@@ -418,12 +421,13 @@ function assertSupportsStep(
 
 async function organizationDefaultOwner(
     actorUserId: string,
+    readOnly: boolean,
 ): Promise<string | null> {
     if (!isOrgScopeEnabled()) return null;
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return null;
     if (!isIdpAuthorization() || actorUserId === orgUserId) return orgUserId;
-    const access = await holderAccess(actorUserId);
+    const access = await holderAccess(actorUserId, { readOnly });
     return access.ok && access.capabilities.has("use") ? orgUserId : null;
 }
 
@@ -432,6 +436,7 @@ async function resolvePointer(input: {
     pointer: string;
     actorUserId: string;
     choice: ProviderChoice;
+    readOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     if (isRiffadoIncludedProviderId(input.pointer)) {
         if (input.step === "transcription" && !isMynahConfigured()) {
@@ -468,6 +473,7 @@ async function resolvePointer(input: {
             pin: { scope: "organization", credentialId: input.pointer },
             actorUserId: input.actorUserId,
             choice: input.choice,
+            readOnly: input.readOnly,
         });
     }
     if (input.choice.kind === "member-default") {
@@ -542,9 +548,10 @@ export async function validateDefaultProviderSelection(input: {
 async function resolveUnpinned(
     step: ProcessingStep,
     actorUserId: string,
+    readOnly: boolean,
 ): Promise<ResolvedStepProviderSelection> {
     const actorState = await loadDefaultProviderState(actorUserId);
-    const orgUserId = await organizationDefaultOwner(actorUserId);
+    const orgUserId = await organizationDefaultOwner(actorUserId, readOnly);
     const organizationState = orgUserId
         ? await loadDefaultProviderState(orgUserId)
         : null;
@@ -584,6 +591,7 @@ async function resolveUnpinned(
                 actorUserId,
                 credential: organization,
                 choice,
+                readOnly,
             });
             return { ...resolved, actorSettings: actorState.settings };
         }
@@ -592,6 +600,7 @@ async function resolveUnpinned(
             pointer: candidate.providerId,
             actorUserId,
             choice,
+            readOnly,
         });
         return { ...resolved, actorSettings: actorState.settings };
     }
@@ -614,11 +623,12 @@ async function resolveUnpinned(
     });
 }
 
-/** Choose and authorize one processing provider without decrypting its key. */
+/** Choose and authorize a provider without decrypting its key; read-only checks also leave access state unchanged. */
 export async function resolveStepProviderSelection(input: {
     step: ProcessingStep;
     pin: ProviderPin | null;
     actorUserId: string;
+    readOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
@@ -626,7 +636,11 @@ export async function resolveStepProviderSelection(input: {
     if (input.pin?.scope === "organization") {
         return resolvePinnedOrganization({ ...input, pin: input.pin });
     }
-    return resolveUnpinned(input.step, input.actorUserId);
+    return resolveUnpinned(
+        input.step,
+        input.actorUserId,
+        input.readOnly === true,
+    );
 }
 
 /** Resolve one processing step's provider and decrypt its key for a request. */

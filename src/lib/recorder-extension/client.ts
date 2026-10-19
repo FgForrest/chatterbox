@@ -13,6 +13,8 @@
  * Dependencies are injected so the state machine is testable without a DOM.
  */
 
+export type MicrophonePermission = "granted" | "prompt" | "denied" | "unknown";
+
 export type RecorderExtensionChannel = "external" | "content";
 
 export type RecorderExtensionState =
@@ -24,6 +26,7 @@ export type RecorderExtensionState =
           paired: false;
           installationId?: string;
           version?: string;
+          micPermission?: MicrophonePermission;
       }
     | {
           kind: "reachable";
@@ -33,6 +36,7 @@ export type RecorderExtensionState =
           pairedHere: boolean;
           installationId?: string;
           version?: string;
+          micPermission?: MicrophonePermission;
       };
 
 export interface PairResult {
@@ -53,6 +57,7 @@ interface PresenceReply {
     version?: string;
     installationId?: string;
     unreachable?: boolean;
+    micPermission?: MicrophonePermission;
 }
 
 type ExternalSendMessage = (
@@ -88,6 +93,11 @@ function toState(
         typeof reply.installationId === "string"
             ? reply.installationId
             : undefined;
+    const micPermission = ["granted", "prompt", "denied", "unknown"].includes(
+        reply.micPermission ?? "",
+    )
+        ? reply.micPermission
+        : undefined;
     if (reply.paired) {
         const pairedTo =
             typeof reply.pairedTo === "string" ? reply.pairedTo : null;
@@ -99,6 +109,7 @@ function toState(
             pairedHere: pairedTo === origin,
             version,
             installationId,
+            ...(micPermission ? { micPermission } : {}),
         };
     }
     return {
@@ -107,6 +118,7 @@ function toState(
         paired: false,
         version,
         installationId,
+        ...(micPermission ? { micPermission } : {}),
     };
 }
 

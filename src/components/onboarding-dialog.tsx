@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
     Dialog,
@@ -13,7 +13,6 @@ import {
     DialogTitle,
 } from "@/components/onboarding-dialog-base";
 import {
-    type OnboardingGoogleState,
     OnboardingStepAiProvider,
     OnboardingStepClaude,
     OnboardingStepComplete,
@@ -26,7 +25,17 @@ import {
 } from "@/components/onboarding-steps";
 import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
-import type { OnboardingCapabilities } from "@/lib/onboarding/capabilities";
+import type {
+    OnboardingCapabilities,
+    OnboardingReadiness,
+    OnboardingStatus,
+} from "@/lib/onboarding/capabilities";
+import {
+    browserRecorderExtensionClient,
+    type RecorderExtensionState,
+} from "@/lib/recorder-extension/client";
+import { RECORDER_EXTENSION_ID } from "@/lib/recorder-extension/extension-id";
+import type { SettingsSection } from "@/types/settings";
 
 /** Identifies a step that can be selected when opening onboarding. */
 export type OnboardingStepId =
@@ -39,143 +48,19 @@ export type OnboardingStepId =
     | "claude"
     | "complete";
 
-interface StepContext {
-    capabilities: OnboardingCapabilities;
-    hasPlaudConnection: boolean;
-    setHasPlaudConnection: (connected: boolean) => void;
-    hasOwnProvider: boolean;
-    hasIncludedProvider: boolean;
-    googleConnection: OnboardingGoogleState;
-    setGoogleConnection: (state: OnboardingGoogleState) => void;
-    recorderConnected: boolean;
-    setRecorderConnected: (connected: boolean) => void;
-    mailReady: boolean;
-    setMailReady: (ready: boolean) => void;
-    summaryItems: OnboardingSummaryItem[];
-    openSettings: (section: string) => void;
-}
-
 interface StepDefinition {
     id: OnboardingStepId;
-    visible: (capabilities: OnboardingCapabilities) => boolean;
     skippable: boolean;
-    content: (context: StepContext) => ReactNode;
 }
-
-function alwaysVisible() {
-    return true;
-}
-
-function renderWelcome() {
-    return <OnboardingStepWelcome />;
-}
-
-function renderPlaud(context: StepContext) {
-    return (
-        <OnboardingStepPlaud
-            hasPlaudConnection={context.hasPlaudConnection}
-            onReconnect={() => context.setHasPlaudConnection(false)}
-            onConnected={() => context.setHasPlaudConnection(true)}
-        />
-    );
-}
-
-function renderAiProvider(context: StepContext) {
-    return (
-        <OnboardingStepAiProvider
-            hasOwnProvider={context.hasOwnProvider}
-            hasIncludedProvider={context.hasIncludedProvider}
-            onGoToSettings={() => context.openSettings("providers")}
-        />
-    );
-}
-
-function renderGoogle(context: StepContext) {
-    return (
-        <OnboardingStepGoogle
-            onConnectionChange={context.setGoogleConnection}
-        />
-    );
-}
-
-function renderRecorder(context: StepContext) {
-    return (
-        <OnboardingStepRecorder
-            storeUrl={context.capabilities.recorderStoreUrl}
-            onConnected={() => context.setRecorderConnected(true)}
-        />
-    );
-}
-
-function renderMail(context: StepContext) {
-    return (
-        <OnboardingStepMail
-            onOpenSettings={() => context.openSettings("mail")}
-            onReady={context.setMailReady}
-        />
-    );
-}
-
-function renderClaude(context: StepContext) {
-    const connectorUrl = context.capabilities.mcpConnectorUrl;
-    return connectorUrl ? (
-        <OnboardingStepClaude connectorUrl={connectorUrl} />
-    ) : null;
-}
-
-function renderComplete(context: StepContext) {
-    return <OnboardingStepComplete items={context.summaryItems} />;
-}
-
 const STEPS: StepDefinition[] = [
-    {
-        id: "welcome",
-        visible: alwaysVisible,
-        skippable: false,
-        content: renderWelcome,
-    },
-    {
-        id: "plaud",
-        visible: alwaysVisible,
-        skippable: true,
-        content: renderPlaud,
-    },
-    {
-        id: "ai-provider",
-        visible: alwaysVisible,
-        skippable: true,
-        content: renderAiProvider,
-    },
-    {
-        id: "google",
-        visible: (capabilities) => capabilities.googleConfigured,
-        skippable: true,
-        content: renderGoogle,
-    },
-    {
-        id: "recorder",
-        visible: alwaysVisible,
-        skippable: true,
-        content: renderRecorder,
-    },
-    {
-        id: "mail",
-        visible: (capabilities) => capabilities.mailAvailable,
-        skippable: true,
-        content: renderMail,
-    },
-    {
-        id: "claude",
-        visible: (capabilities) => capabilities.mcpConnectorUrl !== null,
-        skippable: true,
-        content: renderClaude,
-    },
-    {
-        id: "complete",
-        visible: alwaysVisible,
-        skippable: false,
-        content: renderComplete,
-    },
+    { id: "welcome", skippable: false },
+    { id: "plaud", skippable: true },
+    { id: "ai-provider", skippable: true },
+    { id: "google", skippable: true },
+    { id: "recorder", skippable: true },
+    { id: "mail", skippable: true },
+    { id: "claude", skippable: true },
+    { id: "complete", skippable: false },
 ];
 
 interface OnboardingDialogProps {
@@ -183,92 +68,381 @@ interface OnboardingDialogProps {
     onOpenChange: (open: boolean) => void;
     onComplete: () => void;
     capabilities: OnboardingCapabilities;
+    initialReadiness?: OnboardingReadiness;
     mandatory?: boolean;
     initialStep?: OnboardingStepId;
+    suspended?: boolean;
+    onOpenSettings: (section: SettingsSection) => void;
 }
 
-/** First-run and voluntary setup wizard. */
+/** First-run and voluntary setup wizard, preserving progress during Settings. */
 export function OnboardingDialog({
     open,
     onOpenChange,
     onComplete,
     capabilities,
+    initialReadiness,
     mandatory = false,
     initialStep = "welcome",
+    suspended = false,
+    onOpenSettings,
 }: OnboardingDialogProps) {
     const i18n = useExtracted();
     const name = useProductName();
     const { refresh } = useRouter();
-    const visibleSteps = useMemo(
-        () => STEPS.filter((definition) => definition.visible(capabilities)),
-        [capabilities],
-    );
     const [step, setStep] = useState<OnboardingStepId>(initialStep);
-    const [hasPlaudConnection, setHasPlaudConnection] = useState(false);
-    const [hasOwnProvider, setHasOwnProvider] = useState(false);
-    const [hasIncludedProvider, setHasIncludedProvider] = useState(false);
-    const [googleConnection, setGoogleConnection] =
-        useState<OnboardingGoogleState>("not-connected");
-    const [recorderConnected, setRecorderConnected] = useState(false);
-    const [mailReady, setMailReady] = useState(false);
+    const [readiness, setReadiness] = useState(initialReadiness ?? null);
+    const [failed, setFailed] = useState(false);
+    const [skipped, setSkipped] = useState<Set<OnboardingStepId>>(new Set());
+    const [plaudOverride, setPlaudOverride] = useState<OnboardingStatus | null>(
+        null,
+    );
+    const [claudeConfirmed, setClaudeConfirmed] = useState(false);
+    const [recorderStatus, setRecorderStatus] =
+        useState<OnboardingStatus>("checking");
+    const personal = capabilities.audience !== "organization-account";
+    const requiredProviders = readiness
+        ? [
+              readiness.ai.transcription,
+              readiness.ai.summary,
+              ...(readiness.ai.mailSummary ? [readiness.ai.mailSummary] : []),
+          ]
+        : [];
+    const organizationAi =
+        requiredProviders.length > 0 &&
+        requiredProviders.every(
+            (provider) =>
+                provider.status === "ready" &&
+                provider.source === "organization",
+        );
+    const showAi = !(
+        capabilities.audience === "organization-member" &&
+        organizationAi &&
+        !failed
+    );
+    const visible = (id: OnboardingStepId) => {
+        if (id === "welcome" || id === "complete") return true;
+        if (id === "ai-provider") return showAi;
+        if (!personal) return false;
+        if (id === "google") return capabilities.googleConfigured;
+        if (id === "mail") return capabilities.mailAvailable;
+        if (id === "claude") return capabilities.mcpConnectorUrl !== null;
+        return true;
+    };
+    const visibleSteps = STEPS.filter((definition) => visible(definition.id));
 
     useEffect(() => {
         if (!open) return;
-        const requested = visibleSteps.find(
-            (definition) => definition.id === initialStep,
+        setStep(initialStep);
+        setSkipped(new Set());
+        setClaudeConfirmed(false);
+    }, [initialStep, open]);
+
+    useEffect(() => {
+        if (!open || suspended) return;
+        const controller = new AbortController();
+        const load = async () => {
+            setPlaudOverride(null);
+            try {
+                const response = await fetch("/api/onboarding/readiness", {
+                    signal: controller.signal,
+                    cache: "no-store",
+                });
+                if (!response.ok) throw new Error("readiness check failed");
+                const snapshot = (await response.json()) as OnboardingReadiness;
+                if (controller.signal.aborted) return;
+                setReadiness(snapshot);
+                setFailed(false);
+            } catch {
+                if (!controller.signal.aborted) setFailed(true);
+            }
+        };
+        void load();
+        window.addEventListener("focus", load);
+        return () => {
+            controller.abort();
+            window.removeEventListener("focus", load);
+        };
+    }, [open, suspended]);
+
+    const handleRecorderState = useCallback((state: RecorderExtensionState) => {
+        setRecorderStatus(
+            state.kind === "reachable" && state.paired && state.pairedHere
+                ? "ready"
+                : "not-connected",
         );
-        setStep(requested?.id ?? "welcome");
-    }, [initialStep, open, visibleSteps]);
-
+    }, []);
     useEffect(() => {
-        if (!open || step !== "plaud") return;
-        fetch("/api/plaud/connection")
-            .then((response) => response.json())
-            .then((data: { connected?: boolean }) => {
-                setHasPlaudConnection(data.connected === true);
-            })
-            .catch(() => undefined);
-    }, [open, step]);
+        if (!open || !personal || suspended) return;
+        let cancelled = false;
+        const client = browserRecorderExtensionClient();
+        const detect = async () => {
+            try {
+                const state = await client.detect(RECORDER_EXTENSION_ID);
+                if (!cancelled) handleRecorderState(state);
+            } catch {
+                if (!cancelled) setRecorderStatus("error");
+            }
+        };
+        void detect();
+        const stop = client.onPresence(handleRecorderState);
+        const interval = window.setInterval(detect, 2000);
+        window.addEventListener("focus", detect);
+        return () => {
+            cancelled = true;
+            stop();
+            window.clearInterval(interval);
+            window.removeEventListener("focus", detect);
+        };
+    }, [open, personal, suspended, handleRecorderState]);
 
-    useEffect(() => {
-        if (!open || step !== "ai-provider") return;
-        fetch("/api/settings/ai/providers")
-            .then((response) => response.json())
-            .then((data: { providers?: Array<{ managed?: boolean }> }) => {
-                const providers = data.providers ?? [];
-                setHasOwnProvider(
-                    providers.some((provider) => !provider.managed),
-                );
-                setHasIncludedProvider(
-                    providers.some((provider) => provider.managed),
-                );
-            })
-            .catch(() => undefined);
-    }, [open, step]);
-
-    useEffect(() => {
-        if (open) return;
-        setStep("welcome");
-        setHasPlaudConnection(false);
-        setHasOwnProvider(false);
-        setHasIncludedProvider(false);
-        setGoogleConnection("not-connected");
-        setRecorderConnected(false);
-        setMailReady(false);
-    }, [open]);
-
+    const handleRecorderConnected = useCallback(
+        () => setRecorderStatus("ready"),
+        [],
+    );
+    const status = (value: OnboardingStatus | undefined): OnboardingStatus =>
+        failed ? "error" : (value ?? "checking");
+    const plaudStatus = plaudOverride ?? status(readiness?.plaud);
+    const googleStatus = status(readiness?.google);
     const stepIndex = Math.max(
         0,
         visibleSteps.findIndex((definition) => definition.id === step),
     );
-    const definition = visibleSteps[stepIndex] ?? visibleSteps[0];
-    const previous = stepIndex > 0 ? visibleSteps[stepIndex - 1] : undefined;
-    const next = visibleSteps[stepIndex + 1];
+    const effectiveIndex =
+        step === "ai-provider" && !showAi
+            ? visibleSteps.findIndex(
+                  (definition) =>
+                      STEPS.findIndex((item) => item.id === definition.id) > 2,
+              )
+            : stepIndex;
+    const definition = visibleSteps[effectiveIndex] ?? visibleSteps[0];
+    const previous =
+        effectiveIndex > 0 ? visibleSteps[effectiveIndex - 1] : undefined;
+    const next = visibleSteps[effectiveIndex + 1];
+    const progress = ((effectiveIndex + 1) / visibleSteps.length) * 100;
 
-    const openSettings = (section: string) => {
-        onOpenChange(false);
-        window.location.href = `/dashboard?settings=${encodeURIComponent(section)}`;
+    const summaryItems: OnboardingSummaryItem[] = [];
+    const add = (
+        id: OnboardingStepId,
+        label: string,
+        result: OnboardingStatus,
+        location: string,
+        detail?: string,
+    ) => {
+        summaryItems.push({
+            id,
+            label,
+            status: skipped.has(id) ? "skipped" : result,
+            location,
+            detail: skipped.has(id) ? undefined : detail,
+        });
     };
+    if (personal)
+        add(
+            "plaud",
+            i18n("Plaud"),
+            plaudStatus,
+            i18n("Settings → Plaud Account"),
+        );
+    const aiReady =
+        requiredProviders.length > 0 &&
+        requiredProviders.every((provider) => provider.status === "ready");
+    const aiError = requiredProviders.some(
+        (provider) => provider.status === "error",
+    );
+    const aiStatus = status(
+        !readiness
+            ? undefined
+            : aiError
+              ? "error"
+              : aiReady
+                ? "ready"
+                : "not-connected",
+    );
+    const providerNames = [
+        ...new Set(
+            requiredProviders.flatMap((provider) =>
+                provider.name ? [provider.name] : [],
+            ),
+        ),
+    ].join(", ");
+    add(
+        "ai-provider",
+        i18n("AI"),
+        aiStatus,
+        i18n("Settings → Providers"),
+        organizationAi && !failed
+            ? i18n("provided by your Organization ({name})", {
+                  name: providerNames,
+              })
+            : aiReady && !failed
+              ? i18n("Ready ({name})", { name: providerNames })
+              : undefined,
+    );
+    if (
+        readiness &&
+        !failed &&
+        !organizationAi &&
+        !skipped.has("ai-provider")
+    ) {
+        const coverage = [
+            [
+                "transcription",
+                i18n("AI transcription"),
+                readiness.ai.transcription,
+            ],
+            ["summary", i18n("AI summaries"), readiness.ai.summary],
+            ...(readiness.ai.mailSummary
+                ? [
+                      [
+                          "mail",
+                          i18n("Mail summaries"),
+                          readiness.ai.mailSummary,
+                      ] as const,
+                  ]
+                : []),
+        ] as const;
+        for (const [role, label, provider] of coverage) {
+            summaryItems.push({
+                id: `ai-${role}`,
+                label,
+                status: provider.status,
+                location: i18n("Settings → Providers"),
+                detail:
+                    provider.status === "ready"
+                        ? provider.source === "organization"
+                            ? i18n("provided by your Organization ({name})", {
+                                  name: provider.name ?? "",
+                              })
+                            : i18n("Ready ({name})", {
+                                  name: provider.name ?? "",
+                              })
+                        : undefined,
+            });
+        }
+    }
+    if (personal && capabilities.googleConfigured)
+        add(
+            "google",
+            i18n("Google"),
+            googleStatus,
+            i18n("Settings → Google Account"),
+        );
+    if (personal)
+        add(
+            "recorder",
+            i18n("Recorder"),
+            recorderStatus,
+            i18n("Settings → Meeting Recorder"),
+            recorderStatus === "ready"
+                ? i18n("Paired with this site")
+                : undefined,
+        );
+    if (personal && capabilities.mailAvailable)
+        add(
+            "mail",
+            i18n("Mail"),
+            status(readiness?.mail.status),
+            i18n("Settings → Mail"),
+        );
+    if (personal && capabilities.mcpConnectorUrl)
+        add(
+            "claude",
+            i18n("Claude"),
+            claudeConfirmed ? "confirmed" : "available",
+            i18n("Menu → Re-run setup"),
+        );
+    if (!personal) {
+        for (const [channel, profile] of Object.entries(
+            readiness?.profiles ?? {
+                audio: { status: "checking", name: null },
+                mail: { status: "checking", name: null },
+            },
+        )) {
+            if (profile)
+                summaryItems.push({
+                    id: `profile-${channel}`,
+                    label:
+                        channel === "audio"
+                            ? i18n("Audio profile")
+                            : i18n("Mail profile"),
+                    status: status(profile.status),
+                    detail: failed ? undefined : (profile.name ?? undefined),
+                    location: i18n("Settings → Profiles"),
+                });
+        }
+    }
+
+    let content: ReactNode;
+    switch (definition.id) {
+        case "welcome":
+            content = (
+                <OnboardingStepWelcome audience={capabilities.audience} />
+            );
+            break;
+        case "plaud":
+            content = (
+                <OnboardingStepPlaud
+                    hasPlaudConnection={plaudStatus === "connected"}
+                    status={plaudStatus}
+                    needsReconnect={plaudStatus === "needs-reconnect"}
+                    employee={capabilities.audience === "organization-member"}
+                    onReconnect={() => setPlaudOverride("not-connected")}
+                    onConnected={() => setPlaudOverride("connected")}
+                />
+            );
+            break;
+        case "ai-provider":
+            content = (
+                <OnboardingStepAiProvider
+                    ai={failed ? null : (readiness?.ai ?? null)}
+                    audience={capabilities.audience}
+                    checking={!readiness && !failed}
+                    profiles={failed ? undefined : readiness?.profiles}
+                    onGoToSettings={() => onOpenSettings("providers")}
+                    onOpenProfiles={() => onOpenSettings("profiles")}
+                />
+            );
+            break;
+        case "google":
+            content = <OnboardingStepGoogle status={googleStatus} />;
+            break;
+        case "recorder":
+            content = (
+                <OnboardingStepRecorder
+                    storeUrl={capabilities.recorderStoreUrl}
+                    onConnected={handleRecorderConnected}
+                />
+            );
+            break;
+        case "mail":
+            content = (
+                <OnboardingStepMail
+                    mail={
+                        failed
+                            ? { status: "error", address: null }
+                            : (readiness?.mail ?? {
+                                  status: "checking",
+                                  address: null,
+                              })
+                    }
+                    onOpenSettings={() => onOpenSettings("mail")}
+                />
+            );
+            break;
+        case "claude":
+            content = (
+                <OnboardingStepClaude
+                    connectorUrl={capabilities.mcpConnectorUrl ?? ""}
+                    confirmed={claudeConfirmed}
+                    onConfirm={() => setClaudeConfirmed(true)}
+                />
+            );
+            break;
+        case "complete":
+            content = <OnboardingStepComplete items={summaryItems} />;
+            break;
+    }
 
     const handleComplete = async () => {
         try {
@@ -285,79 +459,8 @@ export function OnboardingDialog({
             toast.error(i18n("Failed to complete onboarding"));
         }
     };
-
-    const summaryItems: OnboardingSummaryItem[] = [
-        {
-            id: "plaud",
-            label: i18n("Plaud"),
-            status: hasPlaudConnection ? "connected" : "skipped",
-            location: i18n("Settings → Plaud Account"),
-        },
-        {
-            id: "ai-provider",
-            label: i18n("AI provider"),
-            status:
-                hasOwnProvider || hasIncludedProvider ? "connected" : "skipped",
-            location: i18n("Settings → Providers"),
-        },
-    ];
-    if (capabilities.googleConfigured) {
-        let googleStatus: OnboardingSummaryItem["status"] = "skipped";
-        if (googleConnection === "calendar-meet") {
-            googleStatus = "connected";
-        }
-        if (googleConnection === "calendar-only") {
-            googleStatus = "calendar-only";
-        }
-        summaryItems.push({
-            id: "google",
-            label: i18n("Google"),
-            status: googleStatus,
-            location: i18n("Settings → Google Account"),
-        });
-    }
-    summaryItems.push({
-        id: "recorder",
-        label: i18n("Recorder"),
-        status: recorderConnected ? "connected" : "skipped",
-        location: i18n("Settings → Meeting Recorder"),
-    });
-    if (capabilities.mailAvailable) {
-        summaryItems.push({
-            id: "mail",
-            label: i18n("Mail"),
-            status: mailReady ? "connected" : "skipped",
-            location: i18n("Settings → Mail"),
-        });
-    }
-    if (capabilities.mcpConnectorUrl) {
-        summaryItems.push({
-            id: "claude",
-            label: i18n("Claude"),
-            status: "skipped",
-            location: i18n("Menu → Re-run setup"),
-        });
-    }
-
-    const context: StepContext = {
-        capabilities,
-        hasPlaudConnection,
-        setHasPlaudConnection,
-        hasOwnProvider,
-        hasIncludedProvider,
-        googleConnection,
-        setGoogleConnection,
-        recorderConnected,
-        setRecorderConnected,
-        mailReady,
-        setMailReady,
-        summaryItems,
-        openSettings,
-    };
-    const progress = ((stepIndex + 1) / visibleSteps.length) * 100;
-
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open && !suspended} onOpenChange={onOpenChange}>
             <DialogContent
                 aria-describedby={undefined}
                 className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[600px]"
@@ -382,7 +485,7 @@ export function OnboardingDialog({
                     <div className="space-y-2">
                         <p className="text-center text-xs text-muted-foreground">
                             {i18n("Step {current} of {total}", {
-                                current: String(stepIndex + 1),
+                                current: String(effectiveIndex + 1),
                                 total: String(visibleSteps.length),
                             })}
                         </p>
@@ -399,7 +502,7 @@ export function OnboardingDialog({
                         </div>
                     </div>
 
-                    {definition?.content(context)}
+                    {content}
 
                     <DialogFooter className="flex-row items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -421,7 +524,12 @@ export function OnboardingDialog({
                                 <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => setStep(next.id)}
+                                    onClick={() => {
+                                        setSkipped((current) =>
+                                            new Set(current).add(definition.id),
+                                        );
+                                        setStep(next.id);
+                                    }}
                                 >
                                     {i18n("Skip")}
                                 </Button>
@@ -435,7 +543,16 @@ export function OnboardingDialog({
                                 next && (
                                     <Button
                                         size="sm"
-                                        onClick={() => setStep(next.id)}
+                                        onClick={() => {
+                                            setSkipped((current) => {
+                                                const updated = new Set(
+                                                    current,
+                                                );
+                                                updated.delete(definition.id);
+                                                return updated;
+                                            });
+                                            setStep(next.id);
+                                        }}
                                     >
                                         {i18n("Next")}
                                         <ArrowRight className="size-4" />

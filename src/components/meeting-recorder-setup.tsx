@@ -91,6 +91,7 @@ export function MeetingRecorderSetup({
     const [pageOrigin, setPageOrigin] = useState("");
     const [compatible, setCompatible] = useState<boolean | null>(null);
     const [busy, setBusy] = useState(false);
+    const [pendingConfirmation, setPendingConfirmation] = useState(false);
     const [manualKey, setManualKey] = useState<string | null>(null);
     const [copied, setCopied] = useState<"key" | "url" | null>(null);
     const [rebindTargets, setRebindTargets] = useState<Record<string, string>>(
@@ -165,6 +166,7 @@ export function MeetingRecorderSetup({
             extension.paired &&
             extension.pairedHere
         ) {
+            setPendingConfirmation(false);
             onConnected?.();
         }
     }, [extension, onConnected]);
@@ -211,6 +213,7 @@ export function MeetingRecorderSetup({
                     result.error ?? i18n("The extension refused pairing"),
                 );
             }
+            setPendingConfirmation(result.pending === true);
             toast.success(
                 result.pending
                     ? i18n("Confirm this server in the extension")
@@ -343,7 +346,7 @@ export function MeetingRecorderSetup({
                     "Requires desktop Chrome, Edge, Brave, or another Chromium browser.",
                 )}
             </p>
-            {extension?.kind !== "reachable" &&
+            {extension?.kind === "not-installed" &&
                 (mode === "settings" || compatible === true) && (
                     <Button
                         asChild
@@ -367,6 +370,25 @@ export function MeetingRecorderSetup({
                     </Button>
                 )}
 
+            <p className="text-sm text-muted-foreground">
+                {i18n(
+                    "After installing, open the extension's toolbar icon and allow this site. Once detected here, click Connect, then Confirm in the extension. Follow any consent prompts; if this site is still waiting for access, open the toolbar icon again.",
+                )}
+            </p>
+            {extension?.kind === "reachable" &&
+                extension.micPermission &&
+                extension.micPermission !== "granted" && (
+                    <output className="block text-sm">
+                        {i18n(
+                            "Allow the microphone in the extension, or your voice will not be recorded",
+                        )}
+                    </output>
+                )}
+            {pendingConfirmation && (
+                <output className="block text-sm">
+                    {i18n("Confirm this server in the extension")}
+                </output>
+            )}
             {extension === null && (
                 <p className="text-sm text-muted-foreground">
                     {i18n("Looking for the extension…")}

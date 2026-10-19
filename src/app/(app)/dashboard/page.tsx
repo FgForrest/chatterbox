@@ -29,6 +29,7 @@ import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { isMcpEnabled } from "@/lib/mcp/config";
 import { mcpResourceUrl } from "@/lib/mcp/metadata";
 import type { OnboardingCapabilities } from "@/lib/onboarding/capabilities";
+import { loadOnboardingReadiness } from "@/lib/onboarding/readiness";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { RECORDER_EXTENSION_STORE_URL } from "@/lib/recorder-extension/extension-id";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
@@ -331,6 +332,23 @@ export default async function DashboardPage() {
         getOrgUserId(),
         isOrgAccount(session.user.id),
     ]);
+    const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
+    const onboardingCapabilities: OnboardingCapabilities = {
+        audience: viewerIsOrgAccount
+            ? "organization-account"
+            : orgUserId
+              ? "organization-member"
+              : "single-user",
+        googleConfigured: getGoogleOAuthConfig() !== null,
+        mailAvailable,
+        mcpConnectorUrl: isMcpEnabled() ? mcpResourceUrl() : null,
+        recorderStoreUrl: RECORDER_EXTENSION_STORE_URL,
+    };
+
+    const onboardingReadinessPromise = loadOnboardingReadiness(
+        session.user.id,
+        onboardingCapabilities,
+    );
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
     const ownRecordings = viewerIsOrgAccount ? [] : userRecordings;
@@ -407,13 +425,8 @@ export default async function DashboardPage() {
             selfHostMode: env.SELF_HOST_MODE,
         },
     );
-    const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
-    const onboardingCapabilities: OnboardingCapabilities = {
-        googleConfigured: getGoogleOAuthConfig() !== null,
-        mailAvailable,
-        mcpConnectorUrl: isMcpEnabled() ? mcpResourceUrl() : null,
-        recorderStoreUrl: RECORDER_EXTENSION_STORE_URL,
-    };
+
+    const onboardingReadiness = await onboardingReadinessPromise;
 
     return (
         <Workstation
@@ -429,6 +442,7 @@ export default async function DashboardPage() {
             isHosted={env.IS_HOSTED}
             mailEnabled={mailAvailable}
             onboardingCapabilities={onboardingCapabilities}
+            onboardingReadiness={onboardingReadiness}
             accessManagement={accessManagementAvailable(actor)}
             canCurate={actor ? await actsForOrganization(actor) : false}
             exportProviders={exportProvidersAvailability()}
