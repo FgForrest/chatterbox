@@ -313,6 +313,20 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         ).toBe("true");
     });
 
+    it("does not offer adding tasks before there is a summary", () => {
+        state.summaryData = null;
+        renderWidget(kind);
+
+        const taskViews = [
+            ...screen.queryAllByTestId("recording-tasks"),
+            ...screen.queryAllByTestId("task-review"),
+        ];
+        expect(taskViews.length).toBeGreaterThan(0);
+        for (const view of taskViews) {
+            expect(view.getAttribute("data-allow-add")).toBe("false");
+        }
+    });
+
     it("shows multi-pass progress and elapsed time while running", () => {
         state.isSummarizing = true;
         state.summaryProgress = { phase: "passes", completed: 2, total: 3 };
