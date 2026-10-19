@@ -906,9 +906,8 @@ async function handleMeetingNotification(id, button) {
     if (!entry) return;
     await chrome.notifications.clear(id);
     entry.nudged = true;
-    if (button === 1) entry.dismissed = true;
     await setArmed(armed);
-    if (button !== 0 || entry.dismissed) return;
+    if (button !== 0) return;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const platform = tab?.url ? detectMeetingPlatform(tab.url) : null;
     if (!platform || platform.id !== entry.platformId) return;
@@ -968,8 +967,6 @@ async function arm(tab, platform, mode) {
         platformId: platform.id,
         mode,
         nudged: existing?.platformId === platform.id ? existing.nudged : false,
-        dismissed:
-            existing?.platformId === platform.id ? existing.dismissed : false,
     };
     await setArmed(armed);
     await applyArmedUi(tab.id, platform, mode);
@@ -993,7 +990,7 @@ async function nudge(tabId, platform) {
     const settings = await getSettings();
     if (!settings.nudgeEnabled) return;
     const armed = await getArmed();
-    if (!armed[tabId] || armed[tabId].nudged || armed[tabId].dismissed) return;
+    if (!armed[tabId] || armed[tabId].nudged) return;
     armed[tabId].nudged = true;
     await setArmed(armed);
     await notify(

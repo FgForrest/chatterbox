@@ -1004,7 +1004,7 @@ describe("meeting notification actions", () => {
         chrome.notifications.create.mockClear();
         harness.listeners.notificationButton("nudge:7", 1);
         await vi.waitFor(() =>
-            expect(harness.sessionValues.armedTabs[7].dismissed).toBe(true),
+            expect(harness.sessionValues.armedTabs[7].nudged).toBe(true),
         );
         await harness.listeners.tabUpdated(7, { status: "complete" }, tab);
         await harness.listeners.tabUpdated(7, { audible: true }, tab);
