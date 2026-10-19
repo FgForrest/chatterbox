@@ -2,7 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import type { ReactNode } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
 import type { WorkflowWidgetFooter } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,12 @@ import { getApiErrorMessage } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 
 interface LearnReviewRowProps {
-    kind: "new_record" | "fact" | "known_fact";
+    kind:
+        | "new_record"
+        | "fact"
+        | "known_fact"
+        | "correction"
+        | "relation_phrase";
     checked?: boolean;
     checkboxLabel?: string;
     disabled?: boolean;
@@ -31,7 +36,10 @@ export function LearnReviewRow({
 }: LearnReviewRowProps) {
     return (
         <div
-            className={cn("flex items-start gap-2 text-sm", className)}
+            className={cn(
+                "flex items-start gap-3 rounded-lg bg-muted p-3 text-sm dark:bg-popover",
+                className,
+            )}
             data-shared-learn-row={kind}
         >
             {onCheckedChange && (
@@ -61,19 +69,39 @@ export function LearnEvidence({
     provenance,
     children,
 }: LearnEvidenceProps) {
+    const i18n = useExtracted();
+    const [expanded, setExpanded] = useState(false);
+    const quoteId = useId();
     return (
-        <div className="space-y-1" data-shared-learn-evidence>
-            {quote && (
-                <p className="text-xs italic text-muted-foreground">
-                    “{quote}”
-                </p>
-            )}
+        <div data-shared-learn-evidence>
+            {children}
             {provenance && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                     {provenance}
                 </p>
             )}
-            {children}
+            {quote && (
+                <div className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                    <p
+                        id={quoteId}
+                        className={cn(
+                            "min-w-0 italic",
+                            expanded ? "break-words" : "truncate",
+                        )}
+                    >
+                        “{quote}”
+                    </p>
+                    <button
+                        type="button"
+                        className="shrink-0 underline underline-offset-2"
+                        aria-controls={quoteId}
+                        aria-expanded={expanded}
+                        onClick={() => setExpanded((value) => !value)}
+                    >
+                        {expanded ? i18n("Shorten") : i18n("Full quote")}
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

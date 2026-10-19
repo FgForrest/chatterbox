@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import { sql } from "drizzle-orm";
-import { db, sqlClient } from "@/db";
+import { sqlClient } from "@/db";
+import { publishEvent } from "@/db/queries/events";
 
 /**
  * Invalidation events for the Organization scope.
@@ -45,9 +45,7 @@ function parseEvent(payload: string): OrgEvent | null {
  */
 export async function notifyOrgChange(event: OrgEvent): Promise<void> {
     try {
-        await db.execute(
-            sql`select pg_notify(${CHANNEL}, ${JSON.stringify(event)})`,
-        );
+        await publishEvent(CHANNEL, event);
     } catch (error) {
         console.error("[org-events] notify failed:", error);
     }

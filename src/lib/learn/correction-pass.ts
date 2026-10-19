@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
+import type { AppLocale } from "@/lib/i18n/config";
 import {
     type AnchorPosition,
     anchorsOverlap,
@@ -25,6 +26,7 @@ import {
 import { LearnOutputUnusable } from "@/lib/learn/errors";
 import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import { parseJsonAnswer, strictJsonSchema } from "@/lib/learn/output";
+import { learnReviewLanguageRule } from "@/lib/learn/review-language";
 import type { LearnBridgeChat } from "@/lib/learn/run-bridge";
 import {
     DATA_RULE,
@@ -177,6 +179,7 @@ export interface CorrectionPassInput {
     token: string;
     turns: readonly TranscriptTurn[];
     language: string | null;
+    reviewLocale?: AppLocale | null;
     almanac: readonly AlmanacRecord[];
     corrected: readonly StandingCorrection[];
     signal?: AbortSignal;
@@ -241,6 +244,7 @@ export async function runCorrectionPass(
 ): Promise<CorrectionPassResult> {
     input.signal?.throwIfAborted();
     const schema = strictJsonSchema(correctionOutputSchema);
+    const languageRule = learnReviewLanguageRule(input.reviewLocale);
     const result: CorrectionPassResult = {
         fixes: [],
         calls: 0,
@@ -252,7 +256,7 @@ export async function runCorrectionPass(
         result.windows = 1;
         result.calls++;
         let reply = await input.bridge.complete({
-            system: BRIDGE_SYSTEM,
+            system: `${BRIDGE_SYSTEM} ${languageRule}`,
             user: contextOf(input, 0, input.turns),
             schema,
             mcp: {
@@ -267,7 +271,7 @@ export async function runCorrectionPass(
             result.repairs++;
             result.calls++;
             reply = await input.bridge.complete({
-                system: REPAIR_SYSTEM,
+                system: `${REPAIR_SYSTEM} ${languageRule}`,
                 user: `The application rejected it: ${answer.error}\n\nDRAFT:\n${reply}`,
                 schema,
                 mcp: null,
@@ -289,7 +293,10 @@ export async function runCorrectionPass(
         result.calls++;
         let reply = await input.chat.complete(
             [
-                { role: "system", content: FALLBACK_SYSTEM },
+                {
+                    role: "system",
+                    content: `${FALLBACK_SYSTEM} ${languageRule}`,
+                },
                 {
                     role: "user",
                     content: contextOf(input, window.first, window.turns),
@@ -303,7 +310,10 @@ export async function runCorrectionPass(
             result.calls++;
             reply = await input.chat.complete(
                 [
-                    { role: "system", content: REPAIR_SYSTEM },
+                    {
+                        role: "system",
+                        content: `${REPAIR_SYSTEM} ${languageRule}`,
+                    },
                     {
                         role: "user",
                         content: `The application rejected it: ${answer.error}\nThe JSON Schema: ${JSON.stringify(schema)}\n\nDRAFT:\n${reply}`,

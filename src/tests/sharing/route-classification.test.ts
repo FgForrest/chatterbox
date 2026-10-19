@@ -33,9 +33,11 @@ type Rule =
     | "job"
     | "people"
     | "tasks"
-    | "mail";
+    | "mail"
+    | "session";
 
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
+    "events/route.ts": { GET: "session" },
     "recordings/[id]/route.ts": {
         GET: "owner",
         // The title: the owner on the private view, the organization
@@ -142,6 +144,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
 
 const API_ROOT = join(__dirname, "../../app/api");
 const GUARDED_DIRECTORIES = [
+    "events",
     "recordings/[id]",
     "jobs",
     "folders",
@@ -186,6 +189,9 @@ describe("recording route classification", () => {
         for (const [file, methods] of Object.entries(CLASSIFIED)) {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
+            if (rules.has("session")) {
+                expect(source, file).toContain("requireApiSession");
+            }
             if (rules.has("view")) {
                 expect(source, file).toContain("requireRecordingView");
             }

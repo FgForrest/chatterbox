@@ -6,6 +6,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +106,8 @@ const ready = {
                 kind: "person",
                 name: "Eva",
                 address: "eva@example.com",
-                evidence: [],
+                reason: "Named in the message",
+                evidence: [{ segmentIndex: 0, charStart: 0, charEnd: 16 }],
             },
         },
         {
@@ -223,6 +225,161 @@ describe.each([
             "Review finished: 2 changes made",
         );
     });
+});
+
+it("stacks a record's address before its own expandable quote", async () => {
+    stubFetch();
+    await renderReview("inline");
+    const row = document.querySelector('[data-shared-learn-row="new_record"]');
+    expect(row).toBeInstanceOf(HTMLElement);
+    const evidence = row?.querySelector("[data-shared-learn-evidence]");
+    expect(evidence?.firstElementChild?.textContent).toBe("eva@example.com");
+    const toggle = within(row as HTMLElement).getByRole("button", {
+        name: "Full quote",
+    });
+    const quote = document.getElementById(
+        toggle.getAttribute("aria-controls") ?? "",
+    );
+    expect(quote?.textContent).toBe("“Jan leads Orion.”");
+    expect(quote?.classList.contains("truncate")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(
+        within(row as HTMLElement)
+            .getByRole("button", { name: "Shorten" })
+            .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(quote?.classList.contains("truncate")).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.textContent).toBe("Full quote");
+    expect(quote?.classList.contains("truncate")).toBe(true);
+});
+
+it.each([
+    "wide",
+    "menu",
+] as const)("rejects and restores a selected record through the %s actions", async (mode) => {
+    stubFetch();
+    await renderReview("inline");
+    const checkbox = screen.getByRole("checkbox", {
+        name: "Add Eva to the Almanac",
+    }) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(true));
+    async function never() {
+        if (mode === "wide")
+            return screen.getByRole("button", { name: "Never propose it" });
+        fireEvent.keyDown(
+            screen.getByRole("button", { name: "More options" }),
+            { key: "ArrowDown" },
+        );
+        expect(
+            await screen.findByRole("menuitem", {
+                name: "It is someone known…",
+            }),
+        ).toBeTruthy();
+        return screen.getByRole("menuitemcheckbox", {
+            name: "Never propose it",
+        });
+    }
+    fireEvent.click(await never());
+    await waitFor(() => expect(checkbox.disabled).toBe(true));
+    expect(checkbox.checked).toBe(false);
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
+        "disabled",
+        true,
+    );
+    const all = screen.getByRole("checkbox", {
+        name: "Tick all: New in the Almanac",
+    });
+    expect(all).toHaveProperty("disabled", true);
+    const section = screen.getByRole("region", { name: "New in the Almanac" });
+    expect(within(section).getByText("0 of 1 selected")).toBeTruthy();
+    const action = await never();
+    expect(
+        action.getAttribute(mode === "wide" ? "aria-pressed" : "aria-checked"),
+    ).toBe("true");
+    fireEvent.click(action);
+    await waitFor(() => expect(checkbox.disabled).toBe(false));
+    expect(checkbox.checked).toBe(false);
+});
+
+it.each([
+    "wide",
+    "menu",
+] as const)("opens the known-record dialog and links a person through the %s actions", async (mode) => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
+    let linked = false;
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/people")
+            return Response.json({
+                people: [{ id: "p-eva", displayName: "Eva Novak" }],
+            });
+        if (url === "/api/knowledge/entities")
+            return Response.json({ entities: [] });
+        if (init?.method === "PATCH") {
+            linked = true;
+            return Response.json({ version: 1 });
+        }
+        return Response.json(
+            linked
+                ? {
+                      ...ready,
+                      names: { ...ready.names, "p-eva": "Eva Novak" },
+                      items: [
+                          {
+                              ...ready.items[0],
+                              decision: "accepted",
+                              choice: { personId: "p-eva" },
+                              version: 1,
+                          },
+                      ],
+                  }
+                : ready,
+        );
+    });
+    vi.stubGlobal("fetch", fetch);
+    await renderReview("inline");
+    if (mode === "menu") {
+        fireEvent.keyDown(
+            screen.getByRole("button", { name: "More options" }),
+            { key: "ArrowDown" },
+        );
+        fireEvent.click(
+            await screen.findByRole("menuitem", {
+                name: "It is someone known…",
+            }),
+        );
+    } else {
+        fireEvent.click(
+            screen.getByRole("button", { name: "It is someone known…" }),
+        );
+    }
+    expect(
+        await screen.findByRole("dialog", { name: "Which record is Eva?" }),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole("option", { name: /Eva Novak/ }));
+    expect(
+        await screen.findByText("Eva is Eva Novak, in the Almanac"),
+    ).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith(
+        "/api/recordings/mail-1/review/items/record-1",
+        expect.objectContaining({
+            method: "PATCH",
+            body: JSON.stringify({
+                decision: "accepted",
+                version: 0,
+                choice: { personId: "p-eva" },
+            }),
+        }),
+    );
 });
 
 it("keeps a manually started mail Learn run inline", async () => {
