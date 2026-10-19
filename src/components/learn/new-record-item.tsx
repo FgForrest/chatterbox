@@ -15,6 +15,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 
@@ -86,6 +93,7 @@ export function NewRecordItem({
     entityTypes,
     seek,
     evidence,
+    quote,
     onDecide,
     onLinked,
 }: {
@@ -104,6 +112,7 @@ export function NewRecordItem({
     entityTypes: { key: string; label: string }[];
     seek: (ms: number) => ReactNode;
     evidence?: ReactNode;
+    quote?: ReactNode;
     onDecide: (
         decision: "accepted" | "rejected" | null,
         choice: NewRecordChoice | null,
@@ -133,11 +142,21 @@ export function NewRecordItem({
         );
     };
 
+    const knownLabel =
+        payload.kind === "person"
+            ? i18n("It is someone known…")
+            : i18n("It is something known…");
+    const toggleRejected = () =>
+        void onDecide(
+            rejected ? null : "rejected",
+            (choice as NewRecordChoice | null) ?? null,
+        );
+
     return (
         <LearnReviewRow
             kind="new_record"
-            checked={ticked}
-            disabled={disabled}
+            checked={ticked && !rejected}
+            disabled={disabled || rejected}
             checkboxLabel={i18n("Add {name} to the Almanac", {
                 name: current.name,
             })}
@@ -173,12 +192,12 @@ export function NewRecordItem({
                         </Button>
                     </div>
                 ) : (
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @[560px]/learn:grid-cols-[minmax(0,1fr)_minmax(6rem,10rem)_auto]">
                         <Input
-                            className="h-8 w-56"
+                            className="col-span-2 h-8 w-full min-w-0 @[560px]/learn:col-span-1"
                             value={name}
                             maxLength={200}
-                            disabled={disabled}
+                            disabled={disabled || rejected}
                             aria-label={i18n("Name")}
                             onChange={(event) => setName(event.target.value)}
                             onBlur={() => {
@@ -192,12 +211,12 @@ export function NewRecordItem({
                                 }
                             }}
                         />
-                        {payload.kind === "entity" && (
+                        {payload.kind === "entity" ? (
                             <NativeSelect
-                                className="h-8"
+                                className="h-8 w-full min-w-0"
                                 aria-label={i18n("Kind of thing")}
                                 value={typeKey ?? ""}
-                                disabled={disabled}
+                                disabled={disabled || rejected}
                                 onChange={(event) => {
                                     setTypeKey(event.target.value);
                                     void keep({
@@ -212,33 +231,63 @@ export function NewRecordItem({
                                     </option>
                                 ))}
                             </NativeSelect>
+                        ) : (
+                            <span className="px-3 text-xs text-muted-foreground">
+                                {i18n("Person")}
+                            </span>
                         )}
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-xs"
-                            disabled={disabled}
-                            onClick={() => setPicking(true)}
-                        >
-                            {payload.kind === "person"
-                                ? i18n("It is someone known…")
-                                : i18n("It is something known…")}
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant={rejected ? "default" : "outline"}
-                            className="h-6 px-2 text-xs"
-                            aria-pressed={rejected}
-                            disabled={disabled}
-                            onClick={() =>
-                                void onDecide(
-                                    rejected ? null : "rejected",
-                                    (choice as NewRecordChoice | null) ?? null,
-                                )
-                            }
-                        >
-                            {i18n("Never propose it")}
-                        </Button>
+                        <div className="hidden items-center justify-end gap-1 @[560px]/learn:flex">
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs text-muted-foreground"
+                                disabled={disabled}
+                                onClick={() => setPicking(true)}
+                            >
+                                {knownLabel}
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs text-muted-foreground aria-pressed:bg-primary/10 aria-pressed:text-primary"
+                                aria-pressed={rejected}
+                                disabled={disabled}
+                                onClick={toggleRejected}
+                            >
+                                {i18n("Never propose it")}
+                            </Button>
+                        </div>
+                        <div className="justify-self-end @[560px]/learn:hidden">
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        aria-label={i18n("More options")}
+                                        disabled={disabled}
+                                    >
+                                        <span aria-hidden="true">⋯</span>
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                        disabled={disabled}
+                                        onSelect={() => setPicking(true)}
+                                    >
+                                        {knownLabel}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuCheckboxItem
+                                        disabled={disabled}
+                                        checked={rejected}
+                                        onCheckedChange={toggleRejected}
+                                    >
+                                        {i18n("Never propose it")}
+                                    </DropdownMenuCheckboxItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
                     </div>
                 )}
                 {payload.maybe && !linked && (
@@ -269,14 +318,19 @@ export function NewRecordItem({
                         </div>
                     )}
                 {evidence ?? (
-                    <LearnEvidence>
+                    <LearnEvidence quote={quote}>
                         <div className="text-xs text-muted-foreground">
-                            {payload.kind === "person"
-                                ? i18n("Person")
-                                : typeLabel(current.typeKey)}
+                            {linked && (
+                                <>
+                                    {payload.kind === "person"
+                                        ? i18n("Person")
+                                        : typeLabel(current.typeKey)}
+                                    {" · "}
+                                </>
+                            )}
+                            {payload.reason}
                             {payload.speakerLabel &&
-                                ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}
-                            {payload.reason && ` · ${payload.reason}`}{" "}
+                                ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}{" "}
                             {payload.evidenceMs.map((ms) => (
                                 <span key={ms} className="mr-1">
                                     {seek(ms)}

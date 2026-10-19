@@ -6,6 +6,7 @@ import {
     type ReactNode,
     useCallback,
     useEffect,
+    useId,
     useMemo,
     useRef,
     useState,
@@ -78,6 +79,7 @@ import { withRecordingView } from "@/lib/sharing/view";
 import { formatClock } from "@/lib/topics/timeline";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { cn } from "@/lib/utils";
 
 type Target =
     | { personId: string }
@@ -194,6 +196,7 @@ export function LearnWidget({
     collapseReady?: boolean;
 }) {
     const i18n = useExtracted();
+    const sectionPrefix = useId();
     const [state, setState] = useState<ReviewState | null>(null);
     const [open, setOpen] = useState(false);
     const resolvedWidgetId = widgetId ?? `${kind}-learn-review-${recordingId}`;
@@ -732,14 +735,6 @@ export function LearnWidget({
     const accentOf = (label: string) =>
         speakerAccent(speakingOrder.indexOf(speakerKey(label)));
 
-    // Below the speakers, two halves side by side where there is room:
-    // who is new, and what was said about them.
-    const who = groups.records.length > 0;
-    const said =
-        groups.corrections.length > 0 ||
-        groups.known.length > 0 ||
-        groups.facts.length > 0 ||
-        groups.phrases.length > 0;
     const status = state?.run?.status;
     const ready = status === "ready";
     const finished = status === "finished";
@@ -832,7 +827,7 @@ export function LearnWidget({
     const blockedItem = (item: ItemView): boolean => {
         switch (item.kind) {
             case "new_record":
-                return false;
+                return item.decision === "rejected";
             case "speaker":
                 return (
                     speakerPerson(item) === null || waitingFor(item).length > 0
@@ -908,22 +903,6 @@ export function LearnWidget({
             </div>
         );
     };
-
-    const checkbox = (item: ItemView, label: string) => (
-        <input
-            type="checkbox"
-            className="mt-1 size-4 shrink-0"
-            checked={ticked(item) && !blockedItem(item)}
-            disabled={blockedItem(item) || finishing}
-            aria-label={label}
-            onChange={(event) =>
-                void decide(
-                    item,
-                    event.target.checked ? "accepted" : "rejected",
-                )
-            }
-        />
-    );
 
     const startLearn = () => {
         void learn();
@@ -1074,6 +1053,56 @@ export function LearnWidget({
         );
     }
 
+    const sections = [
+        {
+            key: "speakers",
+            title: i18n("Speakers"),
+            items: kind === "audio" ? groups.speakers : [],
+        },
+        {
+            key: "records",
+            title: i18n("New in the Almanac"),
+            items: groups.records,
+        },
+        {
+            key: "corrections",
+            title: i18n("Corrections"),
+            items: kind === "audio" ? groups.corrections : [],
+        },
+        {
+            key: "known",
+            title: i18n("Known facts mentioned again"),
+            items: groups.known,
+        },
+        { key: "facts", title: i18n("New facts"), items: groups.facts },
+        {
+            key: "phrases",
+            title: i18n("New kind of relation"),
+            items: groups.phrases,
+        },
+    ].filter((section) => section.items.length > 0);
+    const sectionProps = (key: string) => {
+        const section = sections.find((section) => section.key === key);
+        const items = section?.items ?? [];
+        const title = section?.title ?? "";
+        return {
+            id: `${sectionPrefix}-${key}`,
+            title,
+            count: items.length,
+            selected: items.filter(
+                (item) =>
+                    ticked(item) &&
+                    (item.kind === "relation_phrase" || !blockedItem(item)),
+            ).length,
+            sticky: frame === "dialog",
+            toggle: key === "phrases" ? undefined : groupToggle(items, title),
+        };
+    };
+    const audioWords = (ms: number | undefined) =>
+        ms === undefined
+            ? undefined
+            : turns.find((turn) => turn.startMs <= ms && turn.endMs > ms)?.text;
+
     return (
         <>
             <Dialog
@@ -1178,7 +1207,9 @@ export function LearnWidget({
                     inlineLine={
                         collapseReady && ready && !open ? dialogLine : undefined
                     }
-                    bodyClassName={working ? undefined : "space-y-8"}
+                    bodyClassName={
+                        working ? undefined : "@container/learn space-y-6"
+                    }
                 >
                     {working ? (
                         <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1193,19 +1224,32 @@ export function LearnWidget({
                         </p>
                     ) : (
                         <>
-                            {kind === "audio" && groups.speakers.length > 0 && (
-                                // Who spoke comes first: the facts below name them.
-                                <section
-                                    className={`space-y-1 ${who || said ? "border-b pb-6" : ""}`}
+                            {sections.length >= 2 && (
+                                <nav
+                                    aria-label={i18n("Review sections")}
+                                    className="flex flex-wrap gap-2"
                                 >
-                                    <SectionTitle
-                                        title={i18n("Speakers")}
-                                        count={groups.speakers.length}
-                                        toggle={groupToggle(
-                                            groups.speakers,
-                                            i18n("Speakers"),
-                                        )}
-                                    />
+                                    {sections.map((section) => (
+                                        <button
+                                            key={section.key}
+                                            type="button"
+                                            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs hover:bg-muted"
+                                            onClick={() =>
+                                                scrollToSection(
+                                                    `${sectionPrefix}-${section.key}`,
+                                                )
+                                            }
+                                        >
+                                            {section.title}{" "}
+                                            <span className="tabular-nums text-muted-foreground">
+                                                {section.items.length}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </nav>
+                            )}
+                            {kind === "audio" && groups.speakers.length > 0 && (
+                                <ReviewSection {...sectionProps("speakers")}>
                                     {groups.speakers.map((item) => {
                                         const payload = speakerPayload(item);
                                         const person = speakerPerson(item);
@@ -1285,421 +1329,333 @@ export function LearnWidget({
                                             />
                                         );
                                     })}
-                                </section>
+                                </ReviewSection>
                             )}
-                            <div
-                                className={
-                                    who && said
-                                        ? "grid gap-x-10 gap-y-8 lg:grid-cols-2"
-                                        : "space-y-8"
-                                }
-                            >
-                                {who && (
-                                    <div className="min-w-0 space-y-8">
-                                        <section className="space-y-2">
-                                            <SectionTitle
-                                                title={i18n(
-                                                    "New in the Almanac",
-                                                )}
-                                                count={groups.records.length}
-                                                toggle={groupToggle(
-                                                    groups.records,
-                                                    i18n("New in the Almanac"),
-                                                )}
-                                            />
-                                            {groups.records.map((item) => (
-                                                <NewRecordItem
+                            {groups.records.length > 0 && (
+                                <ReviewSection {...sectionProps("records")}>
+                                    {groups.records.map((item) => (
+                                        <NewRecordItem
+                                            key={item.id}
+                                            payload={newRecordView(item)}
+                                            choice={item.choice}
+                                            ticked={ticked(item)}
+                                            rejected={
+                                                item.decision === "rejected"
+                                            }
+                                            disabled={finishing}
+                                            names={state?.names ?? {}}
+                                            entityTypes={
+                                                state?.entityTypes ?? []
+                                            }
+                                            seek={(ms) => seek(ms)}
+                                            quote={audioWords(
+                                                newRecordView(item)
+                                                    .evidenceMs[0],
+                                            )}
+                                            evidence={
+                                                kind === "mail" ? (
+                                                    <LearnEvidence
+                                                        quote={mailWords(
+                                                            (
+                                                                item.payload as unknown as MailNewRecordPayload
+                                                            ).evidence[0],
+                                                        )}
+                                                    >
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {(
+                                                                item.payload as unknown as MailNewRecordPayload
+                                                            ).address ??
+                                                                (
+                                                                    item.payload as unknown as MailNewRecordPayload
+                                                                ).reason}
+                                                        </div>
+                                                    </LearnEvidence>
+                                                ) : undefined
+                                            }
+                                            onDecide={(decision, choice) =>
+                                                decide(item, decision, choice)
+                                            }
+                                            onLinked={async (choice) => {
+                                                await decide(
+                                                    item,
+                                                    "accepted",
+                                                    choice,
+                                                );
+                                                // Names the record chosen.
+                                                await load();
+                                            }}
+                                        />
+                                    ))}
+                                </ReviewSection>
+                            )}
+                            {kind === "audio" &&
+                                groups.corrections.length > 0 && (
+                                    <ReviewSection
+                                        {...sectionProps("corrections")}
+                                    >
+                                        {groups.corrections.map((item) => {
+                                            const payload = item.payload as {
+                                                kind: "correct" | "link";
+                                                heard: string;
+                                                target: Target;
+                                                replacement: string | null;
+                                                anchors: {
+                                                    turnIndex: number;
+                                                }[];
+                                            };
+                                            return (
+                                                <LearnReviewRow
                                                     key={item.id}
-                                                    payload={newRecordView(
-                                                        item,
-                                                    )}
-                                                    choice={item.choice}
-                                                    ticked={ticked(item)}
-                                                    rejected={
-                                                        item.decision ===
-                                                        "rejected"
+                                                    kind="correction"
+                                                    checked={
+                                                        ticked(item) &&
+                                                        !blockedItem(item)
                                                     }
-                                                    disabled={finishing}
-                                                    names={state?.names ?? {}}
-                                                    entityTypes={
-                                                        state?.entityTypes ?? []
+                                                    disabled={
+                                                        blockedItem(item) ||
+                                                        finishing
                                                     }
-                                                    seek={(ms) => seek(ms)}
-                                                    evidence={
-                                                        kind === "mail" ? (
-                                                            <LearnEvidence
-                                                                quote={mailWords(
-                                                                    (
-                                                                        item.payload as unknown as MailNewRecordPayload
-                                                                    )
-                                                                        .evidence[0],
-                                                                )}
-                                                            >
-                                                                <div className="text-xs text-muted-foreground">
-                                                                    {(
-                                                                        item.payload as unknown as MailNewRecordPayload
-                                                                    ).address ??
-                                                                        (
-                                                                            item.payload as unknown as MailNewRecordPayload
-                                                                        )
-                                                                            .reason}
-                                                                </div>
-                                                            </LearnEvidence>
-                                                        ) : undefined
-                                                    }
-                                                    onDecide={(
-                                                        decision,
-                                                        choice,
-                                                    ) =>
-                                                        decide(
-                                                            item,
-                                                            decision,
-                                                            choice,
-                                                        )
-                                                    }
-                                                    onLinked={async (
-                                                        choice,
-                                                    ) => {
-                                                        await decide(
-                                                            item,
-                                                            "accepted",
-                                                            choice,
-                                                        );
-                                                        // Names the record chosen.
-                                                        await load();
-                                                    }}
-                                                />
-                                            ))}
-                                        </section>
-                                    </div>
-                                )}
-                                {said && (
-                                    <div className="min-w-0 space-y-8">
-                                        {kind === "audio" &&
-                                            groups.corrections.length > 0 && (
-                                                <section className="space-y-2">
-                                                    <SectionTitle
-                                                        title={i18n(
-                                                            "Corrections",
-                                                        )}
-                                                        count={
-                                                            groups.corrections
-                                                                .length
-                                                        }
-                                                        toggle={groupToggle(
-                                                            groups.corrections,
-                                                            i18n("Corrections"),
-                                                        )}
-                                                    />
-                                                    {groups.corrections.map(
-                                                        (item) => {
-                                                            const payload =
-                                                                item.payload as {
-                                                                    kind:
-                                                                        | "correct"
-                                                                        | "link";
-                                                                    heard: string;
-                                                                    target: Target;
-                                                                    replacement:
-                                                                        | string
-                                                                        | null;
-                                                                    anchors: {
-                                                                        turnIndex: number;
-                                                                    }[];
-                                                                };
-                                                            return (
-                                                                <div
-                                                                    key={
-                                                                        item.id
-                                                                    }
-                                                                    className="-mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
-                                                                >
-                                                                    {checkbox(
-                                                                        item,
-                                                                        i18n(
-                                                                            "Correct {heard}",
-                                                                            {
-                                                                                heard: payload.heard,
-                                                                            },
-                                                                        ),
-                                                                    )}
-                                                                    <div className="min-w-0">
-                                                                        "
-                                                                        {
-                                                                            payload.heard
-                                                                        }
-                                                                        " ×
-                                                                        {
-                                                                            payload
-                                                                                .anchors
-                                                                                .length
-                                                                        }{" "}
-                                                                        {payload.kind ===
-                                                                        "link"
-                                                                            ? `↔ ${nameOf(payload.target)} (${i18n("link, word kept")})`
-                                                                            : `→ ${payload.replacement ?? nameOf(payload.target)}`}{" "}
-                                                                        {payload.anchors
-                                                                            .slice(
-                                                                                0,
-                                                                                3,
-                                                                            )
-                                                                            .map(
-                                                                                (
-                                                                                    anchor,
-                                                                                    index,
-                                                                                ) => (
-                                                                                    <span
-                                                                                        key={`${anchor.turnIndex}:${index}`}
-                                                                                        className="mr-1"
-                                                                                    >
-                                                                                        {seek(
-                                                                                            turnStart(
-                                                                                                anchor.turnIndex,
-                                                                                            ),
-                                                                                        )}
-                                                                                    </span>
-                                                                                ),
-                                                                            )}
-                                                                        {waitsNote(
-                                                                            item,
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            );
+                                                    checkboxLabel={i18n(
+                                                        "Correct {heard}",
+                                                        {
+                                                            heard: payload.heard,
                                                         },
                                                     )}
-                                                </section>
-                                            )}
-
-                                        {[
-                                            {
-                                                items: groups.known,
-                                                title: i18n(
-                                                    "Known facts mentioned again",
-                                                ),
-                                            },
-                                            {
-                                                items: groups.facts,
-                                                title: i18n("New facts"),
-                                            },
-                                        ].map(
-                                            (group) =>
-                                                group.items.length > 0 && (
-                                                    <section
-                                                        key={group.title}
-                                                        className="space-y-2"
-                                                    >
-                                                        <SectionTitle
-                                                            title={group.title}
-                                                            count={
-                                                                group.items
-                                                                    .length
-                                                            }
-                                                            toggle={groupToggle(
-                                                                group.items,
-                                                                group.title,
-                                                            )}
-                                                        />
-                                                        {group.items.map(
-                                                            (item) => {
-                                                                const payload =
-                                                                    item.payload as {
-                                                                        subject: Side;
-                                                                        relationKey: string;
-                                                                        object: Side;
-                                                                        startMs: number;
-                                                                        text?: MailTextAnchor;
-                                                                        provenance?:
-                                                                            | "quoted"
-                                                                            | "unverified"
-                                                                            | null;
-                                                                        replaces?: {
-                                                                            object: Side;
-                                                                        };
-                                                                    };
-                                                                const relation =
-                                                                    state
-                                                                        ?.relations[
-                                                                        payload
-                                                                            .relationKey
-                                                                    ] ??
-                                                                    payload.relationKey;
-                                                                return (
-                                                                    <LearnReviewRow
-                                                                        key={
-                                                                            item.id
-                                                                        }
-                                                                        kind={
-                                                                            item.kind ===
-                                                                            "known_fact"
-                                                                                ? "known_fact"
-                                                                                : "fact"
-                                                                        }
-                                                                        checked={
-                                                                            ticked(
-                                                                                item,
-                                                                            ) &&
-                                                                            !blockedItem(
-                                                                                item,
-                                                                            )
-                                                                        }
-                                                                        disabled={
-                                                                            blockedItem(
-                                                                                item,
-                                                                            ) ||
-                                                                            finishing
-                                                                        }
-                                                                        checkboxLabel={`${nameOf(payload.subject)} — ${relation} — ${nameOf(payload.object)}`}
-                                                                        onCheckedChange={(
-                                                                            checked,
-                                                                        ) =>
-                                                                            void decide(
-                                                                                item,
-                                                                                checked
-                                                                                    ? "accepted"
-                                                                                    : "rejected",
-                                                                            )
-                                                                        }
-                                                                        className="-mx-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50"
-                                                                    >
-                                                                        <div>
-                                                                            {sideNode(
-                                                                                payload.subject,
-                                                                            )}{" "}
-                                                                            —{" "}
-                                                                            {
-                                                                                relation
-                                                                            }{" "}
-                                                                            —{" "}
-                                                                            {sideNode(
-                                                                                payload.object,
-                                                                            )}
-                                                                            <LearnEvidence>
-                                                                                {kind ===
-                                                                                "mail" ? (
-                                                                                    <LearnEvidence
-                                                                                        quote={mailWords(
-                                                                                            payload.text,
-                                                                                        )}
-                                                                                        provenance={mailProvenance(
-                                                                                            payload.provenance,
-                                                                                        )}
-                                                                                    />
-                                                                                ) : (
-                                                                                    <div className="text-xs text-muted-foreground">
-                                                                                        {seek(
-                                                                                            payload.startMs,
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                                {payload.replaces && (
-                                                                                    <div className="text-xs text-muted-foreground">
-                                                                                        {i18n(
-                                                                                            "replaces {value}",
-                                                                                            {
-                                                                                                value: nameOf(
-                                                                                                    payload
-                                                                                                        .replaces
-                                                                                                        .object,
-                                                                                                ),
-                                                                                            },
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                                {item.dependsOnLabel &&
-                                                                                    waitsForSpeaker(
-                                                                                        item,
-                                                                                    ) && (
-                                                                                        <div className="text-xs text-muted-foreground">
-                                                                                            {i18n(
-                                                                                                "needs {label} named",
-                                                                                                {
-                                                                                                    label: formatSpeakerLabel(
-                                                                                                        item.dependsOnLabel,
-                                                                                                    ),
-                                                                                                },
-                                                                                            )}
-                                                                                        </div>
-                                                                                    )}
-                                                                                {waitsNote(
-                                                                                    item,
-                                                                                )}
-                                                                            </LearnEvidence>
-                                                                        </div>
-                                                                    </LearnReviewRow>
-                                                                );
-                                                            },
-                                                        )}
-                                                    </section>
-                                                ),
-                                        )}
-
-                                        {groups.phrases.length > 0 && (
-                                            <section className="space-y-2">
-                                                <SectionTitle
-                                                    title={i18n(
-                                                        "New kind of relation",
-                                                    )}
-                                                    count={
-                                                        groups.phrases.length
+                                                    onCheckedChange={(
+                                                        checked,
+                                                    ) =>
+                                                        void decide(
+                                                            item,
+                                                            checked
+                                                                ? "accepted"
+                                                                : "rejected",
+                                                        )
                                                     }
-                                                />
-                                                {groups.phrases.map((item) => (
-                                                    <PhraseItem
-                                                        key={item.id}
-                                                        item={item}
-                                                        recordType={(ref) => {
-                                                            const record =
-                                                                records.get(
-                                                                    ref,
-                                                                );
-                                                            if (!record)
-                                                                return null;
-                                                            const payload =
-                                                                newRecordView(
-                                                                    record,
-                                                                );
-                                                            return payload.kind ===
-                                                                "person"
-                                                                ? "person"
-                                                                : newRecordAs(
-                                                                      payload,
-                                                                      record.choice,
-                                                                  ).typeKey;
-                                                        }}
-                                                        waits={waitsNote(item)}
-                                                        organization={
-                                                            view === "org"
-                                                        }
-                                                        types={
-                                                            state?.types ?? {}
-                                                        }
-                                                        describe={nameOf}
-                                                        evidence={
-                                                            kind === "mail" ? (
-                                                                <LearnEvidence
-                                                                    quote={mailWords(
-                                                                        (
-                                                                            item.payload as unknown as MailPhrasePayload
-                                                                        ).text,
-                                                                    )}
-                                                                    provenance={mailProvenance(
-                                                                        (
-                                                                            item.payload as unknown as MailPhrasePayload
-                                                                        )
-                                                                            .provenance,
-                                                                    )}
-                                                                />
-                                                            ) : undefined
-                                                        }
-                                                        onDecide={decide}
-                                                    />
-                                                ))}
-                                            </section>
-                                        )}
-                                    </div>
+                                                >
+                                                    <div className="min-w-0">
+                                                        "{payload.heard}" ×
+                                                        {payload.anchors.length}{" "}
+                                                        {payload.kind === "link"
+                                                            ? `↔ ${nameOf(payload.target)} (${i18n("link, word kept")})`
+                                                            : `→ ${payload.replacement ?? nameOf(payload.target)}`}{" "}
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {payload.anchors
+                                                                .slice(0, 3)
+                                                                .map(
+                                                                    (
+                                                                        anchor,
+                                                                        index,
+                                                                    ) => (
+                                                                        <span
+                                                                            key={`${anchor.turnIndex}:${index}`}
+                                                                            className="mr-1"
+                                                                        >
+                                                                            {seek(
+                                                                                turnStart(
+                                                                                    anchor.turnIndex,
+                                                                                ),
+                                                                            )}
+                                                                        </span>
+                                                                    ),
+                                                                )}
+                                                        </div>
+                                                        {waitsNote(item)}
+                                                    </div>
+                                                </LearnReviewRow>
+                                            );
+                                        })}
+                                    </ReviewSection>
                                 )}
-                            </div>
+                            {[
+                                {
+                                    items: groups.known,
+                                    title: i18n("Known facts mentioned again"),
+                                },
+                                {
+                                    items: groups.facts,
+                                    title: i18n("New facts"),
+                                },
+                            ].map(
+                                (group) =>
+                                    group.items.length > 0 && (
+                                        <ReviewSection
+                                            {...sectionProps(
+                                                group.items === groups.known
+                                                    ? "known"
+                                                    : "facts",
+                                            )}
+                                            key={group.title}
+                                        >
+                                            {group.items.map((item) => {
+                                                const payload =
+                                                    item.payload as {
+                                                        subject: Side;
+                                                        relationKey: string;
+                                                        object: Side;
+                                                        startMs: number;
+                                                        text?: MailTextAnchor;
+                                                        provenance?:
+                                                            | "quoted"
+                                                            | "unverified"
+                                                            | null;
+                                                        replaces?: {
+                                                            object: Side;
+                                                        };
+                                                    };
+                                                const relation =
+                                                    state?.relations[
+                                                        payload.relationKey
+                                                    ] ?? payload.relationKey;
+                                                return (
+                                                    <LearnReviewRow
+                                                        key={item.id}
+                                                        kind={
+                                                            item.kind ===
+                                                            "known_fact"
+                                                                ? "known_fact"
+                                                                : "fact"
+                                                        }
+                                                        checked={
+                                                            ticked(item) &&
+                                                            !blockedItem(item)
+                                                        }
+                                                        disabled={
+                                                            blockedItem(item) ||
+                                                            finishing
+                                                        }
+                                                        checkboxLabel={`${nameOf(payload.subject)} — ${relation} — ${nameOf(payload.object)}`}
+                                                        onCheckedChange={(
+                                                            checked,
+                                                        ) =>
+                                                            void decide(
+                                                                item,
+                                                                checked
+                                                                    ? "accepted"
+                                                                    : "rejected",
+                                                            )
+                                                        }
+                                                    >
+                                                        <div>
+                                                            {sideNode(
+                                                                payload.subject,
+                                                            )}{" "}
+                                                            — {relation} —{" "}
+                                                            {sideNode(
+                                                                payload.object,
+                                                            )}
+                                                            <LearnEvidence>
+                                                                {kind ===
+                                                                "mail" ? (
+                                                                    <LearnEvidence
+                                                                        quote={mailWords(
+                                                                            payload.text,
+                                                                        )}
+                                                                        provenance={mailProvenance(
+                                                                            payload.provenance,
+                                                                        )}
+                                                                    />
+                                                                ) : (
+                                                                    <div className="text-xs text-muted-foreground">
+                                                                        {seek(
+                                                                            payload.startMs,
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {payload.replaces && (
+                                                                    <div className="text-xs text-muted-foreground">
+                                                                        {i18n(
+                                                                            "replaces {value}",
+                                                                            {
+                                                                                value: nameOf(
+                                                                                    payload
+                                                                                        .replaces
+                                                                                        .object,
+                                                                                ),
+                                                                            },
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {item.dependsOnLabel &&
+                                                                    waitsForSpeaker(
+                                                                        item,
+                                                                    ) && (
+                                                                        <div className="text-xs text-muted-foreground">
+                                                                            {i18n(
+                                                                                "needs {label} named",
+                                                                                {
+                                                                                    label: formatSpeakerLabel(
+                                                                                        item.dependsOnLabel,
+                                                                                    ),
+                                                                                },
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                {waitsNote(
+                                                                    item,
+                                                                )}
+                                                            </LearnEvidence>
+                                                        </div>
+                                                    </LearnReviewRow>
+                                                );
+                                            })}
+                                        </ReviewSection>
+                                    ),
+                            )}
+                            {groups.phrases.length > 0 && (
+                                <ReviewSection {...sectionProps("phrases")}>
+                                    {groups.phrases.map((item) => (
+                                        <PhraseItem
+                                            key={item.id}
+                                            item={item}
+                                            recordType={(ref) => {
+                                                const record = records.get(ref);
+                                                if (!record) return null;
+                                                const payload =
+                                                    newRecordView(record);
+                                                return payload.kind === "person"
+                                                    ? "person"
+                                                    : newRecordAs(
+                                                          payload,
+                                                          record.choice,
+                                                      ).typeKey;
+                                            }}
+                                            waits={waitsNote(item)}
+                                            organization={view === "org"}
+                                            types={state?.types ?? {}}
+                                            describe={nameOf}
+                                            evidence={
+                                                kind === "mail" ? (
+                                                    <LearnEvidence
+                                                        quote={mailWords(
+                                                            (
+                                                                item.payload as unknown as MailPhrasePayload
+                                                            ).text,
+                                                        )}
+                                                        provenance={mailProvenance(
+                                                            (
+                                                                item.payload as unknown as MailPhrasePayload
+                                                            ).provenance,
+                                                        )}
+                                                    />
+                                                ) : (
+                                                    <LearnEvidence>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {typeof item.payload
+                                                                .startMs ===
+                                                                "number" &&
+                                                                seek(
+                                                                    item.payload
+                                                                        .startMs,
+                                                                )}
+                                                        </div>
+                                                    </LearnEvidence>
+                                                )
+                                            }
+                                            onDecide={decide}
+                                        />
+                                    ))}
+                                </ReviewSection>
+                            )}
                         </>
                     )}
                 </WorkflowWidget>
@@ -1742,26 +1698,62 @@ export function LearnWidget({
     );
 }
 
-/** A section of the review: what it holds, and how many; tick-all if any. */
-function SectionTitle({
+function scrollToSection(id: string) {
+    const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+    ).matches;
+    document.getElementById(id)?.scrollIntoView({
+        block: "start",
+        behavior: reduceMotion ? "auto" : "smooth",
+    });
+}
+
+function ReviewSection({
+    id,
     title,
     count,
+    selected,
+    sticky,
     toggle,
+    children,
 }: {
+    id: string;
     title: string;
     count: number;
+    selected: number;
+    sticky: boolean;
     toggle?: GroupToggle;
+    children: ReactNode;
 }) {
+    const i18n = useExtracted();
     return (
-        <div className="mb-2 flex items-center gap-2">
-            {toggle && <GroupCheckbox {...toggle} />}
-            <h3 className="flex items-baseline gap-2 text-sm font-semibold">
-                {title}
-                <span className="text-xs font-normal tabular-nums text-muted-foreground">
+        <section
+            id={id}
+            aria-labelledby={`${id}-title`}
+            className={cn("space-y-2", !sticky && "scroll-mt-24")}
+        >
+            <div
+                className={cn(
+                    "flex flex-wrap items-center gap-2 bg-card py-2",
+                    sticky && "sticky top-0 z-10",
+                )}
+            >
+                {toggle && <GroupCheckbox {...toggle} />}
+                <h3 id={`${id}-title`} className="text-sm font-semibold">
+                    {title}
+                </h3>
+                <span className="text-xs tabular-nums text-muted-foreground">
                     {count}
                 </span>
-            </h3>
-        </div>
+                <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                    {i18n("{selected} of {total} selected", {
+                        selected: String(selected),
+                        total: String(count),
+                    })}
+                </span>
+            </div>
+            {children}
+        </section>
     );
 }
 
@@ -1844,76 +1836,84 @@ function PhraseItem({
               ? "dismiss"
               : undefined;
     return (
-        <div className="space-y-1 text-sm">
-            <div>
-                "{payload.phrase}" ({payload.count}×):{" "}
-                {describe(payload.subject)} →{" "}
-                {payload.object ? describe(payload.object) : i18n("a text")}
-                {waits}
-                {evidence}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-                <Input
-                    className="h-8 w-56"
-                    value={label}
-                    aria-label={i18n("Name of the relation")}
-                    onChange={(event) => setLabel(event.target.value)}
-                />
-                <NativeSelect
-                    className="h-8"
-                    aria-label={i18n("How many values")}
-                    value={cardinality}
-                    onChange={(event) =>
-                        setCardinality(
-                            event.target.value === "one" ? "one" : "many",
-                        )
-                    }
-                >
-                    <option value="many">{i18n("Many values")}</option>
-                    <option value="one">{i18n("One value at a time")}</option>
-                </NativeSelect>
-                <Button
-                    size="sm"
-                    variant={chosen === "create" ? "default" : "outline"}
-                    disabled={!subjectType || !label.trim()}
-                    onClick={() =>
-                        void onDecide(item, "accepted", {
-                            action: "create",
-                            spec: {
-                                label: label.trim(),
-                                subjectTypes: [subjectType],
-                                objectTypes: objectType ? [objectType] : [],
-                                objectKind: objectType ? "entity" : "literal",
-                                cardinality,
-                            },
-                        })
-                    }
-                >
-                    {organization
-                        ? i18n("Create as an Organization relation")
-                        : i18n("Create as my relation")}
-                </Button>
-                {!organization && (
+        <LearnReviewRow kind="relation_phrase">
+            <div className="space-y-1">
+                <div>
+                    "{payload.phrase}" ({payload.count}×):{" "}
+                    {describe(payload.subject)} →{" "}
+                    {payload.object ? describe(payload.object) : i18n("a text")}
+                    {waits}
+                    {evidence}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                        className="h-8 w-56"
+                        value={label}
+                        aria-label={i18n("Name of the relation")}
+                        onChange={(event) => setLabel(event.target.value)}
+                    />
+                    <NativeSelect
+                        className="h-8"
+                        aria-label={i18n("How many values")}
+                        value={cardinality}
+                        onChange={(event) =>
+                            setCardinality(
+                                event.target.value === "one" ? "one" : "many",
+                            )
+                        }
+                    >
+                        <option value="many">{i18n("Many values")}</option>
+                        <option value="one">
+                            {i18n("One value at a time")}
+                        </option>
+                    </NativeSelect>
                     <Button
                         size="sm"
-                        variant={chosen === "suggest" ? "default" : "outline"}
+                        variant={chosen === "create" ? "default" : "outline"}
+                        disabled={!subjectType || !label.trim()}
                         onClick={() =>
                             void onDecide(item, "accepted", {
-                                action: "suggest",
+                                action: "create",
+                                spec: {
+                                    label: label.trim(),
+                                    subjectTypes: [subjectType],
+                                    objectTypes: objectType ? [objectType] : [],
+                                    objectKind: objectType
+                                        ? "entity"
+                                        : "literal",
+                                    cardinality,
+                                },
                             })
                         }
                     >
-                        {i18n("Suggest to Organization")}
+                        {organization
+                            ? i18n("Create as an Organization relation")
+                            : i18n("Create as my relation")}
                     </Button>
-                )}
-                <Button
-                    size="sm"
-                    variant={chosen === "dismiss" ? "default" : "outline"}
-                    onClick={() => void onDecide(item, "rejected", null)}
-                >
-                    {i18n("Dismiss")}
-                </Button>
+                    {!organization && (
+                        <Button
+                            size="sm"
+                            variant={
+                                chosen === "suggest" ? "default" : "outline"
+                            }
+                            onClick={() =>
+                                void onDecide(item, "accepted", {
+                                    action: "suggest",
+                                })
+                            }
+                        >
+                            {i18n("Suggest to Organization")}
+                        </Button>
+                    )}
+                    <Button
+                        size="sm"
+                        variant={chosen === "dismiss" ? "default" : "outline"}
+                        onClick={() => void onDecide(item, "rejected", null)}
+                    >
+                        {i18n("Dismiss")}
+                    </Button>
+                </div>
             </div>
-        </div>
+        </LearnReviewRow>
     );
 }
