@@ -1,134 +1,35 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import { RecordingWorkstation } from "@/components/recordings/recording-workstation";
-import { db } from "@/db";
-import {
-    audioItemColumns,
-    recordingItemJoin,
-    toRecordingResponseRow,
-} from "@/db/items";
-import {
-    chatterItems,
-    recordings,
-    transcriptions,
-    userSettings,
-} from "@/db/schema";
-import { requireAuth, requireCompletedOnboarding } from "@/lib/auth-server";
-import { decryptText } from "@/lib/encryption/fields";
-import { listFolderOrganization } from "@/lib/folders/folders";
-import { readTranscriptTopics } from "@/lib/topics/stored-topics";
-import { readTranscriptTurns } from "@/lib/transcription/read-turns";
-import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
+import { redirect } from "next/navigation";
+import { itemDetailHref } from "@/lib/item-detail";
+
+type SearchParam = string | string[] | undefined;
 
 interface RecordingDetailPageProps {
     params: Promise<{ id: string }>;
+    searchParams: Promise<{
+        view?: SearchParam;
+        playFrom?: SearchParam;
+        evidenceSegment?: SearchParam;
+        evidenceStart?: SearchParam;
+        evidenceEnd?: SearchParam;
+    }>;
+}
+
+function first(value: SearchParam): string | undefined {
+    return Array.isArray(value) ? value[0] : value;
 }
 
 export default async function RecordingDetailPage({
     params,
+    searchParams,
 }: RecordingDetailPageProps) {
-    // Check authentication server-side
-    const session = await requireAuth();
-    await requireCompletedOnboarding(session);
-    const { id } = await params;
-
-    // Fetch recording from database
-    const [recording] = await db
-        .select(audioItemColumns)
-        .from(recordings)
-        .innerJoin(chatterItems, recordingItemJoin)
-        .where(
-            and(
-                eq(recordings.id, id),
-                eq(recordings.userId, session.user.id),
-                isNull(recordings.deletedAt),
-            ),
-        )
-        .limit(1);
-
-    if (!recording) {
-        notFound();
-    }
-
-    // Load player preferences server-side so the embedded
-    // RecordingPlayer respects the user's saved volume / speed /
-    // auto-play / scrubber choices. Without this, the legacy
-    // /recordings/[id] route fell back to the player's hard-coded
-    // 75 / 1x / false defaults regardless of what the user picked
-    // in Settings → Playback (the dashboard route already plumbs
-    // these through Workstation).
-    const [transcriptRows, [settingsRow], folderOrganization] =
-        await Promise.all([
-            db
-                .select()
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, id),
-                        eq(transcriptions.userId, session.user.id),
-                    ),
-                ),
-            db
-                .select({
-                    defaultPlaybackSpeed: userSettings.defaultPlaybackSpeed,
-                    defaultVolume: userSettings.defaultVolume,
-                    autoPlayNext: userSettings.autoPlayNext,
-                    playerScrubber: userSettings.playerScrubber,
-                    preferredTranscriptSource:
-                        userSettings.preferredTranscriptSource,
-                })
-                .from(userSettings)
-                .where(eq(userSettings.userId, session.user.id))
-                .limit(1),
-            listFolderOrganization(session.user.id),
-        ]);
-
-    // Order primary-first (per the user's preferred source) so the switcher
-    // defaults to it, then decrypt for the client component.
-    const primaryTranscript = resolvePrimaryTranscript(
-        transcriptRows,
-        settingsRow?.preferredTranscriptSource ?? "plaud",
-    );
-    const transcriptOptions = [
-        ...(primaryTranscript ? [primaryTranscript] : []),
-        ...transcriptRows.filter((t) => t.id !== primaryTranscript?.id),
-    ].map((t) => ({
-        source: t.source,
-        text: decryptText(t.text),
-        version: { transcriptionId: t.id, revision: t.revision },
-        language: t.detectedLanguage || undefined,
-        provider: t.provider,
-        model: t.model,
-        turns: readTranscriptTurns(t),
-        topics: readTranscriptTopics(t),
-    }));
-    const scrubberStyle: "waveform" | "slider" =
-        settingsRow?.playerScrubber === "slider" ? "slider" : "waveform";
-
-    // Content fields are encrypted at rest; decrypt server-side before
-    // handing off to the client component.
-    // jsonb fields come back typed as `unknown` from drizzle; narrow to
-    // the Recording shape's `number[] | null` here once, server-side.
-    const waveformPeaks = Array.isArray(recording.waveformPeaks)
-        ? (recording.waveformPeaks as number[])
-        : null;
-
-    return (
-        <RecordingWorkstation
-            recording={{
-                ...toRecordingResponseRow(recording),
-                filename: decryptText(recording.title),
-                startTime: recording.occurredAt.toISOString(),
-                waveformPeaks,
-                audioReaped: recording.audioReapedAt !== null,
-                hasTranscript: transcriptRows.length > 0,
-            }}
-            initialPlaybackSpeed={settingsRow?.defaultPlaybackSpeed ?? 1.0}
-            initialVolume={settingsRow?.defaultVolume ?? 75}
-            initialAutoPlayNext={settingsRow?.autoPlayNext ?? false}
-            scrubberStyle={scrubberStyle}
-            transcripts={transcriptOptions}
-            initialFolderOrganization={folderOrganization}
-        />
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    redirect(
+        itemDetailHref(id, {
+            view: first(query.view) === "org" ? "org" : "private",
+            playFrom: first(query.playFrom),
+            evidenceSegment: first(query.evidenceSegment),
+            evidenceStart: first(query.evidenceStart),
+            evidenceEnd: first(query.evidenceEnd),
+        }),
     );
 }
