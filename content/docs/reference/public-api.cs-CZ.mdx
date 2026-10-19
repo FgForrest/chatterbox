@@ -92,7 +92,7 @@ Pole `error` je bezpečné pro zobrazení uživateli. Nikdy neparsujte `error`; 
 
 <span id="endpoints" />
 
-## Endpointy
+## Koncové body
 
 <span id="list-recordings" />
 
@@ -108,8 +108,8 @@ Parametry dotazu (všechny nepovinné):
 | -------------------    | --------------| ------------------------------------------------- |
 | `limit`             | int (1–100)   | Velikost stránky. Výchozí 50.                     |
 | `cursor`             | neprůhledný řetězec | Z předchozí odpovědi v poli `next_cursor`.    |
-| `created_since`             | ISO timestamp | Filtrovat na nahrávky vytvořené v tomto čase nebo později. |
-| `updated_since`             | ISO timestamp | Filtrovat na nahrávky upravené v tomto čase nebo později. |
+| `created_since`             | časový údaj ISO | Filtrovat na nahrávky vytvořené v tomto čase nebo později. |
+| `updated_since`             | časový údaj ISO | Filtrovat na nahrávky upravené v tomto čase nebo později. |
 | `has_transcription`             | `true`/`false` | Filtrovat podle přítomnosti přepisu.        |
 
 ```bash
@@ -287,11 +287,11 @@ pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné h
 
 ## Zápis: relace rekordéru
 
-Výše uvedené endpointy pro čtení přijímají každý platný klíč. Zápis vyžaduje
+Výše uvedené koncové body pro čtení přijímají každý platný klíč. Zápis vyžaduje
 oprávnění `recordings:write`, které používá pouze rozhraní streamovaných relací
-rekordéru. Klíč jen s oprávněním `read` tyto endpointy volat nemůže.
+rekordéru. Klíč jen s oprávněním `read` tyto koncové body volat nemůže.
 
-Toto rozhraní používá rozšíření [Meeting Recorder](../guides/meeting-recorder),
+Toto rozhraní používá rozšíření [Nahrávání schůzek](../guides/meeting-recorder),
 které odesílá zvuk po částech už během nahrávání:
 
 1. `POST /api/v1/recording-sessions` otevře relaci. Tělo obsahuje `mimeType`
@@ -330,8 +330,8 @@ kořen a zapisovatelné složky Organizace:
 }
 ```
 
-Složky jsou seřazené nejprve osobní a potom podle `path`. Endpoint používá
-rate-limit klíče rekordéru: chybějící nebo neplatný klíč vrátí `401`, klíč bez
+Složky jsou seřazené nejprve osobní a potom podle `path`. Koncový bod používá
+omezení počtu požadavků klíče rekordéru: chybějící nebo neplatný klíč vrátí `401`, klíč bez
 oprávnění `recordings:write` vrátí `403` a vyčerpaný limit vrátí `429`.
 
 Je-li uvedeno `folderId`, dokončení nahrávku zařadí před pokračováním ve
@@ -343,7 +343,7 @@ Webhooky `transcription.completed` a `summary.completed` se proto u takové
 nahrávky odešlou až poté, co ji vlastník zařadí a zpracování dosáhne příslušné
 fáze.
 
-Jiné veřejné endpointy pro zápis nejsou k dispozici. Hotový zvuk můžete místo
+Jiné veřejné koncové body pro zápis nejsou k dispozici. Hotový zvuk můžete místo
 toho nahrát tlačítkem v uživatelském rozhraní.
 
 <span id="stability" />
@@ -352,12 +352,12 @@ toho nahrát tlačítkem v uživatelském rozhraní.
 
 Povrch `/api/v1/*` je verzovanou veřejnou smlouvou. Po vydání platí:
 
-- Stávající endpointy neprochází zpětně nekompatibilními změnami — pole se pouze přidávají,
+- Stávající koncové body neprochází zpětně nekompatibilními změnami — pole se pouze přidávají,
   nemění účel.
 - Hodnoty `code` v chybách jsou stabilní. Přidávají se nové kódy; staré nejsou
   přejmenovávány.
 - Odstranění či nekompatibilní změny prochází deprekačním cyklem a jsou uvedeny v
   CHANGELOGu.
 
-Pokud potřebujete nové pole, schopnost nebo endpoint, nahlaste požadavek. Tvar se
+Pokud potřebujete nové pole, schopnost nebo koncový bod, nahlaste požadavek. Tvar se
 nejprve diskutuje v daném vlákně před nasazením.

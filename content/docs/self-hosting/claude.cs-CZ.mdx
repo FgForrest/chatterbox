@@ -6,8 +6,8 @@ description: Umožněte lidem ptát se Claude (claude.ai, Desktop, Cowork) a Cla
 [Externí MCP server](./mcp) umožňuje AI klientům číst, co Klepna ví.
 Tato stránka k němu připojí oba produkty Claude od Anthropicu:
 
-- **Claude**: claude.ai, Claude Desktop, mobilní aplikace a Cowork. Ke
-  custom konektorům přistupují z cloudu Anthropicu, takže `/api/mcp` musí
+- **Claude**: claude.ai, Claude Desktop, mobilní aplikace a Cowork. K
+  vlastním konektorům přistupují z cloudu Anthropicu, takže `/api/mcp` musí
   být dostupné z internetu, a to jen z adres Anthropicu.
 - **Claude Code**: běží na počítači daného člověka a připojuje se odtud,
   přes vaši vnitřní síť.
@@ -23,14 +23,14 @@ pravidla aplikace Klepna. Co lidé dělají po připojení, popisuje kapitola
 
 1. Někdo v Claude připojí konektor (URL `<APP_URL>/api/mcp`).
 2. Claude zavolá `/api/mcp` bez tokenu a dostane 401. Odpověď odkazuje na
-   metadata chráněného resource, která uvádějí váš realm jako
-   authorization server a `openid` jako scope, o který má žádat.
+   metadata chráněného zdroje, která uvádějí váš realm jako
+   autorizační server a `openid` jako rozsah oprávnění, o který má žádat.
 3. Claude pošle člověka na přihlašovací stránku realmu. Po přihlášení
-   dá Keycloak Claude jednorázový kód a Claude ho na token endpointu
-   realmu vymění s tajemstvím klienta `claude`. Dostane access token
-   (15 minut) a offline refresh token (platí, dokud se použije aspoň
+   dá Keycloak Claude jednorázový kód a Claude ho na koncovém bodu pro tokeny
+   realmu vymění s tajemstvím klienta `claude`. Dostane přístupový token
+   (15 minut) a offline obnovovací token (platí, dokud se použije aspoň
    jednou za 30 dní).
-4. Každé volání `/api/mcp` nese access token. Klepna ho ověří proti
+4. Každé volání `/api/mcp` nese přístupový token. Klepna ho ověří proti
    podpisovým klíčům realmu, najde člověka (`sub`) a jeho role a nabídne
    jen nástroje, které tyto role otevírají.
 5. Claude token na pozadí obnovuje. Každé obnovení znovu načte role
@@ -43,10 +43,10 @@ Klepna nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
 ## Než začnete
 
 - [Externí MCP server](./mcp) funguje ve vnitřní síti: `MCP_AUDIENCE` je
-  nastaveno, resource klient `chatterbox-mcp` má svých šest rolí a lidé mají
+  nastaveno, klient chráněných zdrojů `chatterbox-mcp` má svých šest rolí a lidé mají
   role, které mít mají.
 - Doporučujeme Keycloak 26.6 nebo novější; testy aplikace Klepna běží proti
-  26.6.4. Discovery dokument a token endpoint realmu musí být dostupné z
+  26.6.4. Dokument metadat a koncový bod pro tokeny realmu musí být dostupné z
   cloudu Anthropicu a jeho přihlašovací stránka z prohlížečů lidí, kteří
   se připojují.
 - Veřejný DNS název pro host z `APP_URL` a reverzní proxy, kterou
@@ -75,8 +75,8 @@ V administraci realmu **Clients → Create client**:
 4. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
    `S256`. **Advanced → Access Token Lifespan:** 15 minut (10 až 15).
 5. **Client scopes:** jako **Default** ponechte jen `basic` a `roles`,
-   `offline_access` jako **Optional**. Ostatní výchozí scopes s mapováním
-   rolí odeberte: každý přidává své role a aplikace za nimi jako audience
+   `offline_access` jako **Optional**. Ostatní výchozí rozsahy oprávnění s mapováním
+   rolí odeberte: každý přidává své role a aplikace za nimi jako cílové příjemce
    do každého tokenu, který Claude drží.
 6. **Client scopes → `claude-dedicated` → Scope:** vypněte **Full scope
    allowed**, pak **Assign role** a vyberte role `chatterbox-mcp`, které smí
@@ -99,7 +99,7 @@ Stejně jako `claude`, kromě:
   `http://127.0.0.1/callback`. Keycloak přijme libovolný port na
   loopback adrese, když registrovaná URI port nemá, a tak funguje lokální
   callback Claude Code.
-- Consent screen není potřeba.
+- Obrazovka souhlasu není potřeba.
 
 Klepna obsluhuje tokeny `claude-code` jen z vnitřní sítě (krok 3):
 stejný token přicházející z cloudu Anthropicu by musel být odcizen z
@@ -133,7 +133,7 @@ nebo smazáním klienta.
 - Legacy token exchange (V1) vypnutý a nikdo s oprávněním *impersonate*,
   jako na stránce [Externí MCP server](./mcp).
 - **Clients → `claude` → Client scopes → Evaluate** pro testovacího
-  uživatele s některými rolemi: `aud` access tokenu je přesně
+  uživatele s některými rolemi: `aud` přístupového tokenu je přesně
   `chatterbox-mcp`, `sub` je přítomné a `resource_access.chatterbox-mcp.roles`
   vypisuje role tohoto uživatele. S pouhými `basic` a `roles` token
   nenese `preferred_username`; Klepna ho nepotřebuje.
@@ -166,13 +166,13 @@ v `MCP_PUBLIC_CLIENTS` či `MCP_CONNECTOR_KEYS`.
 Klíč konektoru je druhý zámek na konektoru organizace: požadavek s
 tokenem `claude` musí nést i klíč, který do Claude zadal jen váš Owner.
 Osobního klienta uveďte jen tehdy, když Claude toho člověka nabízí
-request headers (viz krok 4). Klíče uchovávejte s ostatními tajemstvími.
+hlavičky požadavků (viz krok 4). Klíče uchovávejte s ostatními tajemstvími.
 
 <span id="step-3-the-public-entrance" />
 
 ## Krok 3: veřejný vstup
 
-Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
+Zveřejněte MCP koncový bod, a nic jiného, pro adresy Anthropicu:
 
 - Veřejný DNS záznam pro host z `APP_URL`. Lidé uvnitř dál chodí do
   aplikace Klepna přes vnitřní síť (split-horizon DNS).
@@ -182,8 +182,8 @@ Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
   Docker je omezte na proxy a vnitřní síť. Přímé spojení na port 3000
   obchází pravidla proxy pro cesty, IP adresy, označovací hlavičku i
   omezení počtu požadavků.
-- Veřejně důvěryhodný certifikát na portu 443. Za allowlistem použijte
-  DNS-01 challenge. Žádné přesměrování na jiný host.
+- Veřejně důvěryhodný certifikát na portu 443. Za seznamem povolených adres použijte
+  ověřovací výzvu DNS-01. Žádné přesměrování na jiný host.
 - Jen z `160.79.104.0/21` a jen dvě přesné cesty: `/api/mcp` a
   `/.well-known/oauth-protected-resource/api/mcp`. Ne prefix:
   `/api/mcp/learn` musí zůstat interní. `GET` a `DELETE` na `/api/mcp`
@@ -241,10 +241,10 @@ Klepna zapisuje IP klienta do přístupového logu, když je
    **Web**).
 2. **Name:** Klepna. **MCP server URL:** přesně `<APP_URL>/api/mcp`.
 3. **Authentication:** Sign in now. **OAuth client:** Use your own OAuth
-   client, s client ID `claude` a tajemstvím z kroku 1 (v **Advanced
+   client, s ID klienta `claude` a tajemstvím z kroku 1 (v **Advanced
    settings**, pokud je dialog na jedné obrazovce).
 4. Pokud `MCP_CONNECTOR_KEYS` uvádí `claude`: **Request headers →**
-   `x-api-key`, jako hodnota klíč, **Required**. Request headers jsou v
+   `x-api-key`, jako hodnota klíč, **Required**. Hlavičky požadavků jsou v
    betě a ještě je nemá každá organizace. Bez této sekce nechte `claude`
    mimo `MCP_CONNECTOR_KEYS`.
 5. **Add.**
@@ -254,7 +254,7 @@ Klepna zapisuje IP klienta do přístupového logu, když je
 realmu.
 
 **Osobní tarify.** Člověk otevře **Customize → Connectors → Add custom
-connector**, zadá stejnou URL a v **Advanced settings** své client ID a
+connector**, zadá stejnou URL a v **Advanced settings** své ID klienta a
 tajemství. **Add**, pak **Connect**.
 
 **Claude Code**, ve vnitřní síti nebo přes VPN:
@@ -266,7 +266,7 @@ claude mcp add --transport http --client-id claude-code chatterbox <APP_URL>/api
 Pak v Claude Code `/mcp`, vyberte `chatterbox` a přihlaste se v
 prohlížeči, který se otevře.
 
-Claude nedovolí změnit klienta, tajemství ani request headers
+Claude nedovolí změnit klienta, tajemství ani hlavičky požadavků
 existujícího konektoru. Pro výměnu konektor odeberte a přidejte znovu;
 členové se pak připojí znovu.
 
@@ -314,10 +314,10 @@ odmítnutí: `[mcp] refused (<reason>) a token of client <client>`, a
 | Důvod | Význam | Řešení |
 | --- | --- | --- |
 | `no-account` | Člověk se do aplikace Klepna nikdy nepřihlásil. | Jednou se přihlásí do aplikace Klepna a pak se připojí znovu. |
-| `no-roles` | Token nenese žádnou ze šesti rolí. | Dejte člověku roli na `chatterbox-mcp` a klientovi její mapování ve scope. |
+| `no-roles` | Token nenese žádnou ze šesti rolí. | Dejte člověku roli na `chatterbox-mcp` a klientovi její mapování v rozsahu oprávnění. |
 | `client-not-allowed` | Klient není v `MCP_ALLOWED_CLIENTS`. | Přidejte ho. |
 | `client-not-public` | Veřejným vstupem přišel klient mimo `MCP_PUBLIC_CLIENTS`. | U `claude-code` zvenku očekávané; jinak přidejte zapomenutého osobního klienta. |
-| `connector-key` | `X-API-Key` chybí nebo nesouhlasí. | Zkontrolujte request header konektoru; konektor přidejte znovu. |
+| `connector-key` | `X-API-Key` chybí nebo nesouhlasí. | Zkontrolujte hlavičku požadavku konektoru; konektor přidejte znovu. |
 | `suspended` | Účet v aplikaci Klepna je pozastavený. | |
 | `no-organization` | Servisní účet při vypnuté Organizaci. | |
 
@@ -325,11 +325,11 @@ Chyby na straně realmu ukončí přihlášení dřív, než Klepna token uvidí
 
 | Keycloak hlásí | Řešení |
 | --- | --- |
-| `invalid_scope` | Ponechte `offline_access` jako volitelný scope klienta. Claude žádá o `openid` a, protože ho realm nabízí, o `offline_access`. |
+| `invalid_scope` | Ponechte `offline_access` jako volitelný rozsah oprávnění klienta. Claude žádá o `openid` a, protože ho realm nabízí, o `offline_access`. |
 | Offline tokens not allowed for the user or client | Dejte člověku roli realmu `offline_access` (výchozí role). |
 | `unauthorized_client` | Tajemství klienta v konektoru nesouhlasí: přidejte konektor znovu. |
 | Invalid parameter: redirect_uri | Zkontrolujte redirect URI klienta (krok 1). |
-| `invalid_target` | Se zapnutými resource indicators: `resource_url` na `chatterbox-mcp` musí být `<APP_URL>/api/mcp`. |
+| `invalid_target` | Se zapnutými identifikátory zdrojů: `resource_url` na `chatterbox-mcp` musí být `<APP_URL>/api/mcp`. |
 
 Nástroj, který se po přidání role neobjeví, se ukáže, jakmile člověk v
 Claude konektor obnoví nebo se připojí znovu: Claude si drží seznam
@@ -345,7 +345,7 @@ odpovídá „Unknown tool“.
   obnovení konektoru.
 - **Okamžité odpojení:** vypněte uživatele v Keycloaku nebo odhlaste
   jeho relace (**Users → daný člověk → Sessions**, včetně offline).
-  Access token, který už drží, funguje do vypršení, nejvýš 15 minut:
+  Přístupový token, který už drží, funguje do vypršení, nejvýš 15 minut:
   Klepna ověřuje tokeny lokálně a neptá se Keycloaku při každém volání.
 - **Osobní klient:** vypněte nebo smažte ho v Keycloaku a odeberte ho
   ze všech tří seznamů.
@@ -359,7 +359,7 @@ odpovídá „Unknown tool“.
 
 <span id="optional-resource-indicators" />
 
-## Volitelně: resource indicators
+## Volitelně: identifikátory zdrojů
 
 Keycloak 26.6 a novější umí svázat token s URL, pro kterou byl vyžádán
 (RFC 8707). Jde o experimentální funkci:
@@ -369,24 +369,24 @@ Keycloak 26.6 a novější umí svázat token s URL, pro kterou byl vyžádán
    `<APP_URL>/api/mcp`.
 3. Nastavte v aplikaci Klepna `MCP_RESOURCE_AUDIENCE=true` a restartujte.
 
-Token, o který Claude pro tento server požádá, pak nese jako audience
+Token, o který Claude pro tento server požádá, pak nese jako cílového příjemce
 `<APP_URL>/api/mcp` a přihlášení pro URL jiného serveru je odmítnuto s
 `invalid_target`. Obnovené tokeny a požadavky bez `resource` (ostatní
 aplikace realmu, servisní účty) si ponechají `chatterbox-mcp`, které
 Klepna dál přijímá. Požadavků bez `resource` se funkce netýká. Známé na
 Keycloaku 26.6.4: člověk bez kterékoliv ze šesti rolí dostane při
 připojení chybu serveru Keycloaku místo 403 od aplikace Klepna. Vyzkoušejte to
-nejdřív na testovacím realmu; end-to-end stack na to má override (viz
+nejdřív na testovacím realmu; sada služeb pro testování celého systému na to má doplňkovou konfiguraci (viz
 [Vyzkoušení lokálně](./mcp#trying-it-locally)).
 
 <span id="why-it-is-built-this-way" />
 
 ## Proč je to postavené takto
 
-- **Důvěrný klient pro Claude.** Veřejné client id je jen jméno. Bez
-  resource indicators dá Keycloak tokenu pro `claude` audience
+- **Důvěrný klient pro Claude.** Veřejné ID klienta je jen jméno. Bez
+  identifikátorů zdrojů dá Keycloak tokenu pro `claude` příjemce
   `chatterbox-mcp`, ať se Claude připojoval k jakémukoliv serveru. Kdokoliv
-  by si mohl přidat vlastní konektor s vaším realmem a client id
+  by si mohl přidat vlastní konektor s vaším realmem a ID klienta
   `claude`; vaši lidé by se přihlásili na skutečné stránce a Claude by
   tomu konektoru předal skutečné tokeny, které by mohl posílat do
   aplikace Klepna ze stejných adres Anthropicu. S tajemstvím umí přihlášení
@@ -405,10 +405,10 @@ nejdřív na testovacím realmu; end-to-end stack na to má override (viz
   ne instrukce, a jediné, co Claude může změnit, je stav nebo přiřazení
   úkolu (`tasks:write`). Lidé mohou v Claude zablokovat jednotlivé
   nástroje (**Customize → Connectors →** konektor) a vy můžete
-  `tasks:write` vynechat ze scope klienta `claude`.
+  `tasks:write` vynechat z rozsahu oprávnění klienta `claude`.
 - **Tokeny drží Anthropic.** Claude ukládá tokeny každého člověka na
-  straně Anthropicu. Platí jen pro Klepna, access token 15 minut, a
-  refresh token funguje jen s tajemstvím klienta, které drží také
+  straně Anthropicu. Platí jen pro Klepna, přístupový token 15 minut, a
+  obnovovací token funguje jen s tajemstvím klienta, které drží také
   Anthropic. Odpovědi, které Claude od aplikace Klepna dostane, se k Anthropicu
   dostanou jako cokoliv jiného v konverzaci, podle podmínek vašeho
   tarifu Claude.

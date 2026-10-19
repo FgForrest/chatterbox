@@ -3,38 +3,38 @@ title: Almanach
 description: Lidé a věci, které Klepna zná, jejich přezdívky a fakta.
 ---
 
-Almanach obsahuje vše, co Klepna ví o lidech a věcech, o kterých Vaše nahrávky hovoří: kdo je kdo, na čem kdo pracuje, jak se jmenuje projekt a jak bývá často špatně rozuměn. Přepis, Naučit se, souhrny a úkoly z něj vycházejí.
+Almanach obsahuje vše, co Klepna ví o lidech a věcech, o kterých Vaše nahrávky hovoří: kdo je kdo, na čem kdo pracuje, jak se jmenuje projekt a jak bývá často špatně rozuměn. Přepis, Učení, souhrny a úkoly z něj vycházejí.
 
-Obsahuje čtyři karty: **Lidé**, **Věci**, **Slovník** a **Revize**.
+Obsahuje čtyři karty: **Lidé**, **Věci**, **Slovník** a **Kontrola**.
 
 <span id="people" />
 
 ## Lidé
 
-![People](images/almanac-people.png)
+![Lidé](images/almanac-people.png)
 
 Každý, koho jste pojmenovali jako řečníka, je zde, včetně počtu nahrávek, ve kterých je slyšet. **Přidat osobu** umožní přidat někoho ještě před tím, než promluví. Lidé označení jako **Organizace** pocházejí z nahrávek sdílených s Organizací (viz [Organizace](organization.md)).
 
 Kliknutím na osobu otevřete její stránku:
 
-![A person](images/almanac-person.png)
+![Osoba](images/almanac-person.png)
 
-- **Také známý jako**: přezdívky a jiné varianty jmen. Vyhledávání podle nich osobu najde a Naučit se je rozpoznává v přepisech.
+- **Také známý jako**: přezdívky a jiné varianty jmen. Vyhledávání podle nich osobu najde a Učení je rozpoznává v přepisech.
 - **Poznámky**: cokoli si chcete zapamatovat. U organizačních osob jsou poznámky Vaše vlastní.
-- **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli Operations director*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Klepna odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
+- **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli provozního ředitele*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Klepna odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
 - **Nahrávky**: kde tato osoba mluví.
-- **To jsem já** určuje aplikaci Klepna, která osoba jste Vy. Naučit se pak ví, kdo nahrávku vytvořil, a Vaše úkoly se zobrazují pod záložkou **Moje**.
+- **To jsem já** určuje aplikaci Klepna, která osoba jste Vy. Učení pak ví, kdo nahrávku vytvořil, a Vaše úkoly se zobrazují pod záložkou **Moje**.
 - **Přejmenovat**, **Sloučit do…** (pokud dvě položky představují tutéž osobu) a **Smazat**.
 
 <span id="things" />
 
 ## Věci
 
-![Things](images/almanac-things.png)
+![Věci](images/almanac-things.png)
 
 Věci jsou organizace, týmy, projekty, produkty, pojmy, lokality a dokumenty. Můžete je vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**.
 
-![A thing](images/almanac-thing.png)
+![Věc](images/almanac-thing.png)
 
 Stránka věci má stejné části jako stránka osoby: přezdívky, popis, fakta a nahrávky, s možnostmi **Upravit**, **Změnit typ**, **Sloučit do…** a **Smazat**.
 
@@ -52,7 +52,7 @@ location: Rotterdam depot, Antwerp depot
 
 Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte:
 
-![Previewing an import](images/almanac-import.png)
+![Náhled importu](images/almanac-import.png)
 
 <span id="vocabulary" />
 
@@ -62,10 +62,10 @@ Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte
 
 <span id="review" />
 
-## Revize
+## Kontrola
 
-![What waits for review](images/almanac-review.png)
+![Co čeká na kontrolu](images/almanac-review.png)
 
-**Revize** shromažďuje kontroly položek čekající na Vaše posouzení: běhy [Učení](learn.md) a navržené úkoly z nahrávky nebo pošty. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
+**Kontrola** shromažďuje kontroly položek čekající na Vaše posouzení: běhy [Učení](learn.md) a navržené úkoly z nahrávky nebo pošty. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
 
-Dále: [Naučit se](learn.md)
+Dále: [Učení](learn.md)
