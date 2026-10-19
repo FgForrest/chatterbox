@@ -52,6 +52,7 @@ export default async function DemoDashboardPage() {
             plaudNeedsReconnect={false}
             isHosted={env.IS_HOSTED}
             onboardingCapabilities={{
+                audience: "single-user",
                 googleConfigured: false,
                 mailAvailable: false,
                 mcpConnectorUrl: null,

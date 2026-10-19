@@ -23,14 +23,33 @@ export function useSettingsNav(
     isHosted: boolean,
     mailEnabled = false,
     accessManagement = false,
+    isOrgAccount = false,
 ) {
     const settingsNav = useMemo(
-        () => buildSettingsNav({ isHosted, mailEnabled, accessManagement }),
-        [isHosted, mailEnabled, accessManagement],
+        () =>
+            buildSettingsNav({
+                isHosted,
+                isOrgAccount,
+                mailEnabled,
+                accessManagement,
+            }),
+        [isHosted, isOrgAccount, mailEnabled, accessManagement],
     );
     const [activeSection, setActiveSection] =
         useState<SettingsSection>("providers");
     const [keyboardSelectedIndex, setKeyboardSelectedIndex] = useState(0);
+    const visibleActiveSection = settingsNav.some(
+        (item) => item.id === activeSection,
+    )
+        ? activeSection
+        : settingsNav[0].id;
+    const selectSection = useCallback(
+        (section: SettingsSection) => {
+            if (settingsNav.some((item) => item.id === section))
+                setActiveSection(section);
+        },
+        [settingsNav],
+    );
 
     // Initial section resolution: prefer URL hash, fall back to
     // localStorage. Re-runs on hashchange so in-app hash writes (e.g.
@@ -81,9 +100,9 @@ export function useSettingsNav(
     // section.
     useEffect(() => {
         if (typeof window === "undefined") return;
-        window.location.hash = activeSection;
-        localStorage.setItem(SETTINGS_STORAGE_KEY, activeSection);
-    }, [activeSection]);
+        window.location.hash = visibleActiveSection;
+        localStorage.setItem(SETTINGS_STORAGE_KEY, visibleActiveSection);
+    }, [visibleActiveSection]);
 
     // Focus the first nav button when the dialog opens. Small delay
     // gives Radix's focus-trap a chance to settle so our focus call
@@ -104,12 +123,12 @@ export function useSettingsNav(
     // the click left off, not where the keyboard cursor used to be).
     useEffect(() => {
         const index = settingsNav.findIndex(
-            (item) => item.id === activeSection,
+            (item) => item.id === visibleActiveSection,
         );
         if (index !== -1) {
             setKeyboardSelectedIndex(index);
         }
-    }, [activeSection, settingsNav]);
+    }, [visibleActiveSection, settingsNav]);
 
     const handleKeyDown = useCallback(
         (e: KeyboardEvent) => {
@@ -165,8 +184,8 @@ export function useSettingsNav(
     }, [open, handleKeyDown]);
 
     return {
-        activeSection,
-        setActiveSection,
+        activeSection: visibleActiveSection,
+        setActiveSection: selectSection,
         keyboardSelectedIndex,
     };
 }

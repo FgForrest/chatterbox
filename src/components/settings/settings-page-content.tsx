@@ -10,6 +10,7 @@ const EMPTY_PROVIDERS: Provider[] = [];
 interface SettingsPageContentProps {
     initialProviders?: Provider[];
     isHosted?: boolean;
+    isOrgAccount?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
 }
@@ -17,6 +18,7 @@ interface SettingsPageContentProps {
 export function SettingsPageContent({
     initialProviders = EMPTY_PROVIDERS,
     isHosted = false,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
 }: SettingsPageContentProps) {
@@ -37,6 +39,7 @@ export function SettingsPageContent({
             onOpenChange={handleOpenChange}
             initialProviders={initialProviders}
             isHosted={isHosted}
+            isOrgAccount={isOrgAccount}
             mailEnabled={mailEnabled}
             accessManagement={accessManagement}
             headerAction={<AppUploadButton />}

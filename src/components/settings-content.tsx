@@ -4,6 +4,7 @@ import type { SettingsSection } from "@/types/settings";
 import { ApiKeysSection } from "./settings/api-keys-section";
 import { RecorderSection } from "./settings/recorder-section";
 import { WebhooksSection } from "./settings/webhooks-section";
+import { isPersonalSettingsSection } from "./settings-nav-config";
 import { AccessSection } from "./settings-sections/access-section";
 import { BillingSection } from "./settings-sections/billing-section";
 import { DevSection } from "./settings-sections/dev-section";
@@ -37,6 +38,7 @@ interface SettingsContentProps {
     activeSection: SettingsSection;
     initialProviders?: Provider[];
     isHosted?: boolean;
+    isOrgAccount?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
     /** Forwarded to `PlaudAccountSection`; see its prop doc. */
@@ -47,10 +49,12 @@ export function SettingsContent({
     activeSection,
     initialProviders = EMPTY_PROVIDERS,
     isHosted = false,
+    isOrgAccount = false,
     mailEnabled = false,
     accessManagement = false,
     onPlaudReconnected,
 }: SettingsContentProps) {
+    if (isOrgAccount && isPersonalSettingsSection(activeSection)) return null;
     switch (activeSection) {
         case "providers":
             return (

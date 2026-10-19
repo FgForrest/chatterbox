@@ -32,6 +32,7 @@ import {
 } from "@/components/onboarding-dialog";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { SettingsDialog } from "@/components/settings-dialog";
+import { Button } from "@/components/ui/button";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
@@ -55,6 +56,7 @@ import {
 } from "@/lib/notifications/browser";
 import {
     type OnboardingCapabilities,
+    type OnboardingReadiness,
     shouldOpenOnboarding,
 } from "@/lib/onboarding/capabilities";
 import {
@@ -136,6 +138,7 @@ interface WorkstationProps {
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
     onboardingCapabilities: OnboardingCapabilities;
+    onboardingReadiness?: OnboardingReadiness;
     /** The viewer manages access at the identity provider. */
     accessManagement?: boolean;
     exportProviders: ExportProvidersAvailability;
@@ -175,6 +178,7 @@ export function Workstation({
     isHosted,
     mailEnabled = false,
     onboardingCapabilities,
+    onboardingReadiness,
     accessManagement = false,
     exportProviders,
     initialFolderOrganization,
@@ -196,6 +200,7 @@ export function Workstation({
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [onboardingSettings, setOnboardingSettings] = useState(false);
     // Auto-opens on first paint when the account hasn't finished
     // onboarding yet (server-supplied truth, re-evaluated on every fresh
     // navigation to this page). Everyone must finish onboarding --
@@ -1451,11 +1456,31 @@ export function Workstation({
 
             <SettingsDialog
                 open={settingsOpen}
-                onOpenChange={setSettingsOpen}
+                onOpenChange={(open) => {
+                    setSettingsOpen(open);
+                    if (!open && onboardingSettings) {
+                        setOnboardingSettings(false);
+                    }
+                }}
+                headerAction={
+                    onboardingSettings ? (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                setSettingsOpen(false);
+                                setOnboardingSettings(false);
+                            }}
+                        >
+                            {i18n("Return to setup")}
+                        </Button>
+                    ) : undefined
+                }
                 initialProviders={providers}
                 isHosted={isHosted}
                 mailEnabled={mailEnabled}
                 accessManagement={accessManagement}
+                isOrgAccount={isOrgAccount}
                 onPlaudReconnected={handleReconnected}
             />
 
@@ -1468,6 +1493,13 @@ export function Workstation({
                 }}
                 mandatory={!initialSettings.onboardingCompleted}
                 capabilities={onboardingCapabilities}
+                initialReadiness={onboardingReadiness}
+                suspended={onboardingSettings}
+                onOpenSettings={(section) => {
+                    window.location.hash = section;
+                    setOnboardingSettings(true);
+                    setSettingsOpen(true);
+                }}
                 initialStep={onboardingInitialStep}
             />
         </>

@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 import type { StorageProvider } from "@/lib/storage/types";
 import { MAX_SESSION_BYTES } from "./constants";
 import type { RecordingSessionMetadata } from "./metadata";
@@ -29,6 +30,9 @@ export async function createRecordingSession(input: {
     noticeAcknowledgedAt: Date | null;
     folderId: string | null;
 }): Promise<{ session: RecordingSessionRow; key: string; expiresAt: Date }> {
+    await assertNotOrgAccount(input.userId, {
+        surface: "createRecordingSession",
+    });
     const key = randomBytes(32).toString("base64");
     const expiresAt = new Date(Date.now() + CAPTURE_KEY_RETENTION_MS);
     const session = await db.transaction(async (tx) => {
@@ -108,6 +112,10 @@ export async function replaceRecordingSession(input: {
     apiKeyId: string;
     sessionId: string;
 }): Promise<RecordingSessionRow> {
+    await assertNotOrgAccount(input.userId, {
+        surface: "replaceRecordingSession",
+        sessionId: input.sessionId,
+    });
     return db.transaction(async (tx) => {
         const [old] = await tx
             .select()

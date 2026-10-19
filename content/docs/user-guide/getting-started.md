@@ -11,20 +11,24 @@ If your organization uses single sign-on, the sign-in page shows one button inst
 
 ## The first-run wizard
 
-The first time you open Chatterbox, a short wizard helps you set up the essentials. Integration steps are optional and appear only when your administrator has configured them.
+The first time you open Chatterbox, a short wizard helps you connect the services you use. Every integration is optional. Google, mail, and Claude appear only when enabled on your instance.
+
+On a self-hosted instance with an Organization, shared recordings and services are already available. Connect only your personal sources. If the effective Organization providers cover transcription and summaries, the AI step is omitted and the final summary names those providers. A Claude Code or Codex Organization provider can supply summaries, but cannot transcribe recordings. When a role is missing, the wizard names it and opens Providers settings. Closing Settings or choosing **Return to setup** resumes the wizard at the same step and refreshes readiness.
+
+The Organization account's **Re-run setup** shows only shared AI providers, defaults, and processing profiles. Members connect personal integrations from their own accounts.
 
 | Step | What it does |
 | --- | --- |
 | ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Chatterbox does: sync recordings, transcribe them, and summarize them with AI. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. |
+| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. On a self-hosted origin, add this site in the Plaud Connector's popup and reload the page. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Set up an AI provider.** Opens Settings, where you add the service that transcribes and summarizes. See [AI providers](settings.md#ai-providers). |
 | Google Calendar and Meet (when configured) | **Connect Google Calendar and Meet.** Read-only access helps identify meetings and suggest speakers from invited guests and Meet attendees. |
-| Meeting Recorder | **Set up Meeting Recorder.** Install the Chrome extension and connect it to this Chatterbox instance. |
-| Mail (when configured) | **Send mail to Chatterbox.** Copy your personal address for sending or forwarding messages into your Chatter. |
-| Claude (when configured) | **Connect Claude.** Add Chatterbox as a custom connector in Claude or Claude Code. |
-| ![Done](images/onboarding-done.png) | **You're all set.** Click **Get Started**. |
+| Meeting Recorder | **Set up Meeting Recorder.** Install the extension, open its toolbar icon and allow this site, click **Connect** here, then **Confirm** in the extension. Follow consent prompts and the detected state; the current extension may require another toolbar visit after consent. If warned, allow the microphone in the extension or your voice will not be recorded. Manual URL and key setup remains available. |
+| Mail (when configured) | **Send mail to Chatterbox.** Your address needs no setup. Send or forward from your company address. Use a secret address in Settings → Mail for automatic forwarding from other senders. Folder addresses are generated per custom folder and changed in the folder header. Mail sent To or Cc an Organization folder waits for you to share it. The wizard shows paused or ineligible receiving states. |
+| Claude (when configured) | **Connect Claude.** In Claude on claude.ai or desktop, open **Customize → Connectors**, find the company connector, click **Connect**, and sign in with your company account. Enable it in a conversation using **+ → Connectors**. Personal-plan and Claude Code instructions are under **Not in your list?**. **Already set up** records your acknowledgement, not a verified connection. See [Claude](claude.md). |
+| ![Done](images/onboarding-done.png) | **You're all set.** Click **Get started**. |
 
-To see the wizard again, open the user menu and choose **Run setup again**. This does not reset your completed setup.
+To see the wizard again, open the user menu and choose **Re-run setup**. This does not reset your completed setup. The final summary checks existing connections even if you return from Google sign-in without revisiting their steps. **Next** continues; only **Skip** records a skipped step. Checking, failed checks, and reconnection requirements are shown separately.
 
 ## Finding your way around
 

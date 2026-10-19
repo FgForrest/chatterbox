@@ -6,6 +6,9 @@ import type { StorageProvider } from "@/lib/storage/types";
 
 vi.mock("nanoid", () => ({ nanoid: () => "session-recording" }));
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
+vi.mock("@/lib/org/config", () => ({
+    assertNotOrgAccount: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/db/items", () => ({ insertAudioItem: vi.fn() }));
 vi.mock("@/lib/audio/server-waveform", () => ({
     generateFileWaveform: vi.fn().mockResolvedValue([0, 0.5, 1]),

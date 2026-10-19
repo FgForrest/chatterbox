@@ -6,6 +6,7 @@ import {
 } from "@/lib/auth-request";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 import {
     enforceV1AuthenticatedRateLimit,
     enforceV1IpRateLimit,
@@ -40,6 +41,14 @@ export async function gateRecordingSessionRequest(
     if (authLimitResponse) return { response: authLimitResponse };
 
     requireApiScope(authn, "recordings:write");
+    const pathname = new URL(request.url).pathname;
+    const sessionId = pathname.match(
+        /^\/api\/v1\/recording-sessions\/([^/]+)(?:\/|$)/,
+    )?.[1];
+    await assertNotOrgAccount(authn.user.id, {
+        surface: `${request.method} ${pathname}`,
+        ...(sessionId ? { sessionId } : {}),
+    });
     if (authn.via !== "api-key" || !authn.apiKeyId) {
         throw new AppError(
             ErrorCode.FORBIDDEN,

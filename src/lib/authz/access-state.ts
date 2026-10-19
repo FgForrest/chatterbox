@@ -120,9 +120,13 @@ async function providerIdentity(
  * verification while it is younger than AUTHZ_VERIFICATION_MAX_AGE,
  * otherwise a fresh one from the access verifier. Without a verifier, or
  * with the provider unreachable, a stale verification is never used:
- * `unverifiable` / `unavailable`.
+ * `unverifiable` / `unavailable`. Read-only checks do not persist a fresh
+ * verdict and reject concurrent changes to the stored access state.
  */
-export async function holderAccess(userId: string): Promise<HolderAccess> {
+export async function holderAccess(
+    userId: string,
+    options: { readOnly?: boolean } = {},
+): Promise<HolderAccess> {
     const [state] = await db
         .select()
         .from(userAccessStates)
@@ -152,15 +156,23 @@ export async function holderAccess(userId: string): Promise<HolderAccess> {
         }
         throw error;
     }
-    const stored = await recordAccessState({
-        userId,
-        ...identity,
-        capabilities: verdict.status === "active" ? verdict.capabilities : [],
-        status: verdict.status,
-        source: "verifier",
-        expectedUpdatedAt: state?.updatedAt ?? null,
-    });
-    if (!stored) return { ok: false, reason: "unavailable" };
+    if (options.readOnly) {
+        const currentVersion = await accessStateVersion(userId);
+        if (currentVersion?.getTime() !== state?.updatedAt.getTime()) {
+            return { ok: false, reason: "unavailable" };
+        }
+    } else {
+        const stored = await recordAccessState({
+            userId,
+            ...identity,
+            capabilities:
+                verdict.status === "active" ? verdict.capabilities : [],
+            status: verdict.status,
+            source: "verifier",
+            expectedUpdatedAt: state?.updatedAt ?? null,
+        });
+        if (!stored) return { ok: false, reason: "unavailable" };
+    }
     if (verdict.status !== "active") return { ok: false, reason: "disabled" };
     return verdict.capabilities.has("use")
         ? {
