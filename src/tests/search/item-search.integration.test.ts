@@ -1,15 +1,4 @@
-/**
- * Server-side search of the pile against a real PostgreSQL: a mail is
- * found by what it says itself (never by what it quotes, its signature or
- * its disclaimer), a recording by its transcript, each library reads only
- * its own items, accents and case are ignored, and a colleague's mail in
- * the Organization library has its secret addresses masked.
- *
- * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
- * create scratch databases on.
- */
-
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -134,6 +123,8 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
     let janMail = "";
     let evaMail = "";
     let token = "";
+    let janMailboxAddress = "";
+    let orgRootId = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -145,6 +136,11 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         subject: string,
         body: string,
         from = "Jan Novotny <jan@example.com>",
+        options: {
+            messageId?: string;
+            inReplyTo?: string;
+            contentType?: string;
+        } = {},
     ): Promise<string> {
         const raw = await signMessage(
             rawMessage(
@@ -153,9 +149,12 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
                     `To: ${userMailbox}`,
                     `Subject: ${subject}`,
                     "Date: Fri, 09 Oct 2026 14:02:00 +0200",
-                    `Message-ID: <${Math.random().toString(36).slice(2)}@example.com>`,
+                    `Message-ID: <${options.messageId ?? Math.random().toString(36).slice(2)}@example.com>`,
+                    ...(options.inReplyTo
+                        ? [`In-Reply-To: <${options.inReplyTo}@example.com>`]
+                        : []),
                     "MIME-Version: 1.0",
-                    "Content-Type: text/plain; charset=utf-8",
+                    `Content-Type: ${options.contentType ?? "text/plain; charset=utf-8"}`,
                 ],
                 body,
             ),
@@ -184,6 +183,14 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         return message.id;
     }
 
+    async function share(itemId: string) {
+        await addRecordingToFolder({
+            userId: "u-jan",
+            recordingId: itemId,
+            folderId: orgRootId,
+        });
+    }
+
     const ids = async (
         viewerUserId: string,
         query: string,
@@ -203,6 +210,16 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
         orgUserId = (await ensureOrgAccount()) ?? "";
+        const [orgRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, orgUserId),
+                    isNull(recordingFolders.parentId),
+                ),
+            );
+        orgRootId = orgRoot?.id ?? "";
         for (const [id, email, sub] of [
             ["u-jan", "jan@example.com", "sub-jan"],
             ["u-eva", "eva@example.com", "sub-eva"],
@@ -220,6 +237,7 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         }
         const mailbox = await ensureMailbox("u-jan");
         const evaMailbox = await ensureMailbox("u-eva");
+        janMailboxAddress = `${mailbox?.localPart}@mail.example.com`;
         const secret = await createSecretAddress({
             userId: "u-jan",
             baseAddressId: mailbox?.id ?? "",
@@ -313,11 +331,159 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         ]);
     });
 
-    it("never finds a mail by what it quotes or by its signature", async () => {
-        expect(await ids("u-jan", "warehouse")).toEqual([]);
+    it("finds quoted text but never a signature", async () => {
+        expect(await ids("u-jan", "warehouse")).toEqual([janMail]);
         expect(await ids("u-jan", "Lighthouse")).toEqual([]);
-        // The title still finds it.
         expect(await ids("u-jan", "pilot")).toEqual([janMail]);
+    });
+
+    it("finds the Czech Gmail forward's words but not its quoted signature", async () => {
+        const forwarded = await deliver(
+            janMailboxAddress,
+            "Forwarded offer",
+            readFileSync(
+                path.join(__dirname, "../mail/fixtures/gmail-forward-cs.html"),
+                "utf8",
+            ),
+            undefined,
+            { contentType: "text/html; charset=utf-8" },
+        );
+        const result = await searchItems({
+            viewerUserId: "u-jan",
+            view: "private",
+            query: "cenu listopadu",
+        });
+        expect(result.hits).toEqual([
+            {
+                id: forwarded,
+                kind: "mail",
+                snippet: expect.stringContaining("můžeme přijmout cenu"),
+            },
+        ]);
+        expect(await ids("u-jan", "nakupu")).toEqual([]);
+    });
+
+    it.each([
+        "",
+        "> ",
+    ])("never searches a disclaimer at quote prefix %j", async (prefix) => {
+        await deliver(
+            janMailboxAddress,
+            "Notice",
+            `The documents are ready.\n\n${prefix}This email is confidential and intended solely for its recipient; disclaimerneedle must not be disclosed.`,
+        );
+        expect(await ids("u-jan", "disclaimerneedle")).toEqual([]);
+    });
+
+    it("never searches attachment names or text", async () => {
+        await deliver(
+            janMailboxAddress,
+            "Documents",
+            [
+                "--search-boundary",
+                "Content-Type: text/plain; charset=utf-8",
+                "",
+                "The documents are enclosed.",
+                "--search-boundary",
+                "Content-Type: text/plain; charset=utf-8",
+                'Content-Disposition: attachment; filename="attachmentname.txt"',
+                "",
+                "attachmentword",
+                "--search-boundary--",
+            ].join("\r\n"),
+            undefined,
+            { contentType: 'multipart/mixed; boundary="search-boundary"' },
+        );
+        expect(await ids("u-jan", "attachmentname")).toEqual([]);
+        expect(await ids("u-jan", "attachmentword")).toEqual([]);
+    });
+
+    it("skips known quotes for the owner, but searches them for a colleague until the original is shared", async () => {
+        const original = await deliver(
+            janMailboxAddress,
+            "Original",
+            "The juniper shipment is ready. Privateoriginalword.",
+            undefined,
+            { messageId: "known-original" },
+        );
+        const reply = await deliver(
+            janMailboxAddress,
+            "Reply",
+            [
+                "Acknowledged.",
+                "",
+                "On Thu, 8 Oct 2026 at 17:40, Eva Buyer <buyer@example.com> wrote:",
+                "> The juniper shipment is ready.",
+            ].join("\n"),
+            undefined,
+            { inReplyTo: "known-original" },
+        );
+        await share(reply);
+        expect(await ids("u-jan", "juniper")).toEqual([original]);
+        expect(await ids("u-jan", "juniper", "org")).toEqual([]);
+        const result = await searchItems({
+            viewerUserId: "u-eva",
+            view: "org",
+            query: "juniper",
+        });
+        expect(result.hits).toEqual([
+            {
+                id: reply,
+                kind: "mail",
+                snippet: expect.stringContaining("juniper"),
+            },
+        ]);
+        expect(JSON.stringify(result)).not.toContain(original);
+        expect(await ids("u-eva", "privateoriginalword", "org")).toEqual([]);
+        expect(await ids("u-eva", "juniper")).toEqual([]);
+        await share(original);
+        expect(await ids("u-eva", "juniper", "org")).toEqual([original]);
+        await markRecordingDeleted(db(), {
+            id: original,
+            userId: "u-jan",
+            at: new Date(),
+        });
+        expect(await ids("u-jan", "juniper")).toEqual([reply]);
+        expect(await ids("u-eva", "juniper", "org")).toEqual([reply]);
+    });
+
+    it("masks secret addresses in a colleague's quoted text before matching", async () => {
+        const quoted = await deliver(
+            janMailboxAddress,
+            "Quoted address",
+            [
+                "Please handle this.",
+                "",
+                "On Thu, 8 Oct 2026 at 17:40, Eva Buyer <buyer@example.com> wrote:",
+                `> Use the quotedaddress ${token}@mail.example.com for delivery.`,
+            ].join("\n"),
+        );
+        await share(quoted);
+        const result = await searchItems({
+            viewerUserId: "u-eva",
+            view: "org",
+            query: "quotedaddress",
+        });
+        expect(result.hits).toEqual([
+            {
+                id: quoted,
+                kind: "mail",
+                snippet: expect.stringContaining("jan."),
+            },
+        ]);
+        expect(JSON.stringify(result)).not.toContain(token);
+        expect(
+            await ids("u-eva", `quotedaddress ${token.slice(0, 7)}`, "org"),
+        ).toEqual([]);
+        expect(
+            await ids("u-jan", `quotedaddress ${token.slice(0, 7)}`),
+        ).toEqual([quoted]);
+        const own = await searchItems({
+            viewerUserId: "u-jan",
+            view: "private",
+            query: "quotedaddress",
+        });
+        expect(own.hits[0]?.snippet).toContain(token);
     });
 
     it("finds a recording by its transcript", async () => {
@@ -358,20 +524,7 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
     });
 
     it("masks a colleague's secret addresses in the Organization library", async () => {
-        const [orgRoot] = await db()
-            .select({ id: recordingFolders.id })
-            .from(recordingFolders)
-            .where(
-                and(
-                    eq(recordingFolders.userId, orgUserId),
-                    isNull(recordingFolders.parentId),
-                ),
-            );
-        await addRecordingToFolder({
-            userId: "u-jan",
-            recordingId: janMail,
-            folderId: orgRoot?.id ?? "",
-        });
+        await share(janMail);
         const { hits } = await searchItems({
             viewerUserId: "u-eva",
             view: "org",
@@ -380,10 +533,10 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         expect(hits.map((hit) => hit.id)).toEqual([janMail]);
         expect(hits[0]?.snippet).toContain("jan.");
         expect(hits[0]?.snippet).not.toContain(token);
-        // Nor does a search spell the token out.
         expect(await ids("u-eva", token.slice(0, 7), "org")).toEqual([]);
-        expect(await ids("u-jan", token.slice(0, 7))).toEqual([janMail]);
-        // Its owner reads their own.
+        expect(await ids("u-jan", `receipts ${token.slice(0, 7)}`)).toEqual([
+            janMail,
+        ]);
         const own = await searchItems({
             viewerUserId: "u-jan",
             view: "private",
