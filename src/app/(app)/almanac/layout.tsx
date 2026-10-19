@@ -1,9 +1,6 @@
 import type { ReactNode } from "react";
 import { AlmanacTabs } from "@/components/almanac/almanac-tabs";
 import { AppHeader } from "@/components/app-header";
-import { AppNav } from "@/components/app-nav";
-import { AppUploadButton } from "@/components/app-upload-button";
-import { HelpButton } from "@/components/help/help-button";
 
 /**
  * The Almanac: the people and things Riffado knows, the vocabulary it
@@ -13,13 +10,7 @@ import { HelpButton } from "@/components/help/help-button";
 export default function AlmanacLayout({ children }: { children: ReactNode }) {
     return (
         <div className="container mx-auto max-w-7xl px-4 py-6">
-            <AppHeader>
-                <AppNav className="min-w-0" />
-                <div className="ml-auto flex items-center gap-2">
-                    <AppUploadButton />
-                    <HelpButton />
-                </div>
-            </AppHeader>
+            <AppHeader />
             <AlmanacTabs />
             {children}
         </div>

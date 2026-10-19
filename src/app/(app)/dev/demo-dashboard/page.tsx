@@ -7,7 +7,6 @@ import {
     DEMO_INITIAL_SETTINGS,
 } from "@/lib/demo/fixtures";
 import { env } from "@/lib/env";
-import { RECORDER_EXTENSION_STORE_URL } from "@/lib/recorder-extension/extension-id";
 
 /**
  * Dev-only screenshot route.
@@ -37,7 +36,7 @@ export default async function DemoDashboardPage() {
         notFound();
     }
 
-    const session = await requireAuth();
+    await requireAuth();
 
     const recordings = buildDemoRecordings(new Date());
     const transcriptions = buildDemoTranscriptions();
@@ -46,18 +45,9 @@ export default async function DemoDashboardPage() {
         <Workstation
             recordings={recordings}
             transcriptions={transcriptions}
-            isAdmin={false}
-            userEmail={session.user.email ?? null}
             initialSettings={DEMO_INITIAL_SETTINGS}
             plaudNeedsReconnect={false}
             isHosted={env.IS_HOSTED}
-            onboardingCapabilities={{
-                audience: "single-user",
-                googleConfigured: false,
-                mailAvailable: false,
-                mcpConnectorUrl: null,
-                recorderStoreUrl: RECORDER_EXTENSION_STORE_URL,
-            }}
             exportProviders={{
                 filesystem: false,
                 googleDrive: false,

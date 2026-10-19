@@ -99,10 +99,10 @@ export function useSettingsNav(
     // round-trip and reopening the dialog lands on the last-visited
     // section.
     useEffect(() => {
-        if (typeof window === "undefined") return;
+        if (!open || typeof window === "undefined") return;
         window.location.hash = visibleActiveSection;
         localStorage.setItem(SETTINGS_STORAGE_KEY, visibleActiveSection);
-    }, [visibleActiveSection]);
+    }, [visibleActiveSection, open]);
 
     // Focus the first nav button when the dialog opens. Small delay
     // gives Radix's focus-trap a chance to settle so our focus call

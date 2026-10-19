@@ -3,13 +3,14 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
-import { userSettings, users } from "@/db/schema";
+import { users } from "@/db/schema";
 import type { ActorContext } from "@/lib/authz/model";
 import {
     type SessionAccess,
     type SessionRefusal,
     sessionAccess,
 } from "@/lib/authz/session-access";
+import { getUserSettings } from "@/lib/settings/user-settings";
 import {
     SSO_ACCESS_DENIED_ERROR,
     SSO_SESSION_ENDED_ERROR,
@@ -60,7 +61,7 @@ const LOGIN_ERRORS: Record<SessionRefusal, string> = {
 };
 
 /** Require an authenticated, non-suspended session. Redirects on failure. */
-export async function requireAuth() {
+export const requireAuth = cache(async () => {
     const resolved = await getSessionWithAccess();
 
     if (!resolved) {
@@ -81,7 +82,7 @@ export async function requireAuth() {
     }
 
     return session;
-}
+});
 
 /**
  * Redirects to `/dashboard` unless the session's account has finished
@@ -98,11 +99,7 @@ export async function requireAuth() {
 export async function requireCompletedOnboarding(
     session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
 ) {
-    const [row] = await db
-        .select({ onboardingCompleted: userSettings.onboardingCompleted })
-        .from(userSettings)
-        .where(eq(userSettings.userId, session.user.id))
-        .limit(1);
+    const row = await getUserSettings(session.user.id);
 
     if (!row?.onboardingCompleted) {
         redirect("/dashboard");

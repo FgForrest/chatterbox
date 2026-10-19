@@ -3,7 +3,7 @@ title: Nastavení
 description: Profily zpracování, poskytovatelé AI a ceny, výchozí hodnoty účtu a zobrazení.
 ---
 
-Otevřete Nastavení z nabídky účtu (kulaté tlačítko s Vaší iniciálou), nebo stiskněte `,`. Sekce jsou seskupeny vlevo.
+Otevřete **≡ → Nastavení** v Klepech, Almanachu nebo Úkolech, nebo stiskněte `,`. Sekce jsou seskupeny vlevo.
 
 **Nápověda** v horní části Nastavení otevře tuto příručku přímo v sekci, kterou máte otevřenou.
 

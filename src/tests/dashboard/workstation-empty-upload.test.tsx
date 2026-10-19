@@ -8,14 +8,17 @@ import {
     screen,
     within,
 } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { type ComponentProps, type Ref, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CommandPalette as CommandPaletteComponent } from "@/components/dashboard/command-palette";
+import type { RecordingListHandle } from "@/components/dashboard/recording-list";
 import type { Workstation as WorkstationComponent } from "@/components/dashboard/workstation";
 import type { UploadCompletionAction } from "@/hooks/use-upload-queue";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
+    paletteProps: null as ComponentProps<typeof CommandPaletteComponent> | null,
     uploadOptions: null as null | {
         onUploadStarted?: (upload: {
             uploadId: string;
@@ -33,6 +36,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: mocks.refresh }),
+    useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock("next-intl", () => ({
@@ -40,6 +44,24 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
+
+vi.mock("@/components/app-chrome-provider", () => ({
+    useAppChrome: () => ({
+        settingsOpen: false,
+        setSettingsOpen: vi.fn(),
+        onboardingOpen: false,
+        paletteOpen: false,
+        setPaletteOpen: vi.fn(),
+        shortcutsOpen: false,
+        setShortcutsOpen: vi.fn(),
+        theme: "light",
+        setTheme: vi.fn(),
+        isAutoSyncing: false,
+        lastSyncResult: null,
+        manualSync: vi.fn(),
+        handleReconnected: vi.fn(),
+    }),
+}));
 
 vi.mock("@/hooks/use-auto-sync", () => ({
     useAutoSync: () => ({
@@ -53,10 +75,6 @@ vi.mock("@/hooks/use-auto-sync", () => ({
 
 vi.mock("@/hooks/use-google-connection", () => ({
     useGoogleConnectOutcome: vi.fn(),
-}));
-
-vi.mock("@/hooks/use-list-keyboard-nav", () => ({
-    useListKeyboardNav: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-org-events", () => ({ useOrgEvents: vi.fn() }));
@@ -89,45 +107,74 @@ vi.mock("@/hooks/use-upload-queue", () => ({
     },
 }));
 
-vi.mock("@/components/dashboard/workstation-header", () => ({
-    WorkstationHeader: () => <div>Dashboard header</div>,
+vi.mock("@/components/app-header", () => ({
+    AppHeader: () => <div>Dashboard header</div>,
 }));
 vi.mock("@/components/dashboard/recording-list", () => ({
     RecordingList: ({
+        ref,
         recordings,
         currentRecording,
         onSelect,
         onOrganize,
         emptyState,
     }: {
+        ref?: Ref<RecordingListHandle>;
         recordings: Recording[];
         currentRecording: Recording | null;
         onSelect: (recording: Recording) => void;
         onOrganize: () => void;
         emptyState?: React.ReactNode;
-    }) => (
-        <section aria-label="Recent recordings">
-            <button type="button" onClick={onOrganize}>
-                Organize
-            </button>
-            {recordings.map((recording) => (
-                <button
-                    type="button"
-                    key={recording.id}
-                    aria-pressed={currentRecording?.id === recording.id}
-                    onClick={() => onSelect(recording)}
-                >
-                    {recording.filename}
+    }) => {
+        useImperativeHandle(ref, () => ({
+            next: () =>
+                onSelect(
+                    recordings[
+                        Math.min(
+                            recordings.length - 1,
+                            recordings.findIndex(
+                                (item) => item.id === currentRecording?.id,
+                            ) + 1,
+                        )
+                    ],
+                ),
+            prev: () =>
+                onSelect(
+                    recordings[
+                        Math.max(
+                            0,
+                            recordings.findIndex(
+                                (item) => item.id === currentRecording?.id,
+                            ) - 1,
+                        )
+                    ],
+                ),
+            focusSearch: vi.fn(),
+        }));
+        return (
+            <section aria-label="Recent recordings">
+                <button type="button" onClick={onOrganize}>
+                    Organize
                 </button>
-            ))}
-            {recordings.length === 0 ? (
-                <>
-                    <p>No recordings yet.</p>
-                    {emptyState}
-                </>
-            ) : null}
-        </section>
-    ),
+                {recordings.map((recording) => (
+                    <button
+                        type="button"
+                        key={recording.id}
+                        aria-pressed={currentRecording?.id === recording.id}
+                        onClick={() => onSelect(recording)}
+                    >
+                        {recording.filename}
+                    </button>
+                ))}
+                {recordings.length === 0 ? (
+                    <>
+                        <p>No recordings yet.</p>
+                        {emptyState}
+                    </>
+                ) : null}
+            </section>
+        );
+    },
 }));
 vi.mock("@/components/dashboard/folder-tree", () => ({
     FolderTree: ({ onNewFolder }: { onNewFolder?: () => void }) => (
@@ -146,7 +193,10 @@ vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
     }) => <div>Selected: {currentRecording?.filename ?? "none"}</div>,
 }));
 vi.mock("@/components/dashboard/command-palette", () => ({
-    CommandPalette: () => null,
+    CommandPalette: (props: ComponentProps<typeof CommandPaletteComponent>) => {
+        mocks.paletteProps = props;
+        return null;
+    },
 }));
 vi.mock("@/components/dashboard/shortcuts-dialog", () => ({
     ShortcutsDialog: () => null,
@@ -214,13 +264,6 @@ const baseProps: ComponentProps<typeof WorkstationComponent> = {
     initialSettings: settings,
     plaudNeedsReconnect: false,
     isHosted: false,
-    onboardingCapabilities: {
-        audience: "single-user",
-        googleConfigured: false,
-        mailAvailable: false,
-        mcpConnectorUrl: null,
-        recorderStoreUrl: "https://store.example/recorder",
-    },
     exportProviders: { filesystem: false, googleDrive: false, mail: false },
     initialFolderOrganization: {
         folders: [rootFolder],
@@ -244,6 +287,8 @@ afterEach(cleanup);
 beforeEach(() => {
     mocks.refresh.mockClear();
     mocks.uploadOptions = null;
+    mocks.paletteProps = null;
+    window.history.replaceState({}, "", "/dashboard");
 });
 
 describe("Workstation empty account", () => {
@@ -332,6 +377,19 @@ describe("Workstation empty account", () => {
 
         expect(screen.getByText("Selected: none")).toBeTruthy();
         expect(screen.queryByText("Start with a folder")).toBeNull();
+    });
+
+    it("selects a search result when the dashboard query changes", () => {
+        window.history.replaceState({}, "", "/dashboard");
+        const first = recording("first", "First recording");
+        const second = recording("second", "Search result");
+        const { rerender } = render(
+            <Workstation {...baseProps} recordings={[first, second]} />,
+        );
+        window.history.replaceState({}, "", "/dashboard?recording=second");
+        rerender(<Workstation {...baseProps} recordings={[first, second]} />);
+        expect(screen.getByText("Selected: Search result")).toBeTruthy();
+        window.history.replaceState({}, "", "/dashboard");
     });
 
     it("selects the newest personal recording on first load", () => {
@@ -523,5 +581,130 @@ describe("Workstation upload completion", () => {
         rerender(<Workstation {...baseProps} recordings={[uploaded, first]} />);
 
         expect(screen.getByText("Selected: First recording")).toBeTruthy();
+    });
+});
+
+describe("Workstation search selection", () => {
+    it("opens loaded Organization hits and items beyond the palette cap without refreshing", () => {
+        const recordings = Array.from({ length: 201 }, (_, index) =>
+            recording(`item-${index}`, `Recording ${index}`),
+        );
+        const shared = {
+            ...recording("shared", "Shared result"),
+            view: "org" as const,
+            isOwn: false,
+        };
+        render(
+            <Workstation
+                {...baseProps}
+                recordings={recordings}
+                organizationLibrary={{
+                    recordings: [shared],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+            />,
+        );
+        let handled = false;
+        act(() => {
+            handled =
+                mocks.paletteProps?.onOpenSearchHit?.({
+                    id: "item-200",
+                    title: "Recording 200",
+                    snippet: null,
+                    href: "/dashboard?recording=item-200",
+                }) ?? false;
+        });
+        expect(handled).toBe(true);
+        expect(screen.getByText("Selected: Recording 200")).toBeTruthy();
+        act(() => {
+            handled =
+                mocks.paletteProps?.onOpenSearchHit?.({
+                    id: "shared",
+                    title: "Shared result",
+                    snippet: null,
+                    href: "/dashboard?recording=shared&view=org",
+                }) ?? false;
+        });
+        expect(handled).toBe(true);
+        expect(screen.getByText("Selected: Shared result")).toBeTruthy();
+        expect(mocks.refresh).not.toHaveBeenCalled();
+        expect(mocks.paletteProps?.currentRecording?.view).toBe("org");
+        expect(
+            mocks.paletteProps?.onOpenSearchHit?.({
+                id: "missing",
+                title: "Missing",
+                snippet: null,
+                href: "/dashboard?recording=missing",
+            }),
+        ).toBe(false);
+    });
+    it("reopens the same search link after a list selection", () => {
+        const first = recording("first", "First recording");
+        const second = recording("second", "Second recording");
+        window.history.replaceState({}, "", "/dashboard?recording=first");
+        render(<Workstation {...baseProps} recordings={[first, second]} />);
+        const hit = {
+            id: first.id,
+            title: first.filename,
+            snippet: null,
+            href: "/dashboard?recording=first",
+        };
+        act(() => {
+            mocks.paletteProps?.onOpenSearchHit?.(hit);
+        });
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        act(() => {
+            mocks.paletteProps?.onOpenSearchHit?.(hit);
+        });
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(window.location.search).toBe("?recording=first");
+    });
+    it("preserves a URL selection when an earlier upload completes", () => {
+        const first = recording("first", "First recording");
+        const linked = recording("linked", "Linked recording");
+        const uploaded = recording("uploaded", "Uploaded recording");
+        const { rerender } = render(
+            <Workstation {...baseProps} recordings={[first, linked]} />,
+        );
+        act(() =>
+            mocks.uploadOptions?.onUploadStarted?.({
+                uploadId: "upload",
+                filename: uploaded.filename,
+            }),
+        );
+        window.history.replaceState({}, "", "/dashboard?recording=linked");
+        rerender(<Workstation {...baseProps} recordings={[first, linked]} />);
+        act(() => {
+            mocks.uploadOptions?.onUploadComplete({
+                recordingId: uploaded.id,
+                uploadId: "upload",
+                filename: uploaded.filename,
+                resumed: false,
+            });
+        });
+        rerender(
+            <Workstation
+                {...baseProps}
+                recordings={[uploaded, first, linked]}
+            />,
+        );
+        expect(screen.getByText("Selected: Linked recording")).toBeTruthy();
+    });
+    it("keeps j/k list navigation on the dashboard", () => {
+        render(
+            <Workstation
+                {...baseProps}
+                recordings={[
+                    recording("first", "First"),
+                    recording("second", "Second"),
+                ]}
+            />,
+        );
+        fireEvent.keyDown(window, { key: "j" });
+        expect(screen.getByText("Selected: Second")).toBeTruthy();
+        fireEvent.keyDown(window, { key: "k" });
+        expect(screen.getByText("Selected: First")).toBeTruthy();
     });
 });

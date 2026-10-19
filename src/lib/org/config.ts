@@ -78,14 +78,14 @@ export function assertOrgScopeWritable(): void {
  * Checked by role, not by whether the scope is enabled: an org account left
  * behind by removed env vars must still never gain a private scope.
  */
-export async function isOrgAccount(userId: string): Promise<boolean> {
+export const isOrgAccount = cache(async (userId: string): Promise<boolean> => {
     const [row] = await db
         .select({ role: users.role })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
     return row?.role === "org";
-}
+});
 
 /** How long a refusal stays unreported after one for the same account and surface. */
 export const RECORDER_REFUSAL_REPORT_WINDOW_MS = 10 * 60 * 1000;

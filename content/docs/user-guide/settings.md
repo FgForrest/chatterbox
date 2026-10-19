@@ -3,7 +3,7 @@ title: Settings
 description: Processing profiles, AI providers and prices, account defaults, and display.
 ---
 
-Open Settings from the account menu (the round button with your initial), or press `,`. The sections are grouped on the left.
+Open **≡ → Settings** from Chatter, Almanac or Tasks, or press `,`. The sections are grouped on the left.
 
 **Help** at the top of Settings opens this guide at the section you have open.
 

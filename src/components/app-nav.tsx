@@ -35,7 +35,12 @@ export function AppNav({ className }: { className?: string }) {
     ] as const;
 
     return (
-        <div className={cn("flex min-w-0 items-center gap-6", className)}>
+        <div
+            className={cn(
+                "flex min-w-0 items-center gap-3 xl:gap-6",
+                className,
+            )}
+        >
             <Link
                 href="/dashboard"
                 aria-label={`${name} ${locale === "cs-CZ" ? "domů" : "home"}`}
@@ -61,10 +66,16 @@ export function AppNav({ className }: { className?: string }) {
                                           "{count, plural, one {# new task or proposal for you} other {# new tasks or proposals for you}}",
                                           { count: pendingTasks },
                                       )}`
-                                    : section.label
+                                    : section.href === "/almanac" &&
+                                        pendingReviews > 0
+                                      ? `${section.label}, ${i18n(
+                                            "{count, plural, one {# review waits} other {# reviews wait}}",
+                                            { count: pendingReviews },
+                                        )}`
+                                      : section.label
                             }
                             className={cn(
-                                "relative flex min-w-12 items-center justify-center gap-2.5 px-3 text-sm font-semibold tracking-tight transition-[color,background-color] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-3 sm:px-9 sm:text-lg",
+                                "relative flex min-w-9 items-center justify-center gap-1.5 px-2 text-sm font-semibold tracking-tight transition-[color,background-color] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-2 sm:px-3 sm:text-base xl:gap-3 xl:px-9 xl:text-lg",
                                 active
                                     ? "bg-primary/[0.12] text-foreground after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary"
                                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
@@ -78,13 +89,17 @@ export function AppNav({ className }: { className?: string }) {
                                 strokeWidth={1.9}
                                 aria-hidden="true"
                             />
-                            <span className="hidden sm:inline">
+                            <span
+                                className={
+                                    active ? "inline" : "hidden sm:inline"
+                                }
+                            >
                                 {section.label}
                             </span>
                             {section.href === "/almanac" &&
                                 pendingReviews > 0 && (
                                     <span
-                                        className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+                                        className="absolute right-0.5 top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-center text-[9px] font-semibold leading-3 text-primary-foreground sm:static sm:px-1.5 sm:text-xs sm:leading-normal"
                                         aria-hidden="true"
                                         title={i18n(
                                             "{count, plural, one {# review waits} other {# reviews wait}}",
@@ -96,7 +111,7 @@ export function AppNav({ className }: { className?: string }) {
                                 )}
                             {section.href === "/tasks" && pendingTasks > 0 && (
                                 <span
-                                    className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+                                    className="absolute right-0.5 top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-center text-[9px] font-semibold leading-3 text-primary-foreground sm:static sm:px-1.5 sm:text-xs sm:leading-normal"
                                     aria-hidden="true"
                                     title={i18n(
                                         "{count, plural, one {# new task or proposal for you} other {# new tasks or proposals for you}}",

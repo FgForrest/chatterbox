@@ -11,6 +11,7 @@ interface ShortcutHandlers {
     onOpenSettings: () => void;
     /** When false, j/k/Enter/etc. are ignored (e.g. a modal is open). */
     enabled?: boolean;
+    globalShortcuts?: boolean;
 }
 
 function isInputTarget(el: EventTarget | null) {
@@ -33,13 +34,18 @@ export function useListKeyboardNav({
     onOpenShortcuts,
     onOpenSettings,
     enabled = true,
+    globalShortcuts = true,
 }: ShortcutHandlers) {
     useEffect(() => {
         if (!enabled) return;
         const handler = (e: KeyboardEvent) => {
             // ⌘K / Ctrl+K always opens the palette, even when an input
             // has focus — matches Linear / Raycast convention.
-            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+            if (
+                globalShortcuts &&
+                (e.metaKey || e.ctrlKey) &&
+                e.key.toLowerCase() === "k"
+            ) {
                 e.preventDefault();
                 onOpenPalette();
                 return;
@@ -62,10 +68,12 @@ export function useListKeyboardNav({
                     onFocusSearch();
                     break;
                 case "?":
+                    if (!globalShortcuts) break;
                     e.preventDefault();
                     onOpenShortcuts();
                     break;
                 case ",":
+                    if (!globalShortcuts) break;
                     e.preventDefault();
                     onOpenSettings();
                     break;
@@ -76,6 +84,7 @@ export function useListKeyboardNav({
         return () => window.removeEventListener("keydown", handler);
     }, [
         enabled,
+        globalShortcuts,
         onNext,
         onPrev,
         onFocusSearch,

@@ -5,13 +5,10 @@ import { recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
     chatterItems,
-    plaudConnections,
     recordings,
     transcriptions,
-    userSettings,
     users,
 } from "@/db/schema";
-import { accessManagementAvailable } from "@/lib/access/service";
 import { getSessionActor, requireAuth } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
@@ -19,17 +16,15 @@ import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
-import { isAdminEmail } from "@/lib/hosted/admin/guard";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
+import { isMailEnabled } from "@/lib/mail/config";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
-import {
-    loadOnboardingCapabilities,
-    loadOnboardingReadiness,
-} from "@/lib/onboarding/readiness";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
+import { getPlaudConnection } from "@/lib/settings/plaud-connection";
+import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -246,8 +241,8 @@ export default async function DashboardPage() {
         userRecordings,
         userTranscriptions,
         userSummaryRows,
-        [settingsRow],
-        [connectionRow],
+        settingsRow,
+        connectionRow,
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
@@ -315,29 +310,12 @@ export default async function DashboardPage() {
         // player render with the user's preferences on first paint — no
         // waterfall of /api/settings/user fetches from three different
         // components.
-        db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, session.user.id))
-            .limit(1),
-        db
-            .select({ invalidatedAt: plaudConnections.invalidatedAt })
-            .from(plaudConnections)
-            .where(eq(plaudConnections.userId, session.user.id))
-            .limit(1),
+        getUserSettings(session.user.id),
+        getPlaudConnection(session.user.id),
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),
     ]);
-    const onboardingCapabilities = await loadOnboardingCapabilities(
-        session.user.id,
-        { id: orgUserId, isAccount: viewerIsOrgAccount },
-    );
-    const onboardingReadinessPromise = settingsRow?.onboardingCompleted
-        ? Promise.resolve(undefined)
-        : loadOnboardingReadiness(session.user.id, onboardingCapabilities, {
-              plaudConnection: connectionRow ?? null,
-          });
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
     const ownRecordings = viewerIsOrgAccount ? [] : userRecordings;
@@ -414,8 +392,7 @@ export default async function DashboardPage() {
             selfHostMode: env.SELF_HOST_MODE,
         },
     );
-
-    const onboardingReadiness = await onboardingReadinessPromise;
+    const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
 
     return (
         <Workstation
@@ -424,15 +401,10 @@ export default async function DashboardPage() {
             transcriptVariants={transcriptVariants}
             organizationLibrary={organizationLibrary}
             isOrgAccount={viewerIsOrgAccount}
-            isAdmin={isAdminEmail(session.user.email)}
-            userEmail={session.user.email ?? null}
             initialSettings={initialSettings}
             plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
             isHosted={env.IS_HOSTED}
-            mailEnabled={onboardingCapabilities.mailAvailable}
-            onboardingCapabilities={onboardingCapabilities}
-            onboardingReadiness={onboardingReadiness}
-            accessManagement={accessManagementAvailable(actor)}
+            mailEnabled={mailAvailable}
             canCurate={actor ? await actsForOrganization(actor) : false}
             exportProviders={exportProvidersAvailability()}
             initialFolderOrganization={visibleFolderOrganization}

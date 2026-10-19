@@ -163,7 +163,7 @@ describe("Organization account personal settings", () => {
         window.location.hash = section;
         localStorage.setItem(SETTINGS_STORAGE_KEY, section);
         const { result } = renderHook(() =>
-            useSettingsNav(false, vi.fn(), false, true, false, true),
+            useSettingsNav(true, vi.fn(), false, true, false, true),
         );
         expect(result.current.activeSection).toBe("providers");
         act(() => result.current.setActiveSection(section));

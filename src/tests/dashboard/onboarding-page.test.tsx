@@ -5,18 +5,31 @@ import {
     plaudConnections,
     recordings,
     transcriptions,
-    userSettings,
 } from "@/db/schema";
+import { appChromeConfig } from "@/lib/settings/app-chrome";
 
-const { state, readiness, capabilities, review, select } = vi.hoisted(() => ({
+const {
+    state,
+    readiness,
+    capabilities,
+    review,
+    select,
+    settings,
+    orgAccount,
+    connection,
+} = vi.hoisted(() => ({
     state: {
         completed: true,
         connection: { invalidatedAt: null as Date | null },
+        organization: false,
     },
     readiness: vi.fn(),
     capabilities: vi.fn(),
     review: vi.fn(),
     select: vi.fn(),
+    settings: vi.fn(),
+    orgAccount: vi.fn(),
+    connection: vi.fn(),
 }));
 vi.mock("@/components/dashboard/workstation", () => ({
     Workstation: () => null,
@@ -52,6 +65,11 @@ vi.mock("@/lib/learn/llm-input", () => ({
 }));
 vi.mock("@/lib/learn/pending", () => ({ recordingsNeedingReview: review }));
 vi.mock("@/lib/learn/render", () => ({ readTextOf: () => null }));
+vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => false }));
+vi.mock("@/lib/settings/user-settings", () => ({ getUserSettings: settings }));
+vi.mock("@/lib/settings/plaud-connection", () => ({
+    getPlaudConnection: connection,
+}));
 vi.mock("@/lib/mail/list", () => ({ loadMailListRows: async () => [] }));
 vi.mock("@/lib/onboarding/readiness", () => ({
     loadOnboardingReadiness: readiness,
@@ -59,14 +77,20 @@ vi.mock("@/lib/onboarding/readiness", () => ({
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => null,
-    isOrgAccount: async () => false,
+    isOrgAccount: orgAccount,
 }));
 vi.mock("@/lib/sharing/access", () => ({ sharedRecordingCondition: vi.fn() }));
 
-describe("dashboard onboarding seed", () => {
+describe("layout onboarding seed", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         state.completed = true;
+        state.organization = false;
+        settings.mockImplementation(async () => ({
+            onboardingCompleted: state.completed,
+        }));
+        orgAccount.mockImplementation(async () => state.organization);
+        connection.mockImplementation(async () => state.connection);
         state.connection = { invalidatedAt: null };
         capabilities.mockResolvedValue({
             audience: "single-user",
@@ -77,16 +101,11 @@ describe("dashboard onboarding seed", () => {
         select.mockImplementation(() => ({
             from(table: unknown) {
                 const rows =
-                    table === userSettings
-                        ? [{ onboardingCompleted: state.completed }]
-                        : table === plaudConnections
-                          ? [state.connection]
-                          : [];
+                    table === plaudConnections ? [state.connection] : [];
                 expect([
                     recordings,
                     transcriptions,
                     aiEnhancements,
-                    userSettings,
                     plaudConnections,
                 ]).toContain(table);
                 const query = Object.assign(Promise.resolve(rows), {
@@ -101,26 +120,56 @@ describe("dashboard onboarding seed", () => {
     });
 
     it("does not load readiness after onboarding is completed", async () => {
-        const page = await DashboardPage();
-        expect(page.props.onboardingReadiness).toBeUndefined();
+        const config = await appChromeConfig();
+        expect(config.onboardingReadiness).toBeUndefined();
         expect(readiness).not.toHaveBeenCalled();
+        expect(connection).not.toHaveBeenCalled();
         expect(capabilities).toHaveBeenCalledExactlyOnceWith("viewer", {
             id: null,
             isAccount: false,
         });
     });
 
-    it("seeds incomplete onboarding with the Plaud row already read by the dashboard", async () => {
+    it("seeds incomplete onboarding with the shared Plaud connection status", async () => {
         state.completed = false;
         state.connection = { invalidatedAt: new Date() };
-        const page = await DashboardPage();
-        expect(page.props.onboardingReadiness).toEqual({ plaud: "connected" });
+        const config = await appChromeConfig();
+        expect(config.onboardingReadiness).toEqual({ plaud: "connected" });
         expect(readiness).toHaveBeenCalledExactlyOnceWith(
             "viewer",
             { audience: "single-user", mailAvailable: false },
             { plaudConnection: state.connection },
         );
-        expect(select).toHaveBeenCalledTimes(5);
+        expect(connection).toHaveBeenCalledExactlyOnceWith("viewer");
+        expect(settings).toHaveBeenCalledExactlyOnceWith("viewer");
+        expect(orgAccount).toHaveBeenCalledExactlyOnceWith("viewer");
+        expect(select).not.toHaveBeenCalled();
+    });
+
+    it("seeds a new account when no settings row exists", async () => {
+        settings.mockResolvedValue(undefined);
+        const config = await appChromeConfig();
+        expect(config.initialSettings.onboardingCompleted).toBe(false);
+        expect(config.onboardingReadiness).toEqual({ plaud: "connected" });
+        expect(readiness).toHaveBeenCalledOnce();
+    });
+
+    it("passes the Organization audience and Recorder filter to the shared provider", async () => {
+        state.organization = true;
+        capabilities.mockResolvedValue({
+            audience: "organization-account",
+            mailAvailable: false,
+        });
+        const config = await appChromeConfig();
+        expect(config.isOrgAccount).toBe(true);
+        expect(config.onboardingCapabilities.audience).toBe(
+            "organization-account",
+        );
+        expect(config.mailEnabled).toBe(false);
+        expect(capabilities).toHaveBeenCalledExactlyOnceWith("viewer", {
+            id: null,
+            isAccount: true,
+        });
     });
 
     it("starts readiness alongside the remaining dashboard work", async () => {
@@ -142,11 +191,12 @@ describe("dashboard onboarding seed", () => {
                 finishReview = resolve;
             });
         });
+        const layoutConfig = appChromeConfig();
         const render = DashboardPage();
         await reviewStarted;
         expect(readiness).toHaveBeenCalledOnce();
         finishReadiness({ plaud: "connected" });
         finishReview(new Set());
-        await render;
+        await Promise.all([layoutConfig, render]);
     });
 });
