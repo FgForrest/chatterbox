@@ -349,3 +349,36 @@ describe("unavailable provider defaults", () => {
         ).toBeTruthy();
     });
 });
+
+describe("Organization implicit provider picker", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
+
+    it.each([
+        "transcription",
+        "summary",
+        "topics",
+        "learning",
+        "title",
+    ] as const)("names the Organization fallback for %s", async (purpose) => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) =>
+                Promise.resolve(
+                    Response.json({
+                        providers: url.includes("organization-providers")
+                            ? [provider("org", "Organization AI")]
+                            : [],
+                    }),
+                ),
+            ),
+        );
+        render(<ProviderRoleSelect purpose={purpose} />);
+        expect(
+            await screen.findByText("Automatic: Organization AI · model"),
+        ).toBeTruthy();
+        expect(screen.queryByText("Unavailable: deleted provider")).toBeNull();
+    });
+});
