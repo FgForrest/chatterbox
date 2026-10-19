@@ -28,7 +28,7 @@ Klepna potřebuje položky `sub`, `email`, `name` a `email_verified`.
 <details>
 <summary>Keycloak</summary>
 
-1. Ve své doméně identity **Clients → Create client**, zvolte **OpenID Connect**,
+1. Ve svém realmu **Clients → Create client**, zvolte **OpenID Connect**,
    ID klienta `chatterbox`.
 2. **Client authentication:** zapnuto. **Authentication flow:** pouze Standard flow.
 3. **Valid redirect URIs:** `<APP_URL>/api/auth/oauth2/callback/oidc`.
@@ -244,7 +244,7 @@ osoba v obou případech nedostane.
 
 ## Vyzkoušení lokálně
 
-Sada služeb pro testování celého systému v repozitáři má doplňkovou konfiguraci Keycloaku s testovací doménou identity (`riffado-e2e`, uživatelé `alice`, `bob`, `carol`, `dave`, všichni s heslem `<name>-password`):
+Sada služeb pro testování celého systému v repozitáři má doplňkovou konfiguraci Keycloaku s testovacím realmem (`riffado-e2e`, uživatelé `alice`, `bob`, `carol`, `dave`, všichni s heslem `<name>-password`):
 
 ```bash
 RIFFADO_E2E_APP_URL=http://localhost:3310 \
