@@ -24,7 +24,7 @@ it("scrolls to a widget and dispatches its single open event", () => {
 
     expect(host.scrollIntoView).toHaveBeenCalledWith({
         behavior: "smooth",
-        block: "center",
+        block: "start",
     });
     expect(reopened).toHaveBeenCalledOnce();
     expect(reopened.mock.calls[0]?.[0]).toMatchObject({

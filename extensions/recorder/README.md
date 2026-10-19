@@ -49,13 +49,30 @@ responsibilities of the server operator.
 
 1. Install [Chatterbox Meeting Recorder from the Chrome Web Store](https://chromewebstore.google.com/detail/chatterbox-meeting-record/pojdfnhpfijfolehkjidbomgjemonkge)
    in desktop Chrome or a compatible browser, and pin it to the toolbar.
-2. Open the extension's **Options**, review and accept the data-use disclosure,
-   and allow microphone access.
-3. Return to **Settings → Meeting Recorder** in Chatterbox and click **Re-check**.
-   If site access is needed, open the extension's toolbar icon on this page and
-   choose **Connect to** this site.
-4. Click **Set up recorder**, then confirm the server in the extension's Options
-   and allow site access when prompted.
+2. Open your Chatterbox dashboard, click the recorder's toolbar icon, then
+   **Connect to** this server. Review the data-use disclosure and click
+   **Agree and continue**. Allow access to this server in Chrome, then allow
+   the microphone when prompted. The setup page shows the result.
+3. Click **Return to Chatterbox and connect**, then **Connect** (or **Set up
+   recorder**) on the dashboard. The same extension setup tab shows the server
+   address. Explicitly confirm it there; the dashboard regains focus.
+
+Meet, Teams and Zoom web use **Prompt** by default, also after updating an
+installation with no saved platform choice. Existing choices and server
+defaults keep precedence. Other platforms remain **Off** until you or the server
+choose otherwise. Updating from 0.2.1 changes the old implicit Off default to
+Prompt for Meet, Teams and Zoom web. When a meeting becomes audible, the
+notification asks whether to record it. **Record** opens the participant notice
+and microphone check, followed by Chrome's audio picker. Choose the meeting tab
+and enable **Share tab audio**. **Not now** dismisses the prompt for that tab.
+
+If the microphone is not allowed, recording waits for you to allow it or choose
+**Record without my microphone**. The popup and toolbar badge warn beforehand.
+Blocked microphone access shows the Chrome settings path for allowing it again.
+An unplugged selected microphone retries the default input. If it still fails,
+meeting audio keeps recording with a persistent notification and popup warning
+explaining the failure. After deliberately recording without a microphone, you
+can dismiss permission reminders in the popup and re-enable them in Options.
 
 ## Load it for development
 
@@ -74,14 +91,19 @@ directly by Chrome.
 
 ## Pairing
 
-First open the extension's **Options**, read the data-use disclosure, and agree.
+Follow **Install and connect** above for setup without copying a key. For manual
+pairing, first open the extension's **Options**, read the data-use disclosure,
+and agree.
 Then in Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
 (a `recordings:write` API key that cannot read your library). Then either:
 
 - Click **Set up recorder** on that page, then confirm the destination in the
   extension's Options page. Chrome may ask for access to that server origin.
-  For self-hosted sites, grant the origin from the extension popup first.
-- Paste the **server URL** and **key** into the extension's Options.
+  For self-hosted sites, the toolbar setup grants access and reuses its setup
+  tab for confirmation.
+- Paste the **server URL** and **key** into the extension's Options, then
+  **Save and grant access**. Open tabs of that server detect the extension
+  without reloading.
 
 ## Packaging
 

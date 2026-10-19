@@ -12,6 +12,12 @@
             <button id="open-options" class="link" type="button" data-i18n="options">Options</button>
         </header>
 
+        <section id="mic-warning" hidden>
+            <p id="mic-warning-text" class="error" data-i18n="micWarning"></p>
+            <button id="allow-mic" type="button" data-i18n="grantMic"></button>
+            <button id="dismiss-mic" type="button" hidden data-i18n="dismissMicReminder"></button>
+        </section>
+
         <!-- Not paired, and the active tab is a site we could connect to -->
         <section id="view-connect" hidden>
             <p data-i18n="popupConnectIntro">Connect this extension to the Chatterbox instance in the current tab. Then click Set up recorder on that page.</p>

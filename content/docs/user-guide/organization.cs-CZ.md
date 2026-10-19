@@ -56,6 +56,10 @@ Profily Organizace jsou sdílené recepty zpracování pro složky Organizace. �
 
 Pouze osoby s oprávněním `access.manage` mohou poskytovatele Organizace přidávat, upravovat, povolovat, zakazovat nebo mazat a nastavit výchozího poskytovatele Organizace pro každou roli. Člen, který si poskytovatele nezvolil, používá tento výchozí, a to i u soukromých položek. Správci vidí také **Využití podle členů**, včetně počtu volání a odhadované ceny. Tyto požadavky hradí účet Organizace. Každá správcovská změna se zapíše do auditního protokolu administrátora.
 
+Noví členové nemusejí poskytovatele nastavovat. Bez poskytovatele připnutého v profilu se použije volba člena pro danou roli, jeho volba pro shrnutí u Učení, témat a názvů, výchozí poskytovatel Organizace pro danou roli, její výchozí poskytovatel shrnutí u navazujících rolí, nejstarší povolený vlastní poskytovatel chatu člena (jen pro chatové role) a nakonec nejstarší povolený vhodný poskytovatel Organizace. Pořadí určuje čas vytvoření a poté ID přihlašovacích údajů. Přepis přeskakuje poskytovatele pouze pro rozšíření; chatové role přeskakují poskytovatele pouze pro přepis. Výslovně zvolený chybějící nebo zakázaný poskytovatel způsobí chybu bez přechodu na jiného.
+
+Správci vidí upozornění, pokud není zvolen výchozí poskytovatel přepisu nebo shrnutí, a mohou náhradního nastavit jako výchozího. Pokud vhodný poskytovatel neexistuje, upozornění vysvětluje, že členové poskytovatele potřebují. Karty jen pro čtení označují náhradního poskytovatele, kterého člen skutečně používá. Náhradní výběr vyžaduje povolenou Organizaci a oprávnění k jejímu použití; náklady hradí Organizace a platí obvyklé limity na člena. Výběr pro samotný účet Organizace a chování náhradního výběru v hostované verzi se nemění.
+
 Ve výchozím nastavení může každý člen provést 60 volání za hodinu u každého poskytovatele Organizace. Po dosažení limitu se další volání daného člena odmítne až do obnovení hodinového okna, aniž by využilo limit jiného člena. Administrátor může limit instance změnit.
 
 ## Kurátoři a organizační účet

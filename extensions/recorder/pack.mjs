@@ -46,6 +46,7 @@ for (const entry of [
     "offscreen",
     "popup",
     "picker",
+    "request",
     "options",
     "icons",
 ]) {

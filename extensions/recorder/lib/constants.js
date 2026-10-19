@@ -39,6 +39,7 @@ export const STORAGE_KEYS = {
     encryptedApiKey: "encryptedApiKey",
     installationId: "installationId",
     microphoneId: "microphoneId",
+    micReminderDismissed: "micReminderDismissed",
     noticeText: "noticeText",
     channelMode: "channelMode",
     /** { [platformId]: "off" | "prompt" | "auto" } -- the user's own choices. */
@@ -61,6 +62,8 @@ export const STORAGE_KEYS = {
 /** Per-platform recording modes. */
 export const PLATFORM_MODES = ["off", "prompt", "auto"];
 export const DEFAULT_PLATFORM_MODE = "off";
+export const PROMPT_PLATFORMS = ["google-meet", "teams", "zoom"];
+export const SETUP_FLOW_KEY = "recorderSetupFlow";
 
 export const DEFAULT_AUTO_STOP_QUIET_SECONDS = 180;
 

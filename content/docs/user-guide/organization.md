@@ -56,6 +56,10 @@ Organization profiles are shared processing recipes for Organization folders. Me
 
 Only people with `access.manage` can add, edit, enable, disable, or delete an Organization provider and set the Organization default for each role. A member who has not made a choice uses that Organization default, including for private items. They also see **Usage per member**, including calls and estimated cost. The Organization account pays for these requests. Every management change is written to the administrator audit log.
 
+New members need no provider setup. Without a profile pin, resolution uses the member’s role choice, their summary choice for Learn/topics/titles, the Organization’s role default, its summary default for those following roles, the member’s oldest enabled chat provider (chat roles only), then the Organization’s oldest enabled suitable provider. Oldest means creation time, then credential ID. Transcription skips enhancement-only providers; chat roles skip transcription-only providers. An explicit missing or disabled choice fails without falling through.
+
+Managers see a notice when no transcription or summary default is chosen and can make the fallback the default. If no suitable provider exists, the notice explains that members need a provider. Read-only cards identify the fallback a member actually uses. Fallback requires an enabled Organization and permission to use it; the Organization pays and the usual per-member limits apply. The organization account’s own resolution and hosted fallback behavior are unchanged.
+
 Each member may make 60 calls per hour to each Organization provider by default. When the limit is reached, that member's next call is refused until the hourly window resets, without using another member's allowance. The administrator can change the limit for the instance.
 
 ## Curators and the organization account

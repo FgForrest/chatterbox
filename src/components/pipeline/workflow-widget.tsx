@@ -2,6 +2,7 @@
 
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -104,24 +105,45 @@ export function workflowWidgetHeadingProps(id: string | undefined) {
     } as const;
 }
 
-function focusWidgetHeading(id: string): void {
-    for (const heading of document.querySelectorAll<HTMLElement>(
-        "[data-workflow-widget-heading]",
-    )) {
-        if (heading.dataset.workflowWidgetHeading === id) {
-            heading.focus({ preventScroll: true });
-            return;
-        }
-    }
+/** Return the scroll behavior that respects the reduced-motion preference. */
+export function workflowScrollBehavior(): ScrollBehavior {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
 }
 
-/** Scroll to a workflow widget and ask its shared frame to open and focus. */
+function widgetHeading(id: string): HTMLElement | undefined {
+    return [
+        ...document.querySelectorAll<HTMLElement>(
+            "[data-workflow-widget-heading]",
+        ),
+    ].find((heading) => heading.dataset.workflowWidgetHeading === id);
+}
+
+function focusWidgetHeading(id: string): void {
+    widgetHeading(id)?.focus({ preventScroll: true });
+}
+
+/** Open a workflow widget, then scroll to its rendered frame and focus its heading. */
 export function openWidget(id: string): void {
-    const target = document.getElementById(id);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    window.dispatchEvent(
-        new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, { detail: { id } }),
-    );
+    flushSync(() => {
+        window.dispatchEvent(
+            new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, { detail: { id } }),
+        );
+    });
+    const heading = widgetHeading(id);
+    if (!heading?.closest('[role="dialog"]')) {
+        const host = document.getElementById(id);
+        const target =
+            host && getComputedStyle(host).display === "contents"
+                ? host.firstElementChild
+                : host;
+        target?.scrollIntoView?.({
+            behavior: workflowScrollBehavior(),
+            block: "start",
+        });
+    }
+    heading?.focus({ preventScroll: true });
 }
 
 /** Listen for the shared workflow-widget open event for one widget id. */
@@ -137,7 +159,6 @@ export function useWorkflowWidgetOpen(
             const detail = (event as CustomEvent<{ id?: unknown }>).detail;
             if (detail?.id !== id) return;
             openRef.current?.();
-            window.requestAnimationFrame(() => focusWidgetHeading(id));
         };
         window.addEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
         return () =>
@@ -267,8 +288,8 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
         dialogLine,
         inlineLine,
     } = props;
-    const openDialog = useCallback(() => onOpenChange?.(true), [onOpenChange]);
-    useWorkflowWidgetOpen(id, frame === "dialog" ? openDialog : undefined);
+    const handleOpen = useCallback(() => onOpenChange?.(true), [onOpenChange]);
+    useWorkflowWidgetOpen(id, handleOpen);
     useEffect(() => {
         if (!open) return;
         window.requestAnimationFrame(() => focusWidgetHeading(id));

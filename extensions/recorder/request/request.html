@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Chatterbox Meeting Recorder</title>
+        <link rel="stylesheet" href="../options/options.css">
+    </head>
+    <body>
+        <main>
+            <h1 data-i18n="extensionName"></h1>
+            <p id="meeting-title"></p>
+            <p data-i18n="micRequestIntro"></p>
+            <p id="mic-status" role="status"></p>
+            <p id="notice-text"></p>
+            <label id="notice-label" class="check">
+                <input id="notice-check" type="checkbox">
+                <span data-i18n="participantAck"></span>
+            </label>
+            <p data-i18n="meetingPickerHint"></p>
+            <button
+                id="grant-mic"
+                class="primary"
+                type="button"
+                data-i18n="grantMic"
+            ></button>
+            <button
+                id="start"
+                class="primary"
+                type="button"
+                hidden
+                data-i18n="recordWithConsent"
+            ></button>
+            <button
+                id="without-mic"
+                type="button"
+                data-i18n="recordWithoutMic"
+            ></button>
+            <button id="cancel" type="button" data-i18n="cancel"></button>
+        </main>
+        <script type="module" src="request.js"></script>
+    </body>
+</html>
