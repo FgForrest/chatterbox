@@ -11,6 +11,7 @@ import {
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ConnectedLine } from "@/components/connected-line";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -19,6 +20,7 @@ import {
     type RecorderExtensionState,
 } from "@/lib/recorder-extension/client";
 import { RECORDER_EXTENSION_ID } from "@/lib/recorder-extension/extension-id";
+import { cn } from "@/lib/utils";
 
 interface RecorderKey {
     id: string;
@@ -318,6 +320,7 @@ export function MeetingRecorderSetup({
     );
     const unsupportedInOnboarding =
         mode === "onboarding" && compatible === false;
+    const centered = mode === "onboarding";
 
     if (unsupportedInOnboarding) {
         return (
@@ -372,7 +375,7 @@ export function MeetingRecorderSetup({
 
             <p className="text-sm text-muted-foreground">
                 {i18n(
-                    "After installing, open the extension's toolbar icon and allow this site. Once detected here, click Connect, then Confirm in the extension. Follow any consent prompts; if this site is still waiting for access, open the toolbar icon again.",
+                    "After installing, open the extension's toolbar icon on this page and connect it to this server. Follow its consent, site access and microphone prompts, then return here, click Connect and confirm the server in the extension.",
                 )}
             </p>
             {extension?.kind === "reachable" &&
@@ -409,11 +412,10 @@ export function MeetingRecorderSetup({
                 </p>
             )}
             {extension?.kind === "reachable" && !extension.paired && (
-                <div className="space-y-2">
-                    <p className="text-sm text-primary">
-                        <Check className="mr-1 inline size-4" />
+                <div className={cn("space-y-2", centered && "text-center")}>
+                    <ConnectedLine align={centered ? "center" : "start"}>
                         {i18n("Extension found")}
-                    </p>
+                    </ConnectedLine>
                     <Button onClick={() => void connect()} disabled={busy}>
                         <Plug className="size-4" />
                         {i18n("Connect")}
@@ -421,11 +423,15 @@ export function MeetingRecorderSetup({
                 </div>
             )}
             {connectedHere && (
-                <div className="flex flex-wrap items-center gap-2 text-sm text-primary">
-                    <Check className="size-4" />
-                    <span>
+                <div
+                    className={cn(
+                        "flex flex-wrap items-center gap-2",
+                        centered && "justify-center",
+                    )}
+                >
+                    <ConnectedLine align={centered ? "center" : "start"}>
                         {i18n("Connected to {host}", { host: connectedHost })}
-                    </span>
+                    </ConnectedLine>
                     {mode === "settings" && (
                         <Button
                             size="sm"
