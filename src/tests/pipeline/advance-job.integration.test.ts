@@ -850,8 +850,8 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 source: "riffado",
             });
         const stale = vi
-            .spyOn(summaryRefresh, "isSummaryStale")
-            .mockResolvedValue(true);
+            .spyOn(summaryRefresh, "staleReadingFingerprint")
+            .mockResolvedValue("current-reading");
         await requestAdvance({
             itemId: ITEM_ID,
             userId: USER_ID,
@@ -861,7 +861,11 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await pipelineAdvanceJobHandler.run(jobContext());
 
-        expect(stale).toHaveBeenCalledWith(USER_ID, ITEM_ID);
+        expect(stale).toHaveBeenCalledWith(
+            expect.objectContaining({
+                transcriptionId: `transcription-${ITEM_ID}`,
+            }),
+        );
     });
 
     it("checks summary staleness for the current released content", async () => {
@@ -897,12 +901,16 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             }),
         );
         const stale = vi
-            .spyOn(summaryRefresh, "isSummaryStale")
-            .mockResolvedValue(true);
+            .spyOn(summaryRefresh, "staleReadingFingerprint")
+            .mockResolvedValue("current-reading");
 
         await pipelineAdvanceJobHandler.run(jobContext());
 
-        expect(stale).toHaveBeenCalledWith(USER_ID, ITEM_ID);
+        expect(stale).toHaveBeenCalledWith(
+            expect.objectContaining({
+                transcriptionId: `transcription-${ITEM_ID}`,
+            }),
+        );
     });
 
     it("does not recreate a reaped transcript after a placement trigger", async () => {

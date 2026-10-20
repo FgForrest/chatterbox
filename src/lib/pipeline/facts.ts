@@ -18,8 +18,7 @@ import {
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { learnRunOpen } from "@/lib/learn/learn-open";
-import { llmRendering } from "@/lib/learn/llm-input";
-import { isSummaryStale } from "@/lib/learn/summary-refresh";
+import { staleReadingFingerprint } from "@/lib/learn/summary-refresh";
 import { mailShareProblems } from "@/lib/mail/share-gate";
 import { readProcessing } from "@/lib/pipeline/state";
 import type {
@@ -707,13 +706,10 @@ export async function gatherFacts(
                 )
               : await loadShareGate(db, itemId, userId);
     const summaryExists = summary !== undefined;
-    const summaryStale = summaryExists
-        ? await isSummaryStale(userId, itemId)
-        : false;
-    const staleFingerprint =
-        summaryStale && summary?.inputFingerprint && summary.transcriptionId
-            ? (await llmRendering(summary.transcriptionId))?.fingerprint
-            : undefined;
+    const staleFingerprint = summary
+        ? await staleReadingFingerprint(summary)
+        : null;
+    const summaryStale = staleFingerprint !== null;
     const summarySource =
         item.kind === "mail"
             ? "mail"
@@ -827,7 +823,7 @@ export async function gatherFacts(
         summary: {
             exists: summaryExists,
             stale: summaryStale,
-            staleFingerprint,
+            staleFingerprint: staleFingerprint ?? undefined,
             current:
                 !summaryStale &&
                 summaryContent !== null &&

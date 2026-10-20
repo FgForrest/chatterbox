@@ -42,9 +42,23 @@ export async function isSummaryStale(
             ),
         )
         .limit(1);
-    if (!summary?.inputFingerprint || !summary.transcriptionId) return false;
+    return summary ? (await staleReadingFingerprint(summary)) !== null : false;
+}
+
+/**
+ * The fingerprint of today's reading of a summary's transcript when it
+ * differs from the reading the summary was made from. Null when it does
+ * not, and for a summary made before corrections existed.
+ */
+export async function staleReadingFingerprint(summary: {
+    transcriptionId: string | null;
+    inputFingerprint: string | null;
+}): Promise<string | null> {
+    if (!summary.inputFingerprint || !summary.transcriptionId) return null;
     const current = await llmRendering(summary.transcriptionId);
-    return current !== null && current.fingerprint !== summary.inputFingerprint;
+    return current !== null && current.fingerprint !== summary.inputFingerprint
+        ? current.fingerprint
+        : null;
 }
 
 /**
