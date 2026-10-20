@@ -175,6 +175,7 @@ describe("Settings Profiles", () => {
     let badRequest = false;
     let extraProfiles: typeof profiles = [];
     let emptyScopes: string[] = [];
+    let holdRestore: Promise<void> | null = null;
 
     beforeEach(() => {
         calls = [];
@@ -184,6 +185,7 @@ describe("Settings Profiles", () => {
         badRequest = false;
         extraProfiles = [];
         emptyScopes = [];
+        holdRestore = null;
         toastError.mockClear();
         toastSuccess.mockClear();
         vi.stubGlobal(
@@ -380,6 +382,7 @@ describe("Settings Profiles", () => {
                         },
                     });
                 }
+                if (url.endsWith("/restore") && holdRestore) await holdRestore;
                 return Response.json({ success: true });
             }),
         );
@@ -1274,5 +1277,64 @@ describe("Settings Profiles", () => {
                 "Disappears from profile choices. Can be restored.",
             ),
         ).toBeTruthy();
+    });
+
+    it("keeps an empty Archived section visible while a filter is active", async () => {
+        emptyScopes = ["archived"];
+        await renderList();
+        expect(screen.queryByRole("heading", { name: "Archived" })).toBeNull();
+        fireEvent.change(screen.getByRole("combobox", { name: "Channel" }), {
+            target: { value: "mail" },
+        });
+        expect(
+            await screen.findByRole("heading", { name: "Archived" }),
+        ).toBeTruthy();
+        expect(
+            screen.getAllByText("No profiles match these filters.").length,
+        ).toBeGreaterThan(0);
+    });
+
+    it("disables other rows and pagination until a mutation settles", async () => {
+        const personal = profiles[0];
+        if (!personal) throw new Error("Missing personal fixture");
+        extraProfiles = Array.from({ length: 12 }, (_, index) => ({
+            ...personal,
+            id: `extra-${index}`,
+            name: `Extra ${index}`,
+        }));
+        let release = () => {};
+        holdRestore = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await renderList();
+        const nextPage = () =>
+            within(
+                screen.getByRole("navigation", {
+                    name: "Personal profile pages",
+                }),
+            ).getByRole("button", { name: "Next page" });
+        const otherRow = () =>
+            screen.getByRole("button", { name: "Edit Default Profile" });
+        expect(nextPage().hasAttribute("disabled")).toBe(false);
+        expect(otherRow().hasAttribute("disabled")).toBe(false);
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Restore Archived Profile" }),
+        );
+        await waitFor(() =>
+            expect(otherRow().hasAttribute("disabled")).toBe(true),
+        );
+        expect(
+            screen
+                .getByRole("button", { name: "Duplicate Default Profile" })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+        expect(nextPage().hasAttribute("disabled")).toBe(true);
+
+        release();
+        await waitFor(() =>
+            expect(otherRow().hasAttribute("disabled")).toBe(false),
+        );
+        expect(nextPage().hasAttribute("disabled")).toBe(false);
     });
 });

@@ -447,6 +447,11 @@ export function ProfilesSection() {
     const refreshAfterSave = useCallback(() => {
         void loadProfiles();
     }, [loadProfiles]);
+    const filtered = debouncedSearch !== "" || channel !== "all";
+    const noProfilesYet = {
+        organization: i18n("No Organization profiles yet."),
+        personal: i18n("No personal profiles yet."),
+    };
 
     return (
         <div className="space-y-5">
@@ -578,7 +583,8 @@ export function ProfilesSection() {
                         if (
                             !group ||
                             (section === "archived" &&
-                                group.pagination.total === 0)
+                                group.pagination.total === 0 &&
+                                !filtered)
                         )
                             return null;
                         const label =
@@ -593,11 +599,6 @@ export function ProfilesSection() {
                                 : section === "personal"
                                   ? User
                                   : Archive;
-                        const noneYet = {
-                            organization: i18n("No Organization profiles yet."),
-                            personal: i18n("No personal profiles yet."),
-                            archived: i18n("No archived profiles yet."),
-                        }[section];
                         const pagination = group.pagination;
                         return (
                             <section
@@ -655,12 +656,12 @@ export function ProfilesSection() {
                                     >
                                         {group.profiles.length === 0 ? (
                                             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                                                {debouncedSearch ||
-                                                channel !== "all"
+                                                {filtered ||
+                                                section === "archived"
                                                     ? i18n(
                                                           "No profiles match these filters.",
                                                       )
-                                                    : noneYet}
+                                                    : noProfilesYet[section]}
                                             </p>
                                         ) : (
                                             <ul className="divide-y rounded-lg border">
