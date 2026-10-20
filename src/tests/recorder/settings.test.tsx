@@ -8,6 +8,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingStepRecorder } from "@/components/onboarding-steps";
 import { RecorderSection } from "@/components/settings/recorder-section";
@@ -151,6 +152,8 @@ beforeEach(() => {
     userAgent = CHROME;
     detect.mockReset().mockResolvedValue({ kind: "not-installed" });
     pair.mockClear();
+    vi.mocked(toast.error).mockClear();
+    window.history.replaceState({}, "", "/settings");
     vi.mocked(browserRecorderExtensionClient).mockReturnValue({
         detect,
         pair,
@@ -170,6 +173,90 @@ describe.each([
     "settings",
     "onboarding",
 ] as const)("Meeting Recorder %s flow", (mode) => {
+    it("shows three steps and marks the visible setup without adding history", async () => {
+        const historyLength = window.history.length;
+        const rendered = render(view(mode));
+        await screen.findByText("Install the extension");
+        expect(
+            screen.getByText(
+                "Complete the three steps in the extension. This page will then connect automatically.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "Can't see the icon? Open the puzzle piece (Extensions) in the toolbar.",
+            ),
+        ).toBeTruthy();
+        expect(new URLSearchParams(window.location.search).get("section")).toBe(
+            "recorder",
+        );
+        expect(window.history.length).toBe(historyLength);
+        rendered.unmount();
+        expect(new URLSearchParams(window.location.search).has("section")).toBe(
+            false,
+        );
+    });
+
+    it("sends a key once per pending setup session", async () => {
+        const state: RecorderExtensionState = {
+            kind: "reachable",
+            channel: "content",
+            paired: false,
+            setupPending: true,
+        };
+        detect.mockResolvedValue(state);
+        const fetchMock = stubRecorderStatus(status);
+        render(view(mode));
+        await waitFor(() => expect(pair).toHaveBeenCalledTimes(1));
+        fireEvent.focus(window);
+        await waitFor(() => expect(detect).toHaveBeenCalledTimes(3));
+        expect(pair).toHaveBeenCalledTimes(1);
+        expect(
+            fetchMock.mock.calls.filter(
+                ([input]) => String(input) === "/api/settings/recorder/pair",
+            ),
+        ).toHaveLength(1);
+    });
+
+    it("does not mint automatically without setupPending or when already paired here", async () => {
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: true,
+            pairedHere: true,
+            pairedTo: status.server_url,
+            setupPending: true,
+        });
+        render(view(mode));
+        await screen.findByText("Connected to chatterbox.example.com");
+        expect(pair).not.toHaveBeenCalled();
+    });
+
+    it("shows a failed automatic attempt once and keeps the manual retry", async () => {
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: false,
+            setupPending: true,
+        });
+        pair.mockResolvedValueOnce({ ok: false, error: "Refused setup" });
+        render(view(mode));
+        await waitFor(() =>
+            expect(toast.error).toHaveBeenCalledWith("Refused setup"),
+        );
+        fireEvent.focus(window);
+        await waitFor(() => expect(detect).toHaveBeenCalledTimes(2));
+        expect(pair).toHaveBeenCalledTimes(1);
+        await waitFor(() =>
+            expect(
+                screen
+                    .getByRole("button", { name: "Connect" })
+                    .hasAttribute("disabled"),
+            ).toBe(false),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+        await waitFor(() => expect(pair).toHaveBeenCalledTimes(2));
+    });
     it("starts with the store installation", async () => {
         render(view(mode));
         const link = await screen.findByRole("link", {
@@ -190,6 +277,7 @@ describe.each([
         const connect = await screen.findByRole("button", {
             name: "Connect",
         });
+        expect(pair).not.toHaveBeenCalled();
         fireEvent.click(connect);
         await waitFor(() =>
             expect(pair).toHaveBeenCalledWith(
@@ -199,6 +287,7 @@ describe.each([
                     serverUrl: status.server_url,
                     apiKey: "op_recorder",
                 },
+                3000,
             ),
         );
     });

@@ -51,6 +51,7 @@ import {
     unregisterPairingScripts,
 } from "./lib/pairing.js";
 import { queuePairing } from "./lib/pairing-request.js";
+import { activeSetupFlow, resumeTypedSetupAfterLogin } from "./lib/setup-flow.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
 import { canPumpUploads } from "./lib/upload-state.js";
 import { readToken } from "./lib/token-vault.js";
@@ -1061,6 +1062,9 @@ async function reevaluateAllTabs() {
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.url || changeInfo.status === "complete") {
+        await resumeTypedSetupAfterLogin(tab).catch((error) =>
+            console.warn("[recorder] setup return after sign-in failed:", error),
+        );
         await evaluateTab(tab);
     }
 
@@ -1238,7 +1242,7 @@ async function ensureConfigAlarm() {
 
 // ---- Pairing and presence ---------------------------------------------
 
-async function pingStatus() {
+async function pingStatus(origin, tabId) {
     const settings = await getSettings();
     const consented = Boolean(settings.dataUseAcknowledgedAt);
     return {
@@ -1249,6 +1253,7 @@ async function pingStatus() {
         pairedTo: consented && settings.serverUrl ? originOf(settings.serverUrl) : null,
         autoMode: consented && anyPlatformAuto(settings),
         micPermission: consented ? await microphonePermission() : undefined,
+        ...(consented && await activeSetupFlow(origin, tabId) ? { setupPending: true } : {}),
     };
 }
 
@@ -1260,7 +1265,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return false;
     }
     if (message.type === MESSAGES.ping) {
-        pingStatus().then((status) =>
+        pingStatus(senderOrigin, sender.tab?.id).then((status) =>
             sendResponse({ ...status, channel: "external" }),
         );
         return true;
@@ -1508,7 +1513,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         : !sender.url?.startsWith(chrome.runtime.getURL(""))
                 )
                     return { installed: true, unreachable: true };
-                return pingStatus();
+                return pingStatus(origin, sender.tab?.id);
             })().then((status) =>
                 sendResponse({ ...status, channel: "content" }),
             );

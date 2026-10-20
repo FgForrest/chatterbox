@@ -49,13 +49,34 @@ responsibilities of the server operator.
 
 1. Install [Chatterbox Meeting Recorder from the Chrome Web Store](https://chromewebstore.google.com/detail/chatterbox-meeting-record/pojdfnhpfijfolehkjidbomgjemonkge)
    in desktop Chrome or a compatible browser, and pin it to the toolbar.
-2. Open your Chatterbox dashboard, click the recorder's toolbar icon, then
-   **Connect to** this server. Review the data-use disclosure and click
-   **Agree and continue**. Allow access to this server in Chrome, then allow
-   the microphone when prompted. The setup page shows the result.
-3. Click **Return to Chatterbox and connect**, then **Connect** (or **Set up
-   recorder**) on the dashboard. The same extension setup tab shows the server
-   address. Explicitly confirm it there; the dashboard regains focus.
+2. Open Chatterbox, click the recorder's toolbar icon, then **Connect to** this
+   server. Options opens with three steps: read the three-point data-use notice
+   and click **I understand and agree**; click **Allow microphone** and choose
+   the first, persistent option; click **Connect to** the displayed server and
+   allow site access. Consent has no checkbox. Each permission has its own click.
+3. The Chatterbox tab sends the key automatically. The extension shows
+   **The extension is ready** and **Back to Chatterbox**. If your server has not
+   been updated, after five seconds setup offers to focus the Chatterbox tab:
+   click **Connect** there. A key from the selected tab and server completes
+   setup without another confirmation; other proposals still require one.
+
+If Options was opened directly, it finds open recorder settings or onboarding
+tabs marked with `?section=recorder`. One tab is preselected; several show a
+host-and-title choice. With no match, enter your Chatterbox address. Setup
+normalizes it to an HTTPS origin, requests access, and opens
+`/settings?section=recorder` in a new tab. Sign in there if necessary. The setup
+window remains valid for 15 minutes. On older servers, open **Settings → Meeting
+Recorder** and click **Connect**. **Enter address and key manually** remains
+available at the connection step.
+
+The microphone step shows Chrome's three choices and explains why temporary
+permission may expire. Edge and Brave use neutral permanent-access instructions.
+**Not now** saves a skipped state across reloads; setup then warns that recordings
+will lack your voice and offers **Allow microphone**. Browser blocks link to
+microphone settings; OS blocks show macOS or Windows instructions. Managed
+browser policies may require an administrator. Other settings appear after setup;
+disconnecting reopens only the connection step while microphone access or its
+saved skip remains valid.
 
 Meet, Teams and Zoom web use **Prompt** by default, also after updating an
 installation with no saved platform choice. Existing choices and server
@@ -98,10 +119,9 @@ Then in Chatterbox, open **Settings → Meeting Recorder** and generate a record
 (a `recordings:write` API key that creates recordings and looks up folder names
 to file them, but cannot read recordings). Then either:
 
-- Click **Set up recorder** on that page, then confirm the destination in the
-  extension's Options page. Chrome may ask for access to that server origin.
-  For self-hosted sites, the toolbar setup grants access and reuses its setup
-  tab for confirmation.
+- Click **Connect** on that page. A matching active setup stores the key directly;
+  without an active setup, confirm the destination in the extension's Options
+  page. Chrome may ask for access to that server origin.
 - Paste the **server URL** and **key** into the extension's Options, then
   **Save and grant access**. Open tabs of that server detect the extension
   without reloading.
@@ -135,7 +155,7 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `desktopCapture` | Opens the screen picker to capture system audio. |
 | `tabCapture` | Records a detected meeting tab's audio directly, without the screen picker. |
 | `alarms` | Auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
-| `tabs` | Detects meeting URLs, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
+| `tabs` | Detects meeting URLs, finds marked recorder setup tabs and their titles for connection, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
 | `storage` | Stores settings, an encrypted recorder token, and recording state. Encrypted audio chunks use the browser's private file system. |
 | `scripting` | Registers the pairing relay on your Chatterbox origin. |
