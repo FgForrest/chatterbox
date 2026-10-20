@@ -205,6 +205,28 @@ describe("Learn prose language post-check", () => {
         ).toEqual(original);
     });
 
+    it("skips only an overlong translation and still applies its siblings", async () => {
+        const original = output();
+        const complete = vi.fn(async () =>
+            JSON.stringify({
+                translations: [
+                    {
+                        index: 0,
+                        text: "Tato osoba je účastnicí schůzky. ".repeat(12),
+                    },
+                    { index: 1, text: czech },
+                ],
+            }),
+        );
+        const result = await repairLearnReviewProse(
+            original,
+            "cs-CZ",
+            complete,
+        );
+        expect(result.speakers[0].reason).toBe(czech);
+        expect(result.newRecords[0].reason).toBe(original.newRecords[0].reason);
+    });
+
     it.each([
         "bridge",
         "fallback",

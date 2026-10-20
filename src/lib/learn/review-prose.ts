@@ -24,6 +24,15 @@ const translationSchema = z.strictObject({
     ),
 });
 
+const translationReplySchema = z.strictObject({
+    translations: z.array(
+        z.strictObject({
+            index: z.number().int().min(0),
+            text: z.string().trim().min(1),
+        }),
+    ),
+});
+
 function proseLanguage(text: string): string | null {
     const detected = detectLanguage(text);
     if (detected) return detected;
@@ -140,7 +149,7 @@ export async function repairLearnReviewProse(
             schema: strictJsonSchema(translationSchema),
             maxTokens: 8_000,
         });
-        const answer = parseJsonAnswer(translationSchema, reply);
+        const answer = parseJsonAnswer(translationReplySchema, reply);
         if (!answer.ok) return output;
         const translated = structuredClone(output);
         const counts = new Map<number, number>();
@@ -152,6 +161,7 @@ export async function repairLearnReviewProse(
             if (
                 !field ||
                 counts.get(entry.index) !== 1 ||
+                entry.text.length > LEARN_LIMITS.reason ||
                 proseLanguage(entry.text) !== localeLanguage(locale)
             )
                 continue;
