@@ -95,7 +95,8 @@ Follow **Install and connect** above for setup without copying a key. For manual
 pairing, first open the extension's **Options**, read the data-use disclosure,
 and agree.
 Then in Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
-(a `recordings:write` API key that cannot read your library). Then either:
+(a `recordings:write` API key that creates recordings and looks up folder names
+to file them, but cannot read recordings). Then either:
 
 - Click **Set up recorder** on that page, then confirm the destination in the
   extension's Options page. Chrome may ask for access to that server origin.

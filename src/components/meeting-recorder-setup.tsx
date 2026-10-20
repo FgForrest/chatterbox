@@ -531,7 +531,7 @@ export function MeetingRecorderSetup({
                     <div className="mt-3 space-y-2">
                         <p className="text-xs text-muted-foreground">
                             {i18n(
-                                "Each key is write-only: it can create recordings but cannot read your library.",
+                                "Each key can create recordings and look up folder names to file them, but cannot read recordings.",
                             )}
                         </p>
                         {status.keys.map((key) => (

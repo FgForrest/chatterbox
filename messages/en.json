@@ -1230,7 +1230,7 @@
   "DsvIdh": "Generate recorder key",
   "mE-uxA": "Help with Meeting Recorder",
   "Wyv7oS": "Connected recorders",
-  "CIGNVp": "Each key is write-only: it can create recordings but cannot read your library.",
+  "BXsMaF": "Each key can create recordings and look up folder names to file them, but cannot read recordings.",
   "opiE3d": "Last used {date}",
   "du1laW": "Never",
   "JP1HeQ": "Disconnect {name}",

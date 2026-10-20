@@ -16,8 +16,9 @@ import {
     completeSession,
     createSession,
     getSession,
-    getRecorderFolders,
+    getRecorderFolder,
     recoverSession,
+    searchRecorderFolders,
     sha256Hex,
     uploadChunk,
 } from "./lib/api.js";
@@ -1392,16 +1393,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "get-folders":
             getSettings()
-                .then(async (settings) =>
-                    getRecorderFolders({
+                .then(async (settings) => {
+                    const auth = {
                         serverUrl: settings.serverUrl,
                         apiKey: await readToken(),
-                    }),
-                )
+                    };
+                    if (typeof message.id === "string")
+                        return getRecorderFolder(auth, message.id);
+                    if (typeof message.q === "string")
+                        return searchRecorderFolders(auth, message.q);
+                    return [];
+                })
                 .then((folders) => sendResponse({ ok: true, folders }))
                 .catch((error) =>
                     sendResponse({
                         ok: false,
+                        status: error?.status,
                         error: error?.message ?? String(error),
                     }),
                 );

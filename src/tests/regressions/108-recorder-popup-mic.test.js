@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
                 children: [],
                 value: "",
                 style: {},
+                setAttribute: vi.fn(),
                 addEventListener: (event, listener) => {
                     handlers[`${id}:${event}`] = listener;
                 },
@@ -30,7 +31,10 @@ const h = vi.hoisted(() => {
         documentElement: {},
         querySelectorAll: () => [],
         getElementById: node,
-        createElement: () => ({}),
+        createElement: () => ({
+            setAttribute: vi.fn(),
+            addEventListener: vi.fn(),
+        }),
     };
     globalThis.window = { close: vi.fn() };
     Object.defineProperty(globalThis, "navigator", {
