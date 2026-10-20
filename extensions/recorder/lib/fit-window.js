@@ -1,3 +1,5 @@
+const MIN_HEIGHT = 160;
+
 /**
  * Keep the popup window this page runs in exactly as tall as the page.
  * Chrome opens it at a fixed size, while the page's views (picking,
@@ -14,7 +16,10 @@ export function fitWindowToContent() {
         const current = await chrome.windows.getCurrent();
         if (current.state !== "normal") return;
         await chrome.windows.update(current.id, {
-            height: Math.min(current.height + delta, screen.availHeight),
+            height: Math.max(
+                MIN_HEIGHT,
+                Math.min(current.height + delta, screen.availHeight),
+            ),
         });
     };
     const schedule = () => {

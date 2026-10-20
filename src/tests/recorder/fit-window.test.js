@@ -108,6 +108,16 @@ describe("recorder window fitted to its page", () => {
         }
     });
 
+    it("never shrinks below a usable height while the page has no layout yet", async () => {
+        const { update, contentResized, flush } = setup({
+            content: 0,
+            inner: 300,
+        });
+        contentResized();
+        await flush();
+        expect(update).toHaveBeenCalledExactlyOnceWith(9, { height: 160 });
+    });
+
     it("never grows past the screen", async () => {
         const { update, contentResized, flush } = setup({
             content: 900,
