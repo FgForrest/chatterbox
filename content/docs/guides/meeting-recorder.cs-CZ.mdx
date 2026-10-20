@@ -26,27 +26,54 @@ z repozitáře.
 
 ## Propojení s Klepnou
 
-Nastavení má tři kroky:
+1. Po instalaci otevřete přehled Klepny a klikněte na ikonu rozšíření na liště.
+   Zvolte **Propojit s** následované adresou vašeho serveru.
+2. V kartě nastavení si přečtěte informace o nakládání s daty, zaškrtněte
+   souhlas a klikněte na **Souhlasím a pokračovat**.
+3. V Chromu povolte přístup k tomuto serveru a poté na výzvu povolte mikrofon.
+   Karta nastavení ukáže výsledek. Pokud jste už s nakládáním s daty souhlasili,
+   použijte **Povolit tento server a nastavit mikrofon**.
+4. Klikněte na **Vrátit se do Klepny a propojit**. V Klepně otevřete
+   **Nastavení → Nahrávání schůzek** (nebo se vraťte ke kroku nahrávání schůzek
+   v průvodci) a po rozpoznání rozšíření klikněte na **Připojit**.
+5. Pro potvrzení se otevře stejná karta nastavení rozšíření. Zkontrolujte adresu
+   serveru a výslovně tam klikněte na **Propojit**.
+6. Klepna se vrátí do popředí. Zkontrolujte, že ukazuje **Připojeno k**
+   následované názvem vašeho serveru.
 
-1. Nainstalujte rozšíření z Internetového obchodu Chrome.
-2. Vraťte se do **Nastavení → Nahrávání schůzek**. Jakmile Klepna rozšíření
-   rozpozná, klikněte na **Připojit**.
-3. Zkontrolujte, že stránka ukazuje **Připojeno k váš-server**.
-
-Pokud rozšíření nejde rozpoznat, rozbalte **Připojit ručně** a vložte adresu
-serveru a vygenerovaný klíč do možností rozšíření.
+Pro ruční propojení rozbalte v Klepně **Připojit ručně** a klikněte na
+**Vytvořit klíč pro nahrávání**. Otevřete **Možnosti** rozšíření, přečtěte si
+informace o nakládání s daty a potvrďte souhlas. Vložte adresu do pole
+**Adresa serveru** a klíč do pole **Klíč pro nahrávání**. Klikněte na
+**Uložit a povolit přístup** a v Chromu povolte tento server. Otevřené karty
+tohoto serveru rozšíření rozpoznají bez opětovného načtení.
 
 Klíč nahrávání kdykoli zrušíte na téže stránce nebo v **API klíčích**.
 
 ## Automatické nahrávání
 
-Ve výchozím stavu vypnuto. V **Možnostech rozšíření → Automatické nahrávání**
-nastavte platformu na **Auto** a jednou potvrďte zásady nahrávání. Od té chvíle
-při otevření schůzky na této platformě:
+Google Meet, Microsoft Teams (web) a Zoom (web) mají výchozí režim **Výzva**.
+Platí to i po aktualizaci instalace bez uložené volby pro danou platformu.
+Ostatní platformy zůstanou v režimu **Vypnuto**, dokud je vy nebo server
+nenastavíte jinak. Uložené volby mají přednost před výchozím nastavením serveru,
+pokud server platformu nezamkl v režimu **Auto**. Výchozí nastavení serveru má
+přednost před počátečními režimy.
+
+V režimu **Výzva** se při zaznění zvuku v rozpoznané schůzce zobrazí oznámení
+s tlačítky **Nahrávat** a **Teď ne**. Pokud chcete jen odznak **REC?**, vypněte
+na stránce **Možnosti** volbu **Upozornit na rozpoznanou schůzku**. **Nahrávat** otevře upozornění účastníkům a kontrolu mikrofonu.
+Potvrďte upozornění a povolte mikrofon, nebo zvolte **Nahrávat bez mého mikrofonu**.
+V dialogu Chromu vyberte kartu se schůzkou a zapněte **Sdílet zvuk karty**.
+**Teď ne** výzvu pro tuto kartu zavře.
+
+Pro nahrávání jedním kliknutím otevřete **Možnosti → Automatické nahrávání**,
+nastavte platformu na **Auto**, jednou potvrďte pravidla nahrávání a klikněte na
+**Uložit nastavení**. Od té chvíle při otevření schůzky na této platformě:
 
 1. Ikona na liště ukáže **REC?** (a pokud je zapnuto, i oznámení).
-2. Jedno kliknutí na ikonu nebo klávesová zkratka okamžitě spustí nahrávání:
-   bez vyskakovacího okna, bez výběru obrazovky, bez zaškrtávátka.
+2. Pokud je přístup k mikrofonu již povolen, jedno kliknutí na ikonu nebo
+   klávesová zkratka spustí nahrávání přímo, bez vyskakovacího okna nebo výběru
+   zvuku. Bez oprávnění k mikrofonu nahrávání počká na vaši volbu popsanou níže.
 3. Nahrávání se samo ukončí, když stránku schůzky opustíte, zavřete záložku,
    nebo je schůzka několik minut potichu (výchozí 3 minuty).
 
@@ -54,13 +81,12 @@ To jedno kliknutí vyžaduje Chrome: rozšíření smí začít zachytávat až 
 ho vyvoláte. Nic nemůže spustit nahrávání samo od sebe, a tím, že nekliknete,
 schůzku, kterou nahrávat nechcete, jednoduše přeskočíte.
 
-Režim **Výzva** pouze upozorní a nahrávání nechá na ručním postupu.
-
 Vlastní server může nastavit výchozí hodnoty pro všechny pomocí
 `RECORDER_AUTO_RECORD_PLATFORMS` (například `google-meet,zoom,teams` nebo
 `all`), dále `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT` a
-`RECORDER_LOCK_DEFAULTS`. Uživatelé je mohou v rozšíření změnit, pokud nejsou
-uzamčené. Podporované platformy: Google Meet, Zoom (web), Microsoft Teams
+`RECORDER_LOCK_DEFAULTS`. Uživatelé mohou výchozí hodnoty v rozšíření změnit;
+uzamčení brání změně platforem, které server nastavil na **Auto**.
+Podporované platformy: Google Meet, Zoom (web), Microsoft Teams
 (web), Webex, Slack huddles, Whereby, Jitsi Meet. Nativní desktopové aplikace
 nemají záložku, kterou by šlo rozpoznat, a zůstávají u ručního postupu s
 výběrem obrazovky.
@@ -73,16 +99,22 @@ v Chromu.
 
 1. Klikněte na ikonu rozšíření, přečtěte si stručné připomenutí pro účastníky a
    zvolte **Souhlas potvrzen · Nahrávat**.
-2. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
+2. Pokud se zobrazí výzva, povolte mikrofon nebo zvolte
+   **Nahrávat bez mého mikrofonu**. Pokud Chrome otevře výběr zvuku, vyberte
+   kartu se schůzkou a zapněte **Sdílet zvuk karty**, nebo vyberte obrazovku
+   podle popisu níže.
+3. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
    klávesovou zkratkou (`Ctrl+Shift+U` ve výchozím nastavení).
 
-Rozšíření používá výchozí mikrofon systému. Zvuk schůzky zachytí podle zdroje:
+Způsob zachycení zvuku schůzky závisí na tom, jak nahrávání spustíte:
 
 - **Schůzka v kartě prohlížeče** (Google Meet nebo webové verze Zoomu a Teams):
-  nahrává se zvuk této karty. Výběr obrazovky není potřeba a zvuky ostatních
-  aplikací se nezachytí.
-- **Jiná karta prohlížeče**: vyberte ji v dialogu Chromu a zapněte sdílení
-  zvuku.
+  při spuštění z lišty s již povoleným mikrofonem lze zvuk karty nahrávat přímo.
+  Spuštění z oznámení nebo po výzvě k povolení mikrofonu otevře výběr zvuku
+  v Chromu. Vyberte kartu se schůzkou a zapněte **Sdílet zvuk karty**. Zvuky
+  ostatních aplikací se nezachytí.
+- **Jiná karta prohlížeče**: vyberte ji v dialogu Chromu a zapněte
+  **Sdílet zvuk karty**.
 - **Samostatná aplikace Zoom nebo Teams**: vyberte **Celou obrazovku** a zapněte
   **Sdílet systémový zvuk**, pokud je tato možnost dostupná. Pokud Chrome
   upozorní, že zvuk obrazovky nelze sdílet, použijte webovou verzi schůzky.
@@ -91,10 +123,40 @@ Rozšíření používá výchozí mikrofon systému. Zvuk schůzky zachytí pod
   minimalizovat; zavřením zastavíte záznam a odešlete dosud uložený zvuk.
   Stejné okno se otevře při výběru jiné karty v dialogu Chromu.
 
-Pokud pro schůzky používáte jiný než výchozí mikrofon, vyberte ho v Možnostech
-rozšíření. Po zastavení se dokončí odesílání a server nahrávku sestaví a uloží.
+Po zastavení se dokončí odesílání a server nahrávku sestaví a uloží.
 Po potvrzení uložení rozšíření otevře přehled Klepny s vybranou novou nahrávkou.
 Přehratelnou kopii můžete stáhnout z její stránky.
+
+## Mikrofon
+
+Rozšíření používá výchozí vstup systému, pokud nevyberete jiné zařízení v
+**Možnosti → Mikrofon → Vstupní zařízení (volitelné)**. Pro výchozí vstup systému
+zvolte **Výchozí (doporučeno)**, nebo vyberte mikrofon ze seznamu a klikněte na
+**Uložit nastavení**. Rozšíření nemůže zjistit, který mikrofon si vybrala
+aplikace pro schůzky.
+
+Bez oprávnění k mikrofonu spuštění počká, dokud přístup nepovolíte nebo nezvolíte
+**Nahrávat bez mého mikrofonu**. Vyskakovací okno předem upozorní a nabídne
+**Povolit přístup k mikrofonu**. Na ikoně se může předem zobrazit **MIC!**;
+u rozpoznaných schůzek v režimech **Výzva** a **Auto** se místo toho zobrazí
+**REC?**.
+
+Pokud Chrome přístup zablokuje, rozšíření ukáže tuto cestu:
+`chrome://settings/content/microphone` → **Nemají povoleno používat mikrofon**
+→ **Klepna – nahrávání schůzek**. Obnovte tam oprávnění mikrofonu, vraťte se do
+rozšíření a povolte přístup. U spravovaného prohlížeče požádejte správce.
+
+Pokud vybraný mikrofon při spuštění nahrávání chybí nebo je odpojený,
+rozšíření zkusí výchozí vstup systému. Když ani ten nefunguje, zvuk schůzky se
+nahrává dál. Trvalé oznámení a upozornění ve vyskakovacím okně vysvětlí chybu.
+Pokud se mikrofon odpojí během nahrávání, zvuk schůzky také pokračuje a zobrazí
+se tato upozornění.
+
+Po výslovném spuštění bez mikrofonu můžete ve vyskakovacím okně zvolit
+**Skrýt připomenutí oprávnění mikrofonu**. Znovu je zapnete v **Možnosti** volbou
+**Zobrazovat připomenutí oprávnění mikrofonu v okně rozšíření a na liště** a
+kliknutím na **Uložit nastavení**. Upozornění na selhání mikrofonu během
+nahrávání zůstávají viditelná.
 
 ## Spolehlivost
 

@@ -317,7 +317,14 @@ které odesílá zvuk po částech už během nahrávání:
 5. `DELETE /api/v1/recording-sessions/{id}` relaci zruší a smaže uložené části.
 
 Spárované rozšíření načítá výchozí nastavení serveru z
-`GET /api/v1/recorder/config` se stejným oprávněním. Stejný klíč může volat
+`GET /api/v1/recorder/config` se stejným oprávněním: platformy s výchozím režimem
+**Auto**, dobu ticha pro zastavení, text upozornění a to, zda jsou tyto platformy
+v režimu **Auto** uzamčené. Hodnoty pocházejí z proměnných prostředí `RECORDER_*`.
+Bez uložené volby nebo režimu **Auto** nastaveného serverem používá rozšíření
+0.3.0 pro Meet, Teams a webový Zoom výchozí režim **Výzva**, pro ostatní platformy
+**Vypnuto**.
+
+Stejný klíč může volat
 `GET /api/v1/recorder/folders`, který vrací osobní složky držitele klíče mimo
 kořen a zapisovatelné složky Organizace:
 
