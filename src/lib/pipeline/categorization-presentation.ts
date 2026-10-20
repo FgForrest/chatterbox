@@ -114,6 +114,7 @@ export function serializeProcessingResolution(
 export async function loadPrivateCategorizationPanel(
     ownerUserId: string,
     itemId: string,
+    viewerUserId = ownerUserId,
 ): Promise<CategorizationPanelPresentation | null> {
     const [item] = await db
         .select({
@@ -126,7 +127,7 @@ export async function loadPrivateCategorizationPanel(
             currentManualOnly: itemProcessing.manualOnly,
         })
         .from(chatterItems)
-        .leftJoin(users, eq(users.id, chatterItems.userId))
+        .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
             and(

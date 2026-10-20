@@ -285,10 +285,11 @@ async function folderPaths(
     );
 }
 
-/** Build the owner-only private processing projection used by item headers. */
+/** Build the owner-scoped processing projection with labels localized for its viewer. */
 export async function loadPrivateItemProcessing(
     ownerUserId: string,
     itemId: string,
+    viewerUserId = ownerUserId,
 ): Promise<ItemProcessingPresentation | null> {
     const [item] = await db
         .select({
@@ -305,7 +306,7 @@ export async function loadPrivateItemProcessing(
             profileSettings: processingProfileRevisions.settings,
         })
         .from(chatterItems)
-        .leftJoin(users, eq(users.id, chatterItems.userId))
+        .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
             and(

@@ -5,6 +5,7 @@ import {
     ChevronLeft,
     ChevronRight,
     FileAudio,
+    Lock,
     Mail,
     Plus,
     User,
@@ -74,7 +75,7 @@ function DefaultProfileSelect({
     return (
         <div className="space-y-1.5">
             <label
-                className="text-sm font-medium"
+                className="block text-sm font-medium"
                 htmlFor={`default-${channel}`}
             >
                 {label}
@@ -312,7 +313,19 @@ export function ProfilesSection() {
                 );
             }
             let success = i18n("Profile restored.");
-            if (action === "duplicate") success = i18n("Profile duplicated.");
+            if (action === "duplicate") {
+                const copy = (await response.json()) as {
+                    profile: SettingsProfileSummary;
+                };
+                success =
+                    destination === "organization"
+                        ? i18n("Copied to the Organization as “{name}”.", {
+                              name: copy.profile.name,
+                          })
+                        : i18n("Copied to personal profiles as “{name}”.", {
+                              name: copy.profile.name,
+                          });
+            }
             if (action === "default")
                 success = i18n("Default profile changed.");
             if (action === "archive") success = i18n("Profile archived.");
@@ -387,7 +400,9 @@ export function ProfilesSection() {
         action: "delete" | "permanent",
     ) => {
         void confirm({
-            title: i18n("Delete profile permanently?"),
+            title: i18n("Delete profile “{name}” permanently?", {
+                name: profile.name,
+            }),
             description: i18n(
                 "The profile disappears and cannot be restored. Recordings, summaries and tasks made with it stay.",
             ),
@@ -436,6 +451,7 @@ export function ProfilesSection() {
     return (
         <div className="space-y-5">
             <SettingsSectionHeader
+                className="flex-wrap [&>div:first-child]:basis-60 [&>div:last-child]:min-w-0 [&>div:last-child]:max-w-full"
                 title={i18n("Profiles")}
                 description={i18n(
                     "Choose how recordings and mail are transcribed, learned from, titled, summarized, and turned into tasks.",
@@ -577,6 +593,11 @@ export function ProfilesSection() {
                                 : section === "personal"
                                   ? User
                                   : Archive;
+                        const noneYet = {
+                            organization: i18n("No Organization profiles yet."),
+                            personal: i18n("No personal profiles yet."),
+                            archived: i18n("No archived profiles yet."),
+                        }[section];
                         const pagination = group.pagination;
                         return (
                             <section
@@ -634,41 +655,39 @@ export function ProfilesSection() {
                                     >
                                         {group.profiles.length === 0 ? (
                                             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                                                {i18n(
-                                                    "No profiles match these filters.",
-                                                )}
+                                                {debouncedSearch ||
+                                                channel !== "all"
+                                                    ? i18n(
+                                                          "No profiles match these filters.",
+                                                      )
+                                                    : noneYet}
                                             </p>
                                         ) : (
                                             <ul className="divide-y rounded-lg border">
-                                                {group.profiles
-                                                    .filter(
-                                                        (profile) =>
-                                                            !profile.archivedAt ||
-                                                            profile.scope !==
-                                                                "organization" ||
-                                                            profile.canEdit,
-                                                    )
-                                                    .map((profile) => (
+                                                {group.profiles.map(
+                                                    (profile) => (
                                                         <li
                                                             key={profile.id}
-                                                            className="flex flex-wrap items-center gap-3 px-3 py-2.5"
+                                                            className={`@container flex flex-wrap items-center gap-3 px-3 py-2.5 ${profile.archivedAt ? "bg-muted/60" : ""}`}
                                                         >
-                                                            <div className="min-w-0 flex-1">
+                                                            <div className="min-w-0 flex-1 basis-full @min-[560px]:basis-64">
                                                                 <div className="flex flex-wrap items-center gap-2">
-                                                                    <span className="truncate text-sm font-medium">
+                                                                    <span
+                                                                        className={`min-w-0 truncate text-sm font-medium ${profile.archivedAt ? "text-muted-foreground" : ""}`}
+                                                                    >
                                                                         {
                                                                             profile.name
                                                                         }
                                                                     </span>
                                                                     {profile.isYourDefault && (
-                                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+                                                                        <span className="whitespace-nowrap rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
                                                                             {i18n(
                                                                                 "Your default",
                                                                             )}
                                                                         </span>
                                                                     )}
                                                                     {profile.isOrganizationDefault && (
-                                                                        <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                                        <span className="whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
                                                                             {i18n(
                                                                                 "Organization default",
                                                                             )}
@@ -677,23 +696,27 @@ export function ProfilesSection() {
                                                                     {!profile.canEdit &&
                                                                         profile.scope ===
                                                                             "organization" && (
-                                                                            <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                                                <Lock
+                                                                                    className="size-3"
+                                                                                    aria-hidden="true"
+                                                                                />
                                                                                 {i18n(
                                                                                     "Read-only",
                                                                                 )}
                                                                             </span>
                                                                         )}
                                                                 </div>
-                                                                <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                                                                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                                                                     {profile.channel ===
                                                                     "audio" ? (
                                                                         <FileAudio
-                                                                            className="size-3"
+                                                                            className="size-3 shrink-0"
                                                                             aria-hidden="true"
                                                                         />
                                                                     ) : (
                                                                         <Mail
-                                                                            className="size-3"
+                                                                            className="size-3 shrink-0"
                                                                             aria-hidden="true"
                                                                         />
                                                                     )}
@@ -710,7 +733,14 @@ export function ProfilesSection() {
                                                                     <span aria-hidden="true">
                                                                         ·
                                                                     </span>
-                                                                    <span>
+                                                                    <span className="inline-flex items-center gap-1">
+                                                                        {profile.scope ===
+                                                                            "organization" && (
+                                                                            <Users
+                                                                                className="size-3 shrink-0"
+                                                                                aria-hidden="true"
+                                                                            />
+                                                                        )}
                                                                         {profile.scope ===
                                                                         "organization"
                                                                             ? i18n(
@@ -720,31 +750,35 @@ export function ProfilesSection() {
                                                                                   "Personal",
                                                                               )}
                                                                     </span>
+                                                                    {profile.archivedAt && (
+                                                                        <>
+                                                                            <span aria-hidden="true">
+                                                                                ·
+                                                                            </span>
+                                                                            <time
+                                                                                dateTime={
+                                                                                    profile.archivedAt
+                                                                                }
+                                                                            >
+                                                                                {i18n(
+                                                                                    "Archived {date}",
+                                                                                    {
+                                                                                        date: new Date(
+                                                                                            profile.archivedAt,
+                                                                                        ).toLocaleDateString(
+                                                                                            locale,
+                                                                                            {
+                                                                                                dateStyle:
+                                                                                                    "medium",
+                                                                                            },
+                                                                                        ),
+                                                                                    },
+                                                                                )}
+                                                                            </time>
+                                                                        </>
+                                                                    )}
                                                                 </p>
                                                             </div>
-                                                            {profile.archivedAt && (
-                                                                <time
-                                                                    dateTime={
-                                                                        profile.archivedAt
-                                                                    }
-                                                                    className="text-xs text-muted-foreground"
-                                                                >
-                                                                    {i18n(
-                                                                        "Archived {date}",
-                                                                        {
-                                                                            date: new Date(
-                                                                                profile.archivedAt,
-                                                                            ).toLocaleDateString(
-                                                                                locale,
-                                                                                {
-                                                                                    dateStyle:
-                                                                                        "medium",
-                                                                                },
-                                                                            ),
-                                                                        },
-                                                                    )}
-                                                                </time>
-                                                            )}
                                                             <ProfileRowActions
                                                                 personalDeleteBlocked={
                                                                     profile.scope ===
@@ -814,7 +848,8 @@ export function ProfilesSection() {
                                                                 }}
                                                             />
                                                         </li>
-                                                    ))}
+                                                    ),
+                                                )}
                                             </ul>
                                         )}
                                         {pagination.totalPages > 1 && (

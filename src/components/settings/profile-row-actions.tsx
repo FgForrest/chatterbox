@@ -75,7 +75,7 @@ export function ProfileRowActions({
                   "Choose another default for mail before deleting this profile. There is no Organization default to take over.",
               );
     return (
-        <div className="flex flex-wrap items-center justify-end gap-1 text-muted-foreground">
+        <div className="flex w-full flex-wrap items-center justify-start gap-1 text-muted-foreground @min-[560px]:w-auto @min-[560px]:justify-end">
             {archived ? (
                 profile.canEdit && (
                     <Button
@@ -101,6 +101,7 @@ export function ProfileRowActions({
                         type="button"
                         size="sm"
                         variant="ghost"
+                        disabled={disabled}
                         aria-label={
                             profile.canEdit
                                 ? i18n("Edit {name}", { name: profile.name })
@@ -143,7 +144,8 @@ export function ProfileRowActions({
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                                 align="end"
-                                className="max-w-80"
+                                collisionPadding={12}
+                                className="max-w-[min(20rem,calc(100vw-1.5rem))]"
                             >
                                 <DropdownMenuLabel>
                                     {i18n("Where to copy “{name}”", {
@@ -228,7 +230,11 @@ export function ProfileRowActions({
                             />
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="max-w-80">
+                    <DropdownMenuContent
+                        align="end"
+                        collisionPadding={12}
+                        className="max-w-[min(20rem,calc(100vw-1.5rem))]"
+                    >
                         {archived || !organization ? (
                             <DropdownMenuItem
                                 disabled={personalDeleteBlocked}
@@ -280,21 +286,22 @@ export function ProfileRowActions({
                                     <Archive aria-hidden="true" />
                                     <span>
                                         {i18n("Archive…")}
-                                        <span className="block text-xs text-muted-foreground">
-                                            {i18n(
-                                                "Disappears from profile choices. Can be restored.",
-                                            )}
+                                        <span
+                                            id={
+                                                organizationDefault
+                                                    ? `archive-reason-${profile.id}`
+                                                    : undefined
+                                            }
+                                            className="block text-xs text-muted-foreground"
+                                        >
+                                            {organizationDefault
+                                                ? archiveReason
+                                                : i18n(
+                                                      "Disappears from profile choices. Can be restored.",
+                                                  )}
                                         </span>
                                     </span>
                                 </DropdownMenuItem>
-                                {organizationDefault && (
-                                    <p
-                                        id={`archive-reason-${profile.id}`}
-                                        className="px-2 pb-2 text-xs text-muted-foreground"
-                                    >
-                                        {archiveReason}
-                                    </p>
-                                )}
                             </>
                         )}
                         {personalDeleteBlocked && (
