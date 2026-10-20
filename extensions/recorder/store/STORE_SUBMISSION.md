@@ -19,7 +19,7 @@ Record meeting audio at the user's request and upload it to the self-hosted inst
 | `tabCapture` | Captures audio from the meeting tab the user chooses to record. |
 | `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Tab URLs are not uploaded. |
 | `notifications` | Tells the user when a meeting is detected, when recording stops, and when an upload completes or needs attention. |
-| `storage` | Keeps the paired server URL, encrypted write-only recorder token, random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
+| `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
 | `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes, so that site's Setup recorder button can connect the extension. |
 | `alarms` | Refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
 | Optional `https://*/*` host access | Allows the user to pair a self-hosted Chatterbox server at a chosen HTTPS origin. Access is requested for that specific origin during pairing. |
@@ -37,6 +37,12 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.4.0
+
+- The popup's folder picker is a search field: type part of a folder path to find it among hundreds of folders. The last folder used stays offered.
+- The extension asks the server for matching folders only (`GET /api/v1/recorder/folders?q=`, at most 20) and for the remembered folder (`?id=`), instead of downloading every folder path. Both list only folders the user can file a recording into.
+- The recorder key is described accurately: it creates recordings and looks up folder names to file them; it cannot read recordings.
 
 ## What changed in 0.3.0
 

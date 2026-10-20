@@ -274,6 +274,57 @@ export async function reachableCustomFolder(
     };
 }
 
+/** Build a request-scoped check shared by folder discovery and categorization. */
+export function createFolderCategorizationCheck(userId: string) {
+    let orgCheck: Promise<void> | undefined;
+    async function checkOrganization(): Promise<void> {
+        assertOrgScopeWritable();
+        if (isIdpAuthorization()) {
+            const access = await holderAccess(userId);
+            if (!access.ok || !access.capabilities.has("use")) {
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "You can no longer file items into the Organization",
+                    403,
+                );
+            }
+        }
+    }
+    return async (
+        folder: Pick<RecordingFolder, "parentId" | "scope">,
+    ): Promise<void> => {
+        if (folder.parentId === null) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Choose a folder below Private or Organization; root folders cannot categorize items",
+                400,
+            );
+        }
+        if (folder.scope === "org") {
+            orgCheck ??= checkOrganization();
+            await orgCheck;
+        }
+    };
+}
+
+/** Load only folder metadata from the caller's trees, without item assignments. */
+export async function listRecordingFolderTrees(
+    userId: string,
+): Promise<RecordingFolder[]> {
+    const [isOrg, orgUserId] = await Promise.all([
+        isOrgAccount(userId),
+        getOrgUserId(),
+    ]);
+    const [personal, org] = await Promise.all([
+        isOrg ? [] : listTreeFolders(db, userId),
+        orgUserId ? listTreeFolders(db, orgUserId) : [],
+    ]);
+    return [
+        ...personal.map((row) => serializeFolder(row, "personal")),
+        ...org.map((row) => serializeFolder(row, "org")),
+    ];
+}
+
 /**
  * Return non-root folders the owner may categorize items into, in input order.
  * Private and Organization roots are deliberately not categorization targets.
@@ -307,13 +358,6 @@ export async function assertCategorizableFolders(
     const folders = folderIds.map((folderId) => {
         const folder = byId.get(folderId);
         if (!folder) throw folderNotFound();
-        if (folder.parentId === null) {
-            throw new AppError(
-                ErrorCode.INVALID_INPUT,
-                "Choose a folder below Private or Organization; root folders cannot categorize items",
-                400,
-            );
-        }
         return {
             folderId: folder.id,
             ownerId: folder.userId,
@@ -323,18 +367,11 @@ export async function assertCategorizableFolders(
                     : ("personal" as const),
         };
     });
-    if (folders.some((folder) => folder.scope === "org")) {
-        assertOrgScopeWritable();
-        if (isIdpAuthorization()) {
-            const access = await holderAccess(ownerUserId);
-            if (!access.ok || !access.capabilities.has("use")) {
-                throw new AppError(
-                    ErrorCode.FORBIDDEN,
-                    "You can no longer file items into the Organization",
-                    403,
-                );
-            }
-        }
+    const check = createFolderCategorizationCheck(ownerUserId);
+    for (const folder of folders) {
+        const row = byId.get(folder.folderId);
+        if (!row) throw folderNotFound();
+        await check({ parentId: row.parentId, scope: folder.scope });
     }
     return folders;
 }

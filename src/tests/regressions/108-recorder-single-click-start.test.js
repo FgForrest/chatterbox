@@ -45,7 +45,7 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
         title: "",
         getElementById: node,
         querySelectorAll: () => [],
-        createElement: () => ({ value: "", textContent: "" }),
+        createElement: () => node(Symbol()),
     });
     vi.stubGlobal("window", { close });
     const storageSet = vi.fn().mockResolvedValue(undefined);
@@ -169,9 +169,11 @@ describe("manual recorder start", () => {
         expect(close).toHaveBeenCalledOnce();
     });
 
-    it("renders the idle view before the folder list responds", async () => {
+    it("renders the idle view before the remembered folder responds", async () => {
         const { node, sendMessage, storageSet, close } = setupPopup(
             "https://example.com",
+            "folder-1",
+            "Private / Previous",
         );
         let finishFolders;
         sendMessage.mockImplementation((message) =>
@@ -199,9 +201,8 @@ describe("manual recorder start", () => {
             ],
         });
         await vi.waitFor(() =>
-            expect(node("folder-picker").children).toHaveLength(2),
+            expect(node("folder-listbox").children).toHaveLength(2),
         );
-        node("folder-picker").value = "folder-1";
         await node("start").click();
         expect(storageSet).toHaveBeenCalledWith({
             folderId: "folder-1",
@@ -229,8 +230,8 @@ describe("manual recorder start", () => {
 
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
-        expect(node("folder-picker").value).toBe("folder-1");
-        expect(node("folder-picker").children[1].textContent).toBe(
+        expect(node("folder-picker").value).toBe("Private / Calls");
+        expect(node("folder-listbox").children[1].textContent).toBe(
             "Private / Calls",
         );
 
@@ -259,7 +260,7 @@ describe("manual recorder start", () => {
 
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
-        expect(node("folder-picker").children[1].textContent).toBe(
+        expect(node("folder-listbox").children[1].textContent).toBe(
             "savedFolder",
         );
     });

@@ -364,7 +364,7 @@ describe("Meeting Recorder Settings details", () => {
         expires_at: "2026-10-17T10:00:00.000Z",
     };
 
-    it("shows recorder names, key prefixes, and the write-only note", async () => {
+    it("shows recorder names, key prefixes, and the recorder key permissions", async () => {
         stubRecorderStatus({ ...status, keys });
         render(view("settings"));
         fireEvent.click(await screen.findByText("Connected recorders"));
@@ -375,7 +375,7 @@ describe("Meeting Recorder Settings details", () => {
         expect(screen.getByText("op_rec_travel")).toBeTruthy();
         expect(
             screen.getByText(
-                "Each key is write-only: it can create recordings but cannot read your library.",
+                "Each key can create recordings and look up folder names to file them, but cannot read recordings.",
             ),
         ).toBeTruthy();
     });
@@ -533,7 +533,7 @@ describe("Meeting Recorder Settings details", () => {
         expect(screen.queryByText("Recover unfinished recordings")).toBeNull();
         expect(
             screen.queryByText(
-                "Each key is write-only: it can create recordings but cannot read your library.",
+                "Each key can create recordings and look up folder names to file them, but cannot read recordings.",
             ),
         ).toBeNull();
     });

@@ -170,20 +170,24 @@ export function mapRecorderFolders(body) {
                 typeof folder.path === "string" &&
                 (folder.scope === "personal" || folder.scope === "org"),
         )
-        .map((folder) => ({ ...folder, label: folder.path }))
-        .sort(
-            (left, right) =>
-                (left.scope === right.scope
-                    ? 0
-                    : left.scope === "personal"
-                      ? -1
-                      : 1) || left.path.localeCompare(right.path),
-        );
+        .map((folder) => ({ ...folder, label: folder.path }));
 }
 
-/** Folders the paired recorder key holder may file a new recording into. */
-export async function getRecorderFolders(auth) {
-    const response = await request(auth, "/api/v1/recorder/folders");
+/** Search folders the paired recorder key holder may file into, in server rank order. */
+export async function searchRecorderFolders(auth, q) {
+    const response = await request(
+        auth,
+        `/api/v1/recorder/folders?q=${encodeURIComponent(q.trim())}`,
+    );
+    return mapRecorderFolders(await response.json());
+}
+
+/** Resolve the remembered folder's current path; unavailable folders return 404. */
+export async function getRecorderFolder(auth, id) {
+    const response = await request(
+        auth,
+        `/api/v1/recorder/folders?id=${encodeURIComponent(id)}`,
+    );
     return mapRecorderFolders(await response.json());
 }
 
