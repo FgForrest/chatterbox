@@ -1,0 +1,13 @@
+body {
+    max-width: 380px;
+}
+
+.actions {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.actions button {
+    width: 100%;
+}

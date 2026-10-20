@@ -57,12 +57,17 @@ Other platforms stay **Off** unless you or the server choose otherwise. Saved
 choices take precedence over server defaults, except when the server locks a
 platform to **Auto**. Server defaults take precedence over the initial modes.
 
-With **Prompt**, when a detected meeting becomes audible, a notification offers
-**Record** and **Not now**. To keep only the **REC?** badge, turn off **Show a
-notification when a meeting is detected** in **Options**. **Record** opens the participant notice and microphone check. Confirm
-the notice and allow the microphone, or choose **Record without my microphone**.
-In Chrome's audio picker, choose the meeting tab and turn on **Share tab audio**.
-**Not now** dismisses the prompt for that tab.
+With **Prompt**, when a detected meeting becomes audible, a notification with
+the participant reminder offers **Consent confirmed · Record** and **Not now**.
+To keep only the **REC?** badge, turn off **Show a notification when a meeting
+is detected** in **Options**. Chrome does not let a notification capture a tab,
+so **Consent confirmed · Record** opens Chrome's sharing dialog: choose the
+meeting tab and keep **Share tab audio** on. A window or the screen carries no
+meeting audio, and the recorder window says so when the **Others** meter stays
+silent. If the microphone is not allowed yet, a small window asks for it first,
+or offers **Record without my microphone**. Clicking the toolbar icon instead
+records the meeting tab directly, without the dialog. **Not now** dismisses the
+prompt for that tab.
 
 For one-click recording, open **Options → Automatic recording**, set a platform
 to **Auto**, confirm the recording policy once and click **Save settings**.
