@@ -26,6 +26,7 @@ import {
     markKnownQuotes,
     peopleByAddress,
 } from "@/lib/mail/known-quotes";
+import { knownSignaturesFor } from "@/lib/mail/known-signatures";
 import type { ParsedMessage } from "@/lib/mail/parse";
 import type { MessageFacts } from "@/lib/mail/policy";
 import { deleteRawMail, storeRawMail } from "@/lib/mail/raw-storage";
@@ -201,7 +202,12 @@ export async function storeMailForOwner(input: {
     if (known) return merge(known);
 
     const itemId = nanoid();
+    const knownSignatures = await knownSignaturesFor(
+        owner,
+        parsed.from[0]?.address ?? null,
+    );
     const segmented = segmentMail({
+        knownSignatures,
         text: parsed.text,
         html: parsed.html,
         from: parsed.from[0] ?? null,

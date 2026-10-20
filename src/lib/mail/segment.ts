@@ -8,6 +8,11 @@
  * from text: `>` prefixes, reply headers ("On ... wrote:", "Dne ...
  * napsal(a):") and forwarded or original-message header blocks in English
  * and Czech. What does not parse stays in the enclosing segment.
+ *
+ * A part's signature is found from the strongest signal that applies:
+ * client signature markup, the `-- ` delimiter, a closing line, a
+ * signature this sender used before, the author's name followed by
+ * contact lines, then a mobile or client footer.
  */
 
 import type {
@@ -15,12 +20,29 @@ import type {
     ContentSegment,
     ParticipantRole,
     SegmentRole,
+    SignatureCue,
 } from "@/lib/content/types";
 import { type ParsedMailbox, parseAddressList } from "@/lib/mail/address-list";
-import { htmlToText, QUOTE_CLOSE, QUOTE_OPEN } from "@/lib/mail/html-text";
+import {
+    htmlToText,
+    QUOTE_CLOSE,
+    QUOTE_OPEN,
+    SIGNATURE_CLOSE,
+    SIGNATURE_OPEN,
+    SIGNATURE_START,
+} from "@/lib/mail/html-text";
+import {
+    isContactLine,
+    isSignatureProse,
+    signatureLines,
+    startsWithAuthor,
+} from "@/lib/mail/signature-patterns";
 
-/** Moves when segmentation changes: a re-parse writes a new revision. */
-export const MAIL_PARSER_VERSION = 1;
+/**
+ * The segmentation rules a revision was written with. Nothing re-parses
+ * stored mail when it moves.
+ */
+export const MAIL_PARSER_VERSION = 2;
 
 /** A participant with what only mail has: address and authentication. */
 export interface MailParticipant extends ContentParticipant {
@@ -44,24 +66,29 @@ export interface SegmentInput {
     sentAt: Date | null;
     /** The From address was proven by a DKIM signature. */
     fromAuthenticated: boolean;
+    /** Signatures the From address used before, as `signatureLines` normalises them. */
+    knownSignatures?: readonly string[];
 }
 
 interface Line {
     depth: number;
     text: string;
+    signature: boolean;
+    signatureToEnd?: boolean;
 }
 
 interface Part {
     depth: number;
     author: ParsedMailbox | null;
     at: Date | null;
-    lines: string[];
+    lines: Line[];
 }
 
-/** The text's lines with their quote depth, from markers and `>`. */
+/** The text's lines with their quote depth, from markers and `>`, and signature marks. */
 function quotedLines(text: string): Line[] {
     const lines: Line[] = [];
     let markerDepth = 0;
+    let signatureDepth = 0;
     for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
         if (raw.trim() === QUOTE_OPEN) {
             markerDepth++;
@@ -71,10 +98,28 @@ function quotedLines(text: string): Line[] {
             markerDepth = Math.max(0, markerDepth - 1);
             continue;
         }
+        if (raw.trim() === SIGNATURE_OPEN) {
+            signatureDepth++;
+            continue;
+        }
+        if (raw.trim() === SIGNATURE_CLOSE) {
+            signatureDepth = Math.max(0, signatureDepth - 1);
+            continue;
+        }
+        if (raw.trim() === SIGNATURE_START) {
+            lines.push({
+                depth: markerDepth,
+                text: "",
+                signature: false,
+                signatureToEnd: true,
+            });
+            continue;
+        }
         const prefix = /^((?:\s*>)+)\s?/.exec(raw);
         const arrows = prefix ? (prefix[1]?.match(/>/g)?.length ?? 0) : 0;
         lines.push({
             depth: markerDepth + arrows,
+            signature: signatureDepth > 0,
             text: (prefix ? raw.slice(prefix[0].length) : raw).trimEnd(),
         });
     }
@@ -261,8 +306,10 @@ function partsOf(lines: readonly Line[]): Part[] {
     // Extra depth added by a text-only quote (a header block) per base depth.
     const shift: number[] = [];
     let pending: Attribution | null = null;
+    let signatureToEnd = false;
     const current = (): Part | undefined => parts.at(-1);
     const open = (depth: number, attribution: Attribution | null) => {
+        signatureToEnd = false;
         parts.push({
             depth,
             author: attribution?.author ?? null,
@@ -290,7 +337,7 @@ function partsOf(lines: readonly Line[]): Part[] {
             continue;
         }
         const block = trimmed ? headerBlockAt(lines, i) : null;
-        if (block && (current()?.lines.some((l) => l.trim()) ?? false)) {
+        if (block && (current()?.lines.some((l) => l.text.trim()) ?? false)) {
             shift[line.depth] = (shift[line.depth] ?? 0) + 1;
             open(line.depth + (shift[line.depth] ?? 0), block.attribution);
             i = block.end;
@@ -306,7 +353,7 @@ function partsOf(lines: readonly Line[]): Part[] {
                 line.depth > 0 &&
                 (!last ||
                     last.depth < line.depth ||
-                    !last.lines.some((l) => l.trim()));
+                    !last.lines.some((l) => l.text.trim()));
             if (next && next.depth > line.depth) {
                 pending = attribution;
             } else if (startsItsQuote) {
@@ -314,7 +361,7 @@ function partsOf(lines: readonly Line[]): Part[] {
                 if (
                     !last ||
                     last.depth !== depth ||
-                    last.lines.some((l) => l.trim())
+                    last.lines.some((l) => l.text.trim())
                 ) {
                     open(depth, attribution);
                 } else {
@@ -332,9 +379,16 @@ function partsOf(lines: readonly Line[]): Part[] {
             open(depth, depth > (last?.depth ?? 0) ? pending : null);
             if (depth > (last?.depth ?? 0)) pending = null;
         }
-        current()?.lines.push(text);
+        if (line.signatureToEnd) {
+            signatureToEnd = true;
+            continue;
+        }
+        current()?.lines.push({
+            ...line,
+            signature: line.signature || signatureToEnd,
+        });
     }
-    return parts.filter((part) => part.lines.some((l) => l.trim()));
+    return parts.filter((part) => part.lines.some((l) => l.text.trim()));
 }
 
 const CLOSINGS: readonly RegExp[] = [
@@ -372,11 +426,39 @@ function disclaimerStart(lines: readonly string[]): number {
     return start;
 }
 
-/** Where a part's signature starts, or -1. */
-function signatureStart(lines: readonly string[]): number {
+function isFooter(line: string): boolean {
+    return (
+        line.length <= 60 &&
+        /^(Sent from|Odesláno z|Get Outlook for|Získat aplikaci Outlook pro)\b/i.test(
+            line,
+        )
+    );
+}
+
+/** The trailing lines are a known signature, or start with its first two lines. */
+function isKnown(candidate: readonly string[], signature: readonly string[]) {
+    if (
+        candidate.length === signature.length &&
+        signature.every((line, i) => candidate[i] === line)
+    )
+        return true;
+    return (
+        signature.length >= 2 &&
+        candidate[0] === signature[0] &&
+        candidate[1] === signature[1]
+    );
+}
+
+/** Where a part's signature starts and which text signal found it, or null. */
+function signatureStart(
+    lines: readonly string[],
+    author: ParsedMailbox | null,
+    known: readonly string[],
+): { index: number; cue: SignatureCue } | null {
     for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i] ?? "";
-        if (line === "-- " || line.trim() === "--") return i;
+        if (line === "-- " || line.trim() === "--")
+            return { index: i, cue: "delimiter" };
     }
     // A closing in the last lines, followed only by a few short lines.
     const content = lines
@@ -389,12 +471,40 @@ function signatureStart(lines: readonly string[]): number {
             continue;
         }
         const after = tail.slice(t + 1);
-        if (after.length === 0) return -1;
+        if (after.length === 0) break;
         if (after.length <= 10 && after.every((e) => e.line.length <= 100)) {
-            return entry.index;
+            return { index: entry.index, cue: "closing" };
         }
     }
-    return -1;
+    const knownLines = known
+        .map(signatureLines)
+        .filter((signature) => signature.length > 0);
+    for (const entry of content.slice(-10)) {
+        const candidate = signatureLines(lines.slice(entry.index).join("\n"));
+        if (knownLines.some((signature) => isKnown(candidate, signature)))
+            return { index: entry.index, cue: "known" };
+    }
+    const lastIndex = content.at(-1)?.index ?? 0;
+    for (const entry of [...tail].reverse()) {
+        const block = lines
+            .slice(entry.index, lastIndex + 1)
+            .map((line) => line.trim());
+        const after = block.slice(1);
+        if (
+            startsWithAuthor(entry.line, author) &&
+            block.length <= 10 &&
+            block.every((line) => line.length <= 100) &&
+            after.filter(isContactLine).length >= 2 &&
+            !after.some(isSignatureProse)
+        ) {
+            return { index: entry.index, cue: "contact" };
+        }
+    }
+    const last = content.at(-1);
+    if (last && isFooter(last.line)) {
+        return { index: last.index, cue: "footer" };
+    }
+    return null;
 }
 
 function clean(lines: readonly string[]): string {
@@ -410,37 +520,75 @@ interface Piece {
     author: ParsedMailbox | null;
     at: Date | null;
     text: string;
+    signatureCue?: SignatureCue;
 }
 
-function piecesOf(part: Part): Piece[] {
+function roleOf(quoted: boolean, signature: boolean): SegmentRole {
+    if (signature) return quoted ? "quoted_signature" : "signature";
+    return quoted ? "quoted" : "body";
+}
+
+function piecesOf(part: Part, known: readonly string[]): Piece[] {
     const quoted = part.depth > 0;
     let lines = part.lines;
     const pieces: Piece[] = [];
-    const disclaimer = disclaimerStart(lines);
+    const disclaimer = disclaimerStart(lines.map((line) => line.text));
     let disclaimerText = "";
     if (disclaimer >= 0) {
-        disclaimerText = clean(lines.slice(disclaimer));
+        disclaimerText = clean(
+            lines.slice(disclaimer).map((line) => line.text),
+        );
         lines = lines.slice(0, disclaimer);
     }
-    const signature = signatureStart(lines);
-    const body = clean(signature >= 0 ? lines.slice(0, signature) : lines);
-    const signatureText =
-        signature >= 0
-            ? clean(lines.slice(signature).filter((l) => l.trim() !== "--"))
-            : "";
     const base = { depth: part.depth, author: part.author, at: part.at };
-    if (body)
-        pieces.push({ ...base, role: quoted ? "quoted" : "body", text: body });
-    if (signatureText) {
-        pieces.push({
-            ...base,
-            role: quoted ? "quoted_signature" : "signature",
-            text: signatureText,
-        });
+    const add = (block: readonly Line[], signatureCue?: SignatureCue) => {
+        const text = clean(
+            block
+                .map((line) => line.text)
+                .filter(
+                    (line) =>
+                        signatureCue !== "delimiter" || line.trim() !== "--",
+                ),
+        );
+        if (text)
+            pieces.push({
+                ...base,
+                role: roleOf(quoted, Boolean(signatureCue)),
+                text,
+                ...(signatureCue ? { signatureCue } : {}),
+            });
+    };
+    if (lines.some((line) => line.signature && line.text.trim())) {
+        const lastIndex = lines.findLastIndex((line) => line.text.trim());
+        lines = lines.map((line, index) =>
+            index === lastIndex && isFooter(line.text.trim())
+                ? { ...line, signature: true }
+                : line,
+        );
+        let start = 0;
+        for (let i = 1; i <= lines.length; i++) {
+            if (
+                i === lines.length ||
+                lines[i]?.signature !== lines[start]?.signature
+            ) {
+                add(
+                    lines.slice(start, i),
+                    lines[start]?.signature ? "markup" : undefined,
+                );
+                start = i;
+            }
+        }
+    } else {
+        const signature = signatureStart(
+            lines.map((line) => line.text),
+            part.author,
+            quoted ? [] : known,
+        );
+        add(signature ? lines.slice(0, signature.index) : lines);
+        if (signature) add(lines.slice(signature.index), signature.cue);
     }
-    if (disclaimerText) {
+    if (disclaimerText)
         pieces.push({ ...base, role: "disclaimer", text: disclaimerText });
-    }
     return pieces;
 }
 
@@ -488,7 +636,8 @@ export function segmentMail(input: SegmentInput): SegmentedMail {
     const text = input.html ? htmlToText(input.html) : (input.text ?? "");
     const segments: ContentSegment[] = [];
     for (const part of partsOf(quotedLines(text))) {
-        for (const piece of piecesOf(part)) {
+        if (part.depth === 0) part.author = input.from;
+        for (const piece of piecesOf(part, input.knownSignatures ?? [])) {
             const own = piece.depth === 0;
             const ref =
                 piece.role === "disclaimer"
@@ -503,6 +652,9 @@ export function segmentMail(input: SegmentInput): SegmentedMail {
                 depth: piece.depth,
                 at: own ? input.sentAt : piece.at,
                 text: piece.text,
+                ...(piece.signatureCue
+                    ? { signatureCue: piece.signatureCue }
+                    : {}),
             });
         }
     }

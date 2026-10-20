@@ -106,3 +106,31 @@ describe("mail parts for Learn", () => {
         });
     });
 });
+
+describe("signature detection cues in Learn", () => {
+    it.each([
+        "markup",
+        "delimiter",
+        "closing",
+        "known",
+        "contact",
+        "footer",
+    ] as const)("labels %s signatures as a single part and honours read-once skipping", (signatureCue) => {
+        const signature: ContentSegment = {
+            index: 0,
+            role: "signature",
+            depth: 0,
+            participantRef: "p1",
+            at: null,
+            signatureCue,
+            text: "Petra Nováková\n\nExample, a.s.",
+        };
+        const learned = mailLearnParts({ segments: [signature] });
+        expect(learned.turns).toHaveLength(1);
+        expect(learned.turns[0]?.text).toBe(`(signature) ${signature.text}`);
+        expect(
+            mailLearnParts({ segments: [signature] }, { skip: new Set([0]) })
+                .turns,
+        ).toEqual([]);
+    });
+});
