@@ -5,7 +5,7 @@ import {
     CalendarDays,
     Check,
     CircleCheck,
-    Clipboard,
+    Copy,
     Mail,
     Mic,
     Minus,
@@ -426,7 +426,7 @@ export function OnboardingStepMail({
                         aria-label={i18n("Copy email address")}
                         onClick={() => void copyAddress()}
                     >
-                        {copied ? <Check /> : <Clipboard />}
+                        {copied ? <Check /> : <Copy />}
                     </Button>
                 </div>
             )}
@@ -519,7 +519,7 @@ export function OnboardingStepClaude({
                         aria-label={i18n("Copy connector address")}
                         onClick={() => void copy("url", connectorUrl)}
                     >
-                        {copied === "url" ? <Check /> : <Clipboard />}
+                        {copied === "url" ? <Check /> : <Copy />}
                     </Button>
                 </div>
                 <details>
@@ -534,7 +534,7 @@ export function OnboardingStepClaude({
                             aria-label={i18n("Copy Claude Code command")}
                             onClick={() => void copy("command", command)}
                         >
-                            {copied === "command" ? <Check /> : <Clipboard />}
+                            {copied === "command" ? <Check /> : <Copy />}
                         </Button>
                     </div>
                     <p>
