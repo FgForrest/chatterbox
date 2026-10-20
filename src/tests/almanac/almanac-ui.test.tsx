@@ -60,8 +60,9 @@ function respond(routes: Record<string, Route>) {
     return fetch;
 }
 
-afterEach(() => {
+afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     pathname = "/almanac";
