@@ -131,8 +131,8 @@ export function SummaryWidget({
     const pipelineWorking = Boolean(
         widget?.active && widget.tone === "working",
     );
-    const working = isSummarizing || pipelineWorking;
     const hasSummary = Boolean(summaryData?.summary);
+    const working = isSummarizing || (pipelineWorking && !hasSummary);
     const summaryOpen = workflowVisible
         ? !(widget?.collapsed ?? false) || workflowExpanded
         : summaryExpanded;

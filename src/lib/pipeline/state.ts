@@ -89,6 +89,7 @@ async function settleSummaryStepInTx(
         step: SummaryStepName;
         content: ContentRevisionInput;
         generation?: number;
+        inputFingerprint?: string | null;
     },
     state: "done" | "skipped",
     reason: string,
@@ -106,24 +107,39 @@ async function settleSummaryStepInTx(
         .for("update")
         .limit(1);
     const storedSummary = processing?.phases.summary;
-    const summary =
-        storedSummary ??
-        (input.step === "title"
-            ? {
-                  state: "pending" as const,
-                  reason: "title-after-summary",
-                  generation: input.generation ?? 0,
-                  inputs: input.content,
-                  at: new Date().toISOString(),
-              }
-            : undefined);
+    const summary = storedSummary ?? {
+        state: "pending" as const,
+        reason: "step-completed",
+        generation: input.generation ?? 0,
+        inputs: input.content,
+        at: new Date().toISOString(),
+    };
     const step = summary?.steps?.[input.step];
+    const currentReading =
+        summary.staleFingerprint !== undefined &&
+        summary.staleFingerprint === input.inputFingerprint;
     if (
-        !summary ||
-        summary.state === "outdated" ||
+        (summary.state === "outdated" &&
+            !(summary.reason === "learn_changed" && currentReading)) ||
         (input.step !== "title" &&
-            (!stepUsesInput(step, summary, input.content) ||
-                step?.state === "outdated"))
+            (step
+                ? !stepUsesInput(step, summary, input.content) ||
+                  (step.state === "outdated" &&
+                      !(step.reason === "learn_changed" && currentReading))
+                : summary.inputs !== undefined &&
+                  (summary.inputs.contentId !== input.content.contentId ||
+                      summary.inputs.contentSourceId !==
+                          input.content.contentSourceId ||
+                      summary.inputs.contentRevision !==
+                          input.content.contentRevision)))
+    ) {
+        return false;
+    }
+    if (
+        stepUsesInput(step, summary, input.content) &&
+        step?.state === state &&
+        (input.inputFingerprint === undefined ||
+            step.inputFingerprint === input.inputFingerprint)
     ) {
         return false;
     }
@@ -150,6 +166,7 @@ async function settleSummaryStepInTx(
             generation,
             state,
             reason,
+            inputFingerprint: input.inputFingerprint,
         },
     };
     const summaryForInput = { ...summary, inputs: input.content };
@@ -193,6 +210,7 @@ export function markSummaryStepDoneInTx(
         step: SummaryStepName;
         content: ContentRevisionInput;
         generation?: number;
+        inputFingerprint?: string | null;
     },
 ): Promise<boolean> {
     return settleSummaryStepInTx(tx, input, "done", "generated");
