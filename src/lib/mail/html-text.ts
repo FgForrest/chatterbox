@@ -128,16 +128,15 @@ function opensQuote(tag: Tag): boolean {
 /**
  * Whether an opening tag is a client's signature container: Gmail's
  * `gmail_signature`, Outlook's `Signature` id, Thunderbird's
- * `moz-signature`, Apple Mail's `AppleMailSignature`.
+ * `moz-signature`. Apple Mail's `AppleMailSignature` is not one: iOS can
+ * leave the typed reply inside it, so its footer is read as text.
  */
 function opensSignature(tag: Tag): boolean {
     const classes = attribute(tag, "class");
     return (
         classes.includes("gmail_signature") ||
         attribute(tag, "data-smartmail") === "gmail_signature" ||
-        ["Signature", "signature", "AppleMailSignature"].includes(
-            attribute(tag, "id"),
-        ) ||
+        ["Signature", "signature"].includes(attribute(tag, "id")) ||
         (["div", "pre"].includes(tag.name) && classes.includes("moz-signature"))
     );
 }

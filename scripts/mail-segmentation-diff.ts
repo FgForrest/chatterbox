@@ -29,6 +29,8 @@ export async function runMailSegmentationDiff(args: string[]) {
         throw new Error("--samples must be a non-negative integer");
     if (values.user !== undefined && !values.user.trim())
         throw new Error("--user must be a non-empty id");
+    if (sampleLimit > 0 && values.user === undefined)
+        throw new Error("--samples prints mail text: give --user <id> too");
     const counts = {
         checked: 0,
         unchanged: 0,

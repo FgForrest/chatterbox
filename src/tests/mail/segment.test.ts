@@ -315,7 +315,6 @@ describe("mail signature detection version 2", () => {
         "signature-outlook-web.html",
         "signature-outlook-classic.html",
         "signature-thunderbird.html",
-        "signature-apple.html",
     ])("keeps client markup in %s within its part", (name) => {
         const segments = segmentV2("", { html: fixture(name) });
         expect(segments.map((segment) => segment.role)).toEqual([
@@ -332,7 +331,6 @@ describe("mail signature detection version 2", () => {
         'data-smartmail="gmail_signature"',
         'id="signature"',
         'class="other moz-signature"',
-        'id="AppleMailSignature"',
     ])("recognises %s inside a quote", (attribute) => {
         const segments = segmentV2("", {
             html: `<blockquote><div>Quoted body</div><div ${attribute}>Example signature</div></blockquote>`,
@@ -342,6 +340,26 @@ describe("mail signature detection version 2", () => {
             "quoted_signature",
         ]);
         expect(segments[1]).toMatchObject({ signatureCue: "markup", depth: 1 });
+    });
+
+    it("reads Apple Mail's signature container as text, its footer by the footer rule", () => {
+        expect(
+            segmentV2("", { html: fixture("signature-apple.html") }).map(
+                (segment) => [segment.role, segment.signatureCue],
+            ),
+        ).toEqual([
+            ["body", undefined],
+            ["signature", "footer"],
+            ["quoted", undefined],
+        ]);
+        expect(
+            segmentV2("", {
+                html: '<div id="AppleMailSignature">Díky, potvrzuji.<br><br>Sent from my iPhone</div>',
+            }).map((segment) => [segment.role, segment.text]),
+        ).toEqual([
+            ["body", "Díky, potvrzuji."],
+            ["signature", "Sent from my iPhone"],
+        ]);
     });
 
     it("keeps unmarked text in reading order and markup wins over text cues", () => {
@@ -418,6 +436,17 @@ describe("mail signature detection version 2", () => {
             segmentV2("Body\nOddělení", { knownSignatures: ["Oddělení"] })[1]
                 ?.signatureCue,
         ).toBe("known");
+    });
+
+    it("does not let a known signature's first lines swallow a P.S.", () => {
+        const knownSignatures = [
+            "Petra Nováková | Vedoucí projektu\nExample, a.s.\nVzorová 12/34",
+        ];
+        const text =
+            "Body\nPetra Nováková | Vedoucí projektu\nExample, a.s.\nP.S. Nezapomeňte prosím poslat podepsanou smlouvu do pátku, jinak termín nestihneme.";
+        expect(
+            segmentV2(text, { knownSignatures }).map((segment) => segment.role),
+        ).toEqual(["body"]);
     });
 
     it("does not match a known near-miss, a single prefix, or a quoted part", () => {
@@ -528,8 +557,9 @@ describe("signature contact patterns", () => {
         "DIČ: CZ00000000",
         "VAT: 00000000",
         "Vzorová 12/34",
+        "Vzorová 635/57a",
         "110 00 Praha",
-        "Praha 11000",
+        "Praha 1, 110 00",
     ])("accepts %s", (line) => expect(isContactLine(line)).toBe(true));
     it.each([
         "125 000 Kč",
@@ -547,6 +577,9 @@ describe("signature contact patterns", () => {
         "2026-11-14",
         "12/34",
         "11000",
+        "Praha 11000",
+        "Objednávka 12345",
+        "Č.j. 123/2026",
         "Department",
         "600 000",
     ])("rejects %s", (line) => expect(isContactLine(line)).toBe(false));

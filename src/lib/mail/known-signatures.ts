@@ -17,7 +17,7 @@ const TRUSTED_CUES: ReadonlySet<SignatureCue> = new Set([
     "closing",
 ]);
 
-/** Trusted signatures from the last five mails from this From address in this owner's pile. */
+/** Trusted signatures from the last five DKIM-verified mails from this From address in this owner's pile. */
 export async function knownSignaturesFor(
     ownerUserId: string,
     address: string | null,
@@ -56,6 +56,7 @@ export async function knownSignaturesFor(
                     participantAddressHash(address),
                 ),
                 sql`${mailParticipants.roles} @> ${JSON.stringify(["from"])}::jsonb`,
+                eq(mailMessages.senderVerified, true),
                 isNull(mailMessages.deletedAt),
                 isNull(chatterItems.deletedAt),
                 before

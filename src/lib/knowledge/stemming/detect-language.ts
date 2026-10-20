@@ -102,10 +102,10 @@ const LATIN = [
 ] as const;
 
 const SCRIPTS = [
-    ["ru", /\p{Script=Cyrillic}/u],
-    ["ar", /\p{Script=Arabic}/u],
-    ["hy", /\p{Script=Armenian}/u],
-    ["ta", /\p{Script=Tamil}/u],
+    ["ru", /\p{Script=Cyrillic}/u, /[ыэ]/u, /[іїєґўђјљњћџѓќѕ]/u],
+    ["ar", /\p{Script=Arabic}/u, null, /[پچژگکیٹڈڑںےۓ]/u],
+    ["hy", /\p{Script=Armenian}/u, null, null],
+    ["ta", /\p{Script=Tamil}/u, null, null],
 ] as const;
 const ADDRESSES =
     /(?<!\S)\S*\d\S*|(?<![\p{L}\p{N}._%+-])(?:(?:[a-z][a-z\d+.-]*:\/\/|www\.)[^\s<>]+|(?:mailto:)?[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+)/giu;
@@ -147,10 +147,13 @@ export function detectLanguage(text: string): string | null {
     const clean = text.toLowerCase().normalize("NFC").replace(ADDRESSES, " ");
     const words = fold(clean).match(WORDS);
     if (!words || words.length < 6) return null;
-    for (const [language, script] of SCRIPTS) {
+    for (const [language, script, required, excluded] of SCRIPTS) {
         let count = 0;
         for (const word of words) if (script.test(word)) count++;
-        if (count >= 6 && count / words.length >= 0.7) return language;
+        if (count < 6 || count / words.length < 0.7) continue;
+        if (excluded?.test(clean) || (required && !required.test(clean)))
+            return null;
+        return language;
     }
     let latinWords = 0;
     for (const word of words) if (LATIN_WORD.test(word)) latinWords++;

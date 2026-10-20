@@ -435,8 +435,15 @@ function isFooter(line: string): boolean {
     );
 }
 
-/** The trailing lines are a known signature, or start with its first two lines. */
-function isKnown(candidate: readonly string[], signature: readonly string[]) {
+/**
+ * The trailing lines are a known signature, or start with its first two
+ * lines and stay signature-like: no line over 100 characters, no prose.
+ */
+function isKnown(
+    block: readonly string[],
+    candidate: readonly string[],
+    signature: readonly string[],
+) {
     if (
         candidate.length === signature.length &&
         signature.every((line, i) => candidate[i] === line)
@@ -445,7 +452,9 @@ function isKnown(candidate: readonly string[], signature: readonly string[]) {
     return (
         signature.length >= 2 &&
         candidate[0] === signature[0] &&
-        candidate[1] === signature[1]
+        candidate[1] === signature[1] &&
+        block.every((line) => line.length <= 100) &&
+        !block.slice(2).some(isSignatureProse)
     );
 }
 
@@ -480,8 +489,14 @@ function signatureStart(
         .map(signatureLines)
         .filter((signature) => signature.length > 0);
     for (const entry of content.slice(-10)) {
-        const candidate = signatureLines(lines.slice(entry.index).join("\n"));
-        if (knownLines.some((signature) => isKnown(candidate, signature)))
+        const block = lines
+            .slice(entry.index)
+            .map((line) => line.trim())
+            .filter(Boolean);
+        const candidate = signatureLines(block.join("\n"));
+        if (
+            knownLines.some((signature) => isKnown(block, candidate, signature))
+        )
             return { index: entry.index, cue: "known" };
     }
     const lastIndex = content.at(-1)?.index ?? 0;

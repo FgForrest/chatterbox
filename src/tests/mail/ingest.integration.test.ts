@@ -1335,6 +1335,9 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 const all = await runMailSegmentationDiff([]);
                 expect(all.checked).toBeGreaterThan(counts.checked);
                 expect(output).toHaveBeenCalledTimes(1);
+                await expect(
+                    runMailSegmentationDiff(["--samples", "1"]),
+                ).rejects.toThrow("--user");
             } finally {
                 output.mockRestore();
             }
@@ -1397,6 +1400,30 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 );
             expect(
                 await knownSignaturesFor("u-jan", "history@example.cz"),
+            ).toEqual([]);
+        });
+
+        it("learns no signature from mail whose sender is not verified", async () => {
+            const stored = await storeSignature(
+                "u-jan",
+                '<div id="Signature">Example department<br>Unverified team</div>',
+                true,
+                "Spoofed Writer <unverified@example.cz>",
+            );
+            expect(
+                await knownSignaturesFor("u-jan", "unverified@example.cz"),
+            ).toHaveLength(1);
+            await db()
+                .update(mailMessages)
+                .set({ senderVerified: false })
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-jan"),
+                        eq(mailMessages.id, stored.itemId),
+                    ),
+                );
+            expect(
+                await knownSignaturesFor("u-jan", "unverified@example.cz"),
             ).toEqual([]);
         });
     });

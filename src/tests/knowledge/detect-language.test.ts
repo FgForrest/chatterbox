@@ -171,6 +171,17 @@ describe("language detection", () => {
         ).toBeNull();
     });
 
+    it.each([
+        "Це повідомлення містить інформацію про новий проєкт, над яким ми працюємо разом.",
+        "Гэты ліст змяшчае інфармацыю пра новы праект, над якім мы працуем разам.",
+        "Това писмо съдържа информация за новия проект, по който работим заедно днес.",
+        "Ово писмо садржи информације о новом пројекту на којем радимо заједно.",
+        "این نامه شامل اطلاعاتی درباره پروژه جدید است که امروز با تیم روی آن کار می کنیم",
+        "یہ خط نئے منصوبے کے بارے میں معلومات پر مشتمل ہے جس پر ہم آج کام کر رہے ہیں",
+    ])("does not take another language of the script for Russian or Arabic: %s", (text) => {
+        expect(detectLanguage(text)).toBeNull();
+    });
+
     it("handles long tokens without treating fragments as evidence", () => {
         expect(detectLanguage("x".repeat(100_000))).toBeNull();
         expect(detectLanguage("word.".repeat(20_000))).toBeNull();

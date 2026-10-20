@@ -9,8 +9,8 @@ const CONTACT_PATTERNS = [
     /(?:^|\W)(?:ic|ico|dic|vat)(?:\s+(?:id|no))?\s*[:.]?\s*(?:[a-z]{2})?\d(?:\s?\d){5,}/i,
 ];
 const ADDRESS_PATTERNS = [
-    /\b[a-z][a-z ]*\s+\d+\/\d+\b/i,
-    /\b(?:\d{3}\s?\d{2}\s+[a-z]+|[a-z]+\s+\d{3}\s?\d{2})\b/i,
+    /\b[a-z]{3,}(?: [a-z]+)*\s+\d{1,4}\/\d{1,3}[a-z]?\b/i,
+    /\b(?:\d{3} \d{2}\s+[a-z]{2,}|[a-z]{2,}(?: \d{1,2})?,?\s+\d{3} \d{2})\b/i,
 ];
 const CURRENCY = /(?:\b(?:kc|czk|eur|usd)\b|[€$])/i;
 const DATE = /\b(?:\d{1,2}[./-]\s*\d{1,2}[./-]\s*\d{2,4}|\d{4}-\d{2}-\d{2})\b/g;
