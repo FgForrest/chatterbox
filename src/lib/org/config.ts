@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { captureServerException } from "@/lib/posthog-server";
 import { isSsoEnabled } from "@/lib/sso/config";
 
 /**
@@ -77,23 +78,52 @@ export function assertOrgScopeWritable(): void {
  * Checked by role, not by whether the scope is enabled: an org account left
  * behind by removed env vars must still never gain a private scope.
  */
-export async function isOrgAccount(userId: string): Promise<boolean> {
+export const isOrgAccount = cache(async (userId: string): Promise<boolean> => {
     const [row] = await db
         .select({ role: users.role })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
     return row?.role === "org";
+});
+
+/** How long a refusal stays unreported after one for the same account and surface. */
+export const RECORDER_REFUSAL_REPORT_WINDOW_MS = 10 * 60 * 1000;
+const reportedRefusals = new Map<string, number>();
+
+function firstRefusalInWindow(userId: string, surface: string): boolean {
+    const key = `${userId}\u0000${surface}`;
+    const now = Date.now();
+    const last = reportedRefusals.get(key);
+    if (last !== undefined && now - last < RECORDER_REFUSAL_REPORT_WINDOW_MS)
+        return false;
+    if (reportedRefusals.size >= 1000) reportedRefusals.clear();
+    reportedRefusals.set(key, now);
+    return true;
 }
 
 /** Reject actions that would give the organization account recordings of its own. */
-export async function assertNotOrgAccount(userId: string): Promise<void> {
+export async function assertNotOrgAccount(
+    userId: string,
+    recorder?: { surface: string; sessionId?: string },
+): Promise<void> {
     if (await isOrgAccount(userId)) {
-        throw new AppError(
+        const error = new AppError(
             ErrorCode.FORBIDDEN,
             "The organization account cannot own recordings",
             403,
         );
+        if (recorder && firstRefusalInWindow(userId, recorder.surface)) {
+            const context = { userId, ...recorder };
+            console.warn("[recorder] Organization account refused", context);
+            captureServerException(error, {
+                source: "recorder",
+                distinctId: userId,
+                reason: "organization_account_refused",
+                ...context,
+            });
+        }
+        throw error;
     }
 }
 

@@ -45,6 +45,8 @@ Automatické přeposílání zachovává původního odesílatele, proto potřeb
 
 E-mail ukazuje odesílatele, s označením **Ověřeno**, když ho podepsala doména odesílatele, dále příjemce a datum. Citované a přeposlané zprávy jsou sbalené pod svým autorem. **Zobrazit formátovaně** ukáže e-mail tak, jak byl navržen, aniž by se cokoli načítalo z internetu. Přílohy jdou jen stáhnout.
 
+Vyhledávání v Klepech najde slova i v přeposlaných a citovaných zprávách. Podpisy a doložky o důvěrnosti se neprohledávají.
+
 S postupem zpracování se v tomto pořadí zobrazují vložené prvky kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce skládají do jednoho řádku. Krok, který po pracovním postupu spustíte sami, ukazuje svůj průběh na místě; okno kontroly se otevře až po kliknutí na **Zkontrolovat** nebo **Zobrazit výsledky**.
 
 Pošta odeslaná stroji (automatické odpovědi, konference, oznámení) se uchová, ale je označena **Nezpracováno**. Nespustí se pro ni žádný krok AI.

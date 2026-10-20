@@ -18,6 +18,8 @@ import { requireApiSession } from "@/lib/auth-server";
 import { encrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { nudge } from "@/lib/jobs/nudge";
+import { requestProviderRecoveryInTx } from "@/lib/pipeline/provider-recovery";
 import { captureServerEvent } from "@/lib/posthog-server";
 import {
     organizationAccountProviderAuditContext,
@@ -195,6 +197,7 @@ export const POST = apiHandler(async (request: Request) => {
                 transaction: tx,
             });
         }
+        await requestProviderRecoveryInTx(tx, session.user.id);
         return {
             id: created.id,
             provider: created.provider,
@@ -204,6 +207,8 @@ export const POST = apiHandler(async (request: Request) => {
             isDefaultEnhancement: Boolean(isDefaultEnhancement),
         };
     });
+
+    nudge();
 
     // Provider label only -- never baseUrl, which can be a private
     // hostname (homelab Ollama, internal LM Studio, etc.).

@@ -23,7 +23,9 @@ import type { ActorContext } from "@/lib/authz/model";
 import { mayManageAccess, mayUse } from "@/lib/authz/policy";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { isIdpAuthorization } from "@/lib/identity/factory";
+import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { requestProviderRecoveryInTx } from "@/lib/pipeline/provider-recovery";
 
 export interface OrganizationProviderActor {
     actor: ActorContext;
@@ -361,8 +363,10 @@ export async function createOrganizationProvider(
             beforeDefaults: defaults.before,
             afterDefaults: defaults.after,
         });
+        await requestProviderRecoveryInTx(tx, context.orgUserId);
         return publicProvider(created, defaults.after);
     });
+    nudge();
     return provider;
 }
 
@@ -462,8 +466,12 @@ export async function updateOrganizationProvider(
             beforeDefaults: defaults.before,
             afterDefaults: defaults.after,
         });
+        if (before.disabledAt !== null && after.disabledAt === null) {
+            await requestProviderRecoveryInTx(tx, context.orgUserId);
+        }
         return publicProvider(after, defaults.after);
     });
+    nudge();
     return provider;
 }
 

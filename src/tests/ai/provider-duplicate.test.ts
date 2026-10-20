@@ -4,6 +4,10 @@ const { setDefaultProvider } = vi.hoisted(() => ({
     setDefaultProvider: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/pipeline/provider-recovery", () => ({
+    requestProviderRecoveryInTx: vi.fn().mockResolvedValue(0),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false },
 }));

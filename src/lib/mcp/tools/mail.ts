@@ -9,10 +9,30 @@ import type { AttachmentMeta } from "@/lib/mail/parse";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { encodeKeyset, parseKeyset } from "@/lib/mcp/cursor";
-import { notFound } from "@/lib/mcp/errors";
+import {
+    mailFilterConditions,
+    mailSearchBatch,
+    mailSearchStamp,
+    type SearchableMail,
+    searchableMailBatch,
+} from "@/lib/mcp/data/mail";
+import {
+    hiddenRecordingFilters,
+    resolveRecordingFilters,
+} from "@/lib/mcp/data/recordings";
+import { McpToolError, notFound } from "@/lib/mcp/errors";
 import { recordingUrl } from "@/lib/mcp/links";
+import { allowMcpScan } from "@/lib/mcp/rate-limit";
 import { defineTool, type McpToolDef } from "@/lib/mcp/registry";
+import { resolvedSchema } from "@/lib/mcp/resolve";
+import { boundedScan } from "@/lib/mcp/scan";
 import { mcpItemCondition, recordingViewFor } from "@/lib/mcp/scope";
+import {
+    matchText,
+    type PreparedQuery,
+    prepareQuery,
+    snippets,
+} from "@/lib/mcp/text-search";
 import { readStoredSummary } from "@/lib/summary/read-summary";
 
 const PAGE = 50;
@@ -310,5 +330,178 @@ const getMail = defineTool({
     },
 });
 
+const searchMail = defineTool({
+    name: "search_mail",
+    anyOf: ["mail:read"],
+    title: "Search mail",
+    description: `Mail in your pile (as list_mail) holding every word of \`query\` (case and accents ignored, word forms in the mail's language), newest first, with up to 3 snippets each, each saying where it was found: subject, sender, the mail's own text, a quoted or forwarded part (with its claimed author) or, with summary access, its summary. Signatures, disclaimers and quoted parts already in your pile as their own mail are not read. Mail is encrypted, so one call reads at most 500 mails (or 10 s, or 50 matches) and reports scanned, complete and continue_before: pass continue_before back as before to search further back. ${MAIL_TEXT}`,
+    annotations: READ_ONLY,
+    input: {
+        query: z
+            .string()
+            .trim()
+            .min(1)
+            .max(200)
+            .describe("Words to find, all required."),
+        from: z
+            .string()
+            .max(40)
+            .optional()
+            .describe(
+                "Mail dated at or after this ISO 8601 date or date-time (UTC unless it names a zone).",
+            ),
+        to: z
+            .string()
+            .max(40)
+            .optional()
+            .describe(
+                "Mail dated at or before this ISO 8601 date-time; a date alone includes that whole day (UTC).",
+            ),
+        person: z
+            .string()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe(
+                "Someone the mail is from, to or cc, or whose forwarded or quoted words it carries: a person id or name.",
+            ),
+        folder: z
+            .string()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe("A folder id; mail in its subfolders counts too."),
+        entity: z
+            .string()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe(
+                "Something a fact's evidence in this mail points at: an entity id or name.",
+            ),
+        before: z
+            .string()
+            .max(512)
+            .optional()
+            .describe("continue_before of the previous call."),
+    },
+    hideInput: hiddenRecordingFilters,
+    output: {
+        results: z.array(
+            z.object({
+                mail: mailRow,
+                snippets: z.array(
+                    z.object({
+                        part: z.enum([
+                            "subject",
+                            "from",
+                            "body",
+                            "quoted",
+                            "summary",
+                        ]),
+                        author: z.string().nullable(),
+                        text: z.string(),
+                    }),
+                ),
+            }),
+        ),
+        scanned: z.number().int(),
+        complete: z.boolean(),
+        continue_before: z.string().nullable(),
+        resolved: z.array(resolvedSchema).optional(),
+    },
+    run: async (context, args) => {
+        const { caller } = context;
+        if (!(await allowMcpScan(caller)))
+            throw new McpToolError(
+                "Too many searches; retry in a minute",
+                "denied",
+            );
+        if (!prepareQuery(args.query, null).length)
+            throw new McpToolError("Give words to search for");
+        const { filters, resolved } = await resolveRecordingFilters(
+            caller,
+            args,
+        );
+        const { where, person: personFilter } = await mailFilterConditions(
+            caller,
+            filters,
+        );
+        const queries = new Map<string, PreparedQuery>();
+        let mails = new Map<string, SearchableMail>();
+        const scan = await boundedScan({
+            batches: async (before) => {
+                const rows = await mailSearchBatch(where, before);
+                mails = await searchableMailBatch(caller, rows, personFilter);
+                return rows;
+            },
+            stopBeforeBatch: true,
+            stampOf: mailSearchStamp,
+            visit: (row) => {
+                const found = mails.get(row.id);
+                if (!found) return null;
+                const key = found.language ?? "";
+                let query = queries.get(key);
+                if (!query) {
+                    query = prepareQuery(args.query, found.language);
+                    queries.set(key, query);
+                }
+                const hits = matchText(
+                    found.parts.map((part) => part.text).join("\n"),
+                    query,
+                    found.language,
+                );
+                if (!hits) return null;
+                const excerpts: {
+                    part: "subject" | "from" | "body" | "quoted" | "summary";
+                    author: string | null;
+                    text: string;
+                }[] = [];
+                let offset = 0;
+                for (const part of found.parts) {
+                    const localHits = hits
+                        .filter(
+                            (hit) =>
+                                hit.start >= offset &&
+                                hit.end <= offset + part.text.length,
+                        )
+                        .map((hit) => ({
+                            start: hit.start - offset,
+                            end: hit.end - offset,
+                        }));
+                    for (const text of snippets(
+                        part.text,
+                        localHits,
+                        3 - excerpts.length,
+                    )) {
+                        excerpts.push({
+                            part: part.part,
+                            author: part.author,
+                            text: part.text.includes(text)
+                                ? text
+                                : text.replace(/^…|…$/g, ""),
+                        });
+                    }
+                    offset += part.text.length + 1;
+                    if (excerpts.length === 3) break;
+                }
+                return { mail: found.mail, snippets: excerpts };
+            },
+            limit: 500,
+            deadlineMs: 10_000,
+            maxResults: 50,
+            before: args.before ?? null,
+        });
+        context.touched.push(...scan.results.map((result) => result.mail.id));
+        return {
+            results: scan.results,
+            scanned: scan.scanned,
+            complete: scan.complete,
+            continue_before: scan.continueBefore,
+            ...(resolved.length ? { resolved } : {}),
+        };
+    },
+});
+
 /** The mail tools, behind `mail:read` alone (D8). */
-export const MAIL_TOOLS: McpToolDef[] = [listMail, getMail];
+export const MAIL_TOOLS: McpToolDef[] = [listMail, getMail, searchMail];

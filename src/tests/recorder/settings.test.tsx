@@ -538,3 +538,99 @@ describe("Meeting Recorder Settings details", () => {
         ).toBeNull();
     });
 });
+
+describe.each([
+    "settings",
+    "onboarding",
+] as const)("recorder detected states in %s", (mode) => {
+    it("never offers Install for an installed-unreachable extension", async () => {
+        detect.mockResolvedValue({ kind: "installed-unreachable" });
+        render(view(mode));
+        expect(
+            await screen.findByText(
+                "Extension found. Open its toolbar icon and allow access to this site.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("link", {
+                name: "Install from Chrome Web Store",
+            }),
+        ).toBeNull();
+    });
+    it("keeps pending confirmation visible until a paired ping arrives", async () => {
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: false,
+        });
+        pair.mockResolvedValueOnce({ ok: true, pending: true });
+        render(view(mode));
+        fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+        expect(
+            await screen.findByText("Confirm this server in the extension"),
+        ).toBeTruthy();
+        expect(screen.queryByText(/Connected to/)).toBeNull();
+        await waitFor(() =>
+            expect(
+                screen
+                    .getByRole("button", { name: "Connect" })
+                    .hasAttribute("disabled"),
+            ).toBe(false),
+        );
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: true,
+            pairedHere: true,
+            pairedTo: status.server_url,
+        });
+        fireEvent.focus(window);
+        expect(
+            await screen.findByText("Connected to chatterbox.example.com"),
+        ).toBeTruthy();
+        await waitFor(() =>
+            expect(
+                screen.queryByText("Confirm this server in the extension"),
+            ).toBeNull(),
+        );
+    });
+    it("offers to connect here when paired elsewhere", async () => {
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: true,
+            pairedHere: false,
+            pairedTo: "https://other.example",
+        });
+        render(view(mode));
+        expect(
+            await screen.findByText("Connected to other.example"),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Connect to this instance" }),
+        ).toBeTruthy();
+    });
+    it.each([
+        "prompt",
+        "denied",
+        "unknown",
+        "granted",
+        undefined,
+    ] as const)("handles microphone permission %s", async (micPermission) => {
+        detect.mockResolvedValue({
+            kind: "reachable",
+            channel: "content",
+            paired: false,
+            micPermission,
+        });
+        render(view(mode));
+        await screen.findByRole("button", { name: "Connect" });
+        expect(
+            Boolean(
+                screen.queryByText(
+                    "Allow the microphone in the extension, or your voice will not be recorded",
+                ),
+            ),
+        ).toBe(micPermission !== undefined && micPermission !== "granted");
+    });
+});

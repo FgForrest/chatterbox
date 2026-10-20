@@ -204,6 +204,80 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+it.each([
+    "queued",
+    "running",
+])("forgets an observed %s Learn run when switching recordings", async (status) => {
+    const invalidated = vi.fn();
+    const stop = onItemProcessingInvalidated("recording-next", invalidated);
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) =>
+            Response.json(
+                String(input).includes("/recording-first/")
+                    ? { ...WORKING_REVIEW, run: { id: "run-first", status } }
+                    : IDLE_REVIEW,
+            ),
+        ),
+    );
+    try {
+        const { rerender } = render(
+            <LearnReview
+                recordingId="recording-first"
+                source="riffado"
+                turns={TURNS}
+            />,
+        );
+        await screen.findByRole("button", { name: "Learning…" });
+
+        rerender(
+            <LearnReview
+                recordingId="recording-next"
+                source="riffado"
+                turns={TURNS}
+            />,
+        );
+
+        await screen.findByRole("button", { name: "Learn" });
+        expect(invalidated).not.toHaveBeenCalled();
+    } finally {
+        stop();
+    }
+});
+
+it("invalidates processing when the observed Learn run settles on the same recording", async () => {
+    vi.useFakeTimers();
+    const invalidated = vi.fn();
+    const stop = onItemProcessingInvalidated("recording-first", invalidated);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(WORKING_REVIEW));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+        render(
+            <LearnReview
+                recordingId="recording-first"
+                source="riffado"
+                turns={TURNS}
+            />,
+        );
+        await act(async () => {});
+        expect(screen.getByRole("button", { name: "Learning…" })).toBeTruthy();
+        expect(invalidated).not.toHaveBeenCalled();
+
+        fetchMock.mockImplementation(async () => Response.json(READY_REVIEW));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3_000);
+        });
+
+        expect(
+            screen.getByRole("button", { name: "Review ({count})" }),
+        ).toBeTruthy();
+        expect(invalidated).toHaveBeenCalledOnce();
+    } finally {
+        stop();
+        vi.useRealTimers();
+    }
+});
+
 describe.each(["audio", "mail"] as const)("%s Learn workflow line", (kind) => {
     const renderCase = kind === "audio" ? renderRecording : renderMail;
     const startPath =

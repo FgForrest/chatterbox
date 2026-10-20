@@ -3,7 +3,7 @@ title: Nastavení
 description: Profily zpracování, poskytovatelé AI a ceny, výchozí hodnoty účtu a zobrazení.
 ---
 
-Otevřete Nastavení z nabídky účtu (kulaté tlačítko s Vaší iniciálou), nebo stiskněte `,`. Sekce jsou seskupeny vlevo.
+Otevřete **≡ → Nastavení** v Klepech, Almanachu nebo Úkolech, nebo stiskněte `,`. Sekce jsou seskupeny vlevo.
 
 **Nápověda** v horní části Nastavení otevře tuto příručku přímo v sekci, kterou máte otevřenou.
 
@@ -36,6 +36,8 @@ Někteří poskytovatelé zajišťují pouze přepis (ElevenLabs, Speechmatics).
 
 Pokud je Vámi zvolený poskytovatel zakázán nebo odstraněn, výběr tuto volbu ponechá viditelnou jako nedostupnou. Zpracování dané role se zastaví, dokud nezvolíte jiného poskytovatele. Před zakázáním nebo odstraněním poskytovatele Organizace potvrzení ukáže, kolik členů si jej zvolilo jako vlastní výchozí možnost.
 
+Bez výslovné volby mohou členové použít nejstaršího povoleného vhodného poskytovatele Organizace, i když Organizace nemá nastaveného výchozího. Automatický výběr přeskakuje zakázané poskytovatele. Správci vidí upozornění na chybějící výchozí poskytovatele přepisu a shrnutí s možností nastavit náhradního jako výchozího. Členové vidí, kterého náhradního poskytovatele používají. Poskytovatele Organizace hradí Organizace, i při soukromém zpracování.
+
 ## Přepis
 
 Sekce **Přepis** nyní obsahuje výchozí hodnoty účtu pro tlačítko **Přepsat**, generované názvy bez poskytovatele připnutého v profilu a importovaný obsah z diktafonu:
@@ -45,14 +47,16 @@ Sekce **Přepis** nyní obsahuje výchozí hodnoty účtu pro tlačítko **Přep
 - **Primární přepis**, pokud jej vytvořil Plaud i Váš poskytovatel,
 - **Výchozí jazyk přepisu**, který se použije při okamžitém přepisu.
 
-Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Názvy bez poskytovatele připnutého v profilu použijí Vaši volbu pro názvy, Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro názvy, výchozího poskytovatele Organizace pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
+Bez poskytovatele připnutého v profilu použije přepis Vaši volbu pro přepis, výchozího poskytovatele přepisu Organizace a poté jejího nejstaršího povoleného poskytovatele, který umí přepisovat. Můstky Claude Code a Codex přepisovat neumějí.
+
+Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Názvy bez poskytovatele připnutého v profilu použijí Vaši volbu pro názvy, Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro názvy, výchozího poskytovatele Organizace pro shrnutí, poté Vašeho prvního povoleného poskytovatele chatu a nakonec nejstaršího povoleného poskytovatele chatu Organizace. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
 
 ## Témata
 
 Tato sekce zachovává výchozího poskytovatele témat účtu. Profil bez
 připnutého poskytovatele témat použije Vaši volbu pro témata, Vaši volbu pro
 shrnutí, výchozího poskytovatele Organizace pro témata, výchozího poskytovatele
-Organizace pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatická detekce témat se
+Organizace pro shrnutí, poté Vašeho prvního povoleného poskytovatele chatu a nakonec nejstaršího povoleného poskytovatele chatu Organizace. Automatická detekce témat se
 nastavuje v sekci **Profily**. Šablony témat, které jste před zavedením profilů
 vytvořili nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před
 profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
@@ -62,15 +66,15 @@ profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 Tato sekce zachovává výchozího poskytovatele Učení účtu. Profil bez připnutého
 poskytovatele Učení použije Vaši volbu pro Učení, Vaši volbu pro shrnutí,
 výchozího poskytovatele Organizace pro Učení, výchozího poskytovatele Organizace
-pro shrnutí a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatické Učení a oprava přepisu se nastavují
+pro shrnutí, poté Vašeho prvního povoleného poskytovatele chatu a nakonec nejstaršího povoleného poskytovatele chatu Organizace. Automatické Učení a oprava přepisu se nastavují
 v sekci **Profily**.
 
 ## Shrnutí
 
 Tato sekce zachovává výchozího poskytovatele shrnutí a předvolbu funkce
 **Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí
-použije Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro shrnutí
-a nakonec Vašeho prvního povoleného poskytovatele chatu. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
+použije Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro shrnutí,
+poté Vašeho prvního povoleného poskytovatele chatu a nakonec nejstaršího povoleného poskytovatele chatu Organizace. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
 **Vícenásobné shrnování** v profilu se nastavují v
 sekci **Profily**. Šablony shrnutí, které jste před zavedením profilů vytvořili
 nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před profily**;

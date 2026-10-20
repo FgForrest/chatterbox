@@ -104,12 +104,18 @@ describe("speaker playback navigation", () => {
         );
 
         const firstSpeaker = screen.getByRole("button", { name: "Speaker 0" });
-        const secondSpeaker = await screen.findByRole("link", { name: "Jan" });
+        const secondSpeaker = await screen.findByRole("button", {
+            name: "Jan",
+        });
         expect(
-            screen.getByText("Right-click a speaker to hear their next turn"),
-        ).toBeDefined();
+            screen.queryByText("Right-click a speaker to hear their next turn"),
+        ).toBeNull();
 
-        fireEvent.contextMenu(firstSpeaker);
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Play the next turn of Speaker 0",
+            }),
+        );
         expect(onPlayFromTurn).toHaveBeenLastCalledWith(1000);
         expect(
             document.querySelector('[data-turn-index="0"]')?.className,

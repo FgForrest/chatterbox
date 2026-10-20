@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { apiKeys, recordingCaptureKeys } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
+import { assertNotOrgAccount } from "@/lib/org/config";
 import {
     getRecorderServerConfig,
     serializeRecorderServerConfig,
@@ -15,6 +16,9 @@ import {
  */
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
+    await assertNotOrgAccount(session.user.id, {
+        surface: "settings/recorder/status",
+    });
 
     const rows = await db
         .select({

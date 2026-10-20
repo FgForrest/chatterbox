@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { parseApiError } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     type RecordingView,
     recordingJobSubject,
@@ -75,7 +76,8 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
     );
 
     const followTranscription = useCallback(
-        async (id: string, jobId: string) => {
+        async (key: string, id: string, jobId: string) => {
+            invalidateItemProcessing(id);
             try {
                 const snapshot = await followJob(jobId, {
                     signal: abortRef.current?.signal,
@@ -88,7 +90,8 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                     toast.error(snapshot.error || "Transcription failed");
                 }
             } finally {
-                finishTracking(id);
+                invalidateItemProcessing(id);
+                finishTracking(key);
             }
         },
         [finishTracking, onTranscribeComplete],
@@ -131,17 +134,20 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                     if (!data.jobId) {
                         throw new Error("Transcription job was not returned");
                     }
-                    await followTranscription(key, data.jobId);
+                    await followTranscription(key, id, data.jobId);
                     return;
                 } else {
                     const error = await parseApiError(response);
                     if (error.code === "TRANSCRIPT_ALREADY_EXISTS") {
+                        invalidateItemProcessing(id);
                         onTranscribeComplete();
                         return;
                     }
+                    invalidateItemProcessing(id);
                     toast.error(error.error || "Transcription failed");
                 }
             } catch {
+                invalidateItemProcessing(id);
                 toast.error("Failed to transcribe recording");
             } finally {
                 finishTracking(key);
@@ -169,7 +175,7 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                     activeJob?: { jobId: string };
                 };
                 if (!data.activeJob || !beginTracking(key)) return;
-                await followTranscription(key, data.activeJob.jobId);
+                await followTranscription(key, id, data.activeJob.jobId);
             } catch {
                 // Observation is best-effort. The durable job continues even
                 // when this page cannot reach its status endpoint.

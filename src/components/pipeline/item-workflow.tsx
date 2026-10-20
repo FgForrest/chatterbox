@@ -10,6 +10,7 @@ import {
 } from "@/components/pipeline/categorize-panel";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { WorkflowStrip } from "@/components/pipeline/workflow-indicator";
+import { workflowScrollBehavior } from "@/components/pipeline/workflow-widget";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import {
@@ -558,7 +559,11 @@ export function ItemWorkflow({
         );
         if (!profile) return;
         pendingFilingFocus.current = false;
-        profile.focus();
+        filingRef.current?.scrollIntoView({
+            behavior: workflowScrollBehavior(),
+            block: "start",
+        });
+        profile.focus({ preventScroll: true });
     }, []);
 
     useEffect(() => {
@@ -569,10 +574,6 @@ export function ItemWorkflow({
 
     const focusFiling = useCallback(() => {
         pendingFilingFocus.current = true;
-        filingRef.current?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-        });
         window.requestAnimationFrame(focusFilingControl);
     }, [focusFilingControl]);
 
@@ -588,6 +589,9 @@ export function ItemWorkflow({
                 break;
             case "transcribe":
                 onTranscribe?.(false);
+                break;
+            case "summarize":
+                onSummary?.();
                 break;
             case "reviewTasks":
                 onReviewTasks?.();

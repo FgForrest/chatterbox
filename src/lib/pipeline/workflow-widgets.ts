@@ -143,12 +143,17 @@ export function deriveWorkflowWidgets(
     const summaryManual =
         data.manualOnly || data.profile?.automatic.summary === false;
     const learnCompleted =
-        data.outputs.learn || data.phases.learn?.state === "done";
+        data.outputs.learn ||
+        data.phases.learn?.state === "done" ||
+        data.phases.learn?.state === "skipped";
     const summaryVisible =
         categorized &&
         contentReady &&
         (data.outputs.summary ||
-            (learnCompleted && (hasReached(summaryStep) || summaryManual)));
+            (learnCompleted &&
+                (hasReached(summaryStep) ||
+                    summaryManual ||
+                    data.phases.learn?.state === "skipped")));
     const taskVisible =
         data.taskReviewWaiting > 0 &&
         (hasReached(taskStep) || data.outputs.summary);
@@ -186,7 +191,13 @@ export function deriveWorkflowWidgets(
             summaryStep,
             summaryVisible,
             "inline",
-            manualRunAction(summaryStep, summaryManual, data.outputs.summary),
+            manualRunAction(
+                summaryStep,
+                summaryManual ||
+                    summaryStep?.state === "next" ||
+                    data.phases.learn?.state === "skipped",
+                data.outputs.summary,
+            ),
         ),
         taskReview: stateFor(
             workflow.visible,

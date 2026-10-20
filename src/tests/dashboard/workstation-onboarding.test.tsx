@@ -1,158 +1,234 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { Workstation } from "@/components/dashboard/workstation";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppChromeProvider } from "@/components/app-chrome-provider";
+import { SettingsPageContent } from "@/components/settings/settings-page-content";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
 
+const mocks = vi.hoisted(() => ({ pathname: "/dashboard", push: vi.fn() }));
 vi.mock("next-intl", () => ({
     useExtracted: () => (source: string) => source,
 }));
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: vi.fn() }),
+    usePathname: () => mocks.pathname,
+    useRouter: () => ({ refresh: vi.fn(), push: mocks.push }),
 }));
-vi.mock("posthog-js", () => ({
-    default: { __loaded: false, capture: vi.fn() },
-}));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-
-vi.mock("@/components/dashboard/command-palette", () => ({
-    CommandPalette: () => null,
-}));
-vi.mock("@/components/dashboard/folder-recording-pane", () => ({
-    FolderRecordingPane: () => null,
-}));
-vi.mock("@/components/dashboard/folder-tree", () => ({
-    FolderTree: () => null,
-}));
-vi.mock("@/components/dashboard/plaud-reconnect-banner", () => ({
-    PlaudReconnectBanner: () => null,
-}));
-vi.mock("@/components/dashboard/recording-list", () => ({
-    RecordingList: () => null,
+vi.mock("@/components/app-upload-button", () => ({
+    AppUploadButton: () => null,
 }));
 vi.mock("@/components/dashboard/shortcuts-dialog", () => ({
     ShortcutsDialog: () => null,
 }));
-vi.mock("@/components/dashboard/trial-banner", () => ({
-    TrialBanner: () => null,
-}));
-vi.mock("@/components/dashboard/upload-dialog", () => ({
-    UploadDialog: () => null,
-    uploadFolderOptions: () => [],
-    uploadFolderParents: () => [],
-}));
-vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
-    WorkstationDetailPane: () => null,
-}));
-vi.mock("@/components/dashboard/workstation-empty-state", () => ({
-    WorkstationEmptyState: () => null,
-}));
-vi.mock("@/components/dashboard/workstation-header", () => ({
-    WorkstationHeader: () => null,
-}));
-vi.mock("@/components/mail/mail-detail-pane", () => ({
-    MailDetailPane: () => null,
+vi.mock("@/components/dashboard/command-palette", () => ({
+    CommandPalette: () => null,
 }));
 vi.mock("@/components/settings-dialog", () => ({
-    SettingsDialog: () => null,
+    SettingsDialog: ({
+        open,
+        onOpenChange,
+        headerAction,
+        isOrgAccount,
+    }: {
+        open: boolean;
+        onOpenChange: (open: boolean) => void;
+        headerAction?: ReactNode;
+        isOrgAccount: boolean;
+    }) => {
+        const { activeSection } = useSettingsNav(
+            open,
+            () => onOpenChange(false),
+            false,
+            true,
+            false,
+            isOrgAccount,
+        );
+        return open ? (
+            <div
+                data-testid="settings-dialog"
+                data-org-account={isOrgAccount}
+                data-section={activeSection}
+            >
+                {headerAction}
+                <button type="button" onClick={() => onOpenChange(false)}>
+                    Close settings
+                </button>
+            </div>
+        ) : null;
+    },
 }));
 vi.mock("@/components/onboarding-dialog", () => ({
     OnboardingDialog: ({
         open,
         initialStep,
+        mandatory,
+        suspended,
+        onOpenSettings,
     }: {
         open: boolean;
         initialStep: string;
+        mandatory: boolean;
+        suspended: boolean;
+        onOpenSettings: (section: "providers" | "mail" | "profiles") => void;
     }) => (
-        <div data-testid="onboarding-dialog">
-            {open ? `open:${initialStep}` : `closed:${initialStep}`}
+        <div data-testid="onboarding-dialog" data-mandatory={mandatory}>
+            <span>
+                {open
+                    ? suspended
+                        ? `suspended:${initialStep}`
+                        : `open:${initialStep}`
+                    : `closed:${initialStep}`}
+            </span>
+            <button type="button" onClick={() => onOpenSettings("providers")}>
+                Set up providers
+            </button>
+            <button type="button" onClick={() => onOpenSettings("mail")}>
+                Set up mail
+            </button>
+            <button type="button" onClick={() => onOpenSettings("profiles")}>
+                Set up profiles
+            </button>
         </div>
     ),
 }));
-
 vi.mock("@/hooks/use-auto-sync", () => ({
-    useAutoSync: () => ({
-        isAutoSyncing: false,
-        lastSyncTime: null,
-        nextSyncTime: null,
-        lastSyncResult: null,
-        manualSync: vi.fn().mockResolvedValue(undefined),
-    }),
+    useAutoSync: () => ({ manualSync: vi.fn() }),
 }));
 vi.mock("@/hooks/use-google-connection", () => ({
     useGoogleConnectOutcome: vi.fn(),
 }));
-vi.mock("@/hooks/use-list-keyboard-nav", () => ({
-    useListKeyboardNav: vi.fn(),
-}));
-vi.mock("@/hooks/use-org-events", () => ({ useOrgEvents: vi.fn() }));
-vi.mock("@/hooks/use-share-refusal", () => ({
-    useShareRefusal: () => vi.fn(),
-}));
 vi.mock("@/hooks/use-theme", () => ({
     useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
 }));
-vi.mock("@/hooks/use-transcribe-queue", () => ({
-    useTranscribeQueue: () => ({
-        inFlightActions: new Map(),
-        observeTranscriptionById: vi.fn(),
-        transcribeById: vi.fn(),
-    }),
-}));
-vi.mock("@/hooks/use-upload-queue", () => ({
-    useUploadQueue: () => ({
-        isUploading: false,
-        pendingUploads: [],
-        uploadInputRef: { current: null },
-        handleUpload: vi.fn(),
-        selectedFile: null,
-        confirmUpload: vi.fn(),
-        cancelUpload: vi.fn(),
-        triggerUpload: vi.fn(),
-    }),
-}));
 
+beforeEach(() => {
+    mocks.pathname = "/dashboard";
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ providers: [] }))),
+    );
+});
 afterEach(() => {
     cleanup();
+    localStorage.clear();
     window.history.replaceState({}, "", "/");
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
 });
 
-describe("workstation onboarding resume", () => {
+function renderChrome(onboardingCompleted = true, organization = false) {
+    return render(
+        <AppChromeProvider
+            initialSettings={{
+                ...INITIAL_SETTINGS_DEFAULTS,
+                onboardingCompleted,
+            }}
+            isAdmin={false}
+            isOrgAccount={organization}
+            userEmail="person@example.com"
+            isHosted={false}
+            mailEnabled={!organization}
+            accessManagement={false}
+            onboardingCapabilities={{
+                audience: organization
+                    ? "organization-account"
+                    : "organization-member",
+                googleConfigured: true,
+                mailAvailable: !organization,
+                mcpConnectorUrl: null,
+                recorderStoreUrl: "https://store.example/recorder",
+            }}
+        >
+            {mocks.pathname === "/settings" ? <SettingsPageContent /> : "App"}
+        </AppChromeProvider>,
+    );
+}
+
+describe.each([
+    "/dashboard",
+    "/almanac",
+    "/tasks",
+])("layout onboarding on %s", (pathname) => {
     it("opens the setup wizard on Google from the resume query", async () => {
-        window.history.replaceState({}, "", "/dashboard?onboarding=google");
-
-        render(
-            <Workstation
-                recordings={[]}
-                transcriptions={new Map()}
-                initialSettings={{
-                    ...INITIAL_SETTINGS_DEFAULTS,
-                    onboardingCompleted: true,
-                }}
-                plaudNeedsReconnect={false}
-                isHosted={false}
-                onboardingCapabilities={{
-                    googleConfigured: true,
-                    mailAvailable: false,
-                    mcpConnectorUrl: null,
-                    recorderStoreUrl: "https://store.example/recorder",
-                }}
-                exportProviders={{
-                    filesystem: false,
-                    googleDrive: false,
-                    mail: false,
-                }}
-                initialFolderOrganization={{ folders: [], assignments: [] }}
-            />,
-        );
-
+        mocks.pathname = pathname;
+        window.history.replaceState({}, "", `${pathname}?onboarding=google`);
+        renderChrome();
         await waitFor(() =>
-            expect(screen.getByTestId("onboarding-dialog").textContent).toBe(
-                "open:google",
-            ),
+            expect(screen.getByText("open:google")).toBeTruthy(),
         );
+        expect(
+            screen
+                .getByTestId("onboarding-dialog")
+                .getAttribute("data-mandatory"),
+        ).toBe("false");
         expect(window.location.search).toBe("");
     });
+    it("keeps first-run setup mandatory", () => {
+        mocks.pathname = pathname;
+        renderChrome(false);
+        expect(screen.getByText("open:welcome")).toBeTruthy();
+        expect(
+            screen
+                .getByTestId("onboarding-dialog")
+                .getAttribute("data-mandatory"),
+        ).toBe("true");
+    });
+    it.each([
+        "providers",
+        "mail",
+        "profiles",
+    ] as const)("opens %s in-app and resumes setup on close", async (section) => {
+        mocks.pathname = pathname;
+        window.history.replaceState({}, "", `${pathname}?onboarding=google`);
+        renderChrome(false);
+        fireEvent.click(
+            screen.getByRole("button", { name: `Set up ${section}` }),
+        );
+        await waitFor(() =>
+            expect(
+                screen
+                    .getByTestId("settings-dialog")
+                    .getAttribute("data-section"),
+            ).toBe(section),
+        );
+        expect(window.location.hash).toBe(`#${section}`);
+        expect(screen.getAllByTestId("settings-dialog")).toHaveLength(1);
+        expect(screen.getByText("suspended:google")).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Return to setup" }),
+        );
+        expect(screen.queryByTestId("settings-dialog")).toBeNull();
+        expect(screen.getByText("open:google")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Set up mail" }));
+        fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+        expect(screen.getByText("open:google")).toBeTruthy();
+        expect(mocks.push).not.toHaveBeenCalled();
+    });
+    it("passes the Organization Recorder filter to the shared Settings dialog", () => {
+        mocks.pathname = pathname;
+        renderChrome(true, true);
+        fireEvent.keyDown(window, { key: "," });
+        expect(
+            screen
+                .getByTestId("settings-dialog")
+                .getAttribute("data-org-account"),
+        ).toBe("true");
+    });
+});
+
+it("applies the Organization filter to the single Settings dialog on /settings", () => {
+    mocks.pathname = "/settings";
+    renderChrome(true, true);
+    expect(screen.getAllByTestId("settings-dialog")).toHaveLength(1);
+    expect(
+        screen.getByTestId("settings-dialog").getAttribute("data-org-account"),
+    ).toBe("true");
 });

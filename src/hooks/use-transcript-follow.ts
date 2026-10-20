@@ -51,6 +51,25 @@ export function readingLineFraction(
     return Math.min(1, top + bottom);
 }
 
+/** The transcript's reading line in viewport pixels, below its sticky chapter bar. */
+export function transcriptReadingLine(box: HTMLElement): number {
+    const inset =
+        box.querySelector<HTMLElement>("[data-chapter-bar]")?.offsetHeight ?? 0;
+    const height = Math.max(0, box.clientHeight - inset);
+    return (
+        box.getBoundingClientRect().top +
+        inset +
+        height *
+            (box.scrollHeight <= box.clientHeight
+                ? 0
+                : readingLineFraction(
+                      box.scrollTop,
+                      height,
+                      box.scrollHeight - inset,
+                  ))
+    );
+}
+
 /** Index of the sentence playing at `ms`: the last to start by then, or -1. */
 export function sentenceIndexAt(
     startsMs: readonly number[],
@@ -80,15 +99,7 @@ function sentenceOnReadingLine(
     root: HTMLElement,
     box: HTMLElement,
 ): number | null {
-    const boxTop = box.getBoundingClientRect().top;
-    const line =
-        boxTop +
-        box.clientHeight *
-            readingLineFraction(
-                box.scrollTop,
-                box.clientHeight,
-                box.scrollHeight,
-            );
+    const line = transcriptReadingLine(box);
     let found: number | null = null;
     for (const element of root.querySelectorAll<HTMLElement>(
         "[data-sentence]",
@@ -179,9 +190,13 @@ export function useTranscriptFollow({
         const first = element?.getClientRects()[0];
         if (!first) return;
         const boxRect = box.getBoundingClientRect();
+        const inset =
+            box.querySelector<HTMLElement>("[data-chapter-bar]")
+                ?.offsetHeight ?? 0;
+        const height = Math.max(0, box.clientHeight - inset);
         if (
-            first.top >= boxRect.top &&
-            first.bottom <= boxRect.top + box.clientHeight * FOLLOW_BOTTOM
+            first.top >= boxRect.top + inset &&
+            first.bottom <= boxRect.top + inset + height * FOLLOW_BOTTOM
         ) {
             return;
         }
@@ -192,7 +207,8 @@ export function useTranscriptFollow({
             top:
                 box.scrollTop +
                 (first.top - boxRect.top) -
-                box.clientHeight * READING_LINE,
+                inset -
+                height * READING_LINE,
             behavior: reduce ? "auto" : "smooth",
         });
     }, [state.active, rootRef, scrollRef]);

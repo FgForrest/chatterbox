@@ -1,10 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useAppChrome } from "@/components/app-chrome-provider";
+import { AppHeader } from "@/components/app-header";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import { FolderRecordingPane } from "@/components/dashboard/folder-recording-pane";
@@ -14,7 +16,6 @@ import {
     RecordingList,
     type RecordingListHandle,
 } from "@/components/dashboard/recording-list";
-import { ShortcutsDialog } from "@/components/dashboard/shortcuts-dialog";
 import type { TranscriptOption } from "@/components/dashboard/transcription-panel";
 import { TrialBanner } from "@/components/dashboard/trial-banner";
 import {
@@ -24,21 +25,12 @@ import {
 } from "@/components/dashboard/upload-dialog";
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
-import { WorkstationHeader } from "@/components/dashboard/workstation-header";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
-import {
-    OnboardingDialog,
-    type OnboardingStepId,
-} from "@/components/onboarding-dialog";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
-import { SettingsDialog } from "@/components/settings-dialog";
-import { useAutoSync } from "@/hooks/use-auto-sync";
-import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import { useMailRefresh } from "@/hooks/use-mail-refresh";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
-import { useTheme } from "@/hooks/use-theme";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import {
     type UploadCompletion,
@@ -49,22 +41,13 @@ import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { sharedRecordingIds } from "@/lib/folders/hierarchy";
 import {
-    requestNotificationPermission,
-    showNewRecordingNotification,
-    showSyncCompleteNotification,
-} from "@/lib/notifications/browser";
-import {
-    type OnboardingCapabilities,
-    shouldOpenOnboarding,
-} from "@/lib/onboarding/capabilities";
-import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
 } from "@/lib/recordings/filename-overrides";
+import type { ChatterSearchHit } from "@/lib/search/types";
 import type { InitialSettings } from "@/lib/settings/initial-settings";
 import { canChangeItem } from "@/lib/sharing/change-permission";
 import { recordingJobSubject } from "@/lib/sharing/view";
-import { SYNC_CONFIG } from "@/lib/sync-config";
 import { cn } from "@/lib/utils";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
@@ -81,17 +64,6 @@ interface TranscriptionData {
     topics?: TranscriptOption["topics"];
 }
 
-interface Provider {
-    id: string;
-    provider: string;
-    baseUrl: string | null;
-    defaultModel: string | null;
-    isDefaultTranscription: boolean;
-    isDefaultEnhancement: boolean;
-    createdAt: Date;
-}
-
-const EMPTY_PROVIDERS: Provider[] = [];
 const EMPTY_RECORDINGS: Recording[] = [];
 
 /** Shared recordings, read through their Organization view. */
@@ -105,19 +77,6 @@ interface WorkstationProps {
     recordings: Recording[];
     transcriptions: Map<string, TranscriptionData>;
     transcriptVariants?: Map<string, TranscriptOption[]>;
-    /**
-     * When true, an admin shortcut appears in the avatar menu. Set by
-     * the server-rendered page based on env.ADMIN_EMAILS membership;
-     * never trusted client-side -- the actual /admin gate runs
-     * server-side.
-     */
-    isAdmin?: boolean;
-    /**
-     * Logged-in user's email. Passed down to the avatar menu for the
-     * identity block. Server-supplied -- never derive from any client
-     * state, which would risk a stale or attacker-influenced value.
-     */
-    userEmail?: string | null;
     initialSettings: InitialSettings;
     /**
      * True when Plaud has rejected the stored token (connection row carries
@@ -125,19 +84,9 @@ interface WorkstationProps {
      * live sync result takes over once a sync runs. Server-supplied.
      */
     plaudNeedsReconnect: boolean;
-    /**
-     * True when running in Riffado's hosted mode (`IS_HOSTED=true`).
-     * Forwarded into SettingsDialog so hosted-only UI gating reflects
-     * the deployment mode. Server-supplied; never derive client-side.
-     * Required (no default) so a future caller can't silently regress
-     * hosted-mode behavior by forgetting to thread the value through.
-     */
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
-    onboardingCapabilities: OnboardingCapabilities;
-    /** The viewer manages access at the identity provider. */
-    accessManagement?: boolean;
     exportProviders: ExportProvidersAvailability;
     initialFolderOrganization: FolderOrganization;
     /** Null when the Organization scope is not enabled. */
@@ -148,34 +97,15 @@ interface WorkstationProps {
     canCurate?: boolean;
 }
 
-/**
- * Top-level dashboard component. Composition root for the recording
- * list, the detail pane (player + transcription), and the four
- * modals (CommandPalette, ShortcutsDialog, SettingsDialog,
- * OnboardingDialog).
- *
- * State ownership is split:
- *  - selection / mobile master-detail toggle live here
- *  - uploads -> useUploadQueue
- *  - transcribes -> useTranscribeQueue
- *  - sync loop -> useAutoSync
- *  - theme -> useTheme
- *  - keyboard nav -> useListKeyboardNav
- *  - deletes stay here because they need access to currentRecording
- *    / visibleRecordings to pick the next selection.
- */
+/** Recording library, selection, uploads and transcription actions. */
 export function Workstation({
     recordings,
     transcriptions,
     transcriptVariants,
-    isAdmin = false,
-    userEmail = null,
     initialSettings,
     plaudNeedsReconnect,
     isHosted,
     mailEnabled = false,
-    onboardingCapabilities,
-    accessManagement = false,
     exportProviders,
     initialFolderOrganization,
     organizationLibrary = null,
@@ -195,18 +125,21 @@ export function Workstation({
         libraryRecordings[0] ?? null,
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    // Auto-opens on first paint when the account hasn't finished
-    // onboarding yet (server-supplied truth, re-evaluated on every fresh
-    // navigation to this page). Everyone must finish onboarding --
-    // `mandatory` below keeps it non-dismissible in that case.
-    const [onboardingOpen, setOnboardingOpen] = useState(() =>
-        shouldOpenOnboarding(initialSettings.onboardingCompleted),
-    );
-    const [onboardingInitialStep, setOnboardingInitialStep] =
-        useState<OnboardingStepId>("welcome");
-    const [paletteOpen, setPaletteOpen] = useState(false);
-    const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const {
+        settingsOpen,
+        setSettingsOpen,
+        onboardingOpen,
+        paletteOpen,
+        setPaletteOpen,
+        shortcutsOpen,
+        setShortcutsOpen,
+        theme,
+        setTheme,
+        isAutoSyncing,
+        lastSyncResult,
+        manualSync,
+        handleReconnected,
+    } = useAppChrome();
     const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
     const [filenameOverrides, setFilenameOverrides] = useState<
         Map<string, string>
@@ -215,8 +148,6 @@ export function Workstation({
     // toggle between them instead of stacking. Desktop ignores this
     // state entirely (both panes render via the grid).
     const [mobileView, setMobileView] = useState<"list" | "detail">("list");
-    const [providers, setProviders] = useState<Provider[]>(EMPTY_PROVIDERS);
-    useGoogleConnectOutcome();
     const [libraryMode, setLibraryMode] = useState<"recent" | "organize">(
         "recent",
     );
@@ -234,32 +165,48 @@ export function Workstation({
         selectionRevision: number;
     } | null>(null);
 
-    useEffect(() => {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get("onboarding") !== "google") return;
-        setOnboardingInitialStep("google");
-        setOnboardingOpen(true);
-        url.searchParams.delete("onboarding");
-        window.history.replaceState(window.history.state, "", url);
-    }, []);
-
-    const { theme, setTheme } = useTheme(initialSettings.theme);
     useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
-    const initialFolderQueryHandled = useRef(false);
+    const locationQuery = useSearchParams().toString();
+    const handledLocationQuery = useRef<string | null>(null);
+    const selectRecordingByUser = useCallback((recording: Recording) => {
+        selectionRevisionRef.current += 1;
+        setPendingUploadSelection(null);
+        setCurrentRecording(recording);
+        setMobileView("detail");
+    }, []);
+    const openSearchHit = useCallback(
+        (hit: ChatterSearchHit): boolean => {
+            const organization =
+                new URL(hit.href, window.location.origin).searchParams.get(
+                    "view",
+                ) === "org";
+            const preferred = organization ? orgRecordings : recordings;
+            const fallback = organization ? recordings : orgRecordings;
+            const linked =
+                preferred.find((item) => item.id === hit.id) ??
+                fallback.find((item) => item.id === hit.id);
+            if (!linked || hiddenIds.has(linked.id)) return false;
+            selectRecordingByUser(linked);
+            setSelectedFolderId(null);
+            return true;
+        },
+        [orgRecordings, recordings, hiddenIds, selectRecordingByUser],
+    );
 
     useEffect(() => {
-        if (initialFolderQueryHandled.current) return;
-        initialFolderQueryHandled.current = true;
-        const params = new URLSearchParams(window.location.search);
+        const query = locationQuery;
+        if (handledLocationQuery.current === query) return;
+        handledLocationQuery.current = query;
+        const params = new URLSearchParams(query);
         const recordingId = params.get("recording");
         if (recordingId) {
             const linked = (
                 params.get("view") === "org" ? orgRecordings : recordings
             ).find((recording) => recording.id === recordingId);
             if (linked) {
-                setCurrentRecording(linked);
-                setMobileView("detail");
+                selectRecordingByUser(linked);
+                setSelectedFolderId(null);
                 return;
             }
         }
@@ -270,11 +217,19 @@ export function Workstation({
                 (folder) => folder.id === folderId,
             )
         ) {
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
             setLibraryMode("organize");
             setSelectedFolderId(folderId);
             setMobileView("detail");
         }
-    }, [initialFolderOrganization.folders, orgRecordings, recordings]);
+    }, [
+        locationQuery,
+        initialFolderOrganization.folders,
+        orgRecordings,
+        recordings,
+        selectRecordingByUser,
+    ]);
 
     useEffect(() => {
         setFolderOrganization(initialFolderOrganization);
@@ -451,48 +406,6 @@ export function Workstation({
         uploadSelectionRevisionsRef.current.delete(uploadId);
     }, []);
 
-    const {
-        isAutoSyncing,
-        lastSyncTime,
-        nextSyncTime,
-        lastSyncResult,
-        manualSync,
-    } = useAutoSync({
-        interval: initialSettings.syncInterval ?? SYNC_CONFIG.defaultInterval,
-        minInterval: SYNC_CONFIG.minInterval,
-        syncOnMount: initialSettings.syncOnMount,
-        syncOnVisibilityChange: initialSettings.syncOnVisibilityChange,
-        enabled: initialSettings.autoSyncEnabled,
-        onSuccess: (newRecordings) => {
-            if (initialSettings.syncNotifications !== false) {
-                if (newRecordings > 0) {
-                    toast.success(
-                        i18n(
-                            "Synced {count, plural, one {# new recording} other {# new recordings}}",
-                            { count: newRecordings },
-                        ),
-                    );
-                } else {
-                    toast.success(i18n("Sync complete - no new recordings"));
-                }
-            }
-            if (initialSettings.browserNotifications) {
-                (async () => {
-                    const granted = await requestNotificationPermission();
-                    if (!granted) return;
-                    if (newRecordings > 0) {
-                        showNewRecordingNotification(newRecordings);
-                    } else {
-                        showSyncCompleteNotification();
-                    }
-                })();
-            }
-        },
-        onError: (error) => {
-            toast.error(error);
-        },
-    });
-
     const handleSync = useCallback(async () => {
         await manualSync();
     }, [manualSync]);
@@ -519,23 +432,6 @@ export function Workstation({
         }
     }, [lastSyncResult]);
     const showReconnect = reconnectOverride ?? plaudNeedsReconnect;
-
-    const handleReconnected = useCallback(() => {
-        refresh();
-        manualSync();
-    }, [refresh, manualSync]);
-
-    // Settings dialog needs the provider list at open-time so the
-    // Providers section seeds correctly. Fetching on open (rather
-    // than on mount) avoids loading a list the user may never see.
-    useEffect(() => {
-        if (settingsOpen) {
-            fetch("/api/settings/ai/providers")
-                .then((res) => res.json())
-                .then((data) => setProviders(data.providers || []))
-                .catch(() => setProviders([]));
-        }
-    }, [settingsOpen]);
 
     const {
         isUploading,
@@ -575,13 +471,6 @@ export function Workstation({
                 folders: [...current.folders, folder],
             };
         });
-    }, []);
-
-    const selectRecordingByUser = useCallback((recording: Recording) => {
-        selectionRevisionRef.current += 1;
-        setPendingUploadSelection(null);
-        setCurrentRecording(recording);
-        setMobileView("detail");
     }, []);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
@@ -1100,6 +989,7 @@ export function Workstation({
         onOpenPalette: () => setPaletteOpen(true),
         onOpenShortcuts: () => setShortcutsOpen(true),
         onOpenSettings: () => setSettingsOpen(true),
+        globalShortcuts: false,
         enabled:
             !settingsOpen && !onboardingOpen && !paletteOpen && !shortcutsOpen,
     });
@@ -1109,26 +999,13 @@ export function Workstation({
             <div className="bg-background">
                 <div className="container mx-auto max-w-7xl px-4 py-6">
                     <TrialBanner isHosted={isHosted} />
-                    <WorkstationHeader
-                        isAdmin={isAdmin}
-                        userEmail={userEmail}
-                        initialTheme={initialSettings.theme}
-                        lastSyncTime={lastSyncTime}
-                        nextSyncTime={nextSyncTime}
-                        isAutoSyncing={isAutoSyncing}
-                        lastSyncResult={lastSyncResult}
-                        onSync={handleSync}
-                        isUploading={isUploading}
-                        isProcessing={isProcessing}
-                        uploadInputRef={uploadInputRef}
-                        onTriggerUpload={triggerUpload}
-                        onUploadInputChange={handleUpload}
-                        onOpenPalette={() => setPaletteOpen(true)}
-                        onOpenSettings={() => setSettingsOpen(true)}
-                        onOpenShortcuts={() => setShortcutsOpen(true)}
-                        onOpenOnboarding={() => {
-                            setOnboardingInitialStep("welcome");
-                            setOnboardingOpen(true);
+                    <AppHeader
+                        upload={{
+                            isUploading,
+                            isProcessing,
+                            inputRef: uploadInputRef,
+                            onTrigger: triggerUpload,
+                            onChange: handleUpload,
                         }}
                     />
 
@@ -1407,6 +1284,7 @@ export function Workstation({
                 currentTheme={theme}
                 dateTimeFormat={initialSettings.dateTimeFormat}
                 onSelectRecording={selectRecordingByUser}
+                onOpenSearchHit={openSearchHit}
                 onSync={handleSync}
                 onUpload={triggerUpload}
                 onOpenSettings={() => setSettingsOpen(true)}
@@ -1421,11 +1299,6 @@ export function Workstation({
                     if (recording?.kind === "mail") return;
                     void transcribeById(id, undefined, recording?.view);
                 }}
-            />
-
-            <ShortcutsDialog
-                open={shortcutsOpen}
-                onOpenChange={setShortcutsOpen}
             />
 
             <UploadDialog
@@ -1447,28 +1320,6 @@ export function Workstation({
                 open={firstLevelFolderOpen}
                 onOpenChange={setFirstLevelFolderOpen}
                 onCreated={handleFolderCreated}
-            />
-
-            <SettingsDialog
-                open={settingsOpen}
-                onOpenChange={setSettingsOpen}
-                initialProviders={providers}
-                isHosted={isHosted}
-                mailEnabled={mailEnabled}
-                accessManagement={accessManagement}
-                onPlaudReconnected={handleReconnected}
-            />
-
-            <OnboardingDialog
-                open={onboardingOpen}
-                onOpenChange={setOnboardingOpen}
-                onComplete={() => {
-                    setOnboardingOpen(false);
-                    refresh();
-                }}
-                mandatory={!initialSettings.onboardingCompleted}
-                capabilities={onboardingCapabilities}
-                initialStep={onboardingInitialStep}
             />
         </>
     );

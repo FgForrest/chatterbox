@@ -16,6 +16,11 @@ import {
     type ProviderFormMode,
 } from "@/components/settings/provider-form-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
+import type { DefaultProviderPointers } from "@/lib/ai/default-provider";
+import {
+    defaultProviderCandidates,
+    providerPointersFromFlags,
+} from "@/lib/ai/provider-resolution-order";
 
 interface ProvidersSectionProps {
     initialProviders?: ProviderCardItem[];
@@ -80,6 +85,10 @@ export function ProvidersSection({
     >([]);
     const [organizationAvailable, setOrganizationAvailable] = useState(false);
     const [canManageOrganization, setCanManageOrganization] = useState(false);
+    const [personalDefaults, setPersonalDefaults] =
+        useState<DefaultProviderPointers | null>(null);
+    const [organizationDefaults, setOrganizationDefaults] =
+        useState<DefaultProviderPointers | null>(null);
     const [dialog, setDialog] = useState<DialogState | null>(null);
     const [busy, setBusy] = useState<{
         scope: ProviderScope;
@@ -97,9 +106,13 @@ export function ProvidersSection({
         if (!response.ok) throw new Error("Failed to fetch providers");
         const body = (await response.json()) as {
             providers: ProviderCardItem[];
+            defaults?: DefaultProviderPointers;
         };
         selfManaged.current = true;
         setPersonalProviders(body.providers);
+        setPersonalDefaults(
+            body.defaults ?? providerPointersFromFlags(body.providers),
+        );
     }, []);
 
     const loadOrganization = useCallback(async () => {
@@ -112,8 +125,12 @@ export function ProvidersSection({
         }
         const list = (await listResponse.json()) as {
             providers: ProviderCardItem[];
+            defaults?: DefaultProviderPointers;
         };
         setOrganizationProviders(list.providers);
+        setOrganizationDefaults(
+            list.defaults ?? providerPointersFromFlags(list.providers),
+        );
         setOrganizationAvailable(true);
 
         const usageResponse = await fetch(
@@ -318,6 +335,62 @@ export function ProvidersSection({
         });
     };
 
+    const makeOrganizationDefault = async (
+        provider: ProviderCardItem,
+        role: "transcription" | "summary",
+    ) => {
+        setBusy({ scope: "organization", id: provider.id });
+        try {
+            const response = await fetch(
+                providerEndpoint("organization", provider.id),
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(
+                        role === "transcription"
+                            ? { isDefaultTranscription: true }
+                            : { isDefaultEnhancement: true },
+                    ),
+                },
+            );
+            const body: unknown = await response.json().catch(() => null);
+            if (!response.ok)
+                throw new Error(
+                    errorMessage(body, i18n("Could not update the provider.")),
+                );
+            await loadOrganization();
+            await loadPersonal();
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Could not update the provider."),
+            );
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const fallbackUsage: Partial<Record<"transcription" | "summary", string>> =
+        {};
+    for (const role of ["transcription", "summary"] as const) {
+        const [candidate] = defaultProviderCandidates(
+            role,
+            personalDefaults ?? providerPointersFromFlags(personalProviders),
+            organizationDefaults,
+            personalProviders.map((provider) => ({
+                ...provider,
+                createdAt: provider.createdAt ?? new Date(0),
+            })),
+            organizationProviders.map((provider) => ({
+                ...provider,
+                createdAt: provider.createdAt ?? new Date(0),
+            })),
+        );
+        if (candidate?.source === "organization-fallback")
+            fallbackUsage[role] = candidate.providerId;
+    }
+
     const openDialog = (
         scope: ProviderScope,
         mode: ProviderFormMode,
@@ -357,6 +430,11 @@ export function ProvidersSection({
                         scope="organization"
                         providers={organizationProviders}
                         canManage={canManageOrganization}
+                        organizationDefaults={organizationDefaults ?? undefined}
+                        fallbackUsage={fallbackUsage}
+                        onMakeDefault={(provider, role) =>
+                            void makeOrganizationDefault(provider, role)
+                        }
                         busyId={busy?.scope === "organization" ? busy.id : null}
                         usage={organizationUsage}
                         locale={locale}

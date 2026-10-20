@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
-const { setDefaultProvider, loadDefaultProviderPointers } = vi.hoisted(() => ({
+const {
+    setDefaultProvider,
+    loadDefaultProviderPointers,
+    requestProviderRecoveryInTx,
+} = vi.hoisted(() => ({
+    requestProviderRecoveryInTx: vi.fn().mockResolvedValue(0),
     setDefaultProvider: vi.fn().mockResolvedValue(undefined),
     loadDefaultProviderPointers: vi.fn().mockResolvedValue({
         transcription: null,
@@ -9,6 +14,10 @@ const { setDefaultProvider, loadDefaultProviderPointers } = vi.hoisted(() => ({
         topics: null,
         title: null,
     }),
+}));
+
+vi.mock("@/lib/pipeline/provider-recovery", () => ({
+    requestProviderRecoveryInTx,
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -147,6 +156,10 @@ describe("enhancement-only providers cannot become the transcription default", (
 
             expect(response.status).toBe(200);
             expect(db.transaction).toHaveBeenCalledTimes(1);
+            expect(requestProviderRecoveryInTx).toHaveBeenCalledWith(
+                expect.any(Object),
+                "user-1",
+            );
         });
 
         it("rolls back provider creation when the in-transaction default write fails", async () => {

@@ -3,7 +3,7 @@
 import { Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 import { UploadDialog } from "@/components/dashboard/upload-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,11 @@ import {
 } from "@/hooks/use-upload-queue";
 
 /** Upload action for application pages outside the dashboard. */
-export function AppUploadButton() {
+export function AppUploadButton({
+    buttonRef,
+}: {
+    buttonRef?: RefObject<HTMLButtonElement | null>;
+}) {
     const i18n = useExtracted();
     const { push } = useRouter();
     const mountedRef = useRef(false);
@@ -66,12 +70,13 @@ export function AppUploadButton() {
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
+                            ref={buttonRef}
                             type="button"
                             onClick={triggerUpload}
                             disabled={isProcessing}
                             variant="outline"
                             size="sm"
-                            className="h-9"
+                            className="h-9 px-2 sm:px-3"
                             aria-label={
                                 isProcessing
                                     ? i18n("Uploading")

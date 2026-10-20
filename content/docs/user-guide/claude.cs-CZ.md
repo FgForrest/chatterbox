@@ -31,11 +31,11 @@ Jednou se přihlaste přímo do aplikace Klepna v prohlížeči. Claude se nemů
 
 ## Připojení Claude
 
-Pokud Klepna nabídne Claude při prvním nastavení, tento krok ukáže adresu konektoru a stejné pokyny jako níže.
+Pokud Klepna nabídne Claude při prvním nastavení, začne níže uvedenými pokyny pro firemní konektor. Pod **Není v seznamu?** najdete nastavení pro osobní tarif, adresu konektoru a příkaz pro Claude Code. Pokud už máte konektor připojený a zapnutý, zvolte **Už mám nastaveno**. Závěrečný přehled uvede **Nastaveno (podle Vašeho potvrzení)**; Klepna Vaše připojení ke Claude nemůže ověřit.
 
 **Pokud Vaše organizace používá Claude Team nebo Enterprise**, administrátor Klepna přidal pro všechny:
 
-1. V Claude otevřete **Customize → Connectors**.
+1. Otevřete Claude na claude.ai nebo v desktopové aplikaci a poté **Customize → Connectors**.
 2. Najděte **Klepna** se štítkem **Custom** a klikněte na **Connect**.
 3. Otevře se přihlašovací stránka Vaší organizace. Přihlaste se stejně jako do aplikace Klepna.
 

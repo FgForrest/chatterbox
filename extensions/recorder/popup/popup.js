@@ -7,12 +7,8 @@
 
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
-import {
-    grantHostAccess,
-    injectPairingScript,
-    originOf,
-    registerPairingScript,
-} from "../lib/pairing.js";
+import { microphonePermission } from "../lib/microphone.js";
+import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
 import {
     effectiveNoticeText,
@@ -45,6 +41,20 @@ let currentTab = null;
 let currentPlatform = null;
 let folderListLoaded = false;
 let pendingFolderId = null;
+let currentState = { state: STATE.idle };
+
+async function renderMicrophoneWarning(state) {
+    const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt) {
+        el("mic-warning").hidden = true;
+        return;
+    }
+    const permission = await microphonePermission();
+    const reminder = settings.dataUseAcknowledgedAt && !settings.micReminderDismissed && permission !== "granted";
+    el("mic-warning").hidden = !settings.dataUseAcknowledgedAt || !(state.micWarning || reminder);
+    el("mic-warning-text").textContent = state.micWarning || t("micWarning");
+    el("dismiss-mic").hidden = !reminder || !state.withoutMicrophone || Boolean(state.micWarning);
+}
 
 function show(name) {
     for (const [key, node] of Object.entries(views)) {
@@ -109,26 +119,12 @@ async function renderUnpaired() {
 el("connect-origin").addEventListener("click", async () => {
     const origin = currentTab?.url ? originOf(currentTab.url) : null;
     if (!origin || !currentTab) return;
-    if (!(await getSettings()).dataUseAcknowledgedAt) {
-        chrome.tabs.create({
-            url: chrome.runtime.getURL(
-                `options/options.html?origin=${encodeURIComponent(origin)}`,
-            ),
-        });
-        return;
-    }
-    const status = el("connect-status");
-    status.textContent = t("requestingAccess");
-    // This click is the user gesture Chrome requires for a host grant.
-    const granted = await grantHostAccess(origin);
-    if (!granted) {
-        status.textContent = t("popupAccessDenied");
-        return;
-    }
-    await registerPairingScript(origin);
-    await injectPairingScript(currentTab.id);
-    status.textContent = t("siteConnected");
-    setTimeout(() => window.close(), 1800);
+    await chrome.tabs.create({
+        url: chrome.runtime.getURL(
+            `options/options.html?origin=${encodeURIComponent(origin)}&tabId=${currentTab.id}`,
+        ),
+    });
+    window.close();
 });
 
 el("connect-options").addEventListener("click", () => {
@@ -295,6 +291,9 @@ function renderFinalizing(state) {
 
 async function render(state) {
     const version = ++renderVersion;
+    currentState = state;
+    await renderMicrophoneWarning(state);
+    if (version !== renderVersion) return;
     currentSessionId = state.sessionId;
     currentRecoverablePrefix = state.recoverablePrefix;
     if (elapsedTimer) {
@@ -400,6 +399,19 @@ for (const id of ["open-options", "go-options"]) {
     });
 }
 
+el("allow-mic").addEventListener("click", async () => {
+    await chrome.tabs.create({
+        url: chrome.runtime.getURL("options/options.html?microphone=1"),
+    });
+    window.close();
+});
+
+el("dismiss-mic").addEventListener("click", async () => {
+    await saveSettings({ micReminderDismissed: true });
+    await renderMicrophoneWarning(currentState);
+    await sendMessage({ type: "reevaluate-tabs" });
+});
+
 // ---- Live updates --------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -413,11 +425,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Initial paint.
 (async () => {
-    if (!(await getSettings()).dataUseAcknowledgedAt) {
-        el("unpaired-intro").textContent = t("reviewDataUse");
-        show("unpaired");
-        return;
-    }
+    void sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
     currentTab = await activeTab();
     currentPlatform = currentTab?.url
         ? detectMeetingPlatform(currentTab.url)

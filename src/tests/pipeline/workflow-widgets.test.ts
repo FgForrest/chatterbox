@@ -92,7 +92,7 @@ describe("workflow widgets", () => {
         expect(widgets.taskReview.visible).toBe(false);
     });
 
-    it("shows a ready manual step without exposing later phases", () => {
+    it("shows Summary after Learn is skipped", () => {
         const widgets = deriveWorkflowWidgets(
             presentation({
                 profile: {
@@ -136,7 +136,8 @@ describe("workflow widgets", () => {
             frame: "inline",
             action: "run",
         });
-        expect(widgets.summary.visible).toBe(false);
+        expect(widgets.summary.visible).toBe(true);
+        expect(widgets.summary.action).toBe("run");
     });
 
     it("restores the Learn run action after its results are erased", () => {

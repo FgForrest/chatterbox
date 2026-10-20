@@ -391,6 +391,7 @@ export function useTranscriptionSummary({
             // waiting, and those differ by however long it sat in the queue.
             summaryStartedAtRef.current = Date.now();
 
+            invalidateItemProcessing(targetId);
             try {
                 let current = job;
                 while (isCurrent()) {
@@ -445,6 +446,7 @@ export function useTranscriptionSummary({
                 // Nothing to report: this client only ever observed the job,
                 // and an observation that fails says nothing about the work.
             } finally {
+                invalidateItemProcessing(targetId);
                 summarizingIdsRef.current = removeSummarizingId(
                     summarizingIdsRef.current,
                     targetId,
@@ -734,6 +736,7 @@ export function useTranscriptionSummary({
                 toast.error("Failed to generate summary");
             }
         } finally {
+            invalidateItemProcessing(targetId);
             summarizingIdsRef.current = removeSummarizingId(
                 summarizingIdsRef.current,
                 targetId,
@@ -769,6 +772,7 @@ export function useTranscriptionSummary({
                 { method: "DELETE" },
             );
             if (response.ok) {
+                invalidateItemProcessing(targetId);
                 if (deleteIsCurrent()) {
                     toast.success("Summary deleted");
                     setAvailableSummarySources((current) =>

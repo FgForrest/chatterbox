@@ -221,6 +221,87 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
+    it.each([
+        "queued",
+        "running",
+    ] as const)("lets a %s Learn retry win over the old Learn failure", (status) => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "transcribed"),
+                    learn: phase("failed", "provider_error"),
+                },
+                outputs: { transcript: true, learn: false, summary: false },
+                failures: [
+                    {
+                        phase: "learn",
+                        reasonCode: "PROVIDER_ERROR",
+                        retryAvailable: true,
+                    },
+                ],
+                latestLearnRun: {
+                    status,
+                    errorCode: null,
+                    updatedAt: "2026-10-16T08:01:00.000Z",
+                },
+            }),
+            "audio",
+        );
+
+        expect(result.status?.message).toBe(
+            status === "queued" ? "learnQueued" : "learnRunning",
+        );
+    });
+
+    it.each([
+        "queued",
+        "running",
+    ] as const)("lets a %s Summary job win over the old Summary failure", (job) => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "transcribed"),
+                    learn: phase("done", "finished"),
+                    summary: phase("failed", "provider_error"),
+                },
+                outputs: { transcript: true, learn: true, summary: false },
+                failures: [
+                    {
+                        phase: "summary",
+                        reasonCode: "PROVIDER_ERROR",
+                        retryAvailable: true,
+                    },
+                ],
+                jobs: { transcription: null, summary: job },
+            }),
+            "audio",
+        );
+
+        expect(result.status?.message).toBe(
+            job === "queued" ? "summaryQueued" : "summaryRunning",
+        );
+    });
+
+    it("keeps another phase's failure while Summary runs", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                failures: [
+                    {
+                        phase: "taskReview",
+                        reasonCode: "PROVIDER_ERROR",
+                        retryAvailable: true,
+                    },
+                ],
+                jobs: { transcription: null, summary: "running" },
+            }),
+            "audio",
+        );
+
+        expect(result.status?.actor).toBe("problem");
+    });
+
     it("shows a newer failed Learn run as the retryable problem", () => {
         const result = deriveWorkflowStatus(
             processing({
@@ -760,6 +841,22 @@ describe("deriveWorkflowStatus", () => {
 
         expect(result.visible).toBe(false);
         expect(result.status).toBeNull();
+    });
+
+    it("keeps the strip while an automatic Summary is still missing", () => {
+        const result = deriveWorkflowStatus(
+            processing({
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "transcribed"),
+                    learn: phase("done", "finished"),
+                },
+                outputs: { transcript: true, learn: true, summary: false },
+            }),
+            "audio",
+        );
+
+        expect(result.visible).toBe(true);
     });
 
     it("keeps a Nothing automatic item visible for an unconfirmed Organization intent", () => {

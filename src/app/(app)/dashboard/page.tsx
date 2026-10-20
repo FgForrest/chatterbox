@@ -5,13 +5,10 @@ import { recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
     chatterItems,
-    plaudConnections,
     recordings,
     transcriptions,
-    userSettings,
     users,
 } from "@/db/schema";
-import { accessManagementAvailable } from "@/lib/access/service";
 import { getSessionActor, requireAuth } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
@@ -19,19 +16,15 @@ import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
-import { isAdminEmail } from "@/lib/hosted/admin/guard";
-import { getGoogleOAuthConfig } from "@/lib/integrations/google/config";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
 import { isMailEnabled } from "@/lib/mail/config";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
-import { isMcpEnabled } from "@/lib/mcp/config";
-import { mcpResourceUrl } from "@/lib/mcp/metadata";
-import type { OnboardingCapabilities } from "@/lib/onboarding/capabilities";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
-import { RECORDER_EXTENSION_STORE_URL } from "@/lib/recorder-extension/extension-id";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
+import { getPlaudConnection } from "@/lib/settings/plaud-connection";
+import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -248,8 +241,8 @@ export default async function DashboardPage() {
         userRecordings,
         userTranscriptions,
         userSummaryRows,
-        [settingsRow],
-        [connectionRow],
+        settingsRow,
+        connectionRow,
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
@@ -317,16 +310,8 @@ export default async function DashboardPage() {
         // player render with the user's preferences on first paint — no
         // waterfall of /api/settings/user fetches from three different
         // components.
-        db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, session.user.id))
-            .limit(1),
-        db
-            .select({ invalidatedAt: plaudConnections.invalidatedAt })
-            .from(plaudConnections)
-            .where(eq(plaudConnections.userId, session.user.id))
-            .limit(1),
+        getUserSettings(session.user.id),
+        getPlaudConnection(session.user.id),
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),
@@ -408,12 +393,6 @@ export default async function DashboardPage() {
         },
     );
     const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
-    const onboardingCapabilities: OnboardingCapabilities = {
-        googleConfigured: getGoogleOAuthConfig() !== null,
-        mailAvailable,
-        mcpConnectorUrl: isMcpEnabled() ? mcpResourceUrl() : null,
-        recorderStoreUrl: RECORDER_EXTENSION_STORE_URL,
-    };
 
     return (
         <Workstation
@@ -422,14 +401,10 @@ export default async function DashboardPage() {
             transcriptVariants={transcriptVariants}
             organizationLibrary={organizationLibrary}
             isOrgAccount={viewerIsOrgAccount}
-            isAdmin={isAdminEmail(session.user.email)}
-            userEmail={session.user.email ?? null}
             initialSettings={initialSettings}
             plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
             isHosted={env.IS_HOSTED}
             mailEnabled={mailAvailable}
-            onboardingCapabilities={onboardingCapabilities}
-            accessManagement={accessManagementAvailable(actor)}
             canCurate={actor ? await actsForOrganization(actor) : false}
             exportProviders={exportProvidersAvailability()}
             initialFolderOrganization={visibleFolderOrganization}

@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, type userSettings } from "@/db/schema";
-import { loadDefaultProviderState } from "@/lib/ai/default-provider";
+import {
+    type DefaultProviderState,
+    loadDefaultProviderState,
+} from "@/lib/ai/default-provider";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -10,7 +13,7 @@ import {
     type DefaultProviderCandidate,
     defaultProviderCandidates,
 } from "@/lib/ai/provider-resolution-order";
-import { holderAccess } from "@/lib/authz/access-state";
+import { type HolderAccess, holderAccess } from "@/lib/authz/access-state";
 import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -181,7 +184,11 @@ function candidateChoice(
     if (candidate.source === "member-summary") {
         return { kind: "member-default", role: "summary" };
     }
-    if (candidate.source === "member-fallback") return { kind: "automatic" };
+    if (
+        candidate.source === "member-fallback" ||
+        candidate.source === "organization-fallback"
+    )
+        return { kind: "automatic" };
     return { kind: "member-default", role: step };
 }
 
@@ -326,6 +333,9 @@ async function resolvePinnedOrganization(input: {
     actorUserId: string;
     credential?: CredentialRow;
     choice?: ProviderChoice;
+    readOnly?: boolean;
+    readOnlyAccess?: () => Promise<HolderAccess>;
+    organizationDefaultsOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
@@ -357,8 +367,17 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    if (isIdpAuthorization()) {
-        const access = await holderAccess(input.actorUserId);
+    if (
+        isIdpAuthorization() &&
+        !(
+            input.readOnly &&
+            input.organizationDefaultsOnly &&
+            input.actorUserId === orgUserId
+        )
+    ) {
+        const access = await (input.readOnly && input.readOnlyAccess
+            ? input.readOnlyAccess()
+            : holderAccess(input.actorUserId, { readOnly: input.readOnly }));
         if (!access.ok || !access.capabilities.has("use")) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
@@ -418,12 +437,16 @@ function assertSupportsStep(
 
 async function organizationDefaultOwner(
     actorUserId: string,
+    readOnly: boolean,
+    readOnlyAccess?: () => Promise<HolderAccess>,
 ): Promise<string | null> {
     if (!isOrgScopeEnabled()) return null;
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return null;
     if (!isIdpAuthorization() || actorUserId === orgUserId) return orgUserId;
-    const access = await holderAccess(actorUserId);
+    const access = await (readOnly && readOnlyAccess
+        ? readOnlyAccess()
+        : holderAccess(actorUserId, { readOnly }));
     return access.ok && access.capabilities.has("use") ? orgUserId : null;
 }
 
@@ -432,6 +455,8 @@ async function resolvePointer(input: {
     pointer: string;
     actorUserId: string;
     choice: ProviderChoice;
+    readOnly?: boolean;
+    readOnlyAccess?: () => Promise<HolderAccess>;
 }): Promise<ResolvedStepProviderSelection> {
     if (isRiffadoIncludedProviderId(input.pointer)) {
         if (input.step === "transcription" && !isMynahConfigured()) {
@@ -468,6 +493,8 @@ async function resolvePointer(input: {
             pin: { scope: "organization", credentialId: input.pointer },
             actorUserId: input.actorUserId,
             choice: input.choice,
+            readOnly: input.readOnly,
+            readOnlyAccess: input.readOnlyAccess,
         });
     }
     if (input.choice.kind === "member-default") {
@@ -542,17 +569,40 @@ export async function validateDefaultProviderSelection(input: {
 async function resolveUnpinned(
     step: ProcessingStep,
     actorUserId: string,
+    readOnly: boolean,
+    organizationDefaultsOnly = false,
+    readOnlyAccess?: () => Promise<HolderAccess>,
 ): Promise<ResolvedStepProviderSelection> {
-    const actorState = await loadDefaultProviderState(actorUserId);
-    const orgUserId = await organizationDefaultOwner(actorUserId);
+    const actorState: DefaultProviderState = organizationDefaultsOnly
+        ? {
+              pointers: {
+                  transcription: null,
+                  summary: null,
+                  learn: null,
+                  topics: null,
+                  title: null,
+              },
+              credentials: [],
+              settings: undefined,
+          }
+        : await loadDefaultProviderState(actorUserId);
+    const orgUserId = await organizationDefaultOwner(
+        actorUserId,
+        readOnly,
+        readOnlyAccess,
+    );
     const organizationState = orgUserId
         ? await loadDefaultProviderState(orgUserId)
         : null;
+    const hasSeparateOrganization =
+        Boolean(orgUserId) &&
+        (organizationDefaultsOnly || orgUserId !== actorUserId);
     const [candidate] = defaultProviderCandidates(
         step,
         actorState.pointers,
         organizationState?.pointers ?? null,
         actorState.credentials,
+        hasSeparateOrganization ? organizationState?.credentials : [],
     );
     if (candidate) {
         const choice = candidateChoice(candidate, step);
@@ -584,6 +634,9 @@ async function resolveUnpinned(
                 actorUserId,
                 credential: organization,
                 choice,
+                readOnly,
+                readOnlyAccess,
+                organizationDefaultsOnly,
             });
             return { ...resolved, actorSettings: actorState.settings };
         }
@@ -592,6 +645,8 @@ async function resolveUnpinned(
             pointer: candidate.providerId,
             actorUserId,
             choice,
+            readOnly,
+            readOnlyAccess,
         });
         return { ...resolved, actorSettings: actorState.settings };
     }
@@ -604,21 +659,34 @@ async function resolveUnpinned(
     if (step === "transcription") {
         throw new AppError(
             ErrorCode.NO_TRANSCRIPTION_PROVIDER,
-            "No transcription API configured",
+            hasSeparateOrganization
+                ? "Neither you nor the Organization has a provider for transcription. Add a provider in Settings or ask an administrator."
+                : "No transcription API configured",
             400,
-            { providerSelection: "absent" },
+            {
+                providerSelection: "absent",
+                organizationProviderMissing: hasSeparateOrganization,
+            },
         );
     }
-    throw missingProvider(`No provider is configured for ${step}`, {
-        providerSelection: "absent",
-    });
+    throw missingProvider(
+        hasSeparateOrganization
+            ? `Neither you nor the Organization has a provider for ${step}. Add a provider in Settings or ask an administrator.`
+            : `No provider is configured for ${step}`,
+        {
+            providerSelection: "absent",
+        },
+    );
 }
 
-/** Choose and authorize one processing provider without decrypting its key. */
+/** Choose and authorize a provider without decrypting its key; read-only checks also leave access state unchanged. */
 export async function resolveStepProviderSelection(input: {
     step: ProcessingStep;
     pin: ProviderPin | null;
     actorUserId: string;
+    readOnly?: boolean;
+    readOnlyAccess?: () => Promise<HolderAccess>;
+    organizationDefaultsOnly?: boolean;
 }): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
@@ -626,7 +694,13 @@ export async function resolveStepProviderSelection(input: {
     if (input.pin?.scope === "organization") {
         return resolvePinnedOrganization({ ...input, pin: input.pin });
     }
-    return resolveUnpinned(input.step, input.actorUserId);
+    return resolveUnpinned(
+        input.step,
+        input.actorUserId,
+        input.readOnly === true,
+        input.readOnly === true && input.organizationDefaultsOnly === true,
+        input.readOnlyAccess,
+    );
 }
 
 /** Resolve one processing step's provider and decrypt its key for a request. */

@@ -275,6 +275,7 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                 try {
                     saved = await saveUploadedAudioFile({
                         userId,
+                        sessionId: session.id,
                         fileId: `meeting-${session.clientRecordingId}`,
                         basename: title,
                         extension: ".ogg",

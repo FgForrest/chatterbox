@@ -68,11 +68,25 @@ function phaseMatches(
     );
 }
 
+const PROVIDER_BLOCKED_REASONS = new Set([
+    "no_provider",
+    "NO_PROVIDER",
+    "NO_TRANSCRIPTION_PROVIDER",
+]);
+
+/** Whether a skip or failure reason means no usable AI provider was configured. */
+export function isProviderBlockedReason(
+    reason: string | null | undefined,
+): boolean {
+    return reason != null && PROVIDER_BLOCKED_REASONS.has(reason);
+}
+
 function stepRequested(
     record: PhaseRecord | undefined,
     step: SummaryStepName,
     input: ContentRevisionInput,
     minimumGeneration?: number,
+    retryNoProvider = false,
 ): boolean {
     const requested = record?.steps?.[step];
     return (
@@ -81,6 +95,11 @@ function stepRequested(
             input.contentSourceId &&
         requested.contentRevision === input.contentRevision &&
         requested.state !== "outdated" &&
+        !(
+            retryNoProvider &&
+            ["skipped", "failed"].includes(requested.state ?? "") &&
+            isProviderBlockedReason(requested.reason)
+        ) &&
         (minimumGeneration === undefined ||
             requested.generation >= minimumGeneration)
     );
@@ -331,6 +350,7 @@ function planMail(
             "summary",
             input,
             minimumGeneration,
+            true,
         )
     ) {
         actions.push({ type: "queueSummary", presetId: null, strict: true });
@@ -439,7 +459,7 @@ function planReleasedAudio(
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
-    const notRequested = (step: SummaryStepName) =>
+    const notRequested = (step: SummaryStepName, retryNoProvider = false) =>
         !stepRequested(
             facts.phases.summary,
             step,
@@ -447,6 +467,7 @@ function planReleasedAudio(
             minimumGeneration === undefined
                 ? releaseGeneration
                 : Math.max(releaseGeneration, minimumGeneration),
+            retryNoProvider,
         );
     for (const step of ["topics", "summary"] as const) {
         if (
@@ -475,7 +496,7 @@ function planReleasedAudio(
     if (
         facts.profile?.automatic.topics &&
         stepProviderAvailable(facts, "topics") &&
-        notRequested("topics")
+        notRequested("topics", true)
     ) {
         actions.push({
             type: "queueTopics",
@@ -496,7 +517,7 @@ function planReleasedAudio(
         stepProviderAvailable(facts, "summary") &&
         !facts.summary.jobActive &&
         (!facts.summary.exists || facts.summary.stale) &&
-        notRequested("summary")
+        notRequested("summary", true)
     ) {
         actions.push({
             type: "queueSummary",
@@ -566,7 +587,13 @@ function planTranscriptAudio(
     } else if (
         facts.profile?.automatic.topics &&
         stepProviderAvailable(facts, "topics") &&
-        !stepRequested(facts.phases.summary, "topics", input, minimumGeneration)
+        !stepRequested(
+            facts.phases.summary,
+            "topics",
+            input,
+            minimumGeneration,
+            true,
+        )
     ) {
         actions.push({
             type: "queueTopics",
@@ -590,6 +617,7 @@ function planTranscriptAudio(
             "summary",
             input,
             minimumGeneration,
+            true,
         )
     ) {
         actions.push({
