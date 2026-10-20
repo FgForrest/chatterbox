@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
@@ -434,10 +433,12 @@ export function CategorizePanel({
 
             <div className="space-y-4 px-4 py-4 sm:px-5">
                 <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
-                    <div className="space-y-1.5">
-                        <Label>{i18n("Folder")}</Label>
+                    <fieldset className="min-w-0 space-y-1.5 rounded-md border p-3">
+                        <legend className="px-1 text-sm font-medium">
+                            {i18n("Folder")}
+                        </legend>
                         {newFolderOpen ? (
-                            <div className="space-y-2 rounded-md border p-3">
+                            <div className="space-y-2">
                                 <Input
                                     aria-label={i18n("Folder name")}
                                     value={newFolderName}
@@ -562,10 +563,12 @@ export function CategorizePanel({
                         <p className="text-xs text-muted-foreground">
                             {folderHint}
                         </p>
-                    </div>
+                    </fieldset>
 
-                    <div className="space-y-1.5">
-                        <Label>{i18n("Profile")}</Label>
+                    <fieldset className="min-w-0 space-y-1.5 rounded-md border p-3">
+                        <legend className="px-1 text-sm font-medium">
+                            {i18n("Profile")}
+                        </legend>
                         <Select
                             value={profileChoice}
                             onValueChange={setProfileChoice}
@@ -632,7 +635,7 @@ export function CategorizePanel({
                                 )}
                             </a>
                         </p>
-                    </div>
+                    </fieldset>
                 </div>
 
                 {selectedProfile && selectedDetails?.description?.trim() && (

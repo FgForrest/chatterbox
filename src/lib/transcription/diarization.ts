@@ -114,10 +114,16 @@ export function parseSpeakerTurns(text: string): SpeakerTurn[] | null {
  * verbatim ("the speaker, speaker_0, explains..."), so renumbering or
  * renaming them would leave the summary referring to something the transcript
  * no longer shows.
+ * `localize` translates numbered provider defaults without changing names.
  */
-export function formatSpeakerLabel(speaker: string): string {
+export function formatSpeakerLabel(
+    speaker: string,
+    localize?: (number: string) => string,
+): string {
     const trimmed = speaker.trim();
     if (!trimmed) return "";
+    const numbered = /^speaker[ _-]+(\d+)$/i.exec(trimmed);
+    if (localize && numbered) return localize(numbered[1]);
     const normalized = trimmed.replace(/[_-]+/g, " ").replace(/\s+/g, " ");
     if (normalized.length > MAX_LABEL_LENGTH) return trimmed;
     return normalized.replace(

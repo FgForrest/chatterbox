@@ -47,6 +47,7 @@ import {
 } from "@/components/learn/review-speaker";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
+import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,7 +79,6 @@ import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
 import { formatClock } from "@/lib/topics/timeline";
-import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 
@@ -197,6 +197,7 @@ export function LearnWidget({
     collapseReady?: boolean;
 }) {
     const i18n = useExtracted();
+    const speakerLabel = useSpeakerLabel();
     const labels = useVocabularyLabels();
     const sectionPrefix = useId();
     const [state, setState] = useState<ReviewState | null>(null);
@@ -651,7 +652,7 @@ export function LearnWidget({
             }
             return (
                 namedSpeaker(side.speakerLabel) ??
-                formatSpeakerLabel(side.speakerLabel)
+                speakerLabel(side.speakerLabel)
             );
         }
         if ("newRef" in side) return recordName(side.newRef);
@@ -667,7 +668,7 @@ export function LearnWidget({
             case "new_record":
                 return recordName(String(payload.ref));
             case "speaker":
-                return String(payload.label);
+                return speakerLabel(String(payload.label));
             case "correction":
                 return `"${String(payload.heard)}"`;
             case "relation_phrase":
@@ -696,7 +697,7 @@ export function LearnWidget({
                           : typeof payload.newRef === "string"
                             ? recordName(payload.newRef)
                             : "?";
-            return `${String(payload.label)} → ${person}`;
+            return `${speakerLabel(String(payload.label))} → ${person}`;
         }
         if (item.kind === "new_record") {
             const record = newRecordView(item);
@@ -895,7 +896,7 @@ export function LearnWidget({
             <span
                 className={`font-medium ${accentOf(side.speakerLabel).text} ${named ? "" : "italic"}`}
             >
-                {named ?? formatSpeakerLabel(side.speakerLabel)}
+                {named ?? speakerLabel(side.speakerLabel)}
             </span>
         );
     };
@@ -1601,7 +1602,7 @@ export function LearnWidget({
                                                                             {i18n(
                                                                                 "needs {label} named",
                                                                                 {
-                                                                                    label: formatSpeakerLabel(
+                                                                                    label: speakerLabel(
                                                                                         item.dependsOnLabel,
                                                                                     ),
                                                                                 },

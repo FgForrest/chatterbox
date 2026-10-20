@@ -114,6 +114,45 @@ describe("CategorizePanel", () => {
         vi.unstubAllGlobals();
     });
 
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("encloses folder and profile symmetrically for %s, including folder creation", (kind) => {
+        renderPanel(base, { kind });
+        const folder = screen.getByRole("group", { name: "Folder" });
+        const profile = screen.getByRole("group", { name: "Profile" });
+        expect(folder.tagName).toBe("FIELDSET");
+        expect(profile.tagName).toBe("FIELDSET");
+        expect(profile.className).toBe(folder.className);
+        expect(profile.parentElement).toBe(folder.parentElement);
+        expect(folder.parentElement?.classList.contains("sm:grid-cols-2")).toBe(
+            true,
+        );
+        expect(
+            profile.contains(screen.getByRole("combobox", { name: "Profile" })),
+        ).toBe(true);
+        expect(
+            profile.contains(
+                screen.getByRole("link", {
+                    name: "Manage profiles in Settings → Profiles.",
+                }),
+            ),
+        ).toBe(true);
+
+        fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+        fireEvent.click(screen.getByText("New folder…"));
+        expect(
+            folder.contains(
+                screen.getByRole("textbox", { name: "Folder name" }),
+            ),
+        ).toBe(true);
+        expect(profile.className).toBe(folder.className);
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(
+            folder.contains(screen.getByRole("combobox", { name: "Folder" })),
+        ).toBe(true);
+    });
+
     it("is an inline filing card with one folder and profile dropdown", () => {
         renderPanel();
         expect(screen.queryByRole("dialog")).toBeNull();

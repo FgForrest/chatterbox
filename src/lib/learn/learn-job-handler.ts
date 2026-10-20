@@ -38,6 +38,7 @@ import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
+import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
 import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
 import { nudge } from "@/lib/jobs/nudge";
@@ -836,7 +837,11 @@ async function runLearnJob({
             ...calendarSpeakerCandidates,
             ...meetSpeakerCandidates,
         ];
-        const reviewLocale = await resolveLearnReviewLocale(db, run);
+        const reviewLocale = await resolveLearnReviewLocale(
+            db,
+            run,
+            transcript.detectedLanguage,
+        );
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"
@@ -1228,7 +1233,11 @@ async function runMailLearnJob(
                 updatedAt: new Date(),
             })
             .where(eq(learnRuns.id, run.id));
-        const reviewLocale = await resolveLearnReviewLocale(db, run);
+        const reviewLocale = await resolveLearnReviewLocale(
+            db,
+            run,
+            content.language,
+        );
         reportProgress({ phase: "reading" });
         const pass =
             turns.length > 0
@@ -1315,6 +1324,16 @@ async function runMailLearnJob(
                             "participant",
                             domainLookupHash("mail-participant", address),
                         ]),
+                    {
+                        knownPerson: translatedSourceMessage(
+                            reviewLocale,
+                            "Another address of a known person",
+                        ),
+                        newPerson: translatedSourceMessage(
+                            reviewLocale,
+                            "A participant of the mail",
+                        ),
+                    },
                 ).filter(
                     (proposal) =>
                         !frame.dismissed.has(
