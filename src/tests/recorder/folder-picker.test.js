@@ -116,6 +116,29 @@ describe("recorder folder API helpers", () => {
             "https://recorder.test/api/v1/recorder/folders?id=saved%2Fid",
         );
     });
+    it("filters a full folder list from a server without search or lookup", async () => {
+        const data = [
+            folder("first", "Private / Calls"),
+            folder("saved", "Private / Weekly"),
+            ...Array.from({ length: 25 }, (_, index) =>
+                folder(`org-${index}`, `Organization / Plán ${index}`, "org"),
+            ),
+        ];
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ data })),
+        );
+        expect(await getRecorderFolder(auth, "saved")).toEqual([
+            { ...data[1], label: data[1].path },
+        ]);
+        expect(await getRecorderFolder(auth, "gone")).toEqual([]);
+        expect(
+            (await searchRecorderFolders(auth, "weekly")).map(({ id }) => id),
+        ).toEqual(["saved"]);
+        const plans = await searchRecorderFolders(auth, "organization plan");
+        expect(plans).toHaveLength(20);
+        expect(plans[0].id).toBe("org-0");
+    });
     it("preserves 404 status so the popup can drop an unavailable remembered folder", async () => {
         vi.stubGlobal(
             "fetch",

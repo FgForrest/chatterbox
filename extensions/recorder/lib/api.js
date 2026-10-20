@@ -173,22 +173,42 @@ export function mapRecorderFolders(body) {
         .map((folder) => ({ ...folder, label: folder.path }));
 }
 
-/** Search folders the paired recorder key holder may file into, in server rank order. */
+function folderSearchText(value) {
+    return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/**
+ * Search folders the paired recorder key holder may file into, in server rank
+ * order. A server without search answers with every folder, so the matching
+ * rule and the 20-result cap are applied here too.
+ */
 export async function searchRecorderFolders(auth, q) {
     const response = await request(
         auth,
         `/api/v1/recorder/folders?q=${encodeURIComponent(q.trim())}`,
     );
-    return mapRecorderFolders(await response.json());
+    const words = folderSearchText(q.trim()).split(/\s+/u);
+    return mapRecorderFolders(await response.json())
+        .filter((folder) => {
+            const path = folderSearchText(folder.path);
+            return words.every((word) => path.includes(word));
+        })
+        .slice(0, 20);
 }
 
-/** Resolve the remembered folder's current path; unavailable folders return 404. */
+/**
+ * Resolve the remembered folder's current path; unavailable folders return
+ * 404. A server without lookup answers with every folder, so only the
+ * requested one is kept.
+ */
 export async function getRecorderFolder(auth, id) {
     const response = await request(
         auth,
         `/api/v1/recorder/folders?id=${encodeURIComponent(id)}`,
     );
-    return mapRecorderFolders(await response.json());
+    return mapRecorderFolders(await response.json()).filter(
+        (folder) => folder.id === id,
+    );
 }
 
 /** Retire older keys issued to the same installation after pairing succeeds. */
