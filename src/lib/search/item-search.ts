@@ -25,6 +25,7 @@ import { searchableMailParts } from "@/lib/mail/searchable-parts";
 import { decodeKeyset, encodeKeyset } from "@/lib/mcp/cursor";
 import { boundedScan } from "@/lib/mcp/scan";
 import { getOrgUserId } from "@/lib/org/config";
+import { snippetBounds } from "@/lib/search/snippets";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import type { RecordingView } from "@/lib/sharing/view";
 
@@ -75,14 +76,15 @@ function snippetOf(texts: readonly string[], word: string): string | null {
     for (const text of texts) {
         const at = foldForSearch(text).indexOf(word);
         if (at < 0) continue;
-        const start = Math.max(0, at - SNIPPET_CHARS / 3);
-        const piece = text
-            .slice(start, start + SNIPPET_CHARS)
-            .replace(/\s+/g, " ")
-            .trim();
-        return `${start > 0 ? "…" : ""}${piece}${
-            start + SNIPPET_CHARS < text.length ? "…" : ""
-        }`;
+        const rawStart = Math.max(0, at - Math.floor(SNIPPET_CHARS / 3));
+        const { start, end } = snippetBounds(
+            text,
+            rawStart,
+            rawStart + SNIPPET_CHARS,
+            { start: at, end: at + word.length },
+        );
+        const piece = text.slice(start, end).replace(/\s+/g, " ").trim();
+        return `${start > 0 ? "…" : ""}${piece}${end < text.length ? "…" : ""}`;
     }
     return null;
 }
@@ -90,14 +92,13 @@ function snippetOf(texts: readonly string[], word: string): string | null {
 /**
  * Items newest first after `before`, with what each says: a recording's
  * transcripts (every one its owner holds), a mail's sender, body and quoted
- * parts. A quoted part is skipped when its original is in `visibleScope`,
+ * parts. A quoted part is skipped when its original is in `scope` too,
  * where it matches on its own. `occurred_at` is written from JavaScript
  * dates, so millisecond cursors compare exactly against the column, and its
  * index serves the order.
  */
 async function loadBatch(
     scope: SQL,
-    visibleScope: SQL,
     before: string | null,
     searchScopes: ReadonlySet<ItemSearchScope>,
     signal?: AbortSignal,
@@ -236,17 +237,17 @@ async function loadBatch(
                                   ),
                               ),
                           ),
-                          visibleScope,
+                          scope,
                           isNull(chatterItems.deletedAt),
                       ),
                   )
             : [];
     signal?.throwIfAborted();
-    const visibleByOwner = new Map<string, Set<string>>();
+    const candidatesByOwner = new Map<string, Set<string>>();
     for (const row of originals) {
-        const ids = visibleByOwner.get(row.userId) ?? new Set<string>();
+        const ids = candidatesByOwner.get(row.userId) ?? new Set<string>();
         ids.add(row.id);
-        visibleByOwner.set(row.userId, ids);
+        candidatesByOwner.set(row.userId, ids);
     }
     const contentTexts = new Map<string, string[]>();
     const summaryTexts = new Map<string, string[]>();
@@ -276,7 +277,7 @@ async function loadBatch(
             row.userId,
             searchableMailParts(
                 row.segments,
-                visibleByOwner.get(row.userId) ?? new Set<string>(),
+                candidatesByOwner.get(row.userId) ?? new Set<string>(),
             ).map((part) => part.text),
         );
     }
@@ -306,6 +307,8 @@ async function loadBatch(
  * search decrypts newest first and stops at a bound, saying where to go
  * on. `scopes` limits the scan to titles, transcripts/message text, and
  * summaries. A mail of someone else's has its secret addresses masked.
+ * Known quotes are skipped only when their originals are candidates in
+ * the same library, ignoring `before`.
  */
 export async function searchItems({
     viewerUserId,
@@ -354,7 +357,6 @@ export async function searchItems({
         return { hits: [], scanned: 0, complete: true, continueBefore: null };
     }
     let scope: SQL;
-    let visibleScope: SQL = eq(chatterItems.userId, viewerUserId);
     if (view === "org") {
         const orgUserId = await getOrgUserId();
         if (!orgUserId) {
@@ -366,22 +368,13 @@ export async function searchItems({
             };
         }
         scope = sharedItemCondition(orgUserId, chatterItems.id);
-        visibleScope = or(visibleScope, scope) ?? visibleScope;
     } else {
         scope = eq(chatterItems.userId, viewerUserId);
     }
     const found: ItemSearchHit[] = [];
     const scan = await boundedScan({
         batches: async (stamp) =>
-            masked(
-                await loadBatch(
-                    scope,
-                    visibleScope,
-                    stamp,
-                    searchScopes,
-                    signal,
-                ),
-            ),
+            masked(await loadBatch(scope, stamp, searchScopes, signal)),
         stampOf: (item) => encodeKeyset({ at: item.occurredAt, id: item.id }),
         visit: (item) => {
             const all = [
