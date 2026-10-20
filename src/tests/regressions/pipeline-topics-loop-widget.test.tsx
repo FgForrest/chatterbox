@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 
 const mocks = vi.hoisted(() => ({ useSummary: vi.fn() }));
@@ -132,6 +133,22 @@ describe.each([
         renderSummary(data, true);
         expect(screen.getByText("Existing summary")).toBeTruthy();
         expect(screen.queryByText("Generating summary…")).toBeNull();
+    });
+
+    it.each([
+        ["topics", "queued"],
+        ["topics", "running"],
+        ["title", "queued"],
+        ["title", "running"],
+    ] as const)("does not show an existing summary as regenerating while a %s job is %s", (step, state) => {
+        const data = presentation(kind, true);
+        data.jobs[step] = state;
+        const summary = deriveWorkflowStatus(data, kind).steps.find(
+            (one) => one.id === "summary",
+        );
+        expect(summary?.state).not.toBe("queued");
+        expect(summary?.state).not.toBe("working");
+        expect(deriveWorkflowWidgets(data).summary.active).toBe(false);
     });
 
     it("shows the first-summary spinner while a companion job waits", () => {
