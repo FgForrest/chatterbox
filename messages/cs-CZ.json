@@ -1381,6 +1381,7 @@
   "TBX7za": "{count, plural, one {# nahrávka} few {# nahrávky} many {# nahrávek} other {# nahrávek}}",
   "daqlCi": "Žádné odpovídající osoby",
   "LPZ6Lq": "Nikdo neodpovídá „{query}“. Zkuste jiné jméno nebo email.",
+  "vA8KJO": "Adresu pro příjem pošty nelze použít jako e-mail osoby.",
   "FPFHAC": "Osobu se nepodařilo uložit",
   "PqTm_2": "Osoby se nepodařilo sloučit",
   "Cekh6k": "Dejte této osobě e-mail svého účtu, aby vás učení poznalo jako toho, kdo pořizuje vaše nahrávky.",

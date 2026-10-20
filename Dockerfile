@@ -99,8 +99,10 @@ RUN bun build scripts/encrypt-backfill.ts --target=bun --outfile=encrypt-backfil
 
 # Bundle the mail maintenance scripts, run by an operator via:
 #   docker compose exec app bun backfill-mail-language.js [--dry-run] [--user <id>]
+#   docker compose exec app bun unlink-internal-addresses.js [--apply] [--user <id>]
 #   docker compose exec app bun mail-segmentation-diff.js [--user <id>] [--samples N]
 RUN bun build scripts/backfill-mail-language.ts --target=bun --outfile=backfill-mail-language.js \
+    && bun build scripts/unlink-internal-addresses.ts --target=bun --outfile=unlink-internal-addresses.js \
     && bun build scripts/mail-segmentation-diff.ts --target=bun --outfile=mail-segmentation-diff.js
 
 # Final runtime image
@@ -140,6 +142,7 @@ COPY --from=builder /app/encrypt-backfill.js ./encrypt-backfill.js
 
 # Copy bundled mail maintenance scripts
 COPY --from=builder /app/backfill-mail-language.js ./backfill-mail-language.js
+COPY --from=builder /app/unlink-internal-addresses.js ./unlink-internal-addresses.js
 COPY --from=builder /app/mail-segmentation-diff.js ./mail-segmentation-diff.js
 
 # Copy migrations folder
