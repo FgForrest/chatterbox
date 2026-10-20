@@ -35,16 +35,29 @@ export const SENSITIVITY_CATEGORIES = [
     "other_private",
 ] as const;
 
-const id = z.string().min(1).max(64);
-const text = z.string().trim().min(1).max(LEARN_LIMITS.text);
+const id = z.string().min(1).max(64).meta({ learnText: "identifier" });
+const text = z
+    .string()
+    .trim()
+    .min(1)
+    .max(LEARN_LIMITS.text)
+    .meta({ learnText: "source" });
 /** `mm:ss` or `h:mm:ss`, one of the times the model was shown. */
-const clock = z.string().regex(/^\s*\[?(?:\d+:)?\d{1,3}:\d{2}\]?\s*$/);
-const label = z.string().min(1).max(64);
+const clock = z
+    .string()
+    .regex(/^\s*\[?(?:\d+:)?\d{1,3}:\d{2}\]?\s*$/)
+    .meta({ learnText: "identifier" });
+const label = z.string().min(1).max(64).meta({ learnText: "identifier" });
+const reason = z
+    .string()
+    .trim()
+    .max(LEARN_LIMITS.reason)
+    .meta({ learnText: "reviewer" });
 
 const person = z.strictObject({ personId: id });
 const entity = z.strictObject({ entityId: id });
 /** A person or thing the answer proposes to add (`newRecords`), by its ref. */
-const ref = z.string().min(1).max(16);
+const ref = z.string().min(1).max(16).meta({ learnText: "identifier" });
 const newRecordRef = z.strictObject({ newRef: ref });
 /** Whoever speaks under a label, for a fact about the voice itself. */
 const speaker = z.strictObject({ speakerLabel: label });
@@ -67,7 +80,7 @@ const newRecord = z.strictObject({
     /** The label this person speaks under, when they speak here. */
     speakerLabel: label.nullable(),
     evidence: z.array(clock).min(1).max(3),
-    reason: z.string().trim().max(LEARN_LIMITS.reason),
+    reason,
 });
 
 const speakerSuggestion = z.strictObject({
@@ -75,7 +88,7 @@ const speakerSuggestion = z.strictObject({
     /** Null: nobody known; the review offers to pick or leave unknown. */
     personId: id.nullable(),
     evidence: z.array(clock).min(1).max(3),
-    reason: z.string().trim().max(LEARN_LIMITS.reason),
+    reason,
 });
 
 const correction = z.strictObject({
@@ -91,7 +104,7 @@ const correction = z.strictObject({
 
 const fact = z.strictObject({
     subject,
-    relationKey: z.string().min(1).max(64),
+    relationKey: id,
     object,
     start: clock,
     end: clock,
@@ -147,7 +160,7 @@ function withoutDefaults(value: unknown): unknown {
     if (typeof value !== "object" || value === null) return value;
     return Object.fromEntries(
         Object.entries(value)
-            .filter(([key]) => key !== "default")
+            .filter(([key]) => key !== "default" && key !== "learnText")
             .map(([key, inner]) => [key, withoutDefaults(inner)]),
     );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, GraduationCap, Loader2 } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import {
     type ReactNode,
     useCallback,
@@ -34,6 +34,7 @@ import {
     type NewRecordView,
     newRecordAs,
 } from "@/components/learn/new-record-item";
+import { useLearnApiErrorMessage } from "@/components/learn/review-error";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import {
     handleLearnReviewFailure,
@@ -60,7 +61,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import {
     labelsFromTurns,
@@ -197,6 +197,8 @@ export function LearnWidget({
     collapseReady?: boolean;
 }) {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const getApiErrorMessage = useLearnApiErrorMessage();
     const speakerLabel = useSpeakerLabel();
     const labels = useVocabularyLabels();
     const sectionPrefix = useId();
@@ -355,7 +357,7 @@ export function LearnWidget({
             // one that did not happen.
             const status = next?.run?.status;
             if (job?.status === "failed") {
-                toast.error(job.error || i18n("Learn failed"));
+                toast.error(failure(job.errorCode));
             } else if (status === "failed") {
                 toast.error(failure(next?.run?.errorCode));
             } else if (status === "ready") {
@@ -443,6 +445,7 @@ export function LearnWidget({
                 response,
                 i18n("Could not keep that decision"),
                 load,
+                getApiErrorMessage,
             );
             return;
         }
@@ -527,6 +530,7 @@ export function LearnWidget({
                     response,
                     i18n("Could not finish the review"),
                     load,
+                    getApiErrorMessage,
                 );
                 return;
             }
@@ -1151,7 +1155,7 @@ export function LearnWidget({
                                 }}
                             >
                                 {event.title} ·{" "}
-                                {new Date(event.start).toLocaleString()}
+                                {new Date(event.start).toLocaleString(locale)}
                             </Button>
                         ))}
                     </div>
@@ -1698,7 +1702,9 @@ export function LearnWidget({
             )}
             {picking && (
                 <SpeakerPicker
-                    label={(picking.payload as { label: string }).label}
+                    label={speakerLabel(
+                        (picking.payload as { label: string }).label,
+                    )}
                     organizationOnly={view === "org"}
                     onPick={async (chosen) => {
                         await decide(picking, "accepted", chosen);

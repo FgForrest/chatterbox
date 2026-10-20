@@ -16,9 +16,10 @@ const LANGUAGE_NAMES: Record<AppLocale, string> = {
 /**
  * Resolve the reviewer's locale: the owner's for a personal item; for the
  * Organization view the Organization account's, else the actor's, else the
- * owner's. A UI locale left on Auto follows the browser, which a background
- * run cannot see, so the same people's default transcription language comes
- * next, then the content's language. English when none is supported.
+ * owner's. An explicit UI locale wins. On Auto the UI follows the browser,
+ * so the actor's browser locale saved in the run's inputs stands in for it.
+ * The same people's default transcription language comes next, then the
+ * content's language. English when none is supported.
  */
 export async function resolveLearnReviewLocale(
     executor: Pick<typeof db, "select">,
@@ -27,6 +28,7 @@ export async function resolveLearnReviewLocale(
         scopeUserId: string;
         view: RecordingView;
         actorUserId?: string | null;
+        inputs?: Record<string, unknown> | null;
     },
     contentLanguage?: string | null,
 ): Promise<AppLocale> {
@@ -51,6 +53,16 @@ export async function resolveLearnReviewLocale(
         for (const id of ids) {
             const locale = normalizeLocale(byId.get(id)?.[field]);
             if (locale) return locale;
+            if (
+                field === "uiLocale" &&
+                id === (run.actorUserId ?? run.userId)
+            ) {
+                const hint = run.inputs?.requestLocale;
+                const browserLocale = normalizeLocale(
+                    typeof hint === "string" ? hint : null,
+                );
+                if (browserLocale) return browserLocale;
+            }
         }
     }
     return normalizeLocale(contentLanguage) ?? defaultLocale;

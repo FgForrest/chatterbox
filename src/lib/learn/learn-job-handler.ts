@@ -51,6 +51,7 @@ import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { findPersonByEmail } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
+import { detectLanguage } from "@/lib/knowledge/stemming/detect-language";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnChatClients } from "@/lib/learn/chat-clients";
@@ -758,6 +759,7 @@ async function runLearnJob({
                 builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
                 payerUserId,
                 inputs: {
+                    ...run.inputs,
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },
@@ -841,7 +843,8 @@ async function runLearnJob({
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             run,
-            transcript.detectedLanguage,
+            transcript.detectedLanguage ??
+                detectLanguage(turns.map((turn) => turn.text).join("\n")),
         );
         reportProgress({ phase: "reading" });
         const pass =
@@ -1228,6 +1231,7 @@ async function runMailLearnJob(
                 builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
                 payerUserId,
                 inputs: {
+                    ...run.inputs,
                     contentId: content.sourceId,
                     contentRevision: content.revision,
                 },
@@ -1237,7 +1241,8 @@ async function runMailLearnJob(
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             run,
-            content.language,
+            content.language ??
+                detectLanguage(turns.map((turn) => turn.text).join("\n")),
         );
         reportProgress({ phase: "reading" });
         const pass =
