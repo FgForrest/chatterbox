@@ -429,7 +429,7 @@ export function MeetingRecorderSetup({
                         centered && "justify-center",
                     )}
                 >
-                    <ConnectedLine>
+                    <ConnectedLine align={centered ? "center" : "start"}>
                         {i18n("Connected to {host}", { host: connectedHost })}
                     </ConnectedLine>
                     {mode === "settings" && (
