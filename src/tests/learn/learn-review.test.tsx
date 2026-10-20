@@ -652,7 +652,7 @@ describe("LearnReview", () => {
         expect(screen.getByText("replaces Acme")).toBeTruthy();
         expect(screen.getByText("needs Speaker 1 named")).toBeTruthy();
         fireEvent.click(
-            screen.getByRole("checkbox", { name: "Accept speaker_1 as Jan" }),
+            screen.getByRole("checkbox", { name: "Accept Speaker 1 as Jan" }),
         );
         await waitFor(() => expect(fact.disabled).toBe(false));
         expect(fact.getAttribute("aria-label")).toBe(
@@ -830,7 +830,7 @@ describe("LearnReview", () => {
             "/api/recordings/rec-1/review/items/speaker_1?source=riffado",
         ]);
         expect(
-            screen.getByRole("checkbox", { name: "Accept speaker_2 as ?" }),
+            screen.getByRole("checkbox", { name: "Accept Speaker 2 as ?" }),
         ).toHaveProperty("disabled", true);
     });
 
@@ -909,7 +909,7 @@ describe("LearnReview", () => {
             await screen.findByRole("button", { name: "Review (1)" }),
         );
         const accept = screen.getByRole("checkbox", {
-            name: "Accept speaker_2 as ?",
+            name: "Accept Speaker 2 as ?",
         }) as HTMLInputElement;
         expect(accept.disabled).toBe(true);
         expect(
@@ -1609,7 +1609,7 @@ describe("LearnReview", () => {
                 name: "Petra Kolářová — works for — Veltrix",
             }) as HTMLInputElement;
             const speaker = screen.getByRole("checkbox", {
-                name: "Accept speaker_1 as Petra Kolářová",
+                name: "Accept Speaker 1 as Petra Kolářová",
             }) as HTMLInputElement;
             expect(fact.disabled).toBe(true);
             expect(speaker.disabled).toBe(true);

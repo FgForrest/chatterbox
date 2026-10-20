@@ -173,6 +173,7 @@ export function participantProposals(
     candidates: readonly MailReviewCandidate[],
     knownByName: ReadonlyMap<string, string>,
     fingerprintOf: (address: string) => string,
+    reasons: { knownPerson: string; newPerson: string },
 ): MailReviewCandidate[] {
     const fold = (name: string) => name.trim().toLowerCase();
     const proposed = new Set(
@@ -208,9 +209,7 @@ export function participantProposals(
                 name,
                 speakerLabel: participant.ref,
                 evidence: [],
-                reason: known
-                    ? "Another address of a known person"
-                    : "A participant of the mail",
+                reason: known ? reasons.knownPerson : reasons.newPerson,
                 address,
                 ...(known ? { maybe: { personId: known } } : {}),
             },

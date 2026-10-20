@@ -168,6 +168,16 @@ describe.each(paths)("Learn review language: %s", (path) => {
             expect(request.system).toContain(
                 "keep keys and identifiers unchanged",
             );
+            expect(request.system).toContain(
+                `write speakers[].reason and newRecords[].reason in ${language}, including reasons for unresolved speakers with personId null`,
+            );
+            expect(request.system).toContain(
+                `check every reason and translate any explanation that is not in ${language}`,
+            );
+            expect(request.system).toContain(
+                "On repair, preserve the proposed content but correct the language of reviewer-facing prose as well as the JSON shape",
+            );
+            expect(request.system).not.toContain("fix only its shape");
         }
         expect(generation[0]?.user).toContain(turns[0]?.text);
         expect(result.repairs).toBe(1);
