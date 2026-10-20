@@ -81,6 +81,7 @@ import {
     getCallerTask,
     listCallerTasks,
     listTasks,
+    listTrackedAssignees,
     type TaskListQuery,
 } from "@/lib/tasks/tasks";
 import {
@@ -101,6 +102,7 @@ const tab = (name: "mine" | "tracked"): TaskListQuery => ({
     tab: name,
     state: "all",
     folderId: null,
+    assignee: null,
     due: null,
     today: null,
     sort: "created",
@@ -460,5 +462,184 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
                 kind: "audio",
             },
         });
+    });
+
+    it("filters Tracked tasks by person or no assignee, combined with state and due", async () => {
+        const tracked = async (query: Partial<TaskListQuery>) =>
+            (
+                await listTasks(viewer("alice"), {
+                    ...tab("tracked"),
+                    ...query,
+                })
+            ).map((row) => row.id);
+
+        expect(await tracked({ assignee: person.aliceBob })).toEqual([
+            task.alicePrivateForBob,
+        ]);
+        expect(await tracked({ assignee: person.orgBob })).toEqual([
+            task.aliceSharedForBob,
+        ]);
+        expect(new Set(await tracked({ assignee: "none" }))).toEqual(
+            new Set([task.aliceSharedDone, ...batch()]),
+        );
+        expect(await tracked({ assignee: "none", state: "done" })).toEqual([
+            task.aliceSharedDone,
+        ]);
+        expect(
+            await tracked({ assignee: person.aliceBob, state: "done" }),
+        ).toEqual([]);
+        expect(
+            await tracked({
+                assignee: person.orgBob,
+                state: "open",
+                due: "overdue",
+                today: "2026-10-20",
+                sort: "due",
+            }),
+        ).toEqual([]);
+        expect(await tracked({ assignee: person.orgCarol })).toEqual([]);
+        expect(await tracked({ assignee: "invisible-person" })).toEqual([]);
+    });
+
+    it.each([
+        "none",
+        "person",
+        "invisible-person",
+    ])("ignores assignee=%s on Mine", async (assignee) => {
+        const mine = await listTasks(viewer("bob"), {
+            ...tab("mine"),
+            assignee: assignee === "person" ? person.orgCarol : assignee,
+        });
+        expect(new Set(mine.map((row) => row.id))).toEqual(
+            new Set([task.aliceSharedForBob, task.bobSharedForBob]),
+        );
+    });
+
+    it("lists distinct decrypted assignees only from the viewer's Tracked tasks", async () => {
+        expect(await listTrackedAssignees(viewer("alice"))).toEqual(
+            expect.arrayContaining([
+                { personId: person.aliceBob, name: "Bob" },
+                { personId: person.orgBob, name: "Bob B." },
+            ]),
+        );
+        expect(await listTrackedAssignees(viewer("alice"))).toHaveLength(2);
+        expect(await listTrackedAssignees(viewer("bob"))).toEqual([
+            { personId: person.orgCarol, name: "Carol" },
+        ]);
+        expect(await listTrackedAssignees(viewer("carol"))).toEqual([]);
+    });
+
+    it("lists the Organization's shared assignees once and filters its tasks", async () => {
+        const assignees = await listTrackedAssignees(viewer("org"));
+        expect(assignees).toHaveLength(2);
+        expect(assignees).toEqual(
+            expect.arrayContaining([
+                { personId: person.orgBob, name: "Bob B." },
+                { personId: person.orgCarol, name: "Carol" },
+            ]),
+        );
+        expect(
+            (
+                await listTasks(viewer("org"), {
+                    ...tab("tracked"),
+                    assignee: person.orgBob,
+                })
+            ).map((row) => row.id),
+        ).toEqual([task.bobSharedForBob, task.aliceSharedForBob]);
+        expect(
+            (
+                await listTasks(viewer("org"), {
+                    ...tab("tracked"),
+                    assignee: "none",
+                })
+            ).map((row) => row.id),
+        ).toEqual([task.aliceSharedDone]);
+    });
+
+    it("excludes people assigned only to proposals, deleted items or another user's private tasks", async () => {
+        const proposalPerson = await insertPerson(db(), ALICE, "Tova Quill");
+        const deletedPerson = await insertPerson(db(), ALICE, "Neri Bramble");
+        const privatePerson = await insertPerson(db(), BOB, "Vela Mosswick");
+        for (const [name, recordingId, userId, assigneePersonId, status] of [
+            [
+                "assignedProposal",
+                "a-private",
+                ALICE,
+                proposalPerson,
+                "proposed",
+            ],
+            ["assignedDeleted", "a-deleted", ALICE, deletedPerson, "done"],
+            ["assignedPrivate", "b-private", BOB, privatePerson, "dropped"],
+        ] as const) {
+            await addTask(name, {
+                recordingId,
+                userId,
+                assigneePersonId,
+                status,
+                createdAt: at(10),
+            });
+        }
+        for (const name of ["alice", "org"]) {
+            const assignees = await listTrackedAssignees(viewer(name));
+            expect(assignees).toHaveLength(2);
+            for (const excluded of [
+                proposalPerson,
+                deletedPerson,
+                privatePerson,
+            ]) {
+                expect(
+                    assignees.map((person) => person.personId),
+                ).not.toContain(excluded);
+            }
+        }
+        expect(await listTrackedAssignees(viewer("bob"))).toEqual(
+            expect.arrayContaining([
+                { personId: privatePerson, name: "Vela Mosswick" },
+            ]),
+        );
+    });
+
+    it("offers assignees beyond the task list limit and from every accepted state", async () => {
+        const donePerson = await insertPerson(db(), ALICE, "Sora Thistlemere");
+        const droppedPerson = await insertPerson(db(), ALICE, "Zeni Cloudfern");
+        await addTask("doneAssignee", {
+            recordingId: "a-private",
+            userId: ALICE,
+            assigneePersonId: donePerson,
+            status: "done",
+            createdAt: at(0),
+        });
+        await addTask("droppedAssignee", {
+            recordingId: "a-private",
+            userId: ALICE,
+            assigneePersonId: droppedPerson,
+            status: "dropped",
+            createdAt: at(0),
+        });
+        await db()
+            .insert(recordingTasks)
+            .values(
+                Array.from({ length: 201 }, () => ({
+                    itemId: "a-private",
+                    userId: ALICE,
+                    status: "open" as const,
+                    assigneePersonId: person.orgBob,
+                    text: encryptText("Recent task"),
+                    source: "manual" as const,
+                    createdAt: at(30),
+                })),
+            );
+        const tasks = await listTasks(viewer("alice"), tab("tracked"));
+        expect(tasks).toHaveLength(200);
+        expect(
+            tasks.every((task) => task.assignee?.personId === person.orgBob),
+        ).toBe(true);
+        expect(await listTrackedAssignees(viewer("alice"))).toEqual(
+            expect.arrayContaining([
+                { personId: person.aliceBob, name: "Bob" },
+                { personId: donePerson, name: "Sora Thistlemere" },
+                { personId: droppedPerson, name: "Zeni Cloudfern" },
+            ]),
+        );
     });
 });

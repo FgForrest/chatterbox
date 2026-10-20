@@ -398,7 +398,7 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         expect(await ids("u-jan", "attachmentword")).toEqual([]);
     });
 
-    it("skips known quotes for the owner, but searches them for a colleague until the original is shared", async () => {
+    it("skips known quotes only when the original is a candidate in the searched library", async () => {
         const original = await deliver(
             janMailboxAddress,
             "Original",
@@ -419,8 +419,25 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
             { inReplyTo: "known-original" },
         );
         await share(reply);
-        expect(await ids("u-jan", "juniper")).toEqual([original]);
-        expect(await ids("u-jan", "juniper", "org")).toEqual([]);
+        for (const scopes of [undefined, ["content"] as const]) {
+            expect(await ids("u-jan", "juniper", "private", scopes)).toEqual([
+                original,
+            ]);
+            const ownOrg = await searchItems({
+                viewerUserId: "u-jan",
+                view: "org",
+                query: "juniper",
+                scopes,
+            });
+            expect(ownOrg.hits).toEqual([
+                {
+                    id: reply,
+                    kind: "mail",
+                    snippet: expect.stringContaining("juniper"),
+                },
+            ]);
+            expect(JSON.stringify(ownOrg)).not.toContain(original);
+        }
         const result = await searchItems({
             viewerUserId: "u-eva",
             view: "org",
@@ -437,6 +454,8 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         expect(await ids("u-eva", "privateoriginalword", "org")).toEqual([]);
         expect(await ids("u-eva", "juniper")).toEqual([]);
         await share(original);
+        expect(await ids("u-jan", "juniper")).toEqual([original]);
+        expect(await ids("u-jan", "juniper", "org")).toEqual([original]);
         expect(await ids("u-eva", "juniper", "org")).toEqual([original]);
         await markRecordingDeleted(db(), {
             id: original,
@@ -445,6 +464,36 @@ describeWithDatabase("searching the pile (PostgreSQL)", () => {
         });
         expect(await ids("u-jan", "juniper")).toEqual([reply]);
         expect(await ids("u-eva", "juniper", "org")).toEqual([reply]);
+    });
+
+    it("cuts app search snippets at word boundaries in both libraries", async () => {
+        const text = `${"amber lanterns shimmer gently ".repeat(12)}snippetneedle ${"violet ribbons flutter softly ".repeat(12)}`;
+        const mail = await deliver(
+            janMailboxAddress,
+            "Excerpt discussion",
+            text,
+        );
+        await share(mail);
+        for (const view of ["private", "org"] as const) {
+            const result = await searchItems({
+                viewerUserId: "u-jan",
+                view,
+                query: "snippetneedle",
+                scopes: ["content"],
+            });
+            expect(result.hits).toHaveLength(1);
+            expect(result.hits[0]?.id).toBe(mail);
+            const snippet = result.hits[0]?.snippet ?? "";
+            expect(snippet).toContain("snippetneedle");
+            expect(snippet.startsWith("…")).toBe(true);
+            expect(snippet.endsWith("…")).toBe(true);
+            const literal = snippet.replace(/^…|…$/g, "");
+            const start = text.indexOf(literal);
+            const end = start + literal.length;
+            expect(start).toBeGreaterThanOrEqual(0);
+            expect(/\s/u.test(text[start - 1])).toBe(true);
+            expect(/\s/u.test(text[end])).toBe(true);
+        }
     });
 
     it("masks secret addresses in a colleague's quoted text before matching", async () => {

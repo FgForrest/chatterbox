@@ -44,6 +44,12 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The extension asks the server for matching folders only (`GET /api/v1/recorder/folders?q=`, at most 20) and for the remembered folder (`?id=`), instead of downloading every folder path. Both list only folders the user can file a recording into.
 - The recorder key is described accurately: it creates recordings and looks up folder names to file them; it cannot read recordings.
 
+## What changed in 0.3.1
+
+- The meeting notification's Record button reads Consent confirmed · Record and carries the participant notice; it no longer opens a separate window with a consent checkbox. Chrome does not let a notification capture a tab, so it opens Chrome's sharing dialog directly (or, when the microphone is not allowed yet, a small microphone window first). Clicking the toolbar icon still records the meeting tab directly.
+- The microphone window uses the recorder's own compact layout; its record buttons carry the consent wording when no consent was given before.
+- The recorder window warns when the shared source stays silent for 20 seconds, which means a window, the screen or the wrong tab was shared without the meeting audio.
+
 ## What changed in 0.3.0
 
 - Self-hosted setup continues from data-use consent to access for the selected server and a microphone prompt. Return to the original dashboard tab, click Connect, then explicitly confirm the server in the same setup tab.

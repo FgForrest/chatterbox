@@ -31,6 +31,7 @@ import {
     recordingFolders,
     recordingTasks,
     taskMentions,
+    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -126,7 +127,11 @@ vi.mock("openai", async (importOriginal) => {
 import { POST } from "@/app/api/mcp/route";
 import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptJsonField,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { addRecordingToFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { createEntity } from "@/lib/knowledge/entities";
 import { confirmFactFromMailInTx } from "@/lib/knowledge/facts";
@@ -999,7 +1004,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             ).toEqual([]);
         });
 
-        it("skips known quotes only when their originals are visible", async () => {
+        it("skips known quotes when their originals are search candidates", async () => {
             for (const caller of [
                 reader(),
                 owner(),
@@ -1009,6 +1014,243 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                     (await search(caller, { query: "Knownquoteword" })).results,
                 ).toEqual([]);
             }
+        });
+
+        it("searches a known quote when its visible original is outside the folder and its descendants", async () => {
+            const original = "search-folder-original";
+            const reply = "search-folder-reply";
+            const query = "Folderquotedneedle";
+            await db()
+                .insert(recordingFolders)
+                .values([
+                    {
+                        id: "search-quote-folder",
+                        userId: orgUserId,
+                        parentId: orgFolder,
+                        name: "Quoted discussion",
+                        kind: "custom",
+                        nameHash: lookupHash("Quoted discussion"),
+                    },
+                    {
+                        id: "search-quote-child",
+                        userId: orgUserId,
+                        parentId: "search-quote-folder",
+                        name: "Follow-ups",
+                        kind: "custom",
+                        nameHash: lookupHash("Follow-ups"),
+                    },
+                ]);
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [
+                    body("Acknowledged."),
+                    body(query, "quoted", original),
+                ],
+            });
+            await db().insert(recordingFolderAssignments).values({
+                userId: OWNER,
+                itemId: reply,
+                folderId: "search-quote-child",
+            });
+            const args = { query, folder: "search-quote-folder" };
+            const result = await search(reader(), args);
+            expect(ids(result)).toEqual([reply]);
+            expect(result.results[0]?.snippets[0]?.part).toBe("quoted");
+            expect(JSON.stringify(result)).not.toContain(original);
+            await db().insert(recordingFolderAssignments).values({
+                userId: OWNER,
+                itemId: original,
+                folderId: "search-quote-child",
+            });
+            expect(ids(await search(reader(), args))).toEqual([original]);
+        });
+
+        it.each([
+            {
+                boundary: "from",
+                originalAt: "2026-10-09",
+                query: "Datefromneedle",
+            },
+            { boundary: "to", originalAt: "2026-10-13", query: "Datetoneedle" },
+        ])("searches a known quote when $boundary excludes its visible original", async ({
+            boundary,
+            originalAt,
+            query,
+        }) => {
+            const original = `search-date-${boundary}-original`;
+            const reply = `search-date-${boundary}-reply`;
+            await seedMail(original, OWNER, {
+                shared: true,
+                at: new Date(originalAt),
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                at: new Date("2026-10-11T12:00:00Z"),
+                segments: [body(query, "quoted", original)],
+            });
+            const result = await search(reader(), {
+                query,
+                from: "2026-10-10",
+                to: "2026-10-12",
+            });
+            expect(ids(result)).toEqual([reply]);
+            expect(JSON.stringify(result)).not.toContain(original);
+            expect(
+                ids(
+                    await search(reader(), {
+                        query,
+                        from: "2026-10-09",
+                        to: "2026-10-13",
+                    }),
+                ),
+            ).toEqual([original]);
+        });
+
+        it("checks known originals against a person's address hash as well as person id", async () => {
+            const original = "search-person-original";
+            const reply = "search-person-reply";
+            const query = "Personquotedneedle";
+            const personId = (
+                await createPerson({
+                    userId: READER,
+                    displayName: "Reply Author",
+                    primaryEmail: "reply-author@example.test",
+                    createdByUserId: READER,
+                })
+            ).id;
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+                participants: [
+                    {
+                        ref: "p1",
+                        roles: ["from"],
+                        displayName: "Original Author",
+                        address: "original-author@example.test",
+                    },
+                ],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [body(query, "quoted", original)],
+                participants: [
+                    {
+                        ref: "p1",
+                        roles: ["from"],
+                        displayName: "Reply Author",
+                        address: "reply-author@example.test",
+                    },
+                ],
+            });
+            const result = await search(reader(), { query, person: personId });
+            expect(ids(result)).toEqual([reply]);
+            expect(JSON.stringify(result)).not.toContain(original);
+            expect(ids(await search(reader(), { query }))).toEqual([original]);
+            await db()
+                .insert(mailParticipants)
+                .values({
+                    itemId: original,
+                    userId: OWNER,
+                    ref: "p2",
+                    roles: ["to"],
+                    address: encryptText("reply-author@example.test"),
+                    addressHash: participantAddressHash(
+                        "reply-author@example.test",
+                    ),
+                    position: 1,
+                });
+            expect(
+                ids(await search(reader(), { query, person: personId })),
+            ).toEqual([original]);
+        });
+
+        it("checks known originals against the entity filter", async () => {
+            const original = "search-entity-original";
+            const reply = "search-entity-reply";
+            const query = "Entityquotedneedle";
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [body(query, "quoted", original)],
+            });
+            for (const itemId of [reply, original]) {
+                const factId = `${itemId}-fact`;
+                await db()
+                    .insert(knowledgeFacts)
+                    .values({
+                        id: factId,
+                        userId: orgUserId,
+                        subjectEntityId: entityId,
+                        subjectKey: `e:${entityId}`,
+                        objectKey: `l:${factId}`,
+                        relationKey: "has_role",
+                        objectLiteral: encryptText("Reviewer"),
+                        origin: "mail",
+                    });
+                await db()
+                    .insert(knowledgeFactEvidence)
+                    .values({
+                        factId,
+                        itemId,
+                        userId: orgUserId,
+                        transcriptRevision: 0,
+                        segmentIndex: 0,
+                        charStart: 0,
+                        charEnd: query.length,
+                        quote: encryptText(query),
+                        status: "supported",
+                    });
+                const result = await search(reader(), {
+                    query,
+                    entity: entityId,
+                });
+                expect(ids(result)).toEqual([itemId]);
+                if (itemId === reply)
+                    expect(JSON.stringify(result)).not.toContain(original);
+            }
+        });
+
+        it("does not search a known quote again after its original falls before the continuation", async () => {
+            const query = "Cursorquotedneedle";
+            const original = "search-cursor-original";
+            await seedMail(original, READER, {
+                at: new Date("2026-10-15T12:00:00Z"),
+                segments: [body(query)],
+                participants: [],
+            });
+            for (let index = 0; index < 49; index++) {
+                await seedMail(`search-cursor-filler-${index}`, READER, {
+                    at: new Date("2026-10-15T11:00:00Z"),
+                    segments: [body(query)],
+                    participants: [],
+                });
+            }
+            await seedMail("search-cursor-reply", READER, {
+                at: new Date("2026-10-15T10:00:00Z"),
+                segments: [body(query, "quoted", original)],
+                participants: [],
+            });
+            const args = { query, from: "2026-10-15", to: "2026-10-15" };
+            const first = await search(reader(), args);
+            expect(first.results).toHaveLength(50);
+            expect(ids(first)).toContain(original);
+            expect(first.complete).toBe(false);
+            expect(first.continue_before).toBeTypeOf("string");
+            const next = await search(reader(), {
+                ...args,
+                before: first.continue_before,
+            });
+            expect(next.results).toEqual([]);
+            expect(next.scanned).toBe(1);
+            expect(next.complete).toBe(true);
         });
 
         it("finds a Czech Gmail forwarded part with its claimed author", async () => {
@@ -1383,7 +1625,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 shared: true,
                 segments: [
                     body(
-                        `${"prefix ".repeat(40)}Parityneedle${" suffix".repeat(40)}`,
+                        `${"prefix ".repeat(40)}Parityneedle${" context".repeat(23)} Parityneedle${" suffix".repeat(40)}`,
                         "quoted",
                     ),
                 ],
@@ -1404,6 +1646,15 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                     "listopadu",
                 ]) {
                     const found = await search(caller, { query });
+                    if (query === "Parityneedle") {
+                        expect(found.results).toHaveLength(1);
+                        expect(found.results[0]?.snippets).toHaveLength(1);
+                        expect(
+                            found.results[0]?.snippets[0]?.text.match(
+                                /Parityneedle/g,
+                            ),
+                        ).toHaveLength(2);
+                    }
                     for (const result of found.results) {
                         const detail = await call<Record<string, unknown>>(
                             "get_mail",
@@ -1818,6 +2069,255 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 await expect(search(reader(), args)).rejects.toMatchObject({
                     outcome: "invalid",
                 });
+        });
+
+        describe("language through ingest", () => {
+            async function ingestText(
+                text: string,
+                subject = "Language fixture",
+            ) {
+                const raw = await signMessage(
+                    rawMessage(
+                        [
+                            "From: Search Writer <owner@example.test>",
+                            `To: ${searchToken}@klepna.example`,
+                            `Subject: ${subject}`,
+                            `Message-ID: <${Math.random().toString(36).slice(2)}@example.test>`,
+                            "MIME-Version: 1.0",
+                            "Content-Type: text/plain; charset=utf-8",
+                        ],
+                        text,
+                    ),
+                    company,
+                );
+                const receivedAt = new Date();
+                expect(
+                    (
+                        await ingestMail({
+                            raw,
+                            recipients: [`${searchToken}@klepna.example`],
+                            spf: "pass",
+                            receivedAt,
+                            resolver,
+                        })
+                    ).outcomes[0]?.outcome,
+                ).toBe("accepted");
+                const [message] = await db()
+                    .select()
+                    .from(mailMessages)
+                    .where(
+                        and(
+                            eq(mailMessages.userId, OWNER),
+                            eq(mailMessages.sizeBytes, raw.length),
+                        ),
+                    )
+                    .orderBy(desc(mailMessages.createdAt))
+                    .limit(1);
+                if (!message) throw new Error("missing ingested mail");
+                const [content] = await db()
+                    .select()
+                    .from(mailContents)
+                    .where(
+                        and(
+                            eq(mailContents.userId, OWNER),
+                            eq(mailContents.itemId, message.id),
+                        ),
+                    );
+                await db().insert(recordingFolderAssignments).values({
+                    userId: OWNER,
+                    itemId: message.id,
+                    folderId: orgFolder,
+                });
+                return {
+                    id: message.id,
+                    language: content?.language,
+                    segments:
+                        decryptJsonField<ContentSegment[]>(content?.segments) ??
+                        [],
+                };
+            }
+
+            it("finds Czech inflections with the detected stored language, including a short subject", async () => {
+                const mail = await ingestText(
+                    "Dobrý den, posílám podklady k požadavku, který jsme pro vás připravili, aby vše bylo v pořádku.",
+                    "Nabídku",
+                );
+                expect(mail.language).toBe("cs");
+                const result = await search(owner(), {
+                    query: "požadavek nabídka",
+                });
+                expect(ids(result)).toContain(mail.id);
+                expect(
+                    result.results
+                        .find((row) => row.mail.id === mail.id)
+                        ?.snippets.map((snippet) => snippet.part),
+                ).toEqual(["subject", "body"]);
+            });
+
+            it("matches across a Czech body and an English quote in their own languages", async () => {
+                const quoted =
+                    "Please review the documents that we have prepared for you and let us know if the schedule is correct. We will send the documents to you when the review is complete and the team is ready.";
+                const mail = await ingestText(
+                    [
+                        "Dobrý den, posílám podklady k požadavku, který jsme pro vás připravili, aby vše bylo v pořádku.",
+                        "",
+                        "On Tue, 20 Oct 2026 at 10:00, Earlier Writer <earlier@example.test> wrote:",
+                        `> ${quoted}`,
+                    ].join("\n"),
+                );
+                expect(mail.segments.map((segment) => segment.role)).toEqual([
+                    "body",
+                    "quoted",
+                ]);
+                const result = await search(reader(), {
+                    query: "požadavek schedule",
+                });
+                expect(ids(result)).toContain(mail.id);
+                expect(
+                    result.results.find((row) => row.mail.id === mail.id)
+                        ?.snippets,
+                ).toEqual([
+                    expect.objectContaining({
+                        part: "body",
+                        text: expect.stringContaining("požadavku"),
+                    }),
+                    expect.objectContaining({
+                        part: "quoted",
+                        author: "Earlier Writer",
+                        text: expect.stringContaining("schedule"),
+                    }),
+                ]);
+                expect(
+                    ids(
+                        await search(reader(), {
+                            query: "požadavek missinglanguageword",
+                        }),
+                    ),
+                ).not.toContain(mail.id);
+            });
+
+            it("uses the viewer locale, settings fallback and Organization locale only when mail and part are undetected", async () => {
+                const mail = await ingestText("Prosím o doplnění požadavku.");
+                expect(mail.language).toBeNull();
+                const [before] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, READER));
+                const [orgBefore] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, orgUserId));
+                const [settingsBefore] = await db()
+                    .select()
+                    .from(userSettings)
+                    .where(eq(userSettings.userId, READER));
+                try {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).toContain(mail.id);
+                    await db()
+                        .insert(userSettings)
+                        .values({
+                            userId: READER,
+                            defaultTranscriptionLanguage: "cs",
+                        })
+                        .onConflictDoUpdate({
+                            target: userSettings.userId,
+                            set: { defaultTranscriptionLanguage: "cs" },
+                        });
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "en" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).not.toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: null })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, orgUserId));
+                    expect(
+                        ids(
+                            await search(
+                                serviceCaller(orgUserId, ["mail:read"]),
+                                { query: "požadavek" },
+                            ),
+                        ),
+                    ).toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "en" })
+                        .where(eq(users.id, orgUserId));
+                    expect(
+                        ids(
+                            await search(
+                                serviceCaller(orgUserId, ["mail:read"]),
+                                { query: "požadavek" },
+                            ),
+                        ),
+                    ).not.toContain(mail.id);
+                } finally {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: before?.locale ?? null })
+                        .where(eq(users.id, READER));
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: orgBefore?.locale ?? null })
+                        .where(eq(users.id, orgUserId));
+                    if (settingsBefore)
+                        await db()
+                            .update(userSettings)
+                            .set({
+                                defaultTranscriptionLanguage:
+                                    settingsBefore.defaultTranscriptionLanguage,
+                            })
+                            .where(eq(userSettings.userId, READER));
+                    else
+                        await db()
+                            .delete(userSettings)
+                            .where(eq(userSettings.userId, READER));
+                }
+            });
+
+            it("keeps a detected English part unstemmed even for a Czech viewer", async () => {
+                const mail = await ingestText(
+                    "Please review the document with the label požadavku and let us know if the document is ready for the next step.",
+                );
+                expect(mail.language).toBe("en");
+                const [before] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, READER));
+                try {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).not.toContain(mail.id);
+                    expect(
+                        ids(await search(reader(), { query: "požadavku" })),
+                    ).toContain(mail.id);
+                } finally {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: before?.locale ?? null })
+                        .where(eq(users.id, READER));
+                }
+            });
         });
     });
 });

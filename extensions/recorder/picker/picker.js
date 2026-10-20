@@ -16,7 +16,11 @@ const progress = document.getElementById("picker-progress");
 const completedView = document.getElementById("picker-completed");
 const micBar = document.getElementById("picker-mic-bar");
 const systemBar = document.getElementById("picker-system-bar");
+const silentHint = document.getElementById("picker-silent");
+const SILENT_DB = -50;
+const SILENT_HINT_MS = 20_000;
 let chooseRequestId = null;
+let systemSilentSince = null;
 let systemStream = null;
 let recording = false;
 let completed = false;
@@ -30,6 +34,18 @@ function showError(error) {
 
 function setLevel(element, db) {
     element.style.width = `${Math.max(0, Math.min(100, (db + 60) * 1.7))}%`;
+}
+
+// A shared window, screen or wrong tab records no meeting audio: say so
+// while there is still time to share the meeting tab instead.
+function noteSystemLevel(db) {
+    if (!recording || db > SILENT_DB) {
+        systemSilentSince = null;
+        silentHint.hidden = true;
+        return;
+    }
+    systemSilentSince ??= Date.now();
+    if (Date.now() - systemSilentSince >= SILENT_HINT_MS) silentHint.hidden = false;
 }
 
 function formatElapsed(startedAt) {
@@ -125,9 +141,11 @@ const capture = createCaptureHost({
     onLevels: ({ micDb, systemDb }) => {
         setLevel(micBar, micDb);
         setLevel(systemBar, systemDb);
+        noteSystemLevel(systemDb);
     },
     onStopped: () => {
         recording = false;
+        silentHint.hidden = true;
         stop.disabled = true;
         status.textContent = t("finishing");
     },

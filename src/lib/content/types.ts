@@ -45,6 +45,19 @@ export type SegmentRole =
     | "quoted_signature"
     | "disclaimer";
 
+/**
+ * What showed a mail signature: the client's markup, the `-- ` delimiter, a
+ * closing line, a signature the sender used before, the author's name over
+ * contact lines, or a mobile or client footer.
+ */
+export type SignatureCue =
+    | "markup"
+    | "delimiter"
+    | "closing"
+    | "known"
+    | "contact"
+    | "footer";
+
 /** One piece of an item's content, in reading order. */
 export interface ContentSegment {
     index: number;
@@ -58,6 +71,8 @@ export interface ContentSegment {
     /** A recording's turn: milliseconds into the audio. */
     startMs?: number;
     endMs?: number;
+    /** A signature or quoted signature: what showed it. */
+    signatureCue?: SignatureCue;
     text: string;
     /**
      * An item already in the pile this quoted part repeats; its text is

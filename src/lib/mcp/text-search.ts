@@ -1,4 +1,5 @@
 import { stemVariants } from "@/lib/knowledge/stemming";
+import { snippetBounds } from "@/lib/search/snippets";
 
 /** Where a query word was found in a text: `[start, end)` offsets. */
 export interface TextHit {
@@ -16,6 +17,7 @@ interface Token {
 }
 
 const WORD = /[\p{L}\p{N}\p{M}]+/gu;
+const MERGE_GAP = 10;
 
 function tokens(text: string, language: string | null): Token[] {
     const out: Token[] = [];
@@ -55,25 +57,33 @@ export function matchText(
     language: string | null,
 ): TextHit[] | null {
     if (query.length === 0) return null;
+    const hits = matchQueryWords(text, query, language);
+    if (hits.some((word) => word.length === 0)) return null;
+    return hits.flat().sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+/** Matches each query word independently, preserving empty entries for words absent from this part. */
+export function matchQueryWords(
+    text: string,
+    query: PreparedQuery,
+    language: string | null,
+): TextHit[][] {
     const words = tokens(text, language);
-    const hits: TextHit[] = [];
-    for (const forms of query) {
+    return query.map((forms) => {
         const wanted = new Set(forms);
-        let found = false;
+        const hits: TextHit[] = [];
         for (const word of words) {
-            if (word.forms.some((form) => wanted.has(form))) {
+            if (word.forms.some((form) => wanted.has(form)))
                 hits.push({ start: word.start, end: word.end });
-                found = true;
-            }
         }
-        if (!found) return null;
-    }
-    return hits.sort((a, b) => a.start - b.start || a.end - b.end);
+        return hits;
+    });
 }
 
 /**
  * Up to `max` non-overlapping excerpts of `text` around `hits` (in text
- * order), `radius` characters either side, marked with "…" where cut.
+ * order), about `radius` characters either side, cut at word boundaries
+ * and marked with "…". Nearby windows merge up to twice their normal size.
  */
 export function snippets(
     text: string,
@@ -81,19 +91,35 @@ export function snippets(
     max = 3,
     radius = 100,
 ): string[] {
-    const out: string[] = [];
-    let coveredUntil = -1;
+    const windows: { start: number; end: number; limit: number }[] = [];
     for (const hit of hits) {
-        if (out.length >= max) break;
-        if (hit.start < coveredUntil) continue;
-        const from = Math.max(0, hit.start - radius, coveredUntil);
-        const to = Math.min(text.length, hit.end + radius);
-        out.push(
-            `${from > 0 ? "…" : ""}${text.slice(from, to).trim()}${
-                to < text.length ? "…" : ""
-            }`,
+        const previous = windows.at(-1);
+        const { start, end } = snippetBounds(
+            text,
+            hit.start - radius,
+            hit.end + radius,
+            hit,
         );
-        coveredUntil = to;
+        if (
+            previous &&
+            start <= previous.end + MERGE_GAP &&
+            end <= previous.limit
+        ) {
+            previous.end = Math.max(previous.end, end);
+            continue;
+        }
+        if (previous && hit.end <= previous.end) continue;
+        if (windows.length >= max) break;
+        const from = Math.max(start, previous?.end ?? 0);
+        const length = Math.max(end - from, hit.end - hit.start + 2 * radius);
+        windows.push({
+            start: from,
+            end,
+            limit: from + 2 * length + MERGE_GAP,
+        });
     }
-    return out;
+    return windows.map(
+        ({ start, end }) =>
+            `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`,
+    );
 }

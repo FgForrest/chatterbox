@@ -549,7 +549,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 contentId: expect.any(String),
                 contentRevision: expect.any(Number),
             },
-            outputLanguage: null,
+            outputLanguage: "en",
             outputFormatLocale: "en",
         });
         expect(decryptText(stored?.summary ?? "")).toBe(

@@ -260,6 +260,7 @@ export interface SearchableMail {
 export async function searchableMailBatch(
     caller: McpCaller,
     rows: readonly MailRow[],
+    candidateCondition: SQL,
     personFilter: MailPersonFilter | null = null,
 ): Promise<Map<string, SearchableMail>> {
     if (!rows.length) return new Map();
@@ -323,14 +324,9 @@ export async function searchableMailBatch(
         ? await db
               .select({ id: chatterItems.id })
               .from(chatterItems)
-              .where(
-                  and(
-                      or(...originalConditions),
-                      mcpItemCondition(caller, ["mail"]),
-                  ),
-              )
+              .where(and(or(...originalConditions), candidateCondition))
         : [];
-    const visible = new Set(originals.map((row) => row.id));
+    const candidates = new Set(originals.map((row) => row.id));
     const stored = new Map<string, StoredSummary>();
     for (const enhancement of enhancements) {
         if (stored.has(enhancement.itemId) && enhancement.source !== "riffado")
@@ -378,7 +374,7 @@ export async function searchableMailBatch(
             parts.push({ part: "from", author: null, text: from.address });
         for (const part of searchableMailParts(
             segments.get(row.id) ?? [],
-            visible,
+            candidates,
         )) {
             const author = people.find(
                 (person) => person.ref === part.participantRef,

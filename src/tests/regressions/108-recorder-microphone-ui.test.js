@@ -73,20 +73,28 @@ const h = vi.hoisted(() => {
 import "../../../extensions/recorder/request/request.js";
 
 describe("visible microphone and participant request", () => {
-    it("requires the participant acknowledgement then resumes automatically after the mic grant", async () => {
+    it("asks for consent on its record buttons, and waits for one after the mic grant", async () => {
         await vi.waitFor(() =>
             expect(h.node("mic-status").textContent).toBe("micWarning"),
         );
-        await h.handlers["grant-mic:click"]();
-        expect(h.node("mic-status").textContent).toBe("participantAckRequired");
-        expect(h.getUserMedia).not.toHaveBeenCalled();
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-        h.node("notice-check").checked = true;
+        expect(h.node("notice-text").hidden).toBe(false);
+        expect(h.node("start").textContent).toBe("recordWithConsent");
+        expect(h.node("without-mic").textContent).toBe(
+            "recordWithoutMicWithConsent",
+        );
         await h.handlers["grant-mic:click"]();
         expect(h.getUserMedia).toHaveBeenCalledExactlyOnceWith({ audio: true });
         expect(chrome.storage.session.set).toHaveBeenCalledWith({
             microphoneGrantAt: expect.any(Number),
         });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "reevaluate-tabs",
+        });
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "resume-recording" }),
+        );
+        expect(h.node("start").hidden).toBe(false);
+        await h.handlers["start:click"]();
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             type: "resume-recording",
             requestId: "request-1",
@@ -94,25 +102,26 @@ describe("visible microphone and participant request", () => {
             noticeAcknowledgedAt: expect.any(String),
         });
         expect(window.close).toHaveBeenCalledOnce();
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            type: "reevaluate-tabs",
-        });
         expect(h.node("meeting-title").textContent).toBe(
             "Google Meet · meet.google.com · abc-defg-hij",
         );
     });
 
     it("offers explicit recording without mic even when Chrome blocks access", async () => {
-        h.node("notice-check").checked = true;
         h.setState("denied");
         chrome.runtime.sendMessage.mockClear();
         await h.handlers["window:focus"]();
         expect(h.node("grant-mic").hidden).toBe(true);
         expect(h.node("start").hidden).toBe(true);
         expect(h.node("mic-status").textContent).toContain("micReallow");
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
         await h.handlers["without-mic:click"]();
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-            expect.objectContaining({ withoutMicrophone: true }),
+            expect.objectContaining({
+                type: "resume-recording",
+                withoutMicrophone: true,
+                noticeAcknowledgedAt: expect.any(String),
+            }),
         );
     });
 });
