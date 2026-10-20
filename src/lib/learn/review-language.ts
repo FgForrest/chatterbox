@@ -6,6 +6,7 @@ import {
     defaultLocale,
     normalizeLocale,
 } from "@/lib/i18n/config";
+import { promptLocaleForLanguage } from "@/lib/profiles/prompts";
 import type { RecordingView } from "@/lib/sharing/view";
 
 const LANGUAGE_NAMES: Record<AppLocale, string> = {
@@ -65,7 +66,7 @@ export async function resolveLearnReviewLocale(
             }
         }
     }
-    return normalizeLocale(contentLanguage) ?? defaultLocale;
+    return promptLocaleForLanguage(contentLanguage) ?? defaultLocale;
 }
 
 /** Language instruction for reviewer-facing prose, separate from source text. */

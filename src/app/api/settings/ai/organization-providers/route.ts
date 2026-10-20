@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { loadDefaultProviderPointers } from "@/lib/ai/default-provider";
 import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
+import {
+    parseProviderMaxOutputTokens,
+    providerMaxOutputTokensSchema,
+} from "@/lib/ai/provider-output-tokens";
 import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
 import { parseProviderRates } from "@/lib/ai/provider-rate-input";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
@@ -23,6 +27,7 @@ const createSchema = z
         copyKeyFrom: z.string().min(1).optional(),
         baseUrl: z.string().nullable().optional(),
         defaultModel: z.string().max(100).nullable().optional(),
+        maxOutputTokens: providerMaxOutputTokensSchema,
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
         audioUsdPerHour: z.unknown().optional(),
@@ -61,9 +66,11 @@ export const POST = apiHandler(async (request: Request) => {
     const context = await organizationProviderManageContext(
         await actorFrom(request),
     );
-    const parsed = createSchema.safeParse(
-        await request.json().catch(() => null),
-    );
+    const input = await request.json().catch(() => null);
+    if (input && typeof input === "object" && "maxOutputTokens" in input) {
+        parseProviderMaxOutputTokens(input);
+    }
+    const parsed = createSchema.safeParse(input);
     if (!parsed.success) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -98,6 +105,7 @@ export const POST = apiHandler(async (request: Request) => {
         ...(body.copyKeyFrom ? { copyKeyFrom: body.copyKeyFrom } : {}),
         baseUrl: body.baseUrl || null,
         defaultModel: body.defaultModel || null,
+        maxOutputTokens: body.maxOutputTokens ?? null,
         rates: parseProviderRates(body),
         defaults: {
             transcription: body.isDefaultTranscription,

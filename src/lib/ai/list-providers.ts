@@ -14,6 +14,7 @@ export interface ProviderListItem {
     provider: string;
     baseUrl: string | null;
     defaultModel: string | null;
+    maxOutputTokens?: number | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
     isDefaultTopics?: boolean;
@@ -62,6 +63,7 @@ export async function listUserProviders(
             provider: apiCredentials.provider,
             baseUrl: apiCredentials.baseUrl,
             defaultModel: apiCredentials.defaultModel,
+            maxOutputTokens: apiCredentials.maxOutputTokens,
             inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
             outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
             audioUsdPerHour: apiCredentials.audioUsdPerHour,

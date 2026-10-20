@@ -13,6 +13,7 @@
  * permanent failure is strictly worse than paying once.
  */
 
+import type * as OpenAIModule from "openai";
 import { APIError } from "openai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -23,6 +24,8 @@ import {
     userSettings,
 } from "@/db/schema";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
+import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
+import { summaryOutputTokens } from "@/lib/summary/summary-model";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
@@ -63,6 +66,10 @@ vi.mock("@/lib/org/config", () => ({
     assertNotOrgAccount: async () => {},
 }));
 
+vi.mock("@/lib/ai/usage-cost", () => ({
+    recordChatCompletionUsage: vi.fn(async () => undefined),
+}));
+
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
@@ -88,7 +95,7 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 }));
 
 vi.mock("openai", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("openai")>();
+    const actual = await importOriginal<typeof OpenAIModule>();
     return {
         ...actual,
         OpenAI: class {
@@ -146,14 +153,18 @@ vi.mock("@/db", () => ({
     },
 }));
 
-function stage(settings: Record<string, unknown> = {}) {
+function stage(
+    settings: Record<string, unknown> = {},
+    transcript = "a transcript",
+    maxOutputTokens: number | null = null,
+) {
     profileLegacy.current = settings;
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
-        [{ recordingId: "rec-1", userId: "user-1", text: "a transcript" }],
+        [{ recordingId: "rec-1", userId: "user-1", text: transcript }],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null, ...settings }],
@@ -165,6 +176,7 @@ function stage(settings: Record<string, unknown> = {}) {
                 baseUrl: "",
                 provider: "openai",
                 defaultModel: "gpt-4o-mini",
+                maxOutputTokens,
                 isDefaultEnhancement: true,
                 userId: "user-1",
             },
@@ -173,8 +185,11 @@ function stage(settings: Record<string, unknown> = {}) {
     selectResults.set(aiEnhancements, [[]]);
 }
 
-function reply(content = '{"summary":"s","keyPoints":[],"actionItems":[]}') {
-    return { choices: [{ message: { content } }] };
+function reply(
+    content = '{"summary":"s","keyPoints":[],"actionItems":[]}',
+    finishReason = "stop",
+) {
+    return { choices: [{ message: { content }, finish_reason: finishReason }] };
 }
 
 function providerError(status: number, code?: string) {
@@ -194,9 +209,6 @@ function providerError(status: number, code?: string) {
  * `jobs/backoff.test.ts`.
  */
 async function generate(): Promise<unknown> {
-    const { generateSummaryForRecording } = await import(
-        "@/lib/summary/generate-summary"
-    );
     const promise = generateSummaryForRecording("user-1", "rec-1", {
         trigger: "manual",
     });
@@ -219,7 +231,78 @@ describe("per-call retry and repair inside summary generation", () => {
     });
 
     afterEach(() => {
+        vi.restoreAllMocks();
         vi.useRealTimers();
+    });
+
+    it("allows detailed minutes and structured tasks in every pass and merge", async () => {
+        stage(
+            { summaryMultiPass: true, summaryMultiPassRounds: 2 },
+            "A long working discussion. ".repeat(1500),
+        );
+        createMock.mockResolvedValue(reply());
+        const result = (await generate()) as { ok: boolean };
+        expect(result.ok).toBe(true);
+        expect(createMock).toHaveBeenCalledTimes(3);
+        for (const [request] of createMock.mock.calls) {
+            const prompt = createMock.mock.calls[0]?.[0].messages[1]
+                .content as string;
+            expect(request.max_tokens).toBe(summaryOutputTokens(prompt.length));
+        }
+    });
+
+    it("gives short recordings the 4000-token pass and merge floor", async () => {
+        stage({ summaryMultiPass: true, summaryMultiPassRounds: 2 });
+        createMock.mockResolvedValue(reply());
+        const result = (await generate()) as { ok: boolean };
+        expect(result.ok).toBe(true);
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 4000, 4000]);
+    });
+
+    it("caps passes, the merge and its repair at the provider limit", async () => {
+        stage(
+            { summaryMultiPass: true, summaryMultiPassRounds: 2 },
+            "A working discussion. ".repeat(3000),
+            3500,
+        );
+        createMock
+            .mockResolvedValueOnce(reply())
+            .mockResolvedValueOnce(reply())
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"'))
+            .mockResolvedValueOnce(reply());
+        const result = (await generate()) as { ok: boolean };
+        expect(result.ok).toBe(true);
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([3500, 3500, 3500, 3500]);
+    });
+
+    it("caps a single-pass repair and keeps a smaller pass allowance", async () => {
+        stage({}, "a transcript", 5000);
+        createMock
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"'))
+            .mockResolvedValueOnce(reply());
+        expect((await generate()) as { ok: boolean }).toMatchObject({
+            ok: true,
+        });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 5000]);
+    });
+
+    it("bounds long pass and repair allowances at 16000", async () => {
+        stage({}, "A working discussion. ".repeat(10000));
+        createMock
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"'))
+            .mockResolvedValueOnce(reply());
+        expect((await generate()) as { ok: boolean }).toMatchObject({
+            ok: true,
+        });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([16000, 16000]);
     });
 
     it("retries a rate-limited pass and succeeds on the next one", async () => {
@@ -248,7 +331,7 @@ describe("per-call retry and repair inside summary generation", () => {
     });
 
     it("repairs invalid JSON through a follow-up conversation", async () => {
-        stage();
+        stage({}, "A long working discussion. ".repeat(1500));
         const invalid = '{"summary":"unfinished"';
         createMock
             .mockResolvedValueOnce(reply(invalid))
@@ -279,7 +362,10 @@ describe("per-call retry and repair inside summary generation", () => {
         expect(JSON.stringify(repairRequest.messages)).not.toContain(
             "a transcript",
         );
-        expect(repairRequest.max_tokens).toBe(3000);
+        const passTokens = createMock.mock.calls[0]?.[0].max_tokens as number;
+        expect(repairRequest.max_tokens).toBe(
+            Math.min(16000, Math.ceil(passTokens * 1.5)),
+        );
     });
 
     it("repairs an invalid merge instead of degrading the run", async () => {
@@ -310,7 +396,7 @@ describe("per-call retry and repair inside summary generation", () => {
         expect(createMock).toHaveBeenCalledTimes(5);
     });
 
-    it("does not retry a transcript past the context window", async () => {
+    it("surfaces the existing context error only after the 2000-token fallback fails", async () => {
         stage();
         createMock.mockRejectedValue(
             providerError(400, "context_length_exceeded"),
@@ -319,9 +405,138 @@ describe("per-call retry and repair inside summary generation", () => {
         const result = (await generate()) as { ok: boolean };
 
         expect(result.ok).toBe(false);
-        // One call, not three. A transcript that does not fit will not fit in
-        // two seconds, and each attempt is billed.
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 2000]);
+        expect(result).toMatchObject({
+            error: expect.objectContaining({
+                code: "context_length_exceeded",
+            }),
+        });
+    });
+
+    it.each([
+        "code",
+        "message",
+    ])("retries a context-rejected pass once at 2000 and logs only allowances (%s)", async (kind) => {
+        stage({}, "private transcript marker");
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        createMock
+            .mockRejectedValueOnce(
+                kind === "code"
+                    ? providerError(400, "context_length_exceeded")
+                    : new APIError(
+                          400,
+                          { message: "Maximum context length is 8192 tokens" },
+                          undefined,
+                          undefined,
+                      ),
+            )
+            .mockResolvedValueOnce(reply());
+        expect(await generate()).toMatchObject({ ok: true });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 2000]);
+        expect(warning).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "4000 output tokens; retrying once with 2000",
+            ),
+        );
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(
+            "private transcript marker",
+        );
+    });
+
+    it("does not retry context errors when the provider cap already limits the request to 2000", async () => {
+        stage({}, "a transcript", 2000);
+        createMock.mockRejectedValue(
+            providerError(400, "context_length_exceeded"),
+        );
+        expect(await generate()).toMatchObject({ ok: false });
         expect(createMock).toHaveBeenCalledTimes(1);
+        expect(createMock.mock.calls[0]?.[0].max_tokens).toBe(2000);
+    });
+
+    it("falls back once on a context-rejected merge", async () => {
+        stage({ summaryMultiPass: true, summaryMultiPassRounds: 2 });
+        createMock
+            .mockResolvedValueOnce(reply())
+            .mockResolvedValueOnce(reply())
+            .mockRejectedValueOnce(
+                providerError(400, "context_length_exceeded"),
+            )
+            .mockResolvedValueOnce(reply());
+        expect(await generate()).toMatchObject({
+            ok: true,
+            value: { multiPass: { merged: true } },
+        });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 4000, 4000, 2000]);
+    });
+
+    it("falls back once on a context-rejected repair", async () => {
+        stage();
+        createMock
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"'))
+            .mockRejectedValueOnce(
+                providerError(400, "context_length_exceeded"),
+            )
+            .mockResolvedValueOnce(reply());
+        expect(await generate()).toMatchObject({ ok: true });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 6000, 2000]);
+    });
+
+    it("sizes a repair from the effective allowance after a context fallback", async () => {
+        stage();
+        createMock
+            .mockRejectedValueOnce(
+                providerError(400, "context_length_exceeded"),
+            )
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"', "length"))
+            .mockResolvedValueOnce(reply());
+        expect(await generate()).toMatchObject({ ok: true });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 2000, 3000]);
+    });
+
+    it.each([
+        "provider cap",
+        "ceiling",
+    ] as const)("skips an impossible length repair at the %s", async (limit) => {
+        stage(
+            {},
+            limit === "ceiling"
+                ? "Long working discussion. ".repeat(10000)
+                : "a transcript",
+            limit === "provider cap" ? 3500 : null,
+        );
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        createMock.mockResolvedValue(
+            reply('{"summary":"unfinished"', "length"),
+        );
+        await generate();
+        expect(createMock).toHaveBeenCalledTimes(1);
+        expect(warning).toHaveBeenCalledWith(
+            expect.stringContaining("reply was cut off by the output limit"),
+        );
+        expect(warning).toHaveBeenCalledWith(
+            expect.stringContaining("skipping repair"),
+        );
+    });
+
+    it("repairs a length-truncated response when a larger allowance is available", async () => {
+        stage();
+        createMock
+            .mockResolvedValueOnce(reply('{"summary":"unfinished"', "length"))
+            .mockResolvedValueOnce(reply());
+        expect(await generate()).toMatchObject({ ok: true });
+        expect(
+            createMock.mock.calls.map(([request]) => request.max_tokens),
+        ).toEqual([4000, 6000]);
     });
 
     it("does not retry a provider that rejected the request", async () => {
@@ -384,5 +599,20 @@ describe("per-call retry and repair inside summary generation", () => {
         // merged, rather than failing a run that has usable output.
         expect(result.ok).toBe(true);
         expect(result.value?.multiPass?.passesUsed).toBeGreaterThanOrEqual(1);
+    });
+});
+
+describe("summary output scaling", () => {
+    it.each([
+        [0, 4000],
+        [12000, 4000],
+        [24000, 4000],
+        [24001, 4001],
+        [30000, 5000],
+        [60000, 10000],
+        [96000, 16000],
+        [500000, 16000],
+    ])("allows %i prompt characters %i tokens", (chars, tokens) => {
+        expect(summaryOutputTokens(chars)).toBe(tokens);
     });
 });

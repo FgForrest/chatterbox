@@ -122,6 +122,7 @@ export function ProviderFormDialog({
     const [apiKey, setApiKey] = useState("");
     const [baseUrl, setBaseUrl] = useState("");
     const [defaultModel, setDefaultModel] = useState("");
+    const [maxOutputTokens, setMaxOutputTokens] = useState("");
     const [isDefaultTranscription, setIsDefaultTranscription] = useState(false);
     const [isDefaultEnhancement, setIsDefaultEnhancement] = useState(false);
     const [isDefaultLearn, setIsDefaultLearn] = useState(false);
@@ -139,6 +140,7 @@ export function ProviderFormDialog({
             setApiKey("");
             setBaseUrl("");
             setDefaultModel("");
+            setMaxOutputTokens("");
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
             setIsDefaultLearn(false);
@@ -152,6 +154,7 @@ export function ProviderFormDialog({
         setApiKey("");
         setBaseUrl(source?.baseUrl ?? "");
         setDefaultModel(source?.defaultModel ?? "");
+        setMaxOutputTokens(source?.maxOutputTokens?.toString() ?? "");
         setIsDefaultTranscription(
             editing && source?.isDefaultTranscription === true,
         );
@@ -228,6 +231,9 @@ export function ProviderFormDialog({
             ...rates,
             baseUrl: baseUrl || null,
             defaultModel: defaultModel || null,
+            maxOutputTokens: maxOutputTokens.trim()
+                ? Number(maxOutputTokens)
+                : null,
         };
         if (mode === "add") body.provider = provider;
         if (duplicating && source) {
@@ -433,6 +439,36 @@ export function ProviderFormDialog({
                         <p className="text-sm text-destructive" role="alert">
                             {defaultModelError}
                         </p>
+                    )}
+                    {!transcriptionOnly && (
+                        <div className="space-y-2">
+                            <Label
+                                htmlFor={`${scope}-provider-max-output-tokens`}
+                            >
+                                {i18n("Max output tokens")}
+                            </Label>
+                            <Input
+                                id={`${scope}-provider-max-output-tokens`}
+                                type="number"
+                                min={256}
+                                max={200000}
+                                step={1}
+                                value={maxOutputTokens}
+                                disabled={saving}
+                                aria-describedby={`${scope}-provider-max-output-tokens-help`}
+                                onChange={(event) =>
+                                    setMaxOutputTokens(event.target.value)
+                                }
+                            />
+                            <p
+                                id={`${scope}-provider-max-output-tokens-help`}
+                                className="text-xs text-muted-foreground"
+                            >
+                                {i18n(
+                                    "Limits AI answers (summaries, titles, chapters and Learn), never transcription. Set this if your model requires an output limit; leave empty for no provider cap.",
+                                )}
+                            </p>
+                        </div>
                     )}
                     <Panel variant="inset" className="space-y-2 text-sm">
                         <label

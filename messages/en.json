@@ -2458,6 +2458,8 @@
   "2zA1UG": "Base URL (Optional)",
   "EGkfUp": "https://api.example.com/v1",
   "yXIBKn": "Private and localhost addresses are not reachable from the hosted app.",
+  "mHgGC0": "Max output tokens",
+  "A5psjc": "Limits AI answers (summaries, titles, chapters and Learn), never transcription. Set this if your model requires an output limit; leave empty for no provider cap.",
   "yJZns3": "Use for transcription",
   "8o8OsN": "Organization default for transcription",
   "nUH-VQ": "Use for summaries",

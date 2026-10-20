@@ -138,6 +138,12 @@ describeWithDatabase("Learn reviewer locale (PostgreSQL)", () => {
         expect(await resolveLearnReviewLocale(database.db, run, "cs")).toBe(
             "cs-CZ",
         );
+        expect(await resolveLearnReviewLocale(database.db, run, "ces")).toBe(
+            "cs-CZ",
+        );
+        expect(await resolveLearnReviewLocale(database.db, run, "cze")).toBe(
+            "cs-CZ",
+        );
         expect(await resolveLearnReviewLocale(database.db, run, "de")).toBe(
             "en",
         );

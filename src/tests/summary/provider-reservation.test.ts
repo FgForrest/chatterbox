@@ -65,6 +65,7 @@ describe("summary provider call reservations", () => {
             apiKey: "plaintext-at-use",
             baseUrl: null,
             defaultModel: "gpt-4o-mini",
+            maxOutputTokens: null,
             isDefaultTranscription: false,
             isDefaultEnhancement: false,
             isDefaultLearn: false,
@@ -108,8 +109,23 @@ describe("summary provider call reservations", () => {
         expect(reserveCall).toHaveBeenCalledTimes(5);
     });
 
-    it("uses a pinned Organization provider and reserves every multi-pass call", async () => {
+    it.each([
+        false,
+        true,
+    ])("uses a pinned Organization provider and reserves every call (context fallback: %s)", async (fallback) => {
         const create = vi.fn().mockResolvedValue(reply());
+        if (fallback)
+            create.mockRejectedValueOnce(
+                new APIError(
+                    400,
+                    {
+                        code: "context_length_exceeded",
+                        message: "context length exceeded",
+                    },
+                    undefined,
+                    undefined,
+                ),
+            );
         const reserveCall = vi.fn().mockResolvedValue(undefined);
         const credential = {
             id: "org-card",
@@ -118,6 +134,7 @@ describe("summary provider call reservations", () => {
             apiKey: "plaintext-at-use",
             baseUrl: null,
             defaultModel: "gpt-4o-mini",
+            maxOutputTokens: null,
             isDefaultTranscription: false,
             isDefaultEnhancement: false,
             isDefaultLearn: false,
@@ -162,8 +179,14 @@ describe("summary provider call reservations", () => {
             actorUserId: "actor",
         });
         expect(model.payerUserId).toBe("org-user");
-        expect(create).toHaveBeenCalledTimes(3);
-        expect(reserveCall).toHaveBeenCalledTimes(3);
+        expect(create).toHaveBeenCalledTimes(fallback ? 4 : 3);
+        expect(reserveCall).toHaveBeenCalledTimes(fallback ? 4 : 3);
+        if (fallback)
+            expect(
+                create.mock.calls.some(
+                    ([params]) => params.max_tokens === 2000,
+                ),
+            ).toBe(true);
         expect(model.openai.maxRetries).toBe(0);
     });
 
@@ -181,6 +204,7 @@ describe("summary provider call reservations", () => {
             apiKey: "plaintext-at-use",
             baseUrl: null,
             defaultModel: "gpt-4o-mini",
+            maxOutputTokens: null,
             isDefaultTranscription: false,
             isDefaultEnhancement: false,
             isDefaultLearn: false,

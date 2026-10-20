@@ -1,0 +1,1 @@
+ALTER TABLE "api_credentials" ADD COLUMN "max_output_tokens" integer;
