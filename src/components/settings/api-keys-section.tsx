@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clipboard, KeyRound, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -271,8 +271,7 @@ export function ApiKeysSection() {
                                     className="flex-1"
                                     onClick={copyCreatedKey}
                                 >
-                                    <Clipboard className="size-4" />{" "}
-                                    {i18n("Copy")}
+                                    <Copy className="size-4" /> {i18n("Copy")}
                                 </Button>
                                 <Button
                                     type="button"

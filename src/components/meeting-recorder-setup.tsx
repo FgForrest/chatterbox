@@ -2,7 +2,7 @@
 
 import {
     Check,
-    Clipboard,
+    Copy,
     Download,
     ExternalLink,
     Plug,
@@ -479,7 +479,7 @@ export function MeetingRecorderSetup({
                                 }
                                 disabled={!manualServerUrl}
                             >
-                                {copied === "url" ? <Check /> : <Clipboard />}
+                                {copied === "url" ? <Check /> : <Copy />}
                             </Button>
                         </div>
                     </div>
@@ -492,7 +492,7 @@ export function MeetingRecorderSetup({
                                 variant="outline"
                                 onClick={() => void copy("key", manualKey)}
                             >
-                                {copied === "key" ? <Check /> : <Clipboard />}
+                                {copied === "key" ? <Check /> : <Copy />}
                                 {i18n("Copy key")}
                             </Button>
                             <p className="text-xs text-muted-foreground">
