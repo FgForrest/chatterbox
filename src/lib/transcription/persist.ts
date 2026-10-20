@@ -772,6 +772,7 @@ export async function upsertEnhancement(
                         contentRevision: args.inputs.contentRevision,
                     },
                     generation: advance.requestedGeneration,
+                    inputFingerprint: args.inputFingerprint,
                 });
             }
             return { advance, outdated: false };

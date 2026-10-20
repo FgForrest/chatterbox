@@ -88,6 +88,7 @@ export interface SummarySidecarTask {
     done: boolean;
     assignee: string | null;
     dueDate: string | null;
+    duePhrase?: string | null;
 }
 
 export interface RecordingMarkdownDocument {
@@ -181,20 +182,31 @@ function taskList(
     tasks: readonly SummarySidecarTask[],
     locale: AppLocale,
 ): string {
-    const due = translatedSourceMessage(locale, "Due").toLocaleLowerCase(
-        locale,
+    const headers = ["Task", "Due", "Assignee"].map((header) =>
+        translatedSourceMessage(locale, header),
     );
-    return tasks
-        .map((task) => {
-            const details = [
-                task.assignee,
-                task.dueDate ? `${due} ${task.dueDate}` : null,
-            ].filter(Boolean);
-            const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
-            const text = task.text.replace(/\s+/g, " ").trim();
-            return `- [${task.done ? "x" : " "}] ${text}${suffix}`;
-        })
+    const rows = tasks.map((task) => {
+        const text = tableCell(task.text);
+        return [
+            task.done ? `~~${text}~~` : text,
+            tableCell(task.dueDate ?? task.duePhrase ?? ""),
+            tableCell(task.assignee ?? ""),
+        ];
+    });
+    return [headers, ["---", "---", "---"], ...rows]
+        .map((cells) => `| ${cells.join(" | ")} |`)
         .join("\n");
+}
+
+function tableCell(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\\", "&#92;")
+        .replaceAll("|", "&#124;")
+        .replace(/\r\n|\r|\n/g, "<br>")
+        .trim();
 }
 
 /**
@@ -440,6 +452,7 @@ async function renderMailSummaryMarkdownDocument(
             done: task.status === "done",
             assignee: task.assignee?.name ?? task.assigneeHint,
             dueDate: task.dueDate,
+            duePhrase: task.duePhrase,
         }));
     if (
         !summary?.trim() &&
@@ -622,6 +635,7 @@ async function renderRecordingMarkdownDocument(
             done: task.status === "done",
             assignee: task.assignee?.name ?? task.assigneeHint,
             dueDate: task.dueDate,
+            duePhrase: task.duePhrase,
         }));
     if (
         !summary?.trim() &&

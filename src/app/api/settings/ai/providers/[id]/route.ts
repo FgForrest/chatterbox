@@ -7,6 +7,7 @@ import {
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
 import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
+import { parseProviderMaxOutputTokens } from "@/lib/ai/provider-output-tokens";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -33,6 +34,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
     const body = await request.json();
+    const maxOutputTokens = parseProviderMaxOutputTokens(body);
     const {
         apiKey,
         baseUrl,
@@ -164,6 +166,8 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         if (defaultModel !== undefined) {
             updateData.defaultModel = defaultModel || null;
         }
+        if (maxOutputTokens !== undefined)
+            updateData.maxOutputTokens = maxOutputTokens;
         if (hasRates) Object.assign(updateData, parseProviderRates(body));
         if (typeof disabled === "boolean") {
             updateData.disabledAt = disabled ? new Date() : null;

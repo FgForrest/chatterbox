@@ -29,6 +29,7 @@ import { t } from "./i18n.js";
  * @property {boolean} hasApiKey
  * @property {string} microphoneId
  * @property {boolean} micReminderDismissed
+ * @property {boolean} microphoneSetupSkipped
  * @property {string|null} noticeText         user override, null = server/default
  * @property {"mixed"|"split"} channelMode
  * @property {Record<string, "off"|"prompt"|"auto">} platformModes
@@ -49,6 +50,7 @@ export async function getSettings() {
         hasApiKey: Boolean(raw[STORAGE_KEYS.encryptedApiKey]),
         microphoneId: raw[STORAGE_KEYS.microphoneId] ?? "",
         micReminderDismissed: raw[STORAGE_KEYS.micReminderDismissed] === true,
+        microphoneSetupSkipped: raw[STORAGE_KEYS.microphoneSetupSkipped] === true,
         noticeText: raw[STORAGE_KEYS.noticeText] ?? null,
         channelMode: raw[STORAGE_KEYS.channelMode] ?? DEFAULT_CHANNEL_MODE,
         platformModes: raw[STORAGE_KEYS.platformModes] ?? {},

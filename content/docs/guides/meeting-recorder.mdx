@@ -28,22 +28,34 @@ repository.
 
 1. After installing, open your Chatterbox dashboard and click the extension's
    toolbar icon. Choose **Connect to** followed by your server address.
-2. In the setup tab, read the data-use disclosure, check the agreement box and
-   click **Agree and continue**.
-3. Allow access to this server in Chrome, then allow the microphone when
-   prompted. The setup tab shows the result. If you already agreed to the
-   disclosure, use **Allow this server and set up microphone**.
-4. Click **Return to Chatterbox and connect**. In Chatterbox, open
-   **Settings → Meeting Recorder** (or return to the recorder step in setup)
-   and click **Connect** once the extension is detected.
-5. The same extension setup tab opens for confirmation. Check the server
-   address and explicitly click **Connect** there.
-6. Chatterbox regains focus. Check that it shows **Connected to** followed by
-   your server's host name.
+2. Read the three-point data-use notice and click **I understand and agree**.
+   The full notice and privacy policy expand below it. There is no checkbox.
+3. Click **Allow microphone**. Choose Chrome's first, persistent option:
+   **Allow while visiting the site** (or **Allow on every visit**). **Allow this
+   time** expires. Edge and Brave show neutral guidance for permanent access.
+   You can choose **Not now**; the saved skip warns that recordings will lack
+   your voice and lets you allow the microphone later.
+4. Click **Connect to** the displayed server and allow site access. This is a
+   separate click from microphone permission. Chatterbox sends the recorder key
+   automatically. The extension shows **The extension is ready** and offers
+   **Back to Chatterbox**. Other settings appear after setup.
+
+If you opened Options directly, it can find open recorder settings or onboarding
+tabs. Choose the host and tab title if several are found. If none is found,
+enter your Chatterbox address; the extension opens recorder settings in a new
+tab. Sign in there if needed. Setup remains active for 15 minutes.
+
+On an older server, after about five seconds the extension offers to focus the
+Chatterbox tab. Open **Settings → Meeting Recorder** if necessary and click
+**Connect**. A key from the tab and server chosen during setup is accepted
+without another confirmation. Proposals from elsewhere still need confirmation.
+With an older extension, keep using **Connect** on the Chatterbox page and confirm
+the server in the extension as prompted.
 
 For manual pairing, expand **Connect manually** in Chatterbox and click
 **Generate recorder key**. Open the extension's **Options**, read and agree to
-the data-use disclosure, and paste the address into **Server URL** and the key
+the data-use disclosure, complete or skip the microphone step, expand **Enter
+address and key manually**, and paste the address into **Server URL** and the key
 into **Recorder key**. Click **Save and grant access** and allow this server in
 Chrome. Open tabs of that server detect the extension without a reload.
 

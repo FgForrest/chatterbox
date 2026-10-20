@@ -6,6 +6,7 @@ import { requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
+import { localeFromAcceptLanguage } from "@/lib/i18n/config";
 import { type LearnSource, startLearnRun } from "@/lib/learn/learn-job";
 import {
     requestedRecordingView,
@@ -31,6 +32,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         actsForOrganization: curates,
         source: requestedSource(request),
         trigger: "manual",
+        requestLocale: request.headers.has("accept-language")
+            ? localeFromAcceptLanguage(request.headers.get("accept-language"))
+            : undefined,
         calendarEventId:
             new URL(request.url).searchParams.get("calendarEventId") ??
             undefined,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
     clearPairing,
     connectGrantedOrigins,
@@ -44,9 +44,12 @@ const h = vi.hoisted(() => {
         value: {
             permissions: { query: vi.fn(async () => ({ state: "prompt" })) },
             mediaDevices: {
-                getUserMedia: vi.fn(async () => ({
-                    getTracks: () => [{ stop: vi.fn() }],
-                })),
+                getUserMedia: vi.fn(async () => {
+                    navigator.permissions.query.mockResolvedValue({
+                        state: "granted",
+                    });
+                    return { getTracks: () => [{ stop: vi.fn() }] };
+                }),
                 enumerateDevices: vi.fn(async () => []),
             },
         },
@@ -63,7 +66,11 @@ const h = vi.hoisted(() => {
             dataset: {},
         }),
     };
-    globalThis.window = { addEventListener: vi.fn() };
+    globalThis.window = {
+        addEventListener: (event, handler) => {
+            handlers[`window:${event}`] = handler;
+        },
+    };
     const area = (values) => ({
         get: vi.fn(async () => ({ ...values })),
         set: vi.fn(async (patch) => Object.assign(values, patch)),
@@ -90,6 +97,7 @@ const h = vi.hoisted(() => {
             executeScript: vi.fn(async () => {}),
         },
         tabs: {
+            create: vi.fn(async () => ({ id: 10 })),
             getCurrent: vi.fn(async () => ({ id: 99 })),
             get: vi.fn(async (id) => ({
                 id,
@@ -129,9 +137,14 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     readLocalMeta: vi.fn(),
 }));
 vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
-    storeToken: h.storeToken,
+    storeToken: vi.fn(async (key) => {
+        h.storeToken(key);
+        h.local.encryptedApiKey = { ciphertext: "test" };
+    }),
     readToken: vi.fn(async () => "op_test"),
-    clearToken: vi.fn(),
+    clearToken: vi.fn(async () => {
+        delete h.local.encryptedApiKey;
+    }),
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     confirmPairing: h.confirmPairing,
@@ -142,81 +155,104 @@ import "../../../extensions/recorder/options/options.js";
 async function ensureConsented() {
     if (h.local.dataUseAcknowledgedAt) return;
     await vi.waitFor(() =>
-        expect(h.node("setup-origin").textContent).toBe("connectTo"),
+        expect(h.node("setup-origin").textContent).toBe("setupConnectIntro"),
     );
-    h.node("data-use-check").checked = true;
     await h.handlers["accept-data-use:click"]();
 }
 
 describe("continuous recorder setup", () => {
-    it("accepts consent, requests access on the same click, injects, asks mic, then reuses the surface for explicit confirmation", async () => {
-        await vi.waitFor(() =>
-            expect(h.node("setup-origin").textContent).toBe("connectTo"),
-        );
-        h.node("data-use-check").checked = true;
-        const click = h.handlers["accept-data-use:click"]();
-        expect(chrome.permissions.request).toHaveBeenCalledWith({
-            origins: ["https://example.com/*"],
-        });
-        expect(
-            chrome.permissions.request.mock.invocationCallOrder[0],
-        ).toBeLessThan(chrome.storage.local.set.mock.invocationCallOrder[0]);
-        await click;
+    it("separates consent, microphone and site access, then accepts the selected key directly", async () => {
+        expect(h.node("consent-body").hidden).toBe(false);
+        expect(h.node("microphone-body").hidden).toBe(true);
+        expect(h.node("recorder-settings").hidden).toBe(true);
+        await h.handlers["accept-data-use:click"]();
         expect(h.local.dataUseAcknowledgedAt).toBeTypeOf("string");
-        expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
-            target: { tabId: 7 },
-            files: ["content-pairing.js"],
-        });
-        expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
-            audio: true,
-        });
-        expect(h.node("mic-status").textContent).toBe("micGranted");
-        expect(h.node("setup-return").hidden).toBe(false);
-        await h.handlers["setup-return:click"]();
-        await vi.waitFor(() =>
+        expect(chrome.permissions.request).not.toHaveBeenCalled();
+        expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+        expect(h.node("consent-body").hidden).toBe(true);
+        expect(h.node("microphone-body").hidden).toBe(false);
+        await h.handlers["setup-grant-mic:click"]();
+        expect(
+            navigator.mediaDevices.getUserMedia,
+        ).toHaveBeenCalledExactlyOnceWith({ audio: true });
+        expect(chrome.permissions.request).not.toHaveBeenCalled();
+        expect(h.node("connect-body").hidden).toBe(false);
+        vi.useFakeTimers();
+        try {
+            const connect = h.handlers["setup-connect:click"]();
+            expect(chrome.permissions.request).toHaveBeenCalledWith({
+                origins: ["https://example.com/*"],
+            });
+            await connect;
+            expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
+                target: { tabId: 7 },
+                files: ["content-pairing.js"],
+            });
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(h.node("setup-fallback").hidden).toBe(false);
+            h.local.installationId = "installation-1";
+            expect(
+                await queuePairing(
+                    { serverUrl: "https://example.com", apiKey: "op_test" },
+                    "https://example.com",
+                    chrome,
+                    7,
+                ),
+            ).toEqual({ ok: true });
+            expect(h.storeToken).toHaveBeenCalledWith("op_test");
+            expect(h.session.pendingPairing).toBeUndefined();
+            expect(h.session.recorderSetupFlow.completed).toBe(true);
+            await h.handlers["window:focus"]();
+            expect(h.node("setup-ready").hidden).toBe(false);
+            expect(h.node("recorder-settings").hidden).toBe(false);
+            await h.handlers["setup-return:click"]();
             expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
                 active: true,
-            }),
-        );
-        expect(h.storeToken).not.toHaveBeenCalled();
-        await queuePairing(
-            { serverUrl: "https://example.com", apiKey: "op_test" },
-            "https://example.com",
-            chrome,
-            7,
-        );
-        expect(chrome.runtime.openOptionsPage).not.toHaveBeenCalled();
-        expect(chrome.tabs.update).toHaveBeenCalledWith(99, { active: true });
-        expect(h.storeToken).not.toHaveBeenCalled();
-        chrome.storage.onChanged.addListener.mock.calls[0][0](
-            { pendingPairing: {} },
-            "session",
-        );
-        await vi.waitFor(() =>
-            expect(h.node("pending-origin").textContent).toBe(
-                "https://example.com",
-            ),
-        );
-        h.confirmPairing.mockResolvedValue({});
-        h.local.installationId = "installation-1";
-        await h.handlers["confirm-pair:click"]();
-        expect(h.storeToken).toHaveBeenCalledWith("op_test");
-        expect(h.confirmPairing).toHaveBeenCalledWith(
-            { serverUrl: "https://example.com", apiKey: "op_test" },
-            "installation-1",
-        );
-        expect(h.session.pendingPairing).toBeUndefined();
-        expect(h.node("setup-connect").hidden).toBe(true);
+            });
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
-    it("denied microphone shows concrete re-allow instructions and hides the prompt button", async () => {
-        await ensureConsented();
+    it("retains a skipped mic on recheck and offers settings for browser blocks", async () => {
         navigator.permissions.query.mockResolvedValue({ state: "denied" });
-        navigator.mediaDevices.getUserMedia.mockClear();
-        await h.handlers["grant-mic:click"]();
-        expect(h.node("mic-status").textContent).toContain("micReallow");
-        expect(h.node("grant-mic").hidden).toBe(true);
-        expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+        await h.handlers["window:focus"]();
+        expect(h.node("setup-grant-mic").hidden).toBe(true);
+        expect(h.node("open-mic-settings").hidden).toBe(false);
+        await h.handlers["open-mic-settings:click"]();
+        expect(chrome.tabs.create).toHaveBeenCalledWith({
+            url: "chrome://settings/content/microphone",
+        });
+        await h.handlers["skip-mic:click"]();
+        expect(h.local.microphoneSetupSkipped).toBe(true);
+        await h.handlers["window:focus"]();
+        expect(h.node("setup-ready").hidden).toBe(false);
+        expect(h.node("ready-grant-mic").hidden).toBe(false);
+        await h.handlers["disconnect:click"]();
+        expect(h.node("connect-body").hidden).toBe(false);
+        expect(h.node("microphone-body").hidden).toBe(true);
+        expect(h.node("step-microphone").className).toBe("step skipped");
+    });
+
+    it("rechecks microphone permissions on focus", async () => {
+        navigator.permissions.query.mockResolvedValue({ state: "granted" });
+        await h.handlers["window:focus"]();
+        expect(h.node("step-microphone").className).toBe("step done");
+    });
+
+    it("keeps OS refusal visible even when the browser permission is granted", async () => {
+        await h.handlers["ready-grant-mic:click"]();
+        navigator.mediaDevices.getUserMedia.mockRejectedValueOnce({
+            name: "NotAllowedError",
+            message: "Permission denied by system",
+        });
+        await h.handlers["setup-grant-mic:click"]();
+        expect(h.node("microphone-body").hidden).toBe(false);
+        expect(h.node("setup-mic-status").textContent).toBe("micSystemOther");
+        await h.handlers["window:focus"]();
+        expect(h.node("microphone-body").hidden).toBe(false);
+        await h.handlers["setup-grant-mic:click"]();
+        expect(h.node("microphone-body").hidden).toBe(true);
     });
 
     it("manual save injects into open server tabs", async () => {
@@ -431,3 +467,5 @@ describe("setup review boundaries", () => {
         expect(h.local.serverUrl).toBeUndefined();
     });
 });
+
+afterAll(() => vi.useRealTimers());

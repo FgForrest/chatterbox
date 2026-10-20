@@ -30,6 +30,7 @@ import type {
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -109,6 +110,8 @@ export interface ItemProcessingPresentation {
     jobs: {
         transcription: ProcessingJobState | null;
         summary: ProcessingJobState | null;
+        topics?: ProcessingJobState | null;
+        title?: ProcessingJobState | null;
     };
     startedBy?: ProcessingRequestOrigin;
     failures: ProcessingPhaseFailure[];
@@ -405,6 +408,7 @@ export async function loadPrivateItemProcessing(
                         TRANSCRIPTION_JOB_KIND,
                         SUMMARY_JOB_KIND,
                         TOPICS_JOB_KIND,
+                        TITLE_JOB_KIND,
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
@@ -701,8 +705,8 @@ export async function loadPrivateItemProcessing(
     const transcriptionJobs = activeJobs.filter(
         (job) => job.kind === TRANSCRIPTION_JOB_KIND,
     );
-    const summaryJobs = activeJobs.filter((job) =>
-        [SUMMARY_JOB_KIND, TOPICS_JOB_KIND].includes(job.kind),
+    const summaryJobs = activeJobs.filter(
+        (job) => job.kind === SUMMARY_JOB_KIND,
     );
 
     return {
@@ -735,6 +739,12 @@ export async function loadPrivateItemProcessing(
         jobs: {
             transcription: processingJobState(transcriptionJobs),
             summary: processingJobState(summaryJobs),
+            topics: processingJobState(
+                activeJobs.filter((job) => job.kind === TOPICS_JOB_KIND),
+            ),
+            title: processingJobState(
+                activeJobs.filter((job) => job.kind === TITLE_JOB_KIND),
+            ),
         },
         startedBy: processingStartedBy(
             [

@@ -134,6 +134,7 @@ function summaryStepMarker(
             contentRevision: input.contentRevision,
             generation: facts.generation,
             profileRevisionId: facts.profile.revisionId,
+            state: "pending",
         };
     }
     steps[step] = {
@@ -142,6 +143,7 @@ function summaryStepMarker(
         contentRevision: input.contentRevision,
         generation: facts.generation,
         profileRevisionId: facts.profile?.revisionId,
+        state: "pending",
     };
     return {
         type: "markPhase",
@@ -153,6 +155,7 @@ function summaryStepMarker(
             inputs: input,
             at: facts.at,
             steps: { ...steps },
+            staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
     };
@@ -196,6 +199,7 @@ function skippedSummaryStepMarker(
             inputs: input,
             at: facts.at,
             steps: { ...steps },
+            staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
     };
@@ -272,6 +276,7 @@ function plaudTasksAction(
             inputs: content,
             at: facts.at,
             steps: { ...steps },
+            staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
     };
@@ -310,6 +315,46 @@ function summaryFailureRecord(facts: PipelineFacts): PhaseRecord | null {
         generation: facts.generation,
         at: facts.at,
         steps,
+    };
+}
+
+function recoveredSummaryRecord(
+    facts: PipelineFacts,
+    input: ContentRevisionInput,
+): PhaseRecord | null {
+    const summary = facts.phases.summary;
+    if (
+        !facts.summary.current ||
+        facts.summary.jobActive ||
+        !summary ||
+        !sameInput(summary, input) ||
+        ["done", "failed", "skipped"].includes(
+            summary.steps?.summary?.state ?? "",
+        ) ||
+        summary.reason === "profile_changed"
+    )
+        return null;
+    const steps = {
+        ...summary.steps,
+        summary: {
+            ...summary.steps?.summary,
+            ...input,
+            state: "done" as const,
+            reason: "generated",
+            generation: facts.generation,
+            profileRevisionId: facts.profile?.revisionId,
+        },
+    };
+    const done = Object.values(steps).every(
+        (step) => step.state === "done" || step.state === "skipped",
+    );
+    return {
+        ...summary,
+        steps,
+        state: done ? "done" : "pending",
+        reason: done ? "completed" : summary.reason,
+        generation: facts.generation,
+        at: facts.at,
     };
 }
 
@@ -986,12 +1031,25 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         facts.generation,
         facts.at,
         facts.summary.stale,
+        facts.summary.staleFingerprint,
     );
     for (const phase of outdated.changed) {
         const record = outdated.phases[phase];
         if (record) actions.push({ type: "markPhase", phase, record });
     }
     facts = { ...facts, phases: outdated.phases };
+    const recoveredSummary = recoveredSummaryRecord(facts, input);
+    if (recoveredSummary) {
+        actions.push({
+            type: "markPhase",
+            phase: "summary",
+            record: recoveredSummary,
+        });
+        facts = {
+            ...facts,
+            phases: { ...facts.phases, summary: recoveredSummary },
+        };
+    }
     const failedSummary = summaryFailureRecord(facts);
     if (failedSummary) {
         actions.push({

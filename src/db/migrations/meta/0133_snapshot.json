@@ -1,5 +1,5 @@
 {
-  "id": "e6de72d7-83a0-4b56-b761-3e803f88d595",
+  "id": "cb5bba14-3d07-489c-b411-6ab9e76266f3",
   "prevId": "0bc8baee-f2b4-4731-b090-2e8d5959dd26",
   "version": "7",
   "dialect": "postgresql",
@@ -1153,6 +1153,12 @@
         "default_model": {
           "name": "default_model",
           "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "max_output_tokens": {
+          "name": "max_output_tokens",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -9404,12 +9410,6 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -9477,7 +9477,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"processing_profiles\".\"is_default\" and \"processing_profiles\".\"archived_at\" is null and \"processing_profiles\".\"deleted_at\" is null",
+          "where": "\"processing_profiles\".\"is_default\" and \"processing_profiles\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

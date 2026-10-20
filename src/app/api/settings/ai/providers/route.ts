@@ -8,6 +8,7 @@ import {
 } from "@/lib/ai/default-provider";
 import { enhancementModelRequiredMessage } from "@/lib/ai/enhancement-provider";
 import { listUserProviders } from "@/lib/ai/list-providers";
+import { parseProviderMaxOutputTokens } from "@/lib/ai/provider-output-tokens";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -46,6 +47,7 @@ export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
 
     const body = await request.json();
+    const maxOutputTokens = parseProviderMaxOutputTokens(body);
     const {
         provider,
         apiKey,
@@ -163,6 +165,7 @@ export const POST = apiHandler(async (request: Request) => {
                 apiKey: encryptedKey,
                 baseUrl: baseUrl || null,
                 defaultModel: defaultModel || null,
+                maxOutputTokens: maxOutputTokens ?? null,
                 isDefaultTranscription: false,
                 isDefaultEnhancement: false,
                 ...rates,
@@ -203,6 +206,7 @@ export const POST = apiHandler(async (request: Request) => {
             provider: created.provider,
             baseUrl: created.baseUrl,
             defaultModel: created.defaultModel,
+            maxOutputTokens: created.maxOutputTokens,
             isDefaultTranscription: Boolean(isDefaultTranscription),
             isDefaultEnhancement: Boolean(isDefaultEnhancement),
         };

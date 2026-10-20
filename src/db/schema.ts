@@ -3173,6 +3173,7 @@ export const apiCredentials = pgTable(
         baseUrl: text("base_url"), // e.g., 'https://api.groq.com/openai/v1'
         // Default model for this provider
         defaultModel: varchar("default_model", { length: 100 }),
+        maxOutputTokens: integer("max_output_tokens"),
         // Whether this is the default provider for transcription/enhancement
         isDefaultTranscription: boolean("is_default_transcription")
             .notNull()

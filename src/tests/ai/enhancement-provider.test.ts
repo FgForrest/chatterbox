@@ -33,6 +33,7 @@ function credential(defaultModel: string | null) {
         apiKey: "test-key",
         baseUrl: "https://example.com/v1",
         defaultModel,
+        maxOutputTokens: null,
         isDefaultTranscription: false,
         isDefaultEnhancement: false,
         isDefaultLearn: false,

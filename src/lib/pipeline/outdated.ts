@@ -34,11 +34,20 @@ function outdatedSteps(
     steps: PhaseRecord["steps"],
     generation: number,
     reason: OutdatedReason,
+    staleFingerprint?: string,
 ): PhaseRecord["steps"] {
     if (!steps) return steps;
     return Object.fromEntries(
         Object.entries(steps).map(([name, step]) => {
             if (name === "title" && automaticTitleStepSettled(step)) {
+                return [name as SummaryStepName, step];
+            }
+            if (
+                reason === "learn_changed" &&
+                staleFingerprint !== undefined &&
+                step.inputFingerprint === staleFingerprint &&
+                step.state === "done"
+            ) {
                 return [name as SummaryStepName, step];
             }
             return [
@@ -59,6 +68,7 @@ function outdatedRecord(
     generation: number,
     at: string,
     reason: OutdatedReason,
+    staleFingerprint?: string,
 ): PhaseRecord {
     return {
         ...record,
@@ -67,7 +77,14 @@ function outdatedRecord(
         generation,
         at,
         ...(record.steps
-            ? { steps: outdatedSteps(record.steps, generation, reason) }
+            ? {
+                  steps: outdatedSteps(
+                      record.steps,
+                      generation,
+                      reason,
+                      staleFingerprint,
+                  ),
+              }
             : {}),
     };
 }
@@ -118,6 +135,7 @@ export function markPhasesOutdatedForInputs(
     generation: number,
     at: string,
     summaryStale: boolean,
+    staleFingerprint = "stale",
 ): InputOutdatedResult {
     const next = { ...phases };
     const changed: PhaseName[] = [];
@@ -135,15 +153,35 @@ export function markPhasesOutdatedForInputs(
     const summaryReason =
         summary?.inputs && !sameInput(summary.inputs, input)
             ? "content_changed"
-            : summaryStale
+            : summaryStale &&
+                (summary?.staleFingerprint !== staleFingerprint ||
+                    (summary.steps?.summary?.state === "done" &&
+                        summary.steps.summary.inputFingerprint !==
+                            staleFingerprint))
               ? "learn_changed"
               : null;
     if (
         summary &&
         summaryReason &&
-        !(summary.state === "outdated" && summary.reason === summaryReason)
+        !(
+            summary.state === "outdated" &&
+            summary.reason === summaryReason &&
+            (summaryReason !== "learn_changed" ||
+                summary.staleFingerprint === staleFingerprint)
+        )
     ) {
-        next.summary = outdatedRecord(summary, generation, at, summaryReason);
+        next.summary = outdatedRecord(
+            summary,
+            generation,
+            at,
+            summaryReason,
+            staleFingerprint,
+        );
+        if (summaryReason === "learn_changed") {
+            next.summary.staleFingerprint = staleFingerprint;
+        } else {
+            delete next.summary.staleFingerprint;
+        }
         changed.push("summary");
         if (phases.taskReview) {
             next.taskReview = outdatedRecord(

@@ -37,6 +37,7 @@ export interface PhaseStepRecord {
     state?: PhaseState;
     reason?: string;
     sourceFingerprint?: string;
+    inputFingerprint?: string | null;
 }
 
 export interface PhaseRecord {
@@ -49,6 +50,7 @@ export interface PhaseRecord {
     at: string;
     steps?: Partial<Record<SummaryStepName, PhaseStepRecord>>;
     profileRevisionId?: string;
+    staleFingerprint?: string;
     problems?: ShareGateProblem[];
 }
 
@@ -136,6 +138,8 @@ export interface PipelineFacts {
     summary: {
         exists: boolean;
         stale: boolean;
+        staleFingerprint?: string;
+        current?: boolean;
         jobActive: boolean;
         phaseJobActive?: boolean;
         failed?: Partial<

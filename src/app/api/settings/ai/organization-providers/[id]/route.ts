@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import {
+    parseProviderMaxOutputTokens,
+    providerMaxOutputTokensSchema,
+} from "@/lib/ai/provider-output-tokens";
 import { parseProviderRates } from "@/lib/ai/provider-rate-input";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSessionActor } from "@/lib/auth-server";
@@ -20,6 +24,7 @@ const updateSchema = z
         apiKey: z.string().min(1).optional(),
         baseUrl: z.string().nullable().optional(),
         defaultModel: z.string().max(100).nullable().optional(),
+        maxOutputTokens: providerMaxOutputTokensSchema,
         disabled: z.boolean().optional(),
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
@@ -58,9 +63,11 @@ export const GET = apiHandler<IdContext>(async (request, routeContext) => {
 export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
     const context = await contextFor(request);
     const { id } = await (routeContext as IdContext).params;
-    const parsed = updateSchema.safeParse(
-        await request.json().catch(() => null),
-    );
+    const input = await request.json().catch(() => null);
+    if (input && typeof input === "object" && "maxOutputTokens" in input) {
+        parseProviderMaxOutputTokens(input);
+    }
+    const parsed = updateSchema.safeParse(input);
     if (!parsed.success) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -95,6 +102,9 @@ export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
             : {}),
         ...(body.defaultModel !== undefined
             ? { defaultModel: body.defaultModel || null }
+            : {}),
+        ...(body.maxOutputTokens !== undefined
+            ? { maxOutputTokens: body.maxOutputTokens }
             : {}),
         ...(body.disabled !== undefined ? { disabled: body.disabled } : {}),
         ...(hasRates ? { rates: parseProviderRates(body) } : {}),

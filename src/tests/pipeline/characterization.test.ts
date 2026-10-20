@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
     consumeRateLimitBucket: vi.fn(),
     startLearnRun: vi.fn(),
     getActiveJob: vi.fn(),
-    isSummaryStale: vi.fn(),
+    staleReadingFingerprint: vi.fn(),
     recordingJobSubject: vi.fn(),
     requestAdvance: vi.fn(),
     requestAdvanceInTx: vi.fn(),
@@ -134,7 +134,7 @@ vi.mock("@/lib/learn/learn-job", () => ({
 vi.mock("@/lib/learn/learn-open", () => ({ learnRunOpen: vi.fn() }));
 
 vi.mock("@/lib/learn/summary-refresh", () => ({
-    isSummaryStale: mocks.isSummaryStale,
+    staleReadingFingerprint: mocks.staleReadingFingerprint,
 }));
 
 vi.mock("@/lib/mail/auto-process", async (importOriginal) => ({
@@ -694,7 +694,7 @@ beforeEach(() => {
     mocks.startLearnRun.mockResolvedValue(undefined);
     mocks.autoLearnMail.mockResolvedValue({ status: "started" });
     mocks.getActiveJob.mockResolvedValue(null);
-    mocks.isSummaryStale.mockResolvedValue(false);
+    mocks.staleReadingFingerprint.mockResolvedValue(null);
     mocks.recordingJobSubject.mockImplementation(
         (recordingId: string, view: string) => `${recordingId}:${view}`,
     );

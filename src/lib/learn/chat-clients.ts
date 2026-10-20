@@ -113,6 +113,7 @@ export async function learnChatClients(input: {
                             ],
                             temperature: 0.1,
                             maxTokens,
+                            maxOutputTokens: credentials.maxOutputTokens,
                         }),
                         response_format: {
                             type: "json_schema",
@@ -129,9 +130,10 @@ export async function learnChatClients(input: {
             },
         },
         chat: {
-            complete: (messages, maxTokens) =>
+            complete: (messages, maxTokens, options) =>
                 retryWithBackoff({
-                    attempts: CALL_RETRY_ATTEMPTS,
+                    attempts:
+                        options?.retry === false ? 1 : CALL_RETRY_ATTEMPTS,
                     baseMs: 1_500,
                     maxMs: 15_000,
                     jitter: 0.5,
@@ -145,8 +147,14 @@ export async function learnChatClients(input: {
                                 messages,
                                 temperature: 0.1,
                                 maxTokens,
+                                maxOutputTokens: credentials.maxOutputTokens,
                             }),
-                            { signal },
+                            {
+                                signal,
+                                ...(options?.retry === false
+                                    ? { maxRetries: 0 }
+                                    : {}),
+                            },
                         );
                         await recordChatCompletionUsage(usage, response);
                         return (

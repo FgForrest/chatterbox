@@ -10,6 +10,32 @@ Record meeting audio at the user's request and upload it to the self-hosted inst
 
 > When you record, Chatterbox Meeting Recorder captures your microphone and the meeting tab's or selected system audio. It encrypts short audio chunks before buffering them in this browser and sends them over HTTPS to the Chatterbox server you pair. That server decrypts them for storage and processing. It does not automatically download a playable copy; you can download one from your account after upload. The recorder token is encrypted in this browser. The server operator controls data after upload. You must inform participants and obtain any consent required to record them.
 
+## In-extension consent and setup
+
+Before connecting or recording, Options shows three points:
+
+- When recording, the extension captures your microphone and meeting audio.
+- It encrypts audio in your browser and sends it only to the Chatterbox server
+  you connect for storage and processing (transcripts and summaries). That
+  server's operator controls it there.
+- You must inform participants about recording and obtain any required consent.
+
+**Full notice and privacy policy** expands the existing full disclosure and
+privacy-policy link. **I understand and agree** saves the consent timestamp;
+there is no checkbox. The next step separately offers microphone permission,
+with a persistent-option example and a saved **Not now** choice. The third step
+separately requests access to the chosen server. One click never triggers both
+browser permission dialogs. Other settings appear after setup.
+
+The address comes from the toolbar's current tab, a marked open recorder setup
+tab (`?section=recorder`), or a typed HTTPS address. With several marked tabs,
+the user chooses a host and title. Typed addresses open the server's recorder
+settings in a new tab. During the 15-minute setup flow, only a key from the
+chosen tab and origin, with a current site grant, is accepted automatically.
+Other proposals still require confirmation. Older servers keep their Connect
+button; after five seconds the extension offers to focus the tab and explains
+how to finish there. Manual address-and-key pairing stays available.
+
 ## Permission justifications
 
 | Permission | Suggested dashboard explanation |
@@ -17,10 +43,10 @@ Record meeting audio at the user's request and upload it to the self-hosted inst
 | `offscreen` | Runs Chrome's audio capture and encoder while the extension popup is closed. |
 | `desktopCapture` | Opens Chrome's picker when the user records audio from a desktop meeting app or another screen. The extension keeps the selected system audio, not screen video. |
 | `tabCapture` | Captures audio from the meeting tab the user chooses to record. |
-| `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Tab URLs are not uploaded. |
+| `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Finds marked recorder setup tabs and shows their host and title for the user's connection choice. Tab URLs and titles are not uploaded. |
 | `notifications` | Tells the user when a meeting is detected, when recording stops, and when an upload completes or needs attention. |
 | `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
-| `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes, so that site's Setup recorder button can connect the extension. |
+| `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes, so the selected setup tab can send a recorder key automatically, or the user can click Connect on older servers. |
 | `alarms` | Refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
 | Optional `https://*/*` host access | Allows the user to pair a self-hosted Chatterbox server at a chosen HTTPS origin. Access is requested for that specific origin during pairing. |
 | Optional `http://localhost/*` host access | Allows pairing a Chatterbox instance on the user's own computer for local development. Remote HTTP is not supported. |
@@ -37,6 +63,13 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.5.0
+
+- Setup is three sequential steps: data-use consent, microphone, then server access and pairing. Consent uses three points, an expandable full notice and one agreement button without a checkbox.
+- Microphone guidance names Chrome's persistent choice, uses neutral wording for Edge and Brave, saves a skipped state and explains browser, OS and managed-policy blocks.
+- Setup finds marked open recorder tabs or accepts a typed address. Matching setup keys connect automatically; foreign proposals retain confirmation. Older servers fall back to their Connect button. Other settings appear once setup is complete.
+- Includes 0.4.1's recorder and microphone window fitting below.
 
 ## What changed in 0.4.1
 

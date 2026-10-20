@@ -223,9 +223,59 @@ describe("buildSummaryMarkdown", () => {
             participants: [],
         });
         expect(md).toContain(
-            "## Tasks\n\n- [x] Send the deck (Jana Novak, due 2026-10-16)\n- [ ] Book a room",
+            "## Tasks\n\n| Task | Due | Assignee |\n| --- | --- | --- |\n| ~~Send the deck~~ | 2026-10-16 | Jana Novak |\n| Book a room |  |  |",
         );
         expect(md).not.toContain("## Action Items");
+    });
+
+    it("escapes task table cells and preserves vague deadlines", () => {
+        const md = buildSummaryMarkdown({
+            title: "Porada",
+            recordedAt: RECORDED_AT,
+            provider: "test",
+            model: "test",
+            source: "riffado",
+            transcriptSource: "riffado",
+            language: "cs",
+            summary: null,
+            keyPoints: [],
+            actionItems: [],
+            participants: [],
+            tasks: [
+                {
+                    text: "Připravit A | B\r\na C\nD",
+                    done: true,
+                    assignee: "Jitka | Dvořáková\nTým",
+                    dueDate: null,
+                    duePhrase: "po poradě | brzy\rpoté",
+                },
+                {
+                    text: "Poslat podklady",
+                    done: false,
+                    assignee: "Ondřej Malý",
+                    dueDate: "2026-10-22",
+                    duePhrase: "ve čtvrtek",
+                },
+                {
+                    text: "Ověřit \\| a <br> & zápis",
+                    done: false,
+                    assignee: null,
+                    dueDate: null,
+                },
+            ],
+        });
+        expect(md).toContain("| Úkol | Termín | Řešitel |");
+        expect(md).toContain(
+            "| ~~Připravit A &#124; B<br>a C<br>D~~ | po poradě &#124; brzy<br>poté | Jitka &#124; Dvořáková<br>Tým |",
+        );
+        expect(md).toContain("| Poslat podklady | 2026-10-22 | Ondřej Malý |");
+        expect(md).not.toContain("ve čtvrtek");
+        expect(md).toContain(
+            "| Ověřit &#92;&#124; a &lt;br&gt; &amp; zápis |  |  |",
+        );
+        expect(
+            md.split("\n").filter((line) => line.startsWith("|")),
+        ).toHaveLength(5);
     });
 
     it("omits empty sections", () => {
@@ -295,7 +345,7 @@ describe("buildSummaryMarkdown", () => {
         });
 
         expect(md).toContain(
-            "## Úkoly\n\n- [ ] Poslat podklady (Jan, termín 2026-10-16)",
+            "## Úkoly\n\n| Úkol | Termín | Řešitel |\n| --- | --- | --- |\n| Poslat podklady | 2026-10-16 | Jan |",
         );
     });
 });

@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
+import { storePairing } from "../../../extensions/recorder/lib/pairing.js";
 import { queuePairing } from "../../../extensions/recorder/lib/pairing-request.js";
+
+vi.mock("../../../extensions/recorder/lib/pairing.js", () => ({
+    originOf: (value) => {
+        try {
+            return new URL(value).origin;
+        } catch {
+            return null;
+        }
+    },
+    storePairing: vi.fn(async () => {}),
+}));
 
 function fakeBrowser() {
     return {
@@ -7,6 +19,7 @@ function fakeBrowser() {
             session: {
                 set: vi.fn(async () => {}),
                 get: vi.fn(async () => ({})),
+                remove: vi.fn(async () => {}),
             },
             local: { set: vi.fn(async () => {}) },
         },
@@ -64,6 +77,7 @@ describe("pairing setup reuse boundaries", () => {
                 surfaceTabId: 99,
                 createdAt:
                     Date.now() - (reason === "expired" ? 16 * 60 * 1000 : 0),
+                connected: true,
             },
         });
         browser.permissions = {
@@ -81,5 +95,50 @@ describe("pairing setup reuse boundaries", () => {
         ).toEqual({ ok: true, pending: true });
         expect(browser.runtime.openOptionsPage).toHaveBeenCalledOnce();
         expect(browser.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    it("stores a matching setup key directly and returns to its options tab", async () => {
+        const browser = fakeBrowser();
+        const flow = {
+            origin: "https://klepna.example.com",
+            tabId: 7,
+            surfaceTabId: 99,
+            createdAt: Date.now(),
+            connected: true,
+        };
+        browser.storage.session.get.mockResolvedValue({
+            recorderSetupFlow: flow,
+        });
+        browser.permissions = { contains: vi.fn(async () => true) };
+        browser.runtime.getURL = (path) => `chrome-extension://test/${path}`;
+        browser.tabs = {
+            get: vi.fn(async () => ({
+                id: 99,
+                windowId: 1,
+                url: "chrome-extension://test/options/options.html",
+            })),
+            update: vi.fn(async () => {}),
+        };
+        browser.windows = { update: vi.fn(async () => {}) };
+        expect(
+            await queuePairing(
+                { serverUrl: flow.origin, apiKey: "op_test" },
+                flow.origin,
+                browser,
+                7,
+            ),
+        ).toEqual({ ok: true });
+        expect(storePairing).toHaveBeenCalledWith({
+            serverUrl: flow.origin,
+            apiKey: "op_test",
+        });
+        expect(browser.storage.session.set).toHaveBeenCalledWith({
+            recorderSetupFlow: { ...flow, completed: true },
+        });
+        expect(browser.storage.session.remove).toHaveBeenCalledWith(
+            "pendingPairing",
+        );
+        expect(browser.tabs.update).toHaveBeenCalledWith(99, { active: true });
+        expect(browser.runtime.openOptionsPage).not.toHaveBeenCalled();
     });
 });

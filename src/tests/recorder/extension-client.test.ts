@@ -42,6 +42,45 @@ function fakePage(options: {
 }
 
 describe("detectRecorderExtension", () => {
+    it.each([
+        "external",
+        "content",
+    ] as const)("reads setupPending over the %s channel", async (channel) => {
+        const reply = {
+            type: "riffado-recorder-present",
+            installed: true,
+            paired: false,
+            setupPending: true,
+        };
+        const { deps } = fakePage(
+            channel === "external"
+                ? { external: () => reply }
+                : { content: () => reply },
+        );
+        const client = createRecorderExtensionClient(deps);
+        expect(await client.detect(ID, 30)).toMatchObject({
+            kind: "reachable",
+            channel,
+            setupPending: true,
+        });
+    });
+
+    it("passes pending setup from unsolicited content presence", () => {
+        const { deps, deliver } = fakePage({});
+        const client = createRecorderExtensionClient(deps);
+        const present = vi.fn();
+        const stop = client.onPresence(present);
+        deliver({
+            type: "riffado-recorder-present",
+            installed: true,
+            setupPending: true,
+        });
+        expect(present).toHaveBeenCalledWith(
+            expect.objectContaining({ setupPending: true }),
+        );
+        stop();
+    });
+
     it("reports not installed when nothing answers and the probe fails", async () => {
         const { deps } = fakePage({ probe: false });
         const client = createRecorderExtensionClient(deps);

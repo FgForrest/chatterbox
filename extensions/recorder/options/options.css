@@ -10,6 +10,7 @@
     --primary-foreground: #fff;
     --error: #b42332;
     --success: #277a49;
+    --warning: #8a5a00;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -25,7 +26,195 @@
         --primary-foreground: #14263c;
         --error: #ff8b94;
         --success: #80d2a0;
+        --warning: #f0c36a;
     }
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.steps {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+}
+
+.step {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 0 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+}
+
+.step:first-child {
+    border-top: 0;
+    padding-top: 4px;
+}
+
+.mark {
+    width: 26px;
+    height: 26px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1.5px solid var(--border);
+    color: var(--muted-foreground);
+}
+
+.active .mark {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.done .mark,
+.ready .mark {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.skipped .mark,
+.skipped .sum {
+    border-color: var(--warning);
+    color: var(--warning);
+}
+
+.step h3 {
+    margin: 3px 0 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.future h3 {
+    color: var(--muted-foreground);
+    font-weight: 500;
+}
+
+.sum {
+    font-size: 12.5px;
+    color: var(--muted-foreground);
+    margin: 2px 0 0;
+}
+
+.step-body {
+    grid-column: 2;
+    display: grid;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 13.5px;
+    line-height: 1.5;
+}
+
+.step-body p,
+.step-body button,
+.step-body details {
+    margin: 0;
+}
+
+.step-body > button {
+    justify-self: start;
+}
+
+.facts {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 4px;
+}
+
+details {
+    margin: 12px 0 18px;
+    font-size: 12.5px;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--muted-foreground);
+}
+
+details[open] > summary {
+    margin-bottom: 8px;
+}
+
+a {
+    color: var(--primary);
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.ready {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 0 12px;
+}
+
+.ready h2 {
+    margin-top: 3px;
+}
+
+.later {
+    text-align: center;
+}
+
+.mini {
+    max-width: 300px;
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+    font-size: 12px;
+}
+
+.prompt-choice {
+    border-radius: 999px;
+    padding: 7px 12px;
+    text-align: center;
+    background: light-dark(#d3e3fd, #004a77);
+    color: light-dark(#041e49, #c2e7ff);
+}
+
+.pick-this {
+    outline: 2.5px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.picks {
+    display: grid;
+    gap: 6px;
+}
+
+label.pick {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.pick:has(input:checked) {
+    border-color: var(--primary);
+}
+
+.pick small {
+    color: var(--muted-foreground);
+    margin-left: auto;
 }
 
 body {

@@ -19,6 +19,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
+import type { AppLocale } from "@/lib/i18n/config";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
@@ -97,6 +98,7 @@ export async function startLearnRun(input: {
     source: LearnSource;
     trigger: "manual" | "auto";
     calendarEventId?: string;
+    requestLocale?: AppLocale;
     /** Whether the actor acts for the Organization; see `writerRefusal`. */
     actsForOrganization?: boolean;
 }): Promise<StartedLearnRun> {
@@ -171,6 +173,7 @@ export async function startLearnRun(input: {
                 profileRevisionId: profile.revisionId,
                 profileOwnerUserId: profile.profile.ownerUserId,
                 payerUserId: provider.payerUserId,
+                requestLocale: input.requestLocale,
             });
         }
         const [live] = await tx
@@ -267,6 +270,9 @@ export async function startLearnRun(input: {
                 builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
                 payerUserId: provider.payerUserId,
                 inputs: {
+                    ...(input.requestLocale
+                        ? { requestLocale: input.requestLocale }
+                        : {}),
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },
@@ -388,6 +394,7 @@ async function insertMailRunInTx(
         profileRevisionId,
         profileOwnerUserId,
         payerUserId,
+        requestLocale,
     }: {
         access: RecordingViewContext;
         actorUserId: string;
@@ -396,6 +403,7 @@ async function insertMailRunInTx(
         profileRevisionId: string;
         profileOwnerUserId: string;
         payerUserId: string;
+        requestLocale?: AppLocale;
     },
 ): Promise<
     | { open: { id: string; jobId: string | null } }
@@ -495,6 +503,7 @@ async function insertMailRunInTx(
             builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
             payerUserId,
             inputs: {
+                ...(requestLocale ? { requestLocale } : {}),
                 contentId: content.id,
                 contentRevision: content.revision,
             },

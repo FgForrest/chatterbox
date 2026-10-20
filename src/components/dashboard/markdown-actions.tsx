@@ -1,12 +1,6 @@
 "use client";
 
-import {
-    Check,
-    Clipboard,
-    Download,
-    Loader2,
-    MoreHorizontal,
-} from "lucide-react";
+import { Check, Copy, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -121,7 +115,7 @@ export function MarkdownActions({
                     ) : copyState === "copied" ? (
                         <Check className="size-4" />
                     ) : (
-                        <Clipboard className="size-4" />
+                        <Copy className="size-4" />
                     )}
                 </Button>
             </div>
@@ -158,7 +152,7 @@ export function MarkdownActions({
                                 onSelect={() => void copyMarkdown()}
                                 disabled={copyState === "copying"}
                             >
-                                <Clipboard className="size-4" />
+                                <Copy className="size-4" />
                                 {i18n("Copy {document} Markdown", {
                                     document: documentLabel,
                                 })}
