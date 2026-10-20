@@ -7,6 +7,7 @@ import {
     RecordingPlayer,
     type RecordingPlayerHandle,
 } from "@/components/dashboard/recording-player";
+import { installFakeMedia } from "@/tests/helpers/fake-media";
 import type { Recording } from "@/types/recording";
 
 vi.mock("@/hooks/use-waveform", () => ({
@@ -32,26 +33,14 @@ const recording: Recording = {
 };
 
 describe("RecordingPlayer playFrom", () => {
-    let position = 0;
-    const play = vi.fn(() => Promise.resolve());
-    const pause = vi.fn();
+    let mediaFor: ReturnType<typeof installFakeMedia>;
+    let play: ReturnType<typeof vi.spyOn>;
+    let pause: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-        position = 0;
-        play.mockClear();
-        pause.mockClear();
-        vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(play);
-        vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(pause);
-        vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(
-            () => {},
-        );
-        Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
-            configurable: true,
-            get: () => position,
-            set: (value: number) => {
-                position = value;
-            },
-        });
+        mediaFor = installFakeMedia();
+        play = vi.mocked(HTMLMediaElement.prototype.play);
+        pause = vi.mocked(HTMLMediaElement.prototype.pause);
     });
 
     afterEach(() => {
@@ -59,32 +48,29 @@ describe("RecordingPlayer playFrom", () => {
         vi.restoreAllMocks();
     });
 
-    /** Move playback on, as the audio element reports it. */
-    function playTo(seconds: number) {
+    async function playTo(seconds: number) {
         const audio = document.querySelector("audio") as HTMLAudioElement;
-        position = seconds;
-        act(() => {
-            audio.dispatchEvent(new Event("seeked"));
-            audio.dispatchEvent(new Event("timeupdate"));
+        await act(async () => {
+            mediaFor(audio).advance(seconds);
         });
     }
 
-    it("pauses at the end it was given, and only there", () => {
+    it("pauses at the end it was given, and only there", async () => {
         const ref = createRef<RecordingPlayerHandle>();
         render(<RecordingPlayer ref={ref} recording={recording} />);
-        act(() => ref.current?.playFrom(3, 4));
+        await act(async () => ref.current?.playFrom(3, 4));
         expect(play).toHaveBeenCalledTimes(1);
-        playTo(3.5);
+        await playTo(3.5);
         expect(pause).not.toHaveBeenCalled();
-        playTo(4.1);
+        await playTo(4.1);
         expect(pause).toHaveBeenCalledTimes(1);
     });
 
-    it("plays on without an end", () => {
+    it("plays on without an end", async () => {
         const ref = createRef<RecordingPlayerHandle>();
         render(<RecordingPlayer ref={ref} recording={recording} />);
-        act(() => ref.current?.playFrom(3));
-        playTo(40);
+        await act(async () => ref.current?.playFrom(3));
+        await playTo(40);
         expect(pause).not.toHaveBeenCalled();
     });
 });
