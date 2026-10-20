@@ -174,6 +174,7 @@ export async function mailMarkdownDocument({
             done: task.status === "done",
             assignee: task.assignee?.name ?? task.assigneeHint,
             dueDate: task.dueDate,
+            duePhrase: task.duePhrase,
         }));
     const summary =
         stored || kept.length > 0
@@ -189,7 +190,11 @@ export async function mailMarkdownDocument({
         summary.summary ?? "",
         ...summary.keyPoints,
         ...summary.actionItems,
-        ...summary.tasks.flatMap((task) => [task.text, task.assignee ?? ""]),
+        ...summary.tasks.flatMap((task) => [
+            task.text,
+            task.assignee ?? "",
+            task.duePhrase ?? "",
+        ]),
     ]);
     return buildMailMarkdown(detail, {
         summary: summary.summary ? mask(summary.summary) : null,
@@ -199,6 +204,7 @@ export async function mailMarkdownDocument({
             ...task,
             text: mask(task.text),
             assignee: task.assignee ? mask(task.assignee) : null,
+            duePhrase: task.duePhrase ? mask(task.duePhrase) : null,
         })),
     });
 }

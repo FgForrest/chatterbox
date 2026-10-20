@@ -29,17 +29,23 @@ export function usesMaxCompletionTokens(model: string): boolean {
 export function buildChatCompletionParams(args: {
     model: string;
     messages: ChatCompletionCreateParamsNonStreaming["messages"];
-    temperature: number;
-    maxTokens: number;
+    temperature?: number;
+    maxTokens?: number;
+    maxOutputTokens?: number | null;
 }): ChatCompletionCreateParamsNonStreaming {
-    const { model, messages, temperature, maxTokens } = args;
+    const { model, messages, temperature, maxOutputTokens } = args;
+    const maxTokens =
+        args.maxTokens == null
+            ? maxOutputTokens
+            : Math.min(args.maxTokens, maxOutputTokens ?? Infinity);
 
     const base = {
         model,
         messages,
-        temperature,
+        ...(temperature === undefined ? {} : { temperature }),
     };
 
+    if (maxTokens == null) return base;
     if (usesMaxCompletionTokens(model)) {
         return { ...base, max_completion_tokens: maxTokens };
     }

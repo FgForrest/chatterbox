@@ -1,6 +1,8 @@
 import type { OpenAI } from "openai";
+import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { sniffAudio } from "@/lib/audio/sniff";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { transcodeToMp3 } from "@/lib/transcription/ffmpeg";
 
 export interface ChatTranscribeArgs {
@@ -93,7 +95,7 @@ export async function chatTranscribe({
         : TRANSCRIBE_INSTRUCTION;
 
     const response = await client.chat.completions.create(
-        {
+        buildChatCompletionParams({
             model,
             messages: [
                 {
@@ -110,9 +112,17 @@ export async function chatTranscribe({
                     ],
                 },
             ],
-        },
+        }),
         { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
     );
+
+    if (response.choices?.[0]?.finish_reason === "length") {
+        throw new AppError(
+            ErrorCode.TRANSCRIPTION_FAILED,
+            "The transcription provider cut off the transcript at its output limit. No partial transcript was saved. Use a provider or model that can return the full recording.",
+            400,
+        );
+    }
 
     const text = response.choices?.[0]?.message?.content;
     if (typeof text !== "string" || text.trim() === "") {

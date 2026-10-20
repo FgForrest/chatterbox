@@ -43,6 +43,7 @@ export interface OrganizationProviderInput {
     copyKeyFrom?: string;
     baseUrl: string | null;
     defaultModel: string | null;
+    maxOutputTokens?: number | null;
     rates: {
         inputUsdPerMillion: string | null;
         outputUsdPerMillion: string | null;
@@ -55,6 +56,7 @@ export interface OrganizationProviderUpdate {
     encryptedApiKey?: string;
     baseUrl?: string | null;
     defaultModel?: string | null;
+    maxOutputTokens?: number | null;
     rates?: OrganizationProviderInput["rates"];
     disabled?: boolean;
     defaults?: Partial<Record<ProviderRole, boolean>>;
@@ -132,6 +134,7 @@ function publicProvider(
         provider: row.provider,
         baseUrl: row.baseUrl,
         defaultModel: row.defaultModel,
+        maxOutputTokens: row.maxOutputTokens,
         rate: hasRate(rate) ? rate : null,
         disabledAt: row.disabledAt,
         createdAt: row.createdAt,
@@ -223,6 +226,7 @@ function auditSnapshot(
         provider: row.provider,
         baseUrl: row.baseUrl,
         model: row.defaultModel,
+        maxOutputTokens: row.maxOutputTokens,
         label: row.provider,
         disabled: row.disabledAt !== null,
         defaults: pointers
@@ -338,6 +342,7 @@ export async function createOrganizationProvider(
                 apiKey: encryptedApiKey,
                 baseUrl: input.baseUrl,
                 defaultModel: input.defaultModel,
+                maxOutputTokens: input.maxOutputTokens ?? null,
                 ...input.rates,
             })
             .returning();
@@ -427,6 +432,9 @@ export async function updateOrganizationProvider(
         if (input.baseUrl !== undefined) update.baseUrl = input.baseUrl;
         if (input.defaultModel !== undefined) {
             update.defaultModel = input.defaultModel;
+        }
+        if (input.maxOutputTokens !== undefined) {
+            update.maxOutputTokens = input.maxOutputTokens;
         }
         if (input.rates) Object.assign(update, input.rates);
         if (input.disabled !== undefined) {

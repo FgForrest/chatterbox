@@ -38,6 +38,7 @@ const personalProvider: ProviderCardItem = {
     provider: "Groq",
     baseUrl: "https://api.groq.com/openai/v1",
     defaultModel: "whisper-large-v3",
+    maxOutputTokens: 4096,
     rate: null,
     disabledAt: null,
     isDefaultTranscription: true,
@@ -49,6 +50,7 @@ const organizationProvider: ProviderCardItem = {
     provider: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     defaultModel: "gpt-4o-mini",
+    maxOutputTokens: 4096,
     rate: null,
     disabledAt: null,
     isDefaultTranscription: true,
@@ -393,6 +395,37 @@ describe.each([
         expect(update?.body).not.toHaveProperty("isDefaultEnhancement");
     });
 
+    it.each([
+        ["12000", 12000],
+        ["", null],
+    ])("saves an edited output limit of %j", async (text, value) => {
+        renderSection();
+        const provider = providerFor(scope);
+        const card = await cardFor(scope);
+        fireEvent.click(
+            within(card).getByRole("button", {
+                name: `Edit ${provider.provider} · ${provider.defaultModel}`,
+            }),
+        );
+        const limit = await screen.findByRole("spinbutton", {
+            name: "Max output tokens",
+        });
+        expect((limit as HTMLInputElement).value).toBe("4096");
+        fireEvent.change(limit, { target: { value: text } });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Update Provider" }),
+        );
+        await waitFor(() =>
+            expect(requests).toContainEqual(
+                expect.objectContaining({
+                    url: `${collections[scope]}/${provider.id}`,
+                    method: "PUT",
+                    body: expect.objectContaining({ maxOutputTokens: value }),
+                }),
+            ),
+        );
+    });
+
     it("confirms disabling and enables immediately", async () => {
         renderSection();
         const provider = providerFor(scope);
@@ -513,6 +546,13 @@ describe.each([
             />,
         );
         expect(screen.getByRole("heading", { name: expected })).toBeTruthy();
+        const limit = screen.getByRole("spinbutton", {
+            name: "Max output tokens",
+        }) as HTMLInputElement;
+        expect(limit.value).toBe(mode === "add" ? "" : "4096");
+        expect(limit.min).toBe("256");
+        expect(limit.max).toBe("200000");
+
         if (scope === "personal") {
             expect(screen.getByText("Use for transcription")).toBeTruthy();
             expect(screen.getByText("Use for summaries")).toBeTruthy();
@@ -717,5 +757,49 @@ describe("Organization fallback notices", () => {
             await within(card).findByText("Used for your transcription"),
         ).toBeTruthy();
         expect(within(card).queryByText("Used for your summaries")).toBeNull();
+    });
+});
+
+describe.each([
+    "personal",
+    "organization",
+] as const)("%s answer cap visibility", (scope) => {
+    it("hides answer limits for transcription-only providers", () => {
+        render(
+            <ProviderFormDialog
+                scope={scope}
+                mode="edit"
+                provider={{
+                    ...providerFor(scope),
+                    provider: "ElevenLabs",
+                    defaultModel: "scribe_v2",
+                }}
+                open
+                isHosted={false}
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+            />,
+        );
+        expect(
+            screen.queryByRole("spinbutton", { name: "Max output tokens" }),
+        ).toBeNull();
+    });
+    it("explains that the limit never applies to transcription", () => {
+        render(
+            <ProviderFormDialog
+                scope={scope}
+                mode="edit"
+                provider={providerFor(scope)}
+                open
+                isHosted={false}
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+            />,
+        );
+        expect(
+            screen.getByText(
+                "Limits AI answers (summaries, titles, chapters and Learn), never transcription. Set this if your model requires an output limit; leave empty for no provider cap.",
+            ),
+        ).toBeTruthy();
     });
 });

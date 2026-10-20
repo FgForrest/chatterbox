@@ -365,6 +365,7 @@ export async function generateTopicsForTranscript(
                             { role: "user", content: prompt },
                         ],
                         temperature: 0.3,
+                        maxOutputTokens: credentials.maxOutputTokens,
                         maxTokens: 2000,
                     }),
                 );

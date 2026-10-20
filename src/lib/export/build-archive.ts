@@ -1001,13 +1001,12 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
-    // Prices the user set on their provider cards. The cards themselves
-    // stay behind (their keys are secrets), so each rate names the card
-    // by what a restore would re-add: provider, model, endpoint.
+    // API keys stay out of the archive.
     const priced = await db
         .select({
             provider: apiCredentials.provider,
             model: apiCredentials.defaultModel,
+            maxOutputTokens: apiCredentials.maxOutputTokens,
             baseUrl: apiCredentials.baseUrl,
             inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
             outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
@@ -1020,6 +1019,7 @@ export async function buildAndUploadExportArchive(input: {
                 or(
                     isNotNull(apiCredentials.inputUsdPerMillion),
                     isNotNull(apiCredentials.audioUsdPerHour),
+                    isNotNull(apiCredentials.maxOutputTokens),
                 ),
             ),
         );

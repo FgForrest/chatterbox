@@ -25,7 +25,9 @@ import {
 
 describe("English built-in prompt byte identity", () => {
     it.each(
-        Object.keys(ORIGINAL_SUMMARY_PROMPTS),
+        Object.keys(ORIGINAL_SUMMARY_PROMPTS).filter(
+            (id) => id !== "general" && id !== "meeting-notes",
+        ),
     )("keeps the %s summary preset byte-identical", (id) => {
         const preset = id as keyof typeof ORIGINAL_SUMMARY_PROMPTS;
         expect(assembleSummaryPrompt(SUMMARY_PROMPT_PARTS[preset], "en")).toBe(

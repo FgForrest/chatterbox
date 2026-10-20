@@ -55,84 +55,96 @@ export const SUMMARY_PROMPT_PARTS: Readonly<
 > = {
     general: {
         skeleton: {
-            en: `Summarize this audio transcription, then extract key points and action items if any exist.
+            en: `First extract every supported action item from this audio transcription, then summarize it and extract key points. Complete the task inventory before writing the minutes; return an empty actionItems array if there are no commitments.
 
 Respond with a single JSON object and nothing else. Do not wrap it in code fences.
 {
+  "actionItems": [{"text": "A supported task", "speaker": null, "assignee": null, "due": null, "quote": null, "candidates": null}],
   "summary": "A Markdown summary of the transcription",
-  "keyPoints": ["key point 1", "key point 2"],
-  "actionItems": ["action item 1", "action item 2"]
+  "keyPoints": ["key point 1", "key point 2"]
 }
 
 {focus} {outputFormat}
 
 Transcription:
-{transcription}`,
-            "cs-CZ": `Shrňte tento zvukový přepis a poté z něj vyberte hlavní body a případné úkoly.
+{transcription}
+
+Before returning the JSON, build actionItems from the entire transcription independently of the minutes. Revisit each speaker's turns in the beginning, middle and end. Retain every distinct deliverable they promise, request and accept, or explicitly undertake to investigate or decide, including brief side commitments and work awaiting an agreed prerequisite. Do not select only the main follow-ups. Fold only steps of the same deliverable for the same doer. Check that every owner, deadline and verbatim quote belongs to that task.`,
+            "cs-CZ": `Nejprve z tohoto zvukového přepisu vyberte všechny doložené úkoly, poté jej shrňte a vyberte hlavní body. Seznam úkolů dokončete před psaním zápisu; pokud přepis neobsahuje závazky, vraťte prázdné pole actionItems.
 
 Odpovězte jediným objektem JSON a ničím jiným. Nevkládejte jej do bloku kódu.
 {
+  "actionItems": [{"text": "Doložený úkol", "speaker": null, "assignee": null, "due": null, "quote": null, "candidates": null}],
   "summary": "Shrnutí přepisu ve formátu Markdown",
-  "keyPoints": ["hlavní bod 1", "hlavní bod 2"],
-  "actionItems": ["úkol 1", "úkol 2"]
+  "keyPoints": ["hlavní bod 1", "hlavní bod 2"]
 }
 
 {focus} {outputFormat}
 
 Přepis:
-{transcription}`,
+{transcription}
+
+Před vrácením JSON sestavte actionItems z celého přepisu nezávisle na zápisu. Znovu projděte promluvy každého mluvčího na začátku, uprostřed i na konci. Zachovejte každý odlišný výsledek, který někdo přislíbil, přijal jako požadavek nebo se zavázal prověřit či rozhodnout, včetně krátkých vedlejších závazků a práce čekající na dohodnutý předpoklad. Nevybírejte jen hlavní navazující kroky. Slučte pouze kroky téhož výsledku u stejného vykonavatele. Ověřte, že každý vlastník, termín i doslovná citace patří právě k danému úkolu.`,
         },
         focus: {
             en: "Match the summary to the recording.",
             "cs-CZ": "Přizpůsobte shrnutí dané nahrávce.",
         },
         outputFormat: {
-            en: `A short or single-topic recording wants one tight paragraph. A long one that moves through several distinct topics is far easier to read as a short opening paragraph followed by a "###" section per topic, so use that shape when the recording earns it.
+            en: `For a meeting or multi-person working discussion beyond a few minutes, write proper minutes: thematic "###" sections named after the actual topics in the output language, each with 2–6 concrete bullets. Every section body must be a bullet list, not prose paragraphs. The first section states the subject, purpose, and parties, organizations and roles explicitly mentioned. Within each topic, explain the current state, proposed solutions and variants (who proposed what), agreements, open questions and risks. Use sub-bullets for parts of a variant. Preserve concrete numbers, limits, sizes, named systems, standards, terms and dates. Include the schedule and dependencies when discussed. A 35-minute working meeting usually needs about 350–700 words in "summary"; scale detail to the content, without padding or inventing facts. Even a meeting focused on one topic needs this detail, not one paragraph.
+
+A short or single-topic recording that is not such a meeting gets one tight paragraph. A long monologue or lecture gets topic sections. Put decisions and agreements in keyPoints, one line each; tasks belong in actionItems. Do not copy those lists into the summary; explain their context and consequences within the relevant topic.
 
 If there are no key points or action items, return empty arrays.`,
-            "cs-CZ": `Krátkou nahrávku nebo nahrávku s jediným tématem shrňte jedním výstižným odstavcem. Dlouhá nahrávka, která prochází několika odlišnými tématy, je mnohem přehlednější ve formě krátkého úvodního odstavce následovaného oddílem s nadpisem úrovně „###“ pro každé téma; tuto strukturu proto použijte, pokud ji obsah nahrávky odůvodňuje.
+            "cs-CZ": `U schůzky nebo pracovní diskuse více lidí delší než několik minut vytvořte podrobný zápis: tematické oddíly s nadpisy úrovně „###“ pojmenované podle skutečně probíraných témat v jazyce výstupu, v každém 2–6 konkrétních odrážek. Obsah každého oddílu musí tvořit odrážky, nikoli souvislé odstavce. První oddíl uvede předmět, účel a výslovně zmíněné strany, organizace a role. U každého tématu popište současný stav, navržená řešení a varianty (kdo co navrhl), dohody, otevřené otázky a rizika. Části variant rozveďte v pododrážkách. Zachovejte konkrétní čísla, limity, velikosti, názvy systémů, standardy, pojmy a data. Pokud zazněl harmonogram a návaznosti, zahrňte je. Pracovní schůzka trvající 35 minut obvykle vyžaduje přibližně 350–700 slov v poli summary; rozsah přizpůsobte obsahu, bez výplně a vymyšlených faktů. I schůzka zaměřená na jedno téma potřebuje tuto podrobnost, nikoli jediný odstavec.
+
+Krátkou nahrávku nebo nahrávku s jediným tématem, která není takovou schůzkou, shrňte jedním výstižným odstavcem. Dlouhý monolog nebo přednášku rozdělte do tematických oddílů. Rozhodnutí a dohody patří do keyPoints, každé na jeden řádek; úkoly patří do actionItems. Tyto seznamy do shrnutí nekopírujte; u příslušného tématu vysvětlete jejich souvislosti a důsledky.
 
 Pokud nejsou žádné hlavní body nebo úkoly, vraťte prázdná pole.`,
         },
     },
     "meeting-notes": {
         skeleton: {
-            en: `Summarize this meeting recording. Include attendees mentioned, decisions made, and action items.
+            en: `First extract every supported action item from this meeting, then write the minutes with the mentioned parties and decisions. Complete the task inventory before writing the minutes.
 
 Respond with a single JSON object and nothing else. Do not wrap it in code fences.
 {
+  "actionItems": [{"text": "A supported task", "speaker": null, "assignee": null, "due": null, "quote": null, "candidates": null}],
   "summary": "A Markdown summary of the meeting",
-  "keyPoints": ["decision 1", "decision 2", "key discussion point"],
-  "actionItems": ["action item with owner if mentioned", "follow-up task"]
+  "keyPoints": ["decision 1", "decision 2", "agreement"]
 }
 
 {outputFormatBlock}{focusBlock}If there are no key points or action items, return empty arrays.
 
 Transcription:
-{transcription}`,
-            "cs-CZ": `Shrňte tuto nahrávku schůzky. Zahrňte zmíněné účastníky, přijatá rozhodnutí a úkoly.
+{transcription}
+
+Before returning the JSON, build actionItems from the entire transcription independently of the minutes. Revisit each speaker's turns in the beginning, middle and end. Retain every distinct deliverable they promise, request and accept, or explicitly undertake to investigate or decide, including brief side commitments and work awaiting an agreed prerequisite. Do not select only the main follow-ups. Fold only steps of the same deliverable for the same doer. Check that every owner, deadline and verbatim quote belongs to that task.`,
+            "cs-CZ": `Nejprve z této schůzky vyberte všechny doložené úkoly, poté napište zápis se zmíněnými stranami a rozhodnutími. Seznam úkolů dokončete před psaním zápisu.
 
 Odpovězte jediným objektem JSON a ničím jiným. Nevkládejte jej do bloku kódu.
 {
+  "actionItems": [{"text": "Doložený úkol", "speaker": null, "assignee": null, "due": null, "quote": null, "candidates": null}],
   "summary": "Shrnutí schůzky ve formátu Markdown",
-  "keyPoints": ["rozhodnutí 1", "rozhodnutí 2", "hlavní bod diskuse"],
-  "actionItems": ["úkol s odpovědnou osobou, pokud byla zmíněna", "navazující úkol"]
+  "keyPoints": ["rozhodnutí 1", "rozhodnutí 2", "dohoda"]
 }
 
 {outputFormatBlock}{focusBlock}Pokud nejsou žádné hlavní body nebo úkoly, vraťte prázdná pole.
 
 Přepis:
-{transcription}`,
+{transcription}
+
+Před vrácením JSON sestavte actionItems z celého přepisu nezávisle na zápisu. Znovu projděte promluvy každého mluvčího na začátku, uprostřed i na konci. Zachovejte každý odlišný výsledek, který někdo přislíbil, přijal jako požadavek nebo se zavázal prověřit či rozhodnout, včetně krátkých vedlejších závazků a práce čekající na dohodnutý předpoklad. Nevybírejte jen hlavní navazující kroky. Slučte pouze kroky téhož výsledku u stejného vykonavatele. Ověřte, že každý vlastník, termín i doslovná citace patří právě k danému úkolu.`,
         },
         focus: {
-            en: "The decisions belong in keyPoints and the tasks in actionItems, so the summary covers who met, what it was about, and how the discussion went, not a second copy of those two lists.",
+            en: "Preserve the substance of the whole meeting: concrete facts, reasoning, variants and their proponents, agreements, dependencies and unresolved risks. keyPoints contains decisions and agreements, one line each; actionItems contains tasks. Explain their context in the relevant topic without copying either list into the summary.",
             "cs-CZ":
-                "Rozhodnutí patří do pole keyPoints a úkoly do pole actionItems. Samotné shrnutí proto popisuje, kdo se sešel, čeho se schůzka týkala a jak diskuse probíhala; neopakuje obsah těchto dvou seznamů.",
+                "Zachovejte věcný obsah celé schůzky: konkrétní fakta, důvody, varianty a jejich navrhovatele, dohody, návaznosti a nevyřešená rizika. Pole keyPoints obsahuje rozhodnutí a dohody, každé na jeden řádek; actionItems obsahuje úkoly. U příslušného tématu vysvětlete jejich souvislosti, aniž byste některý z těchto seznamů kopírovali do shrnutí.",
         },
         outputFormat: {
-            en: 'Write the summary as "###" sections covering only what this meeting supports: who attended, why they met, what was discussed, and any open questions. Name each heading in the output language. Leave a section out entirely rather than writing "None" under it. List attendees as bullets once there are more than two, with their role or team when it was mentioned.',
+            en: 'Write proper minutes as thematic "###" sections named after the actual topics in the output language, not a fixed list of generic headings. The first section states the subject, purpose, and parties, organizations and roles explicitly mentioned. Every section body must be a bullet list, not prose paragraphs. Give each section 2–6 concrete bullets covering the current state, proposed solutions and variants (who proposed what), agreements, open questions and risks within that topic. Use sub-bullets for parts of a variant. Preserve numbers, limits, sizes, named systems, standards, terms and dates. Include the schedule, timing estimates and dependencies when discussed, distinguishing targets from firm deadlines. A 35-minute working meeting usually needs about 350–700 words in "summary"; scale detail to the content, without padding or inventing facts. Omit unsupported sections.',
             "cs-CZ":
-                "Shrnutí napište jako oddíly s nadpisy úrovně „###“ a zahrňte pouze to, co tato schůzka skutečně obsahuje: kdo se účastnil, proč se účastníci sešli, o čem diskutovali a jaké otázky zůstaly otevřené. Podle obsahu použijte přesně tyto nadpisy: „### Účastníci“, „### Účel“, „### Diskuse“ a „### Otevřené otázky“. Oddíl zcela vynechte, místo abyste pod něj psali „Žádné“. Pokud jsou více než dva účastníci, uveďte je v odrážkách a doplňte jejich roli nebo tým, pokud byly zmíněny.",
+                "Vytvořte podrobný zápis s tematickými oddíly a nadpisy úrovně „###“ pojmenovanými podle skutečně probíraných témat v jazyce výstupu, nikoli podle pevného seznamu obecných nadpisů. První oddíl uvede předmět, účel a výslovně zmíněné strany, organizace a role. Obsah každého oddílu musí tvořit odrážky, nikoli souvislé odstavce. Každý oddíl má 2–6 konkrétních odrážek se současným stavem, navrženými řešeními a variantami (kdo co navrhl), dohodami, otevřenými otázkami a riziky daného tématu. Části variant rozveďte v pododrážkách. Zachovejte čísla, limity, velikosti, názvy systémů, standardy, pojmy a data. Pokud zazněl harmonogram, časové odhady a návaznosti, zahrňte je a odlište cílové termíny od pevných lhůt. Pracovní schůzka trvající 35 minut obvykle vyžaduje přibližně 350–700 slov v poli summary; rozsah přizpůsobte obsahu, bez výplně a vymyšlených faktů. Oddíly bez opory v přepisu vynechte.",
         },
     },
     "key-points": {
@@ -242,25 +254,6 @@ export const SUMMARY_PRESETS: Record<SummaryPreset, SummaryPromptConfig> = {
     },
 };
 
-const MEETING_HEADINGS: Partial<
-    Record<
-        string,
-        {
-            attendees: string;
-            purpose: string;
-            discussion: string;
-            openQuestions: string;
-        }
-    >
-> = {
-    cs: {
-        attendees: "Účastníci",
-        purpose: "Účel",
-        discussion: "Diskuse",
-        openQuestions: "Otevřené otázky",
-    },
-};
-
 /** Use a localized built-in only when the user has not edited its text. */
 export function localizedSummaryPrompt(
     id: string,
@@ -268,12 +261,12 @@ export function localizedSummaryPrompt(
     language: string | null,
     isUneditedBuiltIn: boolean,
 ): string {
-    if (!isUneditedBuiltIn || id !== "meeting-notes" || !language) {
+    if (!isUneditedBuiltIn || (id !== "general" && id !== "meeting-notes")) {
         return prompt;
     }
-    const headings = MEETING_HEADINGS[language];
-    if (!headings) return prompt;
-    return `For the meeting sections in "summary", use these exact "###" headings when the content supports them: ${headings.attendees}, ${headings.purpose}, ${headings.discussion}, ${headings.openQuestions}. Keep the JSON keys unchanged.\n\n${prompt}`;
+    const locale =
+        language?.toLowerCase().split(/[-_]/)[0] === "cs" ? "cs-CZ" : "en";
+    return assembleSummaryPrompt(SUMMARY_PROMPT_PARTS[id], locale);
 }
 
 export const SUMMARY_TEMPLATE_KIND: TemplateKind<SummaryPreset> = {
@@ -447,8 +440,8 @@ export function getAiOutputLanguageDirective(
  */
 export const SUMMARY_MARKDOWN_DIRECTIVE = `FORMATTING: the "summary" value is rendered as Markdown.
 
-- Use formatting only where it earns its place: bullets for a genuine list, bold for a term the reader should catch, "###" headings when the recording really does cover several distinct topics. A short summary reads better as one plain paragraph. Never impose structure the recording does not have, and never open a heading above level 3.
-- Do not restate the key points or action items as a list inside "summary". They are rendered as their own lists directly beneath it, so a copy there is read twice. Referring to them in prose is fine.
+- Match structure and detail to the content and the requested format. Working meetings beyond a few minutes need thematic "###" sections and concrete bullets, including meetings about one main topic. Long monologues or lectures can use topic sections; a short recording can use one plain paragraph. Preserve the substance rather than compressing a long meeting into an overview. Never invent content to fill a section, and never open a heading above level 3.
+- Do not restate the key points or action items as a list inside "summary". They are rendered as their own lists directly beneath it, so a copy there is read twice. Explain their context, reasoning and consequences within the relevant topic without copying the list entries.
 - Key points and action items are rendered as Markdown as well, but each is already one entry in a list, so keep each to a single line and do not give it a bullet marker of its own.
 - The reply itself is still one raw JSON object: escape newlines inside strings as \\n, and do not wrap the object in code fences.`;
 

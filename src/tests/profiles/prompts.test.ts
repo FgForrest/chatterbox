@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+    assembleSummaryPrompt,
+    SUMMARY_PROMPT_PARTS,
+} from "@/lib/ai/summary-presets";
+import {
+    BUILTIN_PROMPTS_VERSION,
     promptLocaleForLanguage,
     resolveSummaryPrompt,
     resolveTitlePrompt,
@@ -13,6 +18,10 @@ describe("profile prompt resolution", () => {
         ["en-US", "en"],
         ["cs", "cs-CZ"],
         ["cs_CZ", "cs-CZ"],
+        ["ces", "cs-CZ"],
+        ["cze", "cs-CZ"],
+        ["Czech", "cs-CZ"],
+        ["eng", "en"],
         ["de", null],
         [null, null],
     ] as const)("maps output language %s to profile locale %s", (language, locale) => {
@@ -119,24 +128,59 @@ describe("profile prompt resolution", () => {
         }
     });
 
-    it("uses the established Czech headings in meeting output format", () => {
-        const base = defaultProfileSettings("audio").steps.summary;
-        const settings = { ...base, preset: "meeting-notes" as const };
-        const text = resolveSummaryPrompt({
-            settings,
-            outputLanguage: "cs",
-            contentLanguage: "cs",
-            uiLocale: "cs-CZ",
-        }).text;
-
-        for (const heading of [
-            "### Účastníci",
-            "### Účel",
-            "### Diskuse",
-            "### Otevřené otázky",
-        ]) {
-            expect(text).toContain(heading);
+    it.each([
+        "en",
+        "cs-CZ",
+    ] as const)("keeps unedited summary fields following current %s built-ins", (locale) => {
+        for (const preset of ["general", "meeting-notes"] as const) {
+            const settings = {
+                ...defaultProfileSettings("audio").steps.summary,
+                preset,
+            };
+            const stored = JSON.stringify(settings);
+            expect(settings).toMatchObject({
+                focus: null,
+                outputFormat: {},
+                fullPrompt: null,
+            });
+            const resolved = resolveSummaryPrompt({
+                settings,
+                outputLanguage: "auto",
+                contentLanguage: locale,
+                uiLocale: locale,
+            });
+            expect(resolved).toEqual({
+                text: assembleSummaryPrompt(
+                    SUMMARY_PROMPT_PARTS[preset],
+                    locale,
+                ),
+                builtinVersion: BUILTIN_PROMPTS_VERSION,
+                formatLocale: locale,
+            });
+            expect(JSON.stringify(settings)).toBe(stored);
+            expect(resolved.text).toContain("350–700");
+            expect(resolved.text).toContain("2–6");
+            expect(resolved.text).not.toContain("### Diskuse");
+            expect(resolved.text).not.toContain("### Účastníci");
         }
+    });
+
+    it("uses Czech overrides under auto for the provider language code", () => {
+        const settings = {
+            ...defaultProfileSettings("audio").steps.summary,
+            outputFormat: { "cs-CZ": "Vlastní český formát." },
+        };
+        expect(
+            resolveSummaryPrompt({
+                settings,
+                outputLanguage: "auto",
+                contentLanguage: "ces",
+                uiLocale: "en",
+            }),
+        ).toMatchObject({
+            formatLocale: "cs-CZ",
+            text: expect.stringContaining("Vlastní český formát."),
+        });
     });
 
     it("falls back to the English built-in for an unsupported output language", () => {

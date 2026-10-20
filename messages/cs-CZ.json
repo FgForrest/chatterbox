@@ -2453,6 +2453,8 @@
   "2zA1UG": "Základní URL (volitelné)",
   "EGkfUp": "https://api.example.com/v1",
   "yXIBKn": "Soukromé adresy a localhost nejsou z hostované aplikace dostupné.",
+  "mHgGC0": "Maximální počet výstupních tokenů",
+  "A5psjc": "Omezuje odpovědi AI (souhrny, názvy, kapitoly a Learn), nikdy přepis. Vyplňte, pokud váš model vyžaduje výstupní limit. Prázdné pole znamená bez limitu poskytovatele.",
   "yJZns3": "Použít pro přepis",
   "8o8OsN": "Výchozí poskytovatel Organizace pro přepis",
   "nUH-VQ": "Použít pro shrnutí",

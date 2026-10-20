@@ -113,6 +113,7 @@ export async function learnChatClients(input: {
                             ],
                             temperature: 0.1,
                             maxTokens,
+                            maxOutputTokens: credentials.maxOutputTokens,
                         }),
                         response_format: {
                             type: "json_schema",
@@ -145,6 +146,7 @@ export async function learnChatClients(input: {
                                 messages,
                                 temperature: 0.1,
                                 maxTokens,
+                                maxOutputTokens: credentials.maxOutputTokens,
                             }),
                             { signal },
                         );
