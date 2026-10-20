@@ -999,7 +999,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             ).toEqual([]);
         });
 
-        it("skips known quotes only when their originals are visible", async () => {
+        it("skips known quotes when their originals are search candidates", async () => {
             for (const caller of [
                 reader(),
                 owner(),
@@ -1009,6 +1009,243 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                     (await search(caller, { query: "Knownquoteword" })).results,
                 ).toEqual([]);
             }
+        });
+
+        it("searches a known quote when its visible original is outside the folder and its descendants", async () => {
+            const original = "search-folder-original";
+            const reply = "search-folder-reply";
+            const query = "Folderquotedneedle";
+            await db()
+                .insert(recordingFolders)
+                .values([
+                    {
+                        id: "search-quote-folder",
+                        userId: orgUserId,
+                        parentId: orgFolder,
+                        name: "Quoted discussion",
+                        kind: "custom",
+                        nameHash: lookupHash("Quoted discussion"),
+                    },
+                    {
+                        id: "search-quote-child",
+                        userId: orgUserId,
+                        parentId: "search-quote-folder",
+                        name: "Follow-ups",
+                        kind: "custom",
+                        nameHash: lookupHash("Follow-ups"),
+                    },
+                ]);
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [
+                    body("Acknowledged."),
+                    body(query, "quoted", original),
+                ],
+            });
+            await db().insert(recordingFolderAssignments).values({
+                userId: OWNER,
+                itemId: reply,
+                folderId: "search-quote-child",
+            });
+            const args = { query, folder: "search-quote-folder" };
+            const result = await search(reader(), args);
+            expect(ids(result)).toEqual([reply]);
+            expect(result.results[0]?.snippets[0]?.part).toBe("quoted");
+            expect(JSON.stringify(result)).not.toContain(original);
+            await db().insert(recordingFolderAssignments).values({
+                userId: OWNER,
+                itemId: original,
+                folderId: "search-quote-child",
+            });
+            expect(ids(await search(reader(), args))).toEqual([original]);
+        });
+
+        it.each([
+            {
+                boundary: "from",
+                originalAt: "2026-10-09",
+                query: "Datefromneedle",
+            },
+            { boundary: "to", originalAt: "2026-10-13", query: "Datetoneedle" },
+        ])("searches a known quote when $boundary excludes its visible original", async ({
+            boundary,
+            originalAt,
+            query,
+        }) => {
+            const original = `search-date-${boundary}-original`;
+            const reply = `search-date-${boundary}-reply`;
+            await seedMail(original, OWNER, {
+                shared: true,
+                at: new Date(originalAt),
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                at: new Date("2026-10-11T12:00:00Z"),
+                segments: [body(query, "quoted", original)],
+            });
+            const result = await search(reader(), {
+                query,
+                from: "2026-10-10",
+                to: "2026-10-12",
+            });
+            expect(ids(result)).toEqual([reply]);
+            expect(JSON.stringify(result)).not.toContain(original);
+            expect(
+                ids(
+                    await search(reader(), {
+                        query,
+                        from: "2026-10-09",
+                        to: "2026-10-13",
+                    }),
+                ),
+            ).toEqual([original]);
+        });
+
+        it("checks known originals against a person's address hash as well as person id", async () => {
+            const original = "search-person-original";
+            const reply = "search-person-reply";
+            const query = "Personquotedneedle";
+            const personId = (
+                await createPerson({
+                    userId: READER,
+                    displayName: "Reply Author",
+                    primaryEmail: "reply-author@example.test",
+                    createdByUserId: READER,
+                })
+            ).id;
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+                participants: [
+                    {
+                        ref: "p1",
+                        roles: ["from"],
+                        displayName: "Original Author",
+                        address: "original-author@example.test",
+                    },
+                ],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [body(query, "quoted", original)],
+                participants: [
+                    {
+                        ref: "p1",
+                        roles: ["from"],
+                        displayName: "Reply Author",
+                        address: "reply-author@example.test",
+                    },
+                ],
+            });
+            const result = await search(reader(), { query, person: personId });
+            expect(ids(result)).toEqual([reply]);
+            expect(JSON.stringify(result)).not.toContain(original);
+            expect(ids(await search(reader(), { query }))).toEqual([original]);
+            await db()
+                .insert(mailParticipants)
+                .values({
+                    itemId: original,
+                    userId: OWNER,
+                    ref: "p2",
+                    roles: ["to"],
+                    address: encryptText("reply-author@example.test"),
+                    addressHash: participantAddressHash(
+                        "reply-author@example.test",
+                    ),
+                    position: 1,
+                });
+            expect(
+                ids(await search(reader(), { query, person: personId })),
+            ).toEqual([original]);
+        });
+
+        it("checks known originals against the entity filter", async () => {
+            const original = "search-entity-original";
+            const reply = "search-entity-reply";
+            const query = "Entityquotedneedle";
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body(query)],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [body(query, "quoted", original)],
+            });
+            for (const itemId of [reply, original]) {
+                const factId = `${itemId}-fact`;
+                await db()
+                    .insert(knowledgeFacts)
+                    .values({
+                        id: factId,
+                        userId: orgUserId,
+                        subjectEntityId: entityId,
+                        subjectKey: `e:${entityId}`,
+                        objectKey: `l:${factId}`,
+                        relationKey: "has_role",
+                        objectLiteral: encryptText("Reviewer"),
+                        origin: "mail",
+                    });
+                await db()
+                    .insert(knowledgeFactEvidence)
+                    .values({
+                        factId,
+                        itemId,
+                        userId: orgUserId,
+                        transcriptRevision: 0,
+                        segmentIndex: 0,
+                        charStart: 0,
+                        charEnd: query.length,
+                        quote: encryptText(query),
+                        status: "supported",
+                    });
+                const result = await search(reader(), {
+                    query,
+                    entity: entityId,
+                });
+                expect(ids(result)).toEqual([itemId]);
+                if (itemId === reply)
+                    expect(JSON.stringify(result)).not.toContain(original);
+            }
+        });
+
+        it("does not search a known quote again after its original falls before the continuation", async () => {
+            const query = "Cursorquotedneedle";
+            const original = "search-cursor-original";
+            await seedMail(original, READER, {
+                at: new Date("2026-10-15T12:00:00Z"),
+                segments: [body(query)],
+                participants: [],
+            });
+            for (let index = 0; index < 49; index++) {
+                await seedMail(`search-cursor-filler-${index}`, READER, {
+                    at: new Date("2026-10-15T11:00:00Z"),
+                    segments: [body(query)],
+                    participants: [],
+                });
+            }
+            await seedMail("search-cursor-reply", READER, {
+                at: new Date("2026-10-15T10:00:00Z"),
+                segments: [body(query, "quoted", original)],
+                participants: [],
+            });
+            const args = { query, from: "2026-10-15", to: "2026-10-15" };
+            const first = await search(reader(), args);
+            expect(first.results).toHaveLength(50);
+            expect(ids(first)).toContain(original);
+            expect(first.complete).toBe(false);
+            expect(first.continue_before).toBeTypeOf("string");
+            const next = await search(reader(), {
+                ...args,
+                before: first.continue_before,
+            });
+            expect(next.results).toEqual([]);
+            expect(next.scanned).toBe(1);
+            expect(next.complete).toBe(true);
         });
 
         it("finds a Czech Gmail forwarded part with its claimed author", async () => {
@@ -1383,7 +1620,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 shared: true,
                 segments: [
                     body(
-                        `${"prefix ".repeat(40)}Parityneedle${" suffix".repeat(40)}`,
+                        `${"prefix ".repeat(40)}Parityneedle${" context".repeat(23)} Parityneedle${" suffix".repeat(40)}`,
                         "quoted",
                     ),
                 ],
@@ -1404,6 +1641,15 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                     "listopadu",
                 ]) {
                     const found = await search(caller, { query });
+                    if (query === "Parityneedle") {
+                        expect(found.results).toHaveLength(1);
+                        expect(found.results[0]?.snippets).toHaveLength(1);
+                        expect(
+                            found.results[0]?.snippets[0]?.text.match(
+                                /Parityneedle/g,
+                            ),
+                        ).toHaveLength(2);
+                    }
                     for (const result of found.results) {
                         const detail = await call<Record<string, unknown>>(
                             "get_mail",

@@ -7,17 +7,20 @@ export interface SearchableMailPart {
     text: string;
 }
 
-/** Body and quoted text, excluding quotes whose originals the viewer can read. */
+/**
+ * Body and quoted text, excluding quotes whose originals are candidates
+ * of the same search (whatever its continuation cursor).
+ */
 export function searchableMailParts(
     segments: readonly ContentSegment[],
-    visibleOriginalIds: ReadonlySet<string>,
+    candidateOriginalIds: ReadonlySet<string>,
 ): SearchableMailPart[] {
     return segments.flatMap((segment) => {
         if (segment.role !== "body" && segment.role !== "quoted") return [];
         if (
             segment.role === "quoted" &&
             segment.knownItemId &&
-            visibleOriginalIds.has(segment.knownItemId)
+            candidateOriginalIds.has(segment.knownItemId)
         ) {
             return [];
         }

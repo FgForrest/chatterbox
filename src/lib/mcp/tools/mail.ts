@@ -334,7 +334,7 @@ const searchMail = defineTool({
     name: "search_mail",
     anyOf: ["mail:read"],
     title: "Search mail",
-    description: `Mail in your pile (as list_mail) holding every word of \`query\` (case and accents ignored, word forms in the mail's language), newest first, with up to 3 snippets each, each saying where it was found: subject, sender, the mail's own text, a quoted or forwarded part (with its claimed author) or, with summary access, its summary. Signatures, disclaimers and quoted parts already in your pile as their own mail are not read. Mail is encrypted, so one call reads at most 500 mails (or 10 s, or 50 matches) and reports scanned, complete and continue_before: pass continue_before back as before to search further back. ${MAIL_TEXT}`,
+    description: `Mail in your pile (as list_mail) holding every word of \`query\` (case and accents ignored, word forms in the mail's language), newest first, with up to 3 snippets each, each saying where it was found: subject, sender, the mail's own text, a quoted or forwarded part (with its claimed author) or, with summary access, its summary. Signatures and disclaimers are not read, nor a quoted part whose original mail is itself in the searched pile and filters (it is found there). Mail is encrypted, so one call reads at most 500 mails (or 10 s, or 50 matches) and reports scanned, complete and continue_before: pass continue_before back as before to search further back. ${MAIL_TEXT}`,
     annotations: READ_ONLY,
     input: {
         query: z
@@ -432,7 +432,12 @@ const searchMail = defineTool({
         const scan = await boundedScan({
             batches: async (before) => {
                 const rows = await mailSearchBatch(where, before);
-                mails = await searchableMailBatch(caller, rows, personFilter);
+                mails = await searchableMailBatch(
+                    caller,
+                    rows,
+                    where,
+                    personFilter,
+                );
                 return rows;
             },
             stopBeforeBatch: true,
