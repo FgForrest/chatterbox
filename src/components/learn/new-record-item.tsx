@@ -199,7 +199,7 @@ export function NewRecordItem({
                         </Button>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @[560px]/learn:grid-cols-[minmax(0,1fr)_minmax(6rem,10rem)_auto]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @[560px]/learn:grid-cols-[minmax(0,1fr)_minmax(6rem,13rem)_auto]">
                         <Input
                             className="col-span-2 h-8 w-full min-w-0 @[560px]/learn:col-span-1"
                             value={name}
