@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import {
     apiCredentials,
+    asyncJobs,
     chatterItems,
     folderDefaultProfiles,
     itemProcessing,
@@ -59,11 +60,15 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     };
 });
 
+vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
+import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
+import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import {
     AssignedProfileUnavailableError,
+    loadItemProfileRevision,
     loadSelectedProfileRevision,
     ProfileSelectionRequiredError,
     resolveDefaultProfile,
@@ -78,6 +83,8 @@ import {
     ExplicitDefaultProfileUnavailableError,
     setDefaultProfile,
 } from "@/lib/profiles/store";
+import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { hasWaitingProfileMutation } from "@/tests/helpers/profile-mutation-lock";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -140,6 +147,11 @@ describeWithDatabase("item profile resolution", () => {
     }, 120_000);
 
     beforeEach(async () => {
+        await db().delete(asyncJobs);
+        await db()
+            .update(users)
+            .set({ uiLocale: "en" })
+            .where(eq(users.id, OWNER));
         await db()
             .delete(recordingFolders)
             .where(eq(recordingFolders.userId, OWNER));
@@ -377,7 +389,7 @@ describeWithDatabase("item profile resolution", () => {
                 profileId: audio.id,
                 actor: actor(OWNER),
             }),
-        ).resolves.toEqual({ disposition: "archive" });
+        ).resolves.toEqual({ disposition: "tombstone" });
         await expect(
             deletePersonalProfile({
                 ownerUserId: OWNER,
@@ -395,6 +407,7 @@ describeWithDatabase("item profile resolution", () => {
                     eq(processingProfiles.ownerUserId, OWNER),
                     eq(processingProfiles.scope, "personal"),
                     isNull(processingProfiles.archivedAt),
+                    isNull(processingProfiles.deletedAt),
                 ),
             );
         const [folderDefault] = await db()
@@ -413,7 +426,7 @@ describeWithDatabase("item profile resolution", () => {
         });
     });
 
-    it("archives a personal profile referenced by another owner's Organization item", async () => {
+    it("tombstones a personal profile referenced by another owner's Organization item", async () => {
         const historical = await createProfile({
             ownerUserId: OWNER,
             actor: actor(OWNER),
@@ -444,7 +457,7 @@ describeWithDatabase("item profile resolution", () => {
                 profileId: historical.id,
                 actor: actor(OWNER),
             }),
-        ).resolves.toEqual({ disposition: "archive" });
+        ).resolves.toEqual({ disposition: "tombstone" });
         await expect(
             loadSelectedProfileRevision({
                 revisionId: historical.currentRevisionId ?? "missing",
@@ -627,4 +640,196 @@ describeWithDatabase("item profile resolution", () => {
             }),
         );
     });
+    it.each([
+        "en",
+        "cs-CZ",
+    ])("retains exact queued/history revisions and marks processing headers in %s", async (locale) => {
+        await db()
+            .update(users)
+            .set({ uiLocale: locale })
+            .where(eq(users.id, OWNER));
+        const source = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Recorded choices",
+            settings: defaultProfileSettings("audio"),
+        });
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: ITEM,
+                userId: OWNER,
+                view: "private",
+                profileId: source.id,
+                profileRevisionId: source.currentRevisionId,
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        at: new Date().toISOString(),
+                        generation: 1,
+                    },
+                },
+            });
+        const queuedJob = await enqueueSummaryJob({
+            userId: OWNER,
+            recordingId: ITEM,
+            profileRevisionId: source.currentRevisionId ?? "",
+            trigger: "manual",
+        });
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: source.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "tombstone" });
+        const name = `Recorded choices (${locale === "cs-CZ" ? "smazaný" : "deleted"})`;
+        const [queued] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, queuedJob.job.id));
+        const revisionId = String(queued?.payload.profileRevisionId);
+        await expect(
+            loadSelectedProfileRevision({
+                revisionId,
+                actorUserId: OWNER,
+                channel: "audio",
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            revisionId,
+            profile: { name },
+            settings: source.settings,
+        });
+        await expect(
+            loadItemProfileRevision({
+                itemId: ITEM,
+                view: "private",
+                ownerUserId: OWNER,
+                revisionId,
+            }),
+        ).resolves.toMatchObject({ revisionId, profile: { name } });
+        await expect(
+            resolveItemProfile(ITEM, "private", OWNER),
+        ).resolves.toMatchObject({
+            assigned: true,
+            revisionId,
+            profile: { name },
+        });
+        expect(
+            (await loadPrivateItemProcessing(OWNER, ITEM))?.profile,
+        ).toMatchObject({ name, revisionId });
+    });
+
+    it("serializes queued revision references with deletion and rejects a physically deleted revision", async () => {
+        const source = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Queued then deleted",
+            settings: defaultProfileSettings("audio"),
+        });
+        let releaseQueue: () => void = () => {};
+        const blocked = new Promise<void>((resolve) => {
+            releaseQueue = resolve;
+        });
+        let signalLocked: () => void = () => {};
+        const locked = new Promise<void>((resolve) => {
+            signalLocked = resolve;
+        });
+        const queued = withProfileRevisionGuard(
+            {
+                revisionId: source.currentRevisionId ?? "",
+                actorUserId: OWNER,
+                organizationUserId: ORG,
+            },
+            async (tx) => {
+                signalLocked();
+                await blocked;
+                await tx.insert(asyncJobs).values({
+                    id: "race-queue",
+                    userId: OWNER,
+                    kind: "summary",
+                    subjectId: ITEM,
+                    payload: {
+                        profileRevisionId: source.currentRevisionId,
+                    },
+                });
+            },
+        );
+        await locked;
+        const deletion = deletePersonalProfile({
+            ownerUserId: OWNER,
+            profileId: source.id,
+            actor: actor(OWNER),
+        });
+        try {
+            await vi.waitFor(
+                async () => {
+                    expect(await hasWaitingProfileMutation(db(), OWNER)).toBe(
+                        true,
+                    );
+                },
+                { timeout: 5000, interval: 10 },
+            );
+        } finally {
+            releaseQueue();
+        }
+        await queued;
+        await expect(deletion).resolves.toEqual({ disposition: "tombstone" });
+        const unused = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "No references",
+            settings: defaultProfileSettings("audio"),
+        });
+        await deletePersonalProfile({
+            ownerUserId: OWNER,
+            profileId: unused.id,
+            actor: actor(OWNER),
+        });
+        await expect(
+            enqueueSummaryJob({
+                userId: OWNER,
+                recordingId: ITEM,
+                profileRevisionId: unused.currentRevisionId ?? "",
+                trigger: "manual",
+            }),
+        ).rejects.toThrow("revision is unavailable");
+    });
+    it("queues concurrent summaries without needing a second pooled connection", async () => {
+        const source = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Concurrent summaries",
+            settings: defaultProfileSettings("audio"),
+        });
+        const queued = await Promise.all(
+            Array.from({ length: 25 }, () =>
+                enqueueSummaryJob({
+                    userId: OWNER,
+                    recordingId: ITEM,
+                    profileRevisionId: source.currentRevisionId ?? "",
+                    trigger: "manual",
+                }),
+            ),
+        );
+        expect(new Set(queued.map((result) => result.job.id)).size).toBe(1);
+        expect(queued.filter((result) => result.created)).toHaveLength(1);
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: source.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "tombstone" });
+    }, 20_000);
 });

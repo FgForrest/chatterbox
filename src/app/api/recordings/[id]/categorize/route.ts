@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     itemProcessing,
     mailPendingShares,
@@ -201,6 +202,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             selectedManualOnly = placementResolution.manualOnly;
         }
         if (selectedProfile) {
+            await lockProfileMutation(tx, selectedProfile.ownerUserId);
             const [latest] = await tx
                 .select({
                     id: processingProfiles.id,
@@ -215,6 +217,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                             selectedProfile.ownerUserId,
                         ),
                         eq(processingProfiles.channel, item.kind),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )

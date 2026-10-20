@@ -4,19 +4,21 @@ import {
     Archive,
     ChevronLeft,
     ChevronRight,
-    Copy,
     FileAudio,
     Mail,
-    Pencil,
     Plus,
-    RotateCcw,
-    Trash2,
+    User,
+    Users,
 } from "lucide-react";
-import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useExtracted, useLocale } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { ProfileEditor } from "@/components/settings/profile-editor";
+import {
+    type ProfileAction,
+    ProfileRowActions,
+} from "@/components/settings/profile-row-actions";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +27,7 @@ import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
 import type {
     SettingsProfileDefault,
     SettingsProfileDefaultOption,
+    SettingsProfileSection,
     SettingsProfileSummary,
     SettingsProfilesPage,
 } from "@/types/settings";
@@ -137,16 +140,21 @@ function errorMessage(body: unknown, fallback: string): string {
 
 export function ProfilesSection() {
     const i18n = useExtracted();
+    const locale = useLocale();
     const confirm = useConfirm();
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [channel, setChannel] = useState<"all" | ProfileChannel>("all");
-    const [scope, setScope] = useState<
-        "all" | "personal" | "organization" | "archived"
-    >("all");
+    const [pages, setPages] = useState({
+        organization: 1,
+        personal: 1,
+        archived: 1,
+    });
+    const [archivedOpen, setArchivedOpen] = useState(true);
+    const [mutating, setMutating] = useState(false);
+    const requestId = useRef(0);
     const [newProfileScope, setNewProfileScope] =
         useState<ProfileScope>("personal");
-    const [page, setPage] = useState(1);
     const [data, setData] = useState<SettingsProfilesPage | null>(null);
     const [loading, setLoading] = useState(true);
     const [editor, setEditor] = useState<EditorTarget | null>(null);
@@ -155,7 +163,7 @@ export function ProfilesSection() {
     useEffect(() => {
         const timer = window.setTimeout(() => {
             setDebouncedSearch(search.trim());
-            setPage(1);
+            setPages({ organization: 1, personal: 1, archived: 1 });
         }, 250);
         return () => window.clearTimeout(timer);
     }, [search]);
@@ -164,90 +172,136 @@ export function ProfilesSection() {
         const params = new URLSearchParams();
         if (debouncedSearch) params.set("q", debouncedSearch);
         if (channel !== "all") params.set("channel", channel);
-        if (scope === "archived") {
-            params.set("archived", "true");
-        } else if (scope !== "all") {
-            params.set("scope", scope);
-        }
-        params.set("page", String(page));
+        params.set("sectioned", "true");
+        params.set("organizationPage", String(pages.organization));
+        params.set("personalPage", String(pages.personal));
+        params.set("archivedPage", String(pages.archived));
         params.set("pageSize", String(PAGE_SIZE));
         return params.toString();
-    }, [channel, debouncedSearch, page, scope]);
+    }, [channel, debouncedSearch, pages]);
+
+    const latestQuery = useRef(query);
+    latestQuery.current = query;
 
     const loadProfiles = useCallback(async () => {
+        if (latestQuery.current !== query) return;
+        const currentRequest = ++requestId.current;
         setLoading(true);
         try {
             const response = await fetch(`/api/settings/profiles?${query}`);
             if (!response.ok) throw new Error("load");
-            setData((await response.json()) as SettingsProfilesPage);
+            const body = (await response.json()) as SettingsProfilesPage;
+            if (currentRequest === requestId.current) {
+                setData(body);
+                if (body.sections) {
+                    const normalized = {
+                        organization:
+                            body.sections.organization.pagination.page,
+                        personal: body.sections.personal.pagination.page,
+                        archived: body.sections.archived.pagination.page,
+                    };
+                    setPages((current) =>
+                        current.organization === normalized.organization &&
+                        current.personal === normalized.personal &&
+                        current.archived === normalized.archived
+                            ? current
+                            : normalized,
+                    );
+                }
+            }
         } catch {
-            toast.error(i18n("Failed to load profiles."));
+            if (currentRequest === requestId.current)
+                toast.error(i18n("Failed to load profiles."));
         } finally {
-            setLoading(false);
+            if (currentRequest === requestId.current) setLoading(false);
         }
     }, [i18n, query]);
 
     useEffect(() => {
         void loadProfiles();
+        return () => {
+            requestId.current++;
+        };
     }, [loadProfiles]);
 
     const mutate = async (
         profile: SettingsProfileSummary,
-        action: "duplicate" | "default" | "archive" | "delete" | "restore",
+        action: ProfileAction,
+        destination?: ProfileScope,
     ) => {
         const previous = data;
+        setMutating(true);
         if (action === "default") {
             setData((current) =>
-                current
+                current?.sections
                     ? {
                           ...current,
-                          profiles: current.profiles.map((item) =>
-                              item.channel === profile.channel &&
-                              item.scope === profile.scope
-                                  ? {
-                                        ...item,
-                                        isDefault: item.id === profile.id,
-                                    }
-                                  : item,
-                          ),
-                      }
-                    : current,
-            );
-        } else if (
-            action === "archive" ||
-            action === "delete" ||
-            action === "restore"
-        ) {
-            setData((current) =>
-                current
-                    ? {
-                          ...current,
-                          profiles: current.profiles.filter(
-                              (item) => item.id !== profile.id,
-                          ),
-                          pagination: {
-                              ...current.pagination,
-                              total: Math.max(0, current.pagination.total - 1),
+                          sections: {
+                              ...current.sections,
+                              organization: {
+                                  ...current.sections.organization,
+                                  profiles:
+                                      current.sections.organization.profiles.map(
+                                          (item) =>
+                                              item.channel === profile.channel
+                                                  ? {
+                                                        ...item,
+                                                        isDefault:
+                                                            item.id ===
+                                                            profile.id,
+                                                        isOrganizationDefault:
+                                                            item.id ===
+                                                            profile.id,
+                                                    }
+                                                  : item,
+                                      ),
+                              },
                           },
                       }
                     : current,
             );
+        } else if (
+            ["archive", "delete", "permanent", "restore"].includes(action)
+        ) {
+            setData((current) => {
+                if (!current?.sections) return current;
+                const section = profile.archivedAt ? "archived" : profile.scope;
+                const sectionData = current.sections[section];
+                return {
+                    ...current,
+                    sections: {
+                        ...current.sections,
+                        [section]: {
+                            ...sectionData,
+                            profiles: sectionData.profiles.filter(
+                                (item) => item.id !== profile.id,
+                            ),
+                            pagination: {
+                                ...sectionData.pagination,
+                                total: Math.max(
+                                    0,
+                                    sectionData.pagination.total - 1,
+                                ),
+                            },
+                        },
+                    },
+                };
+            });
         }
-
         let endpoint = `/api/settings/profiles/${encodeURIComponent(profile.id)}`;
-        if (action === "duplicate") endpoint = `${endpoint}/duplicate`;
-        if (action === "default") endpoint = `${endpoint}/default`;
-        if (action === "restore") endpoint = `${endpoint}/restore`;
+        if (["duplicate", "default", "restore", "permanent"].includes(action))
+            endpoint += `/${action}`;
         try {
             const response = await fetch(endpoint, {
-                method:
-                    action === "archive" || action === "delete"
-                        ? "DELETE"
-                        : "POST",
+                method: ["archive", "delete", "permanent"].includes(action)
+                    ? "DELETE"
+                    : "POST",
                 ...(action === "duplicate"
                     ? {
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({}),
+                          body: JSON.stringify({
+                              scope: destination ?? "personal",
+                          }),
                       }
                     : {}),
             });
@@ -259,20 +313,22 @@ export function ProfilesSection() {
             }
             let success = i18n("Profile restored.");
             if (action === "duplicate") success = i18n("Profile duplicated.");
-            if (action === "default") {
+            if (action === "default")
                 success = i18n("Default profile changed.");
-            }
             if (action === "archive") success = i18n("Profile archived.");
-            if (action === "delete") success = i18n("Profile deleted.");
+            if (action === "delete" || action === "permanent")
+                success = i18n("Profile deleted.");
             toast.success(success);
             await loadProfiles();
         } catch (error) {
-            if (previous) setData(previous);
+            if (previous && latestQuery.current === query) setData(previous);
             toast.error(
                 error instanceof Error
                     ? error.message
                     : i18n("Failed to update profile."),
             );
+        } finally {
+            setMutating(false);
         }
     };
 
@@ -311,18 +367,14 @@ export function ProfilesSection() {
 
     const deleteImpact = async (
         profile: SettingsProfileSummary,
-    ): Promise<
-        { disposition: "delete" | "archive" } | { memberDefaultCount: number }
-    > => {
+    ): Promise<{ memberDefaultCount: number }> => {
         const response = await fetch(
             `/api/settings/profiles/${encodeURIComponent(profile.id)}?deleteImpact=true`,
         );
         if (!response.ok)
             throw new Error(i18n("Failed to load delete impact."));
         const body = (await response.json()) as {
-            deleteImpact?:
-                | { disposition: "delete" | "archive" }
-                | { memberDefaultCount: number };
+            deleteImpact?: { memberDefaultCount: number };
         };
         if (!body.deleteImpact) {
             throw new Error(i18n("Failed to load delete impact."));
@@ -330,44 +382,25 @@ export function ProfilesSection() {
         return body.deleteImpact;
     };
 
-    const removePersonal = async (profile: SettingsProfileSummary) => {
-        let impact:
-            | { disposition: "delete" | "archive" }
-            | { memberDefaultCount: number };
-        try {
-            impact = await deleteImpact(profile);
-        } catch (error) {
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : i18n("Failed to load delete impact."),
-            );
-            return;
-        }
-        const archives =
-            "disposition" in impact && impact.disposition === "archive";
-        const description = archives
-            ? i18n(
-                  "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
-              )
-            : i18n(
-                  "This profile has no processing history and will be permanently deleted.",
-              );
+    const removeProfile = (
+        profile: SettingsProfileSummary,
+        action: "delete" | "permanent",
+    ) => {
         void confirm({
-            title: i18n("Delete “{name}”?", { name: profile.name }),
-            description,
-            confirmLabel: i18n("Delete"),
+            title: i18n("Delete profile permanently?"),
+            description: i18n(
+                "The profile disappears and cannot be restored. Recordings, summaries and tasks made with it stay.",
+            ),
+            confirmLabel: i18n("Delete permanently"),
             pendingLabel: i18n("Deleting…"),
             destructive: true,
-            onConfirm: () => mutate(profile, "delete"),
+            onConfirm: () => mutate(profile, action),
             errorMessage: i18n("Failed to delete profile."),
         });
     };
 
     const archiveOrganization = async (profile: SettingsProfileSummary) => {
-        let impact:
-            | { disposition: "delete" | "archive" }
-            | { memberDefaultCount: number };
+        let impact: { memberDefaultCount: number };
         try {
             impact = await deleteImpact(profile);
         } catch (error) {
@@ -378,8 +411,7 @@ export function ProfilesSection() {
             );
             return;
         }
-        const memberDefaultCount =
-            "memberDefaultCount" in impact ? impact.memberDefaultCount : 0;
+        const memberDefaultCount = impact.memberDefaultCount;
         void confirm({
             title: i18n("Archive “{name}”?", { name: profile.name }),
             description: i18n(
@@ -394,8 +426,6 @@ export function ProfilesSection() {
         });
     };
 
-    const profiles = data?.profiles ?? [];
-    const pagination = data?.pagination;
     const closeEditor = useCallback((open: boolean) => {
         if (!open) setEditor(null);
     }, []);
@@ -413,25 +443,26 @@ export function ProfilesSection() {
                 icon={FileAudio}
                 action={
                     <div className="flex flex-wrap justify-end gap-2">
-                        {data?.permissions.canCreateOrganization && (
-                            <NativeSelect
-                                aria-label={i18n("New profile scope")}
-                                className="h-8"
-                                value={newProfileScope}
-                                onChange={(event) =>
-                                    setNewProfileScope(
-                                        event.target.value as ProfileScope,
-                                    )
-                                }
-                            >
-                                <option value="personal">
-                                    {i18n("Personal")}
-                                </option>
-                                <option value="organization">
-                                    {i18n("Organization")}
-                                </option>
-                            </NativeSelect>
-                        )}
+                        {data?.permissions.canCreateOrganization &&
+                            data.permissions.canCreatePersonal !== false && (
+                                <NativeSelect
+                                    aria-label={i18n("New profile scope")}
+                                    className="h-8"
+                                    value={newProfileScope}
+                                    onChange={(event) =>
+                                        setNewProfileScope(
+                                            event.target.value as ProfileScope,
+                                        )
+                                    }
+                                >
+                                    <option value="personal">
+                                        {i18n("Personal")}
+                                    </option>
+                                    <option value="organization">
+                                        {i18n("Organization")}
+                                    </option>
+                                </NativeSelect>
+                            )}
                         <Button
                             type="button"
                             size="sm"
@@ -439,7 +470,11 @@ export function ProfilesSection() {
                                 setEditor({
                                     profileId: null,
                                     newChannel: "audio",
-                                    newScope: newProfileScope,
+                                    newScope:
+                                        data?.permissions.canCreatePersonal ===
+                                        false
+                                            ? "organization"
+                                            : newProfileScope,
                                 })
                             }
                         >
@@ -454,7 +489,11 @@ export function ProfilesSection() {
                                 setEditor({
                                     profileId: null,
                                     newChannel: "mail",
-                                    newScope: newProfileScope,
+                                    newScope:
+                                        data?.permissions.canCreatePersonal ===
+                                        false
+                                            ? "organization"
+                                            : newProfileScope,
                                 })
                             }
                         >
@@ -471,7 +510,7 @@ export function ProfilesSection() {
                         channel="audio"
                         state={data.defaults.audio}
                         options={data.defaults.options}
-                        disabled={changingDefault}
+                        disabled={changingDefault || mutating}
                         onChange={(selectedChannel, value) =>
                             void changeDefault(selectedChannel, value)
                         }
@@ -480,7 +519,7 @@ export function ProfilesSection() {
                         channel="mail"
                         state={data.defaults.mail}
                         options={data.defaults.options}
-                        disabled={changingDefault}
+                        disabled={changingDefault || mutating}
                         onChange={(selectedChannel, value) =>
                             void changeDefault(selectedChannel, value)
                         }
@@ -488,7 +527,7 @@ export function ProfilesSection() {
                 </div>
             )}
 
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <Input
                     type="search"
                     aria-label={i18n("Search profiles")}
@@ -503,31 +542,12 @@ export function ProfilesSection() {
                         setChannel(
                             event.target.value as "all" | ProfileChannel,
                         );
-                        setPage(1);
+                        setPages({ organization: 1, personal: 1, archived: 1 });
                     }}
                 >
                     <option value="all">{i18n("All channels")}</option>
                     <option value="audio">{i18n("For recordings")}</option>
                     <option value="mail">{i18n("For mail")}</option>
-                </NativeSelect>
-                <NativeSelect
-                    aria-label={i18n("Scope")}
-                    value={scope}
-                    onChange={(event) => {
-                        setScope(
-                            event.target.value as
-                                | "all"
-                                | "personal"
-                                | "organization"
-                                | "archived",
-                        );
-                        setPage(1);
-                    }}
-                >
-                    <option value="all">{i18n("All scopes")}</option>
-                    <option value="personal">{i18n("Personal")}</option>
-                    <option value="organization">{i18n("Organization")}</option>
-                    <option value="archived">{i18n("Archived")}</option>
                 </NativeSelect>
             </div>
 
@@ -535,274 +555,346 @@ export function ProfilesSection() {
                 <div className="py-10 text-center text-sm text-muted-foreground">
                     {i18n("Loading profiles…")}
                 </div>
-            ) : profiles.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                    {i18n("No profiles match these filters.")}
-                </div>
             ) : (
-                <ul className="divide-y rounded-lg border">
-                    {profiles.map((profile) => {
-                        const channelLabel =
-                            profile.channel === "audio"
-                                ? i18n("for recordings")
-                                : i18n("for mail");
-                        const scopeLabel =
-                            profile.scope === "personal"
-                                ? i18n("Personal")
-                                : i18n("Organization");
+                (["organization", "personal", "archived"] as const).map(
+                    (section: SettingsProfileSection) => {
+                        const group = data?.sections?.[section];
+                        if (
+                            !group ||
+                            (section === "archived" &&
+                                group.pagination.total === 0)
+                        )
+                            return null;
+                        const label =
+                            section === "organization"
+                                ? i18n("Organization")
+                                : section === "personal"
+                                  ? i18n("Personal")
+                                  : i18n("Archived");
+                        const Icon =
+                            section === "organization"
+                                ? Users
+                                : section === "personal"
+                                  ? User
+                                  : Archive;
+                        const pagination = group.pagination;
                         return (
-                            <li
-                                key={profile.id}
-                                className="flex flex-wrap items-center gap-3 px-3 py-2.5"
+                            <section
+                                key={section}
+                                aria-labelledby={`profiles-${section}`}
+                                className="space-y-2"
                             >
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="truncate text-sm font-medium">
-                                            {profile.name}
-                                        </span>
-                                        {profile.isYourDefault && (
-                                            <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
-                                                {i18n("Your default")}
-                                            </span>
-                                        )}
-                                        {profile.isOrganizationDefault && (
-                                            <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                                                {i18n("Organization default")}
-                                            </span>
-                                        )}
-                                        {!profile.canEdit &&
-                                            profile.scope ===
-                                                "organization" && (
-                                                <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                                                    {i18n("Read-only")}
-                                                </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h3
+                                        id={`profiles-${section}`}
+                                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide"
+                                    >
+                                        <Icon
+                                            className="size-3.5 text-muted-foreground"
+                                            aria-hidden="true"
+                                        />
+                                        {label}
+                                    </h3>
+                                    <span className="text-xs tabular-nums text-muted-foreground">
+                                        {pagination.total}
+                                    </span>
+                                    {section === "organization" && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {i18n(
+                                                "Applies to members who have not chosen their own default profile.",
                                             )}
-                                    </div>
-                                    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                                        {profile.channel === "audio" ? (
-                                            <FileAudio
-                                                className="size-3"
-                                                aria-hidden="true"
-                                            />
-                                        ) : (
-                                            <Mail
-                                                className="size-3"
-                                                aria-hidden="true"
-                                            />
-                                        )}
-                                        <span>{channelLabel}</span>
-                                        <span aria-hidden="true">·</span>
-                                        <span>{scopeLabel}</span>
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap items-center justify-end gap-1">
-                                    {profile.archivedAt ? (
-                                        profile.canEdit && (
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="ghost"
-                                                aria-label={i18n(
-                                                    "Restore {name}",
-                                                    { name: profile.name },
-                                                )}
-                                                onClick={() =>
-                                                    void mutate(
-                                                        profile,
-                                                        "restore",
-                                                    )
-                                                }
-                                            >
-                                                <RotateCcw
-                                                    className="mr-1 size-3.5"
-                                                    aria-hidden="true"
-                                                />
-                                                {i18n("Restore")}
-                                            </Button>
-                                        )
-                                    ) : (
-                                        <>
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="ghost"
-                                                aria-label={
-                                                    profile.canEdit
-                                                        ? i18n("Edit {name}", {
-                                                              name: profile.name,
-                                                          })
-                                                        : i18n("View {name}", {
-                                                              name: profile.name,
-                                                          })
-                                                }
-                                                onClick={() =>
-                                                    setEditor({
-                                                        profileId: profile.id,
-                                                    })
-                                                }
-                                            >
-                                                <Pencil
-                                                    className="mr-1 size-3.5"
-                                                    aria-hidden="true"
-                                                />
-                                                {profile.canEdit
-                                                    ? i18n("Edit")
-                                                    : i18n("View")}
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="ghost"
-                                                aria-label={
-                                                    profile.scope ===
-                                                    "organization"
-                                                        ? i18n(
-                                                              "Duplicate to personal {name}",
-                                                              {
-                                                                  name: profile.name,
-                                                              },
-                                                          )
-                                                        : i18n(
-                                                              "Duplicate {name}",
-                                                              {
-                                                                  name: profile.name,
-                                                              },
-                                                          )
-                                                }
-                                                onClick={() =>
-                                                    void mutate(
-                                                        profile,
-                                                        "duplicate",
-                                                    )
-                                                }
-                                            >
-                                                <Copy
-                                                    className="mr-1 size-3.5"
-                                                    aria-hidden="true"
-                                                />
-                                                {profile.scope ===
-                                                "organization"
-                                                    ? i18n(
-                                                          "Duplicate to personal",
-                                                      )
-                                                    : i18n("Duplicate")}
-                                            </Button>
-                                            {profile.canEdit &&
-                                                profile.scope ===
-                                                    "personal" && (
-                                                    <Button
-                                                        type="button"
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        aria-label={i18n(
-                                                            "Delete {name}",
-                                                            {
-                                                                name: profile.name,
-                                                            },
-                                                        )}
-                                                        onClick={() =>
-                                                            void removePersonal(
-                                                                profile,
-                                                            )
-                                                        }
-                                                    >
-                                                        <Trash2
-                                                            className="mr-1 size-3.5"
-                                                            aria-hidden="true"
-                                                        />
-                                                        {i18n("Delete")}
-                                                    </Button>
-                                                )}
-                                            {profile.canEdit &&
-                                                profile.scope ===
-                                                    "organization" &&
-                                                !profile.isDefault && (
-                                                    <>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            aria-label={i18n(
-                                                                "Make {name} Organization default",
-                                                                {
-                                                                    name: profile.name,
-                                                                },
-                                                            )}
-                                                            onClick={() =>
-                                                                void mutate(
-                                                                    profile,
-                                                                    "default",
-                                                                )
-                                                            }
-                                                        >
-                                                            {i18n(
-                                                                "Make Organization default",
-                                                            )}
-                                                        </Button>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            aria-label={i18n(
-                                                                "Archive {name}",
-                                                                {
-                                                                    name: profile.name,
-                                                                },
-                                                            )}
-                                                            onClick={() =>
-                                                                void archiveOrganization(
-                                                                    profile,
-                                                                )
-                                                            }
-                                                        >
-                                                            <Archive
-                                                                className="mr-1 size-3.5"
-                                                                aria-hidden="true"
-                                                            />
-                                                            {i18n("Archive")}
-                                                        </Button>
-                                                    </>
-                                                )}
-                                        </>
+                                        </p>
+                                    )}
+                                    {section === "archived" && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="ghost"
+                                            className="ml-auto"
+                                            aria-expanded={archivedOpen}
+                                            aria-controls="archived-profiles"
+                                            onClick={() =>
+                                                setArchivedOpen((open) => !open)
+                                            }
+                                        >
+                                            {archivedOpen
+                                                ? i18n("Hide")
+                                                : i18n("Show")}
+                                        </Button>
                                     )}
                                 </div>
-                            </li>
+                                {(section !== "archived" || archivedOpen) && (
+                                    <div
+                                        id={
+                                            section === "archived"
+                                                ? "archived-profiles"
+                                                : undefined
+                                        }
+                                        className="space-y-2"
+                                    >
+                                        {group.profiles.length === 0 ? (
+                                            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                                                {i18n(
+                                                    "No profiles match these filters.",
+                                                )}
+                                            </p>
+                                        ) : (
+                                            <ul className="divide-y rounded-lg border">
+                                                {group.profiles
+                                                    .filter(
+                                                        (profile) =>
+                                                            !profile.archivedAt ||
+                                                            profile.scope !==
+                                                                "organization" ||
+                                                            profile.canEdit,
+                                                    )
+                                                    .map((profile) => (
+                                                        <li
+                                                            key={profile.id}
+                                                            className="flex flex-wrap items-center gap-3 px-3 py-2.5"
+                                                        >
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <span className="truncate text-sm font-medium">
+                                                                        {
+                                                                            profile.name
+                                                                        }
+                                                                    </span>
+                                                                    {profile.isYourDefault && (
+                                                                        <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+                                                                            {i18n(
+                                                                                "Your default",
+                                                                            )}
+                                                                        </span>
+                                                                    )}
+                                                                    {profile.isOrganizationDefault && (
+                                                                        <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                                            {i18n(
+                                                                                "Organization default",
+                                                                            )}
+                                                                        </span>
+                                                                    )}
+                                                                    {!profile.canEdit &&
+                                                                        profile.scope ===
+                                                                            "organization" && (
+                                                                            <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                                                {i18n(
+                                                                                    "Read-only",
+                                                                                )}
+                                                                            </span>
+                                                                        )}
+                                                                </div>
+                                                                <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                                                                    {profile.channel ===
+                                                                    "audio" ? (
+                                                                        <FileAudio
+                                                                            className="size-3"
+                                                                            aria-hidden="true"
+                                                                        />
+                                                                    ) : (
+                                                                        <Mail
+                                                                            className="size-3"
+                                                                            aria-hidden="true"
+                                                                        />
+                                                                    )}
+                                                                    <span>
+                                                                        {profile.channel ===
+                                                                        "audio"
+                                                                            ? i18n(
+                                                                                  "for recordings",
+                                                                              )
+                                                                            : i18n(
+                                                                                  "for mail",
+                                                                              )}
+                                                                    </span>
+                                                                    <span aria-hidden="true">
+                                                                        ·
+                                                                    </span>
+                                                                    <span>
+                                                                        {profile.scope ===
+                                                                        "organization"
+                                                                            ? i18n(
+                                                                                  "Organization",
+                                                                              )
+                                                                            : i18n(
+                                                                                  "Personal",
+                                                                              )}
+                                                                    </span>
+                                                                </p>
+                                                            </div>
+                                                            {profile.archivedAt && (
+                                                                <time
+                                                                    dateTime={
+                                                                        profile.archivedAt
+                                                                    }
+                                                                    className="text-xs text-muted-foreground"
+                                                                >
+                                                                    {i18n(
+                                                                        "Archived {date}",
+                                                                        {
+                                                                            date: new Date(
+                                                                                profile.archivedAt,
+                                                                            ).toLocaleDateString(
+                                                                                locale,
+                                                                                {
+                                                                                    dateStyle:
+                                                                                        "medium",
+                                                                                },
+                                                                            ),
+                                                                        },
+                                                                    )}
+                                                                </time>
+                                                            )}
+                                                            <ProfileRowActions
+                                                                personalDeleteBlocked={
+                                                                    profile.scope ===
+                                                                        "personal" &&
+                                                                    Boolean(
+                                                                        profile.isYourDefault,
+                                                                    ) &&
+                                                                    !data
+                                                                        ?.defaults?.[
+                                                                        profile
+                                                                            .channel
+                                                                    ]
+                                                                        .organizationDefault
+                                                                }
+                                                                profile={
+                                                                    profile
+                                                                }
+                                                                canCreateOrganization={
+                                                                    data
+                                                                        ?.permissions
+                                                                        .canCreateOrganization ??
+                                                                    false
+                                                                }
+                                                                canCreatePersonal={
+                                                                    data
+                                                                        ?.permissions
+                                                                        .canCreatePersonal !==
+                                                                    false
+                                                                }
+                                                                disabled={
+                                                                    mutating ||
+                                                                    changingDefault
+                                                                }
+                                                                onEdit={() =>
+                                                                    setEditor({
+                                                                        profileId:
+                                                                            profile.id,
+                                                                    })
+                                                                }
+                                                                onAction={(
+                                                                    action,
+                                                                    scope,
+                                                                ) => {
+                                                                    if (
+                                                                        action ===
+                                                                            "delete" ||
+                                                                        action ===
+                                                                            "permanent"
+                                                                    )
+                                                                        removeProfile(
+                                                                            profile,
+                                                                            action,
+                                                                        );
+                                                                    else if (
+                                                                        action ===
+                                                                        "archive"
+                                                                    )
+                                                                        void archiveOrganization(
+                                                                            profile,
+                                                                        );
+                                                                    else
+                                                                        void mutate(
+                                                                            profile,
+                                                                            action,
+                                                                            scope,
+                                                                        );
+                                                                }}
+                                                            />
+                                                        </li>
+                                                    ))}
+                                            </ul>
+                                        )}
+                                        {pagination.totalPages > 1 && (
+                                            <nav
+                                                aria-label={i18n(
+                                                    "{section} profile pages",
+                                                    { section: label },
+                                                )}
+                                                className="flex items-center justify-end gap-2 text-sm text-muted-foreground"
+                                            >
+                                                <Button
+                                                    type="button"
+                                                    size="icon-sm"
+                                                    variant="outline"
+                                                    aria-label={i18n(
+                                                        "Previous page",
+                                                    )}
+                                                    disabled={
+                                                        pagination.page <= 1 ||
+                                                        loading ||
+                                                        mutating
+                                                    }
+                                                    onClick={() =>
+                                                        setPages((current) => ({
+                                                            ...current,
+                                                            [section]:
+                                                                pagination.page -
+                                                                1,
+                                                        }))
+                                                    }
+                                                >
+                                                    <ChevronLeft
+                                                        className="size-4"
+                                                        aria-hidden="true"
+                                                    />
+                                                </Button>
+                                                <span>
+                                                    {i18n(
+                                                        "Page {page, number} of {total, number}",
+                                                        {
+                                                            page: pagination.page,
+                                                            total: pagination.totalPages,
+                                                        },
+                                                    )}
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    size="icon-sm"
+                                                    variant="outline"
+                                                    aria-label={i18n(
+                                                        "Next page",
+                                                    )}
+                                                    disabled={
+                                                        pagination.page >=
+                                                            pagination.totalPages ||
+                                                        loading ||
+                                                        mutating
+                                                    }
+                                                    onClick={() =>
+                                                        setPages((current) => ({
+                                                            ...current,
+                                                            [section]:
+                                                                pagination.page +
+                                                                1,
+                                                        }))
+                                                    }
+                                                >
+                                                    <ChevronRight
+                                                        className="size-4"
+                                                        aria-hidden="true"
+                                                    />
+                                                </Button>
+                                            </nav>
+                                        )}
+                                    </div>
+                                )}
+                            </section>
                         );
-                    })}
-                </ul>
-            )}
-
-            {pagination && pagination.totalPages > 1 && (
-                <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                    <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        aria-label={i18n("Previous page")}
-                        disabled={pagination.page <= 1 || loading}
-                        onClick={() => setPage((current) => current - 1)}
-                    >
-                        <ChevronLeft className="size-4" aria-hidden="true" />
-                    </Button>
-                    <span>
-                        {i18n("Page {page, number} of {total, number}", {
-                            page: pagination.page,
-                            total: pagination.totalPages,
-                        })}
-                    </span>
-                    <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        aria-label={i18n("Next page")}
-                        disabled={
-                            pagination.page >= pagination.totalPages || loading
-                        }
-                        onClick={() => setPage((current) => current + 1)}
-                    >
-                        <ChevronRight className="size-4" aria-hidden="true" />
-                    </Button>
-                </div>
+                    },
+                )
             )}
 
             {editor && (

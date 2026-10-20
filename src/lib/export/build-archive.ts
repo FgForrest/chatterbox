@@ -1900,6 +1900,7 @@ interface ArchivedProfiles {
         createdAt: string;
         updatedAt: string;
         archivedAt: string | null;
+        deletedAt: string | null;
     }[];
     revisions: {
         id: string;
@@ -1935,6 +1936,7 @@ async function collectProfiles(
             createdAt: processingProfiles.createdAt,
             updatedAt: processingProfiles.updatedAt,
             archivedAt: processingProfiles.archivedAt,
+            deletedAt: processingProfiles.deletedAt,
         })
         .from(processingProfiles)
         .where(archivedProfileCondition(scope));
@@ -1966,7 +1968,13 @@ async function collectProfiles(
                   )
                   .where(
                       and(
-                          inArray(processingProfileRevisions.id, revisionIds),
+                          or(
+                              inArray(
+                                  processingProfileRevisions.id,
+                                  revisionIds,
+                              ),
+                              isNotNull(processingProfiles.deletedAt),
+                          ),
                           archivedProfileCondition(scope),
                       ),
                   )
@@ -1984,6 +1992,7 @@ async function collectProfiles(
             createdAt: profile.createdAt.toISOString(),
             updatedAt: profile.updatedAt.toISOString(),
             archivedAt: profile.archivedAt?.toISOString() ?? null,
+            deletedAt: profile.deletedAt?.toISOString() ?? null,
         })),
         revisions: revisionRows.map((revision) => ({
             ...revision,

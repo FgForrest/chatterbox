@@ -4,6 +4,11 @@ import { SUMMARY_PROMPT_PARTS } from "@/lib/ai/summary-presets";
 import { requireApiSessionActor } from "@/lib/auth-server";
 import type { ActorContext } from "@/lib/authz/model";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    type AppLocale,
+    localeFromAcceptLanguage,
+    normalizeLocale,
+} from "@/lib/i18n/config";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { mayEditProfile } from "@/lib/profiles/access";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
@@ -23,13 +28,20 @@ export const profileScopeSchema = z.enum(["personal", "organization"]);
 export interface ProfileRouteActor {
     actor: ActorContext;
     userId: string;
+    locale: AppLocale;
 }
 
 export async function profileRouteActor(
     request: Request,
 ): Promise<ProfileRouteActor> {
     const { session, actor } = await requireApiSessionActor(request);
-    return { actor, userId: session.user.id };
+    return {
+        actor,
+        userId: session.user.id,
+        locale:
+            normalizeLocale(session.user.uiLocale) ??
+            localeFromAcceptLanguage(request.headers.get("accept-language")),
+    };
 }
 
 export async function ensureActorProfiles(userId: string): Promise<void> {

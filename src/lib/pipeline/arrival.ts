@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { db } from "@/db";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     itemProcessing,
     processingProfiles,
@@ -83,6 +84,7 @@ export async function requestArrivalInTx(
     });
     if (!advance || !input.profile || view !== "private") return advance;
 
+    await lockProfileMutation(tx, input.profile.ownerUserId);
     const [latest] = await tx
         .select({
             id: processingProfiles.id,
@@ -94,6 +96,7 @@ export async function requestArrivalInTx(
                 eq(processingProfiles.id, input.profile.id),
                 eq(processingProfiles.ownerUserId, input.profile.ownerUserId),
                 eq(processingProfiles.channel, input.profile.channel),
+                isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),
         )

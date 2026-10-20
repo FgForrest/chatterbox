@@ -8,6 +8,7 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
+import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
 import {
     asyncJobs,
     chatterItems,
@@ -168,6 +169,7 @@ export async function startLearnRun(input: {
                 trigger,
                 actsForOrganization,
                 profileRevisionId: profile.revisionId,
+                profileOwnerUserId: profile.profile.ownerUserId,
                 payerUserId: provider.payerUserId,
             });
         }
@@ -241,6 +243,11 @@ export async function startLearnRun(input: {
             .orderBy(desc(learnRuns.createdAt))
             .limit(1);
         if (open) return { open };
+        await lockProfileRevisionInTx(
+            tx,
+            profile.profile.ownerUserId,
+            profile.revisionId,
+        );
         const [run] = await tx
             .insert(learnRuns)
             .values({
@@ -379,6 +386,7 @@ async function insertMailRunInTx(
         trigger,
         actsForOrganization,
         profileRevisionId,
+        profileOwnerUserId,
         payerUserId,
     }: {
         access: RecordingViewContext;
@@ -386,6 +394,7 @@ async function insertMailRunInTx(
         trigger: "manual" | "auto";
         actsForOrganization?: boolean;
         profileRevisionId: string;
+        profileOwnerUserId: string;
         payerUserId: string;
     },
 ): Promise<
@@ -465,6 +474,7 @@ async function insertMailRunInTx(
         .orderBy(desc(learnRuns.createdAt))
         .limit(1);
     if (open) return { open };
+    await lockProfileRevisionInTx(tx, profileOwnerUserId, profileRevisionId);
     const [run] = await tx
         .insert(learnRuns)
         .values({

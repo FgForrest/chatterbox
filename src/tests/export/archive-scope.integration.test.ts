@@ -1338,6 +1338,49 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         expect(bravo.text).not.toContain("profile-alice-choice");
     });
 
+    it("exports tombstoned profile metadata and all immutable revisions while preserving scope", async () => {
+        const deletedAt = new Date("2026-10-20T12:00:00Z");
+        await db()
+            .insert(processingProfiles)
+            .values({
+                id: "deleted-profile",
+                ownerUserId: ALICE,
+                scope: "personal",
+                channel: "audio",
+                name: encryptText("Historical profile"),
+                currentRevisionId: "deleted-current",
+                deletedAt,
+            });
+        await db()
+            .insert(processingProfileRevisions)
+            .values(
+                ["deleted-first", "deleted-middle", "deleted-current"].map(
+                    (id) => ({
+                        id,
+                        profileId: "deleted-profile",
+                        settings: encryptText(JSON.stringify({ version: id })),
+                        createdBy: ALICE,
+                    }),
+                ),
+            );
+        const personal = await archive({ kind: "personal", userId: ALICE });
+        const profiles = personal.json("profiles/profiles.json");
+        expect(profiles.profiles).toContainEqual(
+            expect.objectContaining({
+                id: "deleted-profile",
+                name: "Historical profile",
+                deletedAt: deletedAt.toISOString(),
+            }),
+        );
+        expect(
+            profiles.revisions.filter(
+                (r: { profileId: string }) => r.profileId === "deleted-profile",
+            ),
+        ).toHaveLength(3);
+        const other = await archive({ kind: "personal", userId: BRAVO });
+        expect(other.text).not.toContain("Historical profile");
+    });
+
     it("renders a person's exports without the Organization's corrections", async () => {
         const overlays = await confirmedOverlays({
             ownerUserId: ALICE,

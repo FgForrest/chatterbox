@@ -14,6 +14,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     transcriptions,
+    users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
@@ -27,6 +28,7 @@ import type {
     PipelinePhases,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -296,11 +298,14 @@ export async function loadPrivateItemProcessing(
             phases: itemProcessing.phases,
             profileId: processingProfiles.id,
             profileName: processingProfiles.name,
+            profileDeletedAt: processingProfiles.deletedAt,
+            viewerLocale: users.uiLocale,
             profileScope: processingProfiles.scope,
             profileRevisionId: processingProfileRevisions.id,
             profileSettings: processingProfileRevisions.settings,
         })
         .from(chatterItems)
+        .leftJoin(users, eq(users.id, chatterItems.userId))
         .leftJoin(
             itemProcessing,
             and(
@@ -617,7 +622,11 @@ export async function loadPrivateItemProcessing(
         automatic
             ? {
                   id: item.profileId,
-                  name: decryptText(item.profileName),
+                  name: profileHistoryName(
+                      decryptText(item.profileName),
+                      item.profileDeletedAt,
+                      item.viewerLocale,
+                  ),
                   scope: item.profileScope,
                   revisionId: item.profileRevisionId,
                   automatic: {

@@ -1,22 +1,19 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
+import { profileHistoryReferences } from "@/db/queries/profile-history";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
-    aiEnhancements,
-    asyncJobs,
     folderDefaultProfiles,
-    itemProcessing,
-    learnRuns,
     processingProfileRevisions,
     processingProfiles,
-    recordingFolders,
-    transcriptions,
     userSettings,
 } from "@/db/schema";
 import type { HolderAccess } from "@/lib/authz/access-state";
 import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import type { AppLocale } from "@/lib/i18n/config";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import {
     mayEditProfile,
@@ -24,6 +21,7 @@ import {
     mayUseProfile,
 } from "@/lib/profiles/access";
 import { defaultProfileRule } from "@/lib/profiles/default-rule";
+import { validateProfileProviderPins } from "@/lib/profiles/providers";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import {
     type ProfileChannel,
@@ -169,6 +167,7 @@ export async function listProfiles(
         .where(
             and(
                 eq(processingProfiles.ownerUserId, input.ownerUserId),
+                isNull(processingProfiles.deletedAt),
                 input.includeArchived
                     ? undefined
                     : isNull(processingProfiles.archivedAt),
@@ -212,10 +211,9 @@ export interface ListActorProfilesInput {
     archivedOnly?: boolean;
 }
 
-/** List the actor's personal profiles and Organization profiles they may use. */
-export async function listActorProfiles(
-    input: ListActorProfilesInput,
-): Promise<ProfilePage> {
+async function actorProfiles(
+    input: ListActorProfilesInput & { includeArchived?: boolean },
+): Promise<ProfileRecord[]> {
     const orgUserId = await getOrgUserId();
     const actorUserId = input.actor.actorId;
     const permittedOwners = or(
@@ -249,9 +247,12 @@ export async function listActorProfiles(
         .where(
             and(
                 permittedOwners,
-                input.archivedOnly
-                    ? isNotNull(processingProfiles.archivedAt)
-                    : isNull(processingProfiles.archivedAt),
+                isNull(processingProfiles.deletedAt),
+                input.includeArchived
+                    ? undefined
+                    : input.archivedOnly
+                      ? isNotNull(processingProfiles.archivedAt)
+                      : isNull(processingProfiles.archivedAt),
             ),
         )
         .orderBy(asc(processingProfiles.createdAt), asc(processingProfiles.id));
@@ -259,10 +260,17 @@ export async function listActorProfiles(
     const permitted = await Promise.all(
         rows.map(async (row) => {
             const profile = present(row);
-            return (await mayUseProfile(actorUserId, profile)) ? profile : null;
+            if (!(await mayUseProfile(actorUserId, profile))) return null;
+            if (
+                profile.archivedAt &&
+                profile.scope === "organization" &&
+                !(await mayEditProfile(input.actor, profile))
+            )
+                return null;
+            return profile;
         }),
     );
-    const filtered = permitted.filter(
+    return permitted.filter(
         (profile): profile is ProfileRecord =>
             profile !== null &&
             (!input.channel || profile.channel === input.channel) &&
@@ -272,6 +280,13 @@ export async function listActorProfiles(
                 (profile.description?.toLocaleLowerCase().includes(search) ??
                     false)),
     );
+}
+
+/** List the actor's personal profiles and Organization profiles they may use. */
+export async function listActorProfiles(
+    input: ListActorProfilesInput,
+): Promise<ProfilePage> {
+    const filtered = await actorProfiles(input);
     const offset = Math.max(0, input.offset ?? 0);
     const limit = Math.min(100, Math.max(1, input.limit ?? 25));
     return {
@@ -279,6 +294,43 @@ export async function listActorProfiles(
         total: filtered.length,
         offset,
         limit,
+    };
+}
+
+export type ProfileSection = "organization" | "personal" | "archived";
+
+/** Filter once and paginate each visible profile section independently. */
+export async function listActorProfileSections(input: {
+    actor: ActorContext;
+    search?: string;
+    channel?: ProfileChannel;
+    pages: Record<ProfileSection, number>;
+    limit: number;
+}): Promise<Record<ProfileSection, ProfilePage>> {
+    const profiles = await actorProfiles({ ...input, includeArchived: true });
+    const limit = Math.min(100, Math.max(1, input.limit));
+    function section(key: ProfileSection): ProfilePage {
+        const filtered = profiles.filter((profile) =>
+            key === "archived"
+                ? profile.archivedAt !== null
+                : profile.archivedAt === null && profile.scope === key,
+        );
+        const page = Math.min(
+            Math.max(1, input.pages[key]),
+            Math.max(1, Math.ceil(filtered.length / limit)),
+        );
+        const offset = (page - 1) * limit;
+        return {
+            items: filtered.slice(offset, offset + limit),
+            total: filtered.length,
+            offset,
+            limit,
+        };
+    }
+    return {
+        organization: section("organization"),
+        personal: section("personal"),
+        archived: section("archived"),
     };
 }
 
@@ -313,6 +365,7 @@ export async function getProfile(
             and(
                 eq(processingProfiles.ownerUserId, ownerUserId),
                 eq(processingProfiles.id, profileId),
+                isNull(processingProfiles.deletedAt),
                 options.includeArchived
                     ? undefined
                     : isNull(processingProfiles.archivedAt),
@@ -356,6 +409,7 @@ async function getOwnedDefaultProfile(
                 eq(processingProfiles.ownerUserId, ownerUserId),
                 eq(processingProfiles.channel, channel),
                 eq(processingProfiles.isDefault, true),
+                isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),
         )
@@ -574,6 +628,7 @@ export async function createProfile(
     const revisionId = nanoid();
 
     return db.transaction(async (tx) => {
+        await lockProfileMutation(tx, input.ownerUserId);
         const [profile] = await tx
             .insert(processingProfiles)
             .values({
@@ -619,6 +674,7 @@ export async function updateProfile(
     input: UpdateProfileInput,
 ): Promise<ProfileRecord | null> {
     return db.transaction(async (tx) => {
+        await lockProfileMutation(tx, input.ownerUserId);
         const [current] = await tx
             .select({
                 profile: processingProfiles,
@@ -642,6 +698,7 @@ export async function updateProfile(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             )
@@ -682,6 +739,7 @@ export async function updateProfile(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.id, input.profileId),
                     eq(processingProfiles.version, input.expectedVersion),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             )
@@ -721,13 +779,21 @@ export interface DuplicateProfileInput {
     profileId: string;
     actor: ActorContext;
     name?: string;
+    scope?: ProfileScope;
+    locale?: AppLocale;
 }
 
-/** Copy an available profile into the acting user's personal scope. */
+/** Copy an available current revision into an authorized destination scope. */
 export async function duplicateProfile(
     input: DuplicateProfileInput,
 ): Promise<ProfileRecord> {
-    if (input.actor.kind !== "user") throw new ProfilePermissionError();
+    const scope = input.scope ?? "personal";
+    if (scope === "personal" && input.actor.kind !== "user")
+        throw new ProfilePermissionError();
+    const ownerUserId =
+        scope === "organization" ? await getOrgUserId() : input.actor.actorId;
+    if (!ownerUserId) throw new ProfilePermissionError();
+    await assertCreateAccess(input.actor, ownerUserId, scope);
     const source = await getProfile(
         input.sourceOwnerUserId,
         input.profileId,
@@ -736,12 +802,20 @@ export async function duplicateProfile(
     if (!source) {
         throw new ProfilePermissionError();
     }
+    await validateProfileProviderPins({
+        actorUserId: input.actor.actorId,
+        profileOwnerUserId: ownerUserId,
+        profileScope: scope,
+        settings: source.settings,
+    });
     return createProfile({
-        ownerUserId: input.actor.actorId,
+        ownerUserId,
         actor: input.actor,
-        scope: "personal",
+        scope,
         channel: source.channel,
-        name: input.name ?? `${source.name} copy`,
+        name:
+            input.name ??
+            `${source.name} (${input.locale === "cs-CZ" ? "kopie" : "copy"})`,
         description: source.description,
         settings: source.settings,
         isDefault: false,
@@ -754,9 +828,7 @@ export interface ArchiveProfileInput {
     actor: ActorContext;
 }
 
-export type ProfileDeleteDisposition = "delete" | "archive";
-
-type ProfileQueryExecutor = Pick<typeof db, "select">;
+export type ProfileDeleteDisposition = "delete" | "tombstone";
 
 type ProfileRemovalExecutor = Pick<typeof db, "select" | "update">;
 
@@ -813,6 +885,7 @@ async function applyOrganizationFallbackForProfileRemoval(
                     eq(processingProfiles.scope, "organization"),
                     eq(processingProfiles.channel, input.profile.channel),
                     eq(processingProfiles.isDefault, true),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             )
@@ -865,79 +938,10 @@ async function applyOrganizationFallbackForProfileRemoval(
         );
 }
 
-async function profileHistoryReferences(
-    executor: ProfileQueryExecutor,
-    ownerUserId: string,
-    profileId: string,
-): Promise<boolean> {
-    const revisions = await executor
-        .select({ id: processingProfileRevisions.id })
-        .from(processingProfileRevisions)
-        .innerJoin(
-            processingProfiles,
-            and(
-                eq(processingProfiles.id, processingProfileRevisions.profileId),
-                eq(processingProfiles.ownerUserId, ownerUserId),
-            ),
-        )
-        .where(eq(processingProfileRevisions.profileId, profileId));
-    const revisionIds = revisions.map(({ id }) => id);
-    const itemProfileReference =
-        revisionIds.length > 0
-            ? or(
-                  eq(itemProcessing.profileId, profileId),
-                  inArray(itemProcessing.profileRevisionId, revisionIds),
-              )
-            : eq(itemProcessing.profileId, profileId);
-    const item = await executor
-        .select({ id: itemProcessing.itemId })
-        .from(itemProcessing)
-        .where(itemProfileReference)
-        .limit(1);
-    if (item.length > 0) return true;
-    if (revisionIds.length === 0) return false;
-    const [transcription, learn, enhancement, job] = await Promise.all([
-        executor
-            .select({ id: transcriptions.id })
-            .from(transcriptions)
-            .where(inArray(transcriptions.profileRevisionId, revisionIds))
-            .limit(1),
-        executor
-            .select({ id: learnRuns.id })
-            .from(learnRuns)
-            .where(inArray(learnRuns.profileRevisionId, revisionIds))
-            .limit(1),
-        executor
-            .select({ id: aiEnhancements.id })
-            .from(aiEnhancements)
-            .where(inArray(aiEnhancements.profileRevisionId, revisionIds))
-            .limit(1),
-        executor
-            .select({ id: asyncJobs.id })
-            .from(asyncJobs)
-            .where(
-                and(
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                    inArray(
-                        sql<string>`${asyncJobs.payload} ->> 'profileRevisionId'`,
-                        revisionIds,
-                    ),
-                ),
-            )
-            .limit(1),
-    ]);
-    return (
-        transcription.length > 0 ||
-        learn.length > 0 ||
-        enhancement.length > 0 ||
-        job.length > 0
-    );
-}
-
 /**
  * Report whether deleting an owner-scoped personal profile preserves it as
- * archived history. Once ownership establishes its opaque profile and revision
- * IDs, references are checked across every history owner without reading data.
+ * tombstoned history. Ownership establishes the opaque profile and revision
+ * IDs; references owned by other users are checked only by those opaque IDs.
  */
 export async function profileDeleteDisposition(
     ownerUserId: string,
@@ -950,19 +954,15 @@ export async function profileDeleteDisposition(
             and(
                 eq(processingProfiles.ownerUserId, ownerUserId),
                 eq(processingProfiles.id, profileId),
+                isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),
         )
         .limit(1);
     if (!profile || profile.scope !== "personal") return null;
-    const [allProfiles, referenced] = await Promise.all([
-        db
-            .select({ id: processingProfiles.id })
-            .from(processingProfiles)
-            .where(eq(processingProfiles.ownerUserId, ownerUserId)),
-        profileHistoryReferences(db, ownerUserId, profileId),
-    ]);
-    return referenced || allProfiles.length === 1 ? "archive" : "delete";
+    return (await profileHistoryReferences(db, ownerUserId, profileId))
+        ? "tombstone"
+        : "delete";
 }
 
 /** Count member default pointers that refer to one Organization profile. */
@@ -978,6 +978,7 @@ export async function profileMemberDefaultCount(
                 eq(processingProfiles.ownerUserId, ownerUserId),
                 eq(processingProfiles.id, profileId),
                 eq(processingProfiles.scope, "organization"),
+                isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),
         )
@@ -1002,27 +1003,10 @@ export interface DeletePersonalProfileResult {
     disposition: ProfileDeleteDisposition;
 }
 
-/** Delete an unused personal profile or archive it when history must survive. */
-export async function deletePersonalProfile(
+/** Permanently remove an authorized profile, retaining referenced revisions as history. */
+export async function deleteProfile(
     input: ArchiveProfileInput,
 ): Promise<DeletePersonalProfileResult | null> {
-    const [current] = await db
-        .select({
-            ownerUserId: processingProfiles.ownerUserId,
-            scope: processingProfiles.scope,
-        })
-        .from(processingProfiles)
-        .where(
-            and(
-                eq(processingProfiles.ownerUserId, input.ownerUserId),
-                eq(processingProfiles.id, input.profileId),
-                isNull(processingProfiles.archivedAt),
-            ),
-        )
-        .limit(1);
-    if (!current) return null;
-    await assertEditAccess(input.actor, current);
-    if (current.scope !== "personal") throw new ProfilePermissionError();
     const organizationUserId = await getOrgUserId();
     const organizationAvailable =
         organizationUserId !== null &&
@@ -1032,8 +1016,8 @@ export async function deletePersonalProfile(
     if (organizationAvailable && organizationUserId) {
         await ensureProfiles(organizationUserId);
     }
-
     return db.transaction(async (tx) => {
+        await lockProfileMutation(tx, input.ownerUserId);
         await tx
             .insert(userSettings)
             .values({ userId: input.ownerUserId })
@@ -1046,89 +1030,75 @@ export async function deletePersonalProfile(
             })
             .from(userSettings)
             .where(eq(userSettings.userId, input.ownerUserId))
-            .for("update")
-            .limit(1);
-        const [locked] = await tx
-            .select({
-                channel: processingProfiles.channel,
-                ownerUserId: processingProfiles.ownerUserId,
-                scope: processingProfiles.scope,
-                isDefault: processingProfiles.isDefault,
-            })
+            .for("update");
+        const [current] = await tx
+            .select()
             .from(processingProfiles)
             .where(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.id, input.profileId),
-                    eq(processingProfiles.scope, "personal"),
-                    isNull(processingProfiles.archivedAt),
+                    isNull(processingProfiles.deletedAt),
                 ),
             )
             .for("update")
             .limit(1);
-        if (!locked) return null;
-        await assertEditAccess(input.actor, locked);
-        await applyOrganizationFallbackForProfileRemoval(tx, {
-            ownerUserId: input.ownerUserId,
-            profileId: input.profileId,
-            actorUserId: input.actor.actorId,
-            organizationUserId,
-            organizationAvailable,
-            settings: settings ?? null,
-            profile: locked,
-        });
-        const actualDisposition = await profileHistoryReferences(
+        if (!current) return null;
+        await assertEditAccess(input.actor, current);
+        if (
+            current.scope === "organization" &&
+            (current.isDefault || !current.archivedAt)
+        ) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Only archived, non-default Organization profiles can be deleted permanently",
+                409,
+            );
+        }
+        if (current.scope === "personal") {
+            await applyOrganizationFallbackForProfileRemoval(tx, {
+                ownerUserId: input.ownerUserId,
+                profileId: input.profileId,
+                actorUserId: input.actor.actorId,
+                organizationUserId,
+                organizationAvailable,
+                settings: settings ?? null,
+                profile: current,
+            });
+        }
+        const now = new Date();
+        await tx
+            .update(userSettings)
+            .set({ defaultAudioProfileId: null, updatedAt: now })
+            .where(eq(userSettings.defaultAudioProfileId, input.profileId));
+        await tx
+            .update(userSettings)
+            .set({ defaultMailProfileId: null, updatedAt: now })
+            .where(eq(userSettings.defaultMailProfileId, input.profileId));
+        await tx
+            .update(folderDefaultProfiles)
+            .set({ profileId: null, manualOnly: false })
+            .where(eq(folderDefaultProfiles.profileId, input.profileId));
+        const referenced = await profileHistoryReferences(
             tx,
             input.ownerUserId,
             input.profileId,
         );
-        const [allProfiles] = await tx
-            .select({ count: sql<number>`count(*)` })
-            .from(processingProfiles)
-            .where(eq(processingProfiles.ownerUserId, input.ownerUserId));
-        const lockedDisposition =
-            actualDisposition || Number(allProfiles?.count ?? 0) === 1
-                ? "archive"
-                : "delete";
-        const folders = await tx
-            .select({ id: folderDefaultProfiles.folderId })
-            .from(folderDefaultProfiles)
-            .innerJoin(
-                recordingFolders,
-                and(
-                    eq(recordingFolders.id, folderDefaultProfiles.folderId),
-                    eq(recordingFolders.userId, input.ownerUserId),
-                ),
-            )
-            .where(eq(folderDefaultProfiles.profileId, input.profileId));
-        if (folders.length > 0) {
-            await tx
-                .update(folderDefaultProfiles)
-                .set({ profileId: null, manualOnly: false })
-                .where(
-                    and(
-                        inArray(
-                            folderDefaultProfiles.folderId,
-                            folders.map(({ id }) => id),
-                        ),
-                        eq(folderDefaultProfiles.profileId, input.profileId),
-                    ),
-                );
-        }
-        if (lockedDisposition === "archive") {
+        if (referenced) {
             await tx
                 .update(processingProfiles)
                 .set({
-                    archivedAt: new Date(),
+                    deletedAt: now,
                     isDefault: false,
                     version: sql`${processingProfiles.version} + 1`,
                     updatedBy: input.actor.actorId,
-                    updatedAt: new Date(),
+                    updatedAt: now,
                 })
                 .where(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
                         eq(processingProfiles.id, input.profileId),
+                        isNull(processingProfiles.deletedAt),
                     ),
                 );
         } else {
@@ -1138,11 +1108,32 @@ export async function deletePersonalProfile(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
                         eq(processingProfiles.id, input.profileId),
+                        isNull(processingProfiles.deletedAt),
                     ),
                 );
         }
-        return { disposition: lockedDisposition };
+        return { disposition: referenced ? "tombstone" : "delete" };
     });
+}
+
+/** Delete a personal profile under the same history-preserving rule. */
+export async function deletePersonalProfile(
+    input: ArchiveProfileInput,
+): Promise<DeletePersonalProfileResult | null> {
+    const [profile] = await db
+        .select({ scope: processingProfiles.scope })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.id, input.profileId),
+                isNull(processingProfiles.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!profile) return null;
+    if (profile.scope !== "personal") throw new ProfilePermissionError();
+    return deleteProfile(input);
 }
 
 export interface RestoreProfileInput {
@@ -1162,9 +1153,18 @@ export interface SetDefaultProfileInput {
 export async function setDefaultProfile(
     input: SetDefaultProfileInput,
 ): Promise<boolean> {
-    if (input.actor.kind !== "user") throw new ProfilePermissionError();
+    if (input.actor.kind !== "user" && input.actor.kind !== "local-org")
+        throw new ProfilePermissionError();
     const organizationUserId = await getOrgUserId();
     return db.transaction(async (tx) => {
+        for (const owner of [
+            ...new Set([
+                input.ownerUserId,
+                ...(organizationUserId ? [organizationUserId] : []),
+            ]),
+        ].sort()) {
+            await lockProfileMutation(tx, owner);
+        }
         await tx
             .insert(userSettings)
             .values({ userId: input.ownerUserId })
@@ -1198,6 +1198,7 @@ export async function setDefaultProfile(
                     and(
                         ownerCondition,
                         eq(processingProfiles.id, input.profileId),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
@@ -1253,6 +1254,7 @@ export async function setDefaultProfile(
                         eq(processingProfiles.scope, "organization"),
                         eq(processingProfiles.channel, channel),
                         eq(processingProfiles.isDefault, true),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
@@ -1304,6 +1306,7 @@ export async function setDefaultProfile(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
                         eq(processingProfiles.channel, channel),
                         eq(processingProfiles.isDefault, true),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 );
@@ -1319,6 +1322,7 @@ export async function setDefaultProfile(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
                         eq(processingProfiles.id, lockedTarget.id),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
@@ -1347,6 +1351,7 @@ export async function setDefaultProfile(
                     eq(processingProfiles.scope, "personal"),
                     eq(processingProfiles.channel, channel),
                     eq(processingProfiles.isDefault, true),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             );
@@ -1366,6 +1371,7 @@ export async function setDefaultProfile(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
                         eq(processingProfiles.id, lockedTarget.id),
                         eq(processingProfiles.channel, channel),
+                        isNull(processingProfiles.deletedAt),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
@@ -1410,6 +1416,7 @@ export async function archiveProfile(
             and(
                 eq(processingProfiles.ownerUserId, input.ownerUserId),
                 eq(processingProfiles.id, input.profileId),
+                isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),
         )
@@ -1428,6 +1435,7 @@ export async function archiveProfile(
     }
 
     return db.transaction(async (tx) => {
+        await lockProfileMutation(tx, input.ownerUserId);
         await tx
             .insert(userSettings)
             .values({ userId: input.ownerUserId })
@@ -1454,6 +1462,7 @@ export async function archiveProfile(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             )
@@ -1483,6 +1492,7 @@ export async function archiveProfile(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.deletedAt),
                     isNull(processingProfiles.archivedAt),
                 ),
             )
@@ -1495,38 +1505,43 @@ export async function archiveProfile(
 export async function restoreProfile(
     input: RestoreProfileInput,
 ): Promise<boolean> {
-    const [current] = await db
-        .select({
-            ownerUserId: processingProfiles.ownerUserId,
-            scope: processingProfiles.scope,
-        })
-        .from(processingProfiles)
-        .where(
-            and(
-                eq(processingProfiles.ownerUserId, input.ownerUserId),
-                eq(processingProfiles.id, input.profileId),
-                isNotNull(processingProfiles.archivedAt),
-            ),
-        )
-        .limit(1);
-    if (!current) return false;
-    await assertEditAccess(input.actor, current);
-    const restored = await db
-        .update(processingProfiles)
-        .set({
-            archivedAt: null,
-            isDefault: false,
-            version: sql`${processingProfiles.version} + 1`,
-            updatedBy: input.actor.actorId,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(processingProfiles.ownerUserId, input.ownerUserId),
-                eq(processingProfiles.id, input.profileId),
-                isNotNull(processingProfiles.archivedAt),
-            ),
-        )
-        .returning({ id: processingProfiles.id });
-    return restored.length > 0;
+    return db.transaction(async (tx) => {
+        await lockProfileMutation(tx, input.ownerUserId);
+        const [current] = await tx
+            .select({
+                ownerUserId: processingProfiles.ownerUserId,
+                scope: processingProfiles.scope,
+            })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.deletedAt),
+                    isNotNull(processingProfiles.archivedAt),
+                ),
+            )
+            .limit(1);
+        if (!current) return false;
+        await assertEditAccess(input.actor, current);
+        const restored = await tx
+            .update(processingProfiles)
+            .set({
+                archivedAt: null,
+                isDefault: false,
+                version: sql`${processingProfiles.version} + 1`,
+                updatedBy: input.actor.actorId,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.deletedAt),
+                    isNotNull(processingProfiles.archivedAt),
+                ),
+            )
+            .returning({ id: processingProfiles.id });
+        return restored.length > 0;
+    });
 }

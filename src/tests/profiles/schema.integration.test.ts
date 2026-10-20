@@ -341,4 +341,34 @@ describeWithDatabase("processing profiles schema", () => {
             .where(eq(folderDefaultProfiles.folderId, FOLDER_ID));
         expect(defaults).toEqual([]);
     });
+    it("defaults profiles from metadata without deletedAt to not deleted and excludes tombstones from default uniqueness", async () => {
+        if (!database) throw new Error("test database was not initialized");
+        await database.db.insert(processingProfiles).values({
+            id: "legacy-no-deleted-at",
+            ownerUserId: USER_ID,
+            scope: "personal",
+            channel: "audio",
+            name: "ciphertext",
+            isDefault: true,
+        });
+        const [legacy] = await database.db
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, "legacy-no-deleted-at"));
+        expect(legacy?.deletedAt).toBeNull();
+        await database.db
+            .update(processingProfiles)
+            .set({ deletedAt: new Date() })
+            .where(eq(processingProfiles.id, "legacy-no-deleted-at"));
+        await expect(
+            database.db.insert(processingProfiles).values({
+                id: "replacement-live-default",
+                ownerUserId: USER_ID,
+                scope: "personal",
+                channel: "audio",
+                name: "ciphertext",
+                isDefault: true,
+            }),
+        ).resolves.toBeDefined();
+    });
 });
