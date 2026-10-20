@@ -120,17 +120,18 @@ describe.each([
     "mail",
 ] as const)("%s summary while companion jobs wait", (kind) => {
     it.each([
-        "topics",
-        "title",
-    ] as const)("keeps the existing summary visible during queued or running %s", (step) => {
-        for (const state of ["queued", "running"] as const) {
-            const data = presentation(kind, true);
-            data.jobs[step] = state;
-            renderSummary(data, true);
-            expect(screen.getByText("Existing summary")).toBeTruthy();
-            expect(screen.queryByText("Generating summary…")).toBeNull();
-            cleanup();
-        }
+        "queued",
+        "running",
+    ] as const)("keeps the existing summary visible when topics/title were aggregated into a %s summary job", (state) => {
+        const data = presentation(kind, true);
+        data.jobs.summary = state;
+        expect(deriveWorkflowWidgets(data).summary).toMatchObject({
+            active: true,
+            tone: "working",
+        });
+        renderSummary(data, true);
+        expect(screen.getByText("Existing summary")).toBeTruthy();
+        expect(screen.queryByText("Generating summary…")).toBeNull();
     });
 
     it("shows the first-summary spinner while a companion job waits", () => {

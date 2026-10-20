@@ -31,8 +31,10 @@ import {
     updatePhaseInTx,
 } from "@/lib/pipeline/state";
 import type { PipelineFacts, SummaryStepName } from "@/lib/pipeline/types";
+import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
+import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { generateTopicsForTranscript } from "@/lib/topics/generate-topics";
-import { queueAutoTopics } from "@/lib/topics/topics-job";
+import { queueAutoTopics, TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 import {
     createMigratedTestDatabase,
@@ -838,19 +840,33 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
         ).toBe(2);
     });
 
-    it.each([
-        "topics",
-        "title",
-    ] as const)("does not report an active %s job as a summary job", async (step) => {
-        await database.db.insert(asyncJobs).values({
-            userId: USER,
-            kind: step === "title" ? "title.generate" : "topics",
-            subjectId: ITEM,
-            payload: {},
-            status: "processing",
+    describe.each([
+        { step: "topics", kind: TOPICS_JOB_KIND },
+        { step: "title", kind: TITLE_JOB_KIND },
+        { step: "summary", kind: SUMMARY_JOB_KIND },
+    ] as const)("$step job presentation", ({ step, kind }) => {
+        it.each([
+            { status: "pending", state: "queued" },
+            { status: "processing", state: "running" },
+        ] as const)("reports $status only in its own job field as $state", async ({
+            status,
+            state,
+        }) => {
+            await database.db.insert(asyncJobs).values({
+                userId: USER,
+                kind,
+                subjectId: ITEM,
+                payload: {},
+                status,
+            });
+            const data = await loadPrivateItemProcessing(USER, ITEM);
+            expect(data?.jobs).toEqual({
+                transcription: null,
+                summary: null,
+                topics: null,
+                title: null,
+                [step]: state,
+            });
         });
-        const data = await loadPrivateItemProcessing(USER, ITEM);
-        expect(data?.jobs.summary).toBeNull();
-        expect(data?.jobs[step]).toBe("running");
     });
 });
