@@ -329,6 +329,14 @@ input[type="checkbox"] {
     text-align: left;
 }
 
+#folder-picker:focus {
+    direction: ltr;
+}
+
+.folder-option::after {
+    content: "\200E";
+}
+
 #folder-results {
     border: 1px solid var(--border);
     border-radius: 7px;

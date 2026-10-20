@@ -230,7 +230,7 @@ describe("manual recorder start", () => {
 
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
-        expect(node("folder-picker").value).toBe("Private / Calls");
+        expect(node("folder-picker").value).toBe("Private / Calls\u200E");
         expect(node("folder-listbox").children[1].textContent).toBe(
             "Private / Calls",
         );

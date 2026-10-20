@@ -12,6 +12,7 @@ import { createFolderCombobox } from "../../../extensions/recorder/popup/folder-
 const popupHtml = readFileSync("extensions/recorder/popup/popup.html", "utf8");
 const saved = { id: "saved", label: "Private / Calls" };
 const auth = { serverUrl: "https://recorder.test", apiKey: "op_test" };
+const shown = (label) => `${label}\u200E`;
 const folder = (id, path, scope = "personal") => ({
     id,
     name: path.split(" / ").at(-1),
@@ -184,7 +185,7 @@ describe("recorder folder combobox", () => {
             folderLabel: "Private / Renamed",
         });
         ui.input.blur();
-        expect(ui.input.value).toBe("Private / Renamed");
+        expect(ui.input.value).toBe(shown("Private / Renamed"));
         expect(ui.input.title).toBe("Private / Renamed");
     });
     it("drops a remembered folder silently on 404", async () => {
@@ -193,7 +194,7 @@ describe("recorder folder combobox", () => {
             vi.fn(async () => ({ ok: false, status: 404 })),
         );
         await vi.advanceTimersByTimeAsync(0);
-        expect(ui.input.value).toBe("fileLater");
+        expect(ui.input.value).toBe(shown("fileLater"));
         expect(ui.labels()).toEqual(["fileLater"]);
         expect(ui.status.textContent).toBe("");
         expect(ui.save).toHaveBeenCalledWith({
@@ -209,7 +210,7 @@ describe("recorder folder combobox", () => {
             }),
         );
         await vi.advanceTimersByTimeAsync(0);
-        expect(ui.input.value).toBe("savedFolder");
+        expect(ui.input.value).toBe(shown("savedFolder"));
         expect(ui.save).not.toHaveBeenCalled();
     });
     it("debounces a keystroke burst and shows only remembered folders below two trimmed characters", async () => {
@@ -303,7 +304,7 @@ describe("recorder folder combobox", () => {
             folderId: "picked",
             folderLabel: label,
         });
-        expect(ui.input.value).toBe(label);
+        expect(ui.input.value).toBe(shown(label));
         expect(ui.input.getAttribute("aria-expanded")).toBe("false");
         ui.input.click();
         ui.key("ArrowUp");
@@ -320,7 +321,7 @@ describe("recorder folder combobox", () => {
             folderId: null,
             folderLabel: null,
         });
-        expect(ui.input.value).toBe("fileLater");
+        expect(ui.input.value).toBe(shown("fileLater"));
     });
     it("does not overwrite a new selection with an old remembered-folder lookup", async () => {
         const response = deferred();
@@ -339,7 +340,22 @@ describe("recorder folder combobox", () => {
             folderId: null,
             folderLabel: null,
         });
-        expect(ui.input.value).toBe("fileLater");
+        expect(ui.input.value).toBe(shown("fileLater"));
+    });
+    it("ends the closed path with a left-to-right mark and searches without it", async () => {
+        const ui = setup(
+            { folderId: saved.id, folderLabel: "Clients / ACME s.r.o." },
+            vi.fn(async () => ({ ok: true, folders: [] })),
+        );
+        expect(ui.input.value).toBe(shown("Clients / ACME s.r.o."));
+        ui.input.focus();
+        expect(ui.input.value).toBe("Clients / ACME s.r.o.");
+        ui.input.blur();
+        ui.input.focus();
+        ui.listbox.children[0].click();
+        ui.type(`${ui.input.value}ac`);
+        await vi.advanceTimersByTimeAsync(200);
+        expect(ui.request).toHaveBeenLastCalledWith({ q: "fileLaterac" });
     });
     it("distinguishes failed searches from no matches without changing the saved selection", async () => {
         const ui = setup(

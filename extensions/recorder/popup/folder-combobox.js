@@ -1,3 +1,5 @@
+const LRM = "\u200E";
+
 /** Bind the recorder folder autocomplete to popup controls. */
 export function createFolderCombobox({
     input,
@@ -34,6 +36,11 @@ export function createFolderCombobox({
 
     function selectedLabel() {
         return remembered?.label || t("fileLater");
+    }
+
+    function showSelection() {
+        input.value = `${selectedLabel()}${LRM}`;
+        input.title = selectedLabel();
     }
 
     function render() {
@@ -92,8 +99,7 @@ export function createFolderCombobox({
         open = false;
         query = "";
         active = -1;
-        input.value = selectedLabel();
-        input.title = selectedLabel();
+        showSelection();
         render();
     }
 
@@ -120,10 +126,7 @@ export function createFolderCombobox({
                     remembered = null;
                     await persist();
                 }
-                if (!open) {
-                    input.value = selectedLabel();
-                    input.title = selectedLabel();
-                }
+                if (!open) showSelection();
             } else if (job.version === version) {
                 results = response?.ok ? (response.folders ?? []) : [];
                 error = !response?.ok;
@@ -145,6 +148,7 @@ export function createFolderCombobox({
         open = true;
         query = "";
         active = -1;
+        input.value = selectedLabel();
         input.select();
         render();
     });
@@ -159,7 +163,7 @@ export function createFolderCombobox({
     input.addEventListener("input", () => {
         cancelSearch();
         open = true;
-        query = input.value.trim();
+        query = input.value.replaceAll(LRM, "").trim();
         active = -1;
         results = [];
         if (query.length >= 2) {
