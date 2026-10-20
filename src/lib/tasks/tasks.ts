@@ -2611,6 +2611,8 @@ export interface TaskListQuery {
     tab: TaskTab;
     state: TaskStateFilter;
     folderId: string | null;
+    /** Tracked only: a person id, or `none` for unassigned tasks. */
+    assignee?: string | null;
     due: TaskDueFilter;
     /** The viewer's today, `YYYY-MM-DD`, for the due filters. */
     today: string | null;
@@ -2644,6 +2646,33 @@ function addDays(day: string, days: number): string {
     return date.toISOString().slice(0, 10);
 }
 
+function taskTabConditions(viewer: TaskViewer, tab: TaskTab): SQL[] {
+    const mine = assignedToViewer(viewer);
+    return [
+        ne(recordingTasks.status, "proposed"),
+        isNull(chatterItems.deletedAt),
+        ...(tab === "mine"
+            ? [mine, taskVisible(viewer, ANY_TASK_ITEM)]
+            : [taskListed(viewer, ANY_TASK_ITEM), not(mine)]),
+    ];
+}
+
+/** A person a task is assigned to. */
+export type TaskAssignee = NonNullable<TaskView["assignee"]>;
+
+/** Distinct assignees of all the viewer's Tracked tasks, without a list limit. */
+export async function listTrackedAssignees(
+    viewer: TaskViewer,
+): Promise<TaskAssignee[]> {
+    const rows = await db
+        .selectDistinct({ personId: people.id, name: people.displayName })
+        .from(recordingTasks)
+        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .innerJoin(people, assigneeJoin())
+        .where(and(...taskTabConditions(viewer, "tracked")));
+    return rows.map((row) => ({ ...row, name: decryptText(row.name) }));
+}
+
 /**
  * The viewer's task list. Mine: assigned to them, on their recordings or
  * shared ones. Tracked: everything else on recordings they answer for
@@ -2653,16 +2682,17 @@ export async function listTasks(
     viewer: TaskViewer,
     query: TaskListQuery,
 ): Promise<TaskListItem[]> {
-    const conditions: (SQL | undefined)[] = [
-        ne(recordingTasks.status, "proposed"),
-        isNull(chatterItems.deletedAt),
-    ];
-    const mine = assignedToViewer(viewer);
-    if (query.tab === "mine") {
-        if (viewer.isOrg) return [];
-        conditions.push(mine, taskVisible(viewer, ANY_TASK_ITEM));
-    } else {
-        conditions.push(taskListed(viewer, ANY_TASK_ITEM), not(mine));
+    if (query.tab === "mine" && viewer.isOrg) return [];
+    const conditions: (SQL | undefined)[] = taskTabConditions(
+        viewer,
+        query.tab,
+    );
+    if (query.tab === "tracked" && query.assignee) {
+        conditions.push(
+            query.assignee === "none"
+                ? isNull(recordingTasks.assigneePersonId)
+                : eq(recordingTasks.assigneePersonId, query.assignee),
+        );
     }
     if (query.state !== "all") {
         conditions.push(eq(recordingTasks.status, query.state));
