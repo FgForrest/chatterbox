@@ -1,9 +1,18 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { chatterItems, mailMessages, mailParticipants } from "@/db/schema";
+import {
+    chatterItems,
+    mailMessages,
+    mailParticipants,
+    userSettings,
+    users,
+} from "@/db/schema";
 import { keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { normalizeLocale } from "@/lib/i18n/config";
+import { stemmingLanguage } from "@/lib/knowledge/stemming";
+import { detectLanguage } from "@/lib/knowledge/stemming/detect-language";
 import { loadMailDetail } from "@/lib/mail/detail";
 import type { AttachmentMeta } from "@/lib/mail/parse";
 import { secretAddressMasker } from "@/lib/mail/redact";
@@ -28,7 +37,7 @@ import { resolvedSchema } from "@/lib/mcp/resolve";
 import { boundedScan } from "@/lib/mcp/scan";
 import { mcpItemCondition, recordingViewFor } from "@/lib/mcp/scope";
 import {
-    matchText,
+    matchQueryWords,
     type PreparedQuery,
     prepareQuery,
     snippets,
@@ -334,7 +343,7 @@ const searchMail = defineTool({
     name: "search_mail",
     anyOf: ["mail:read"],
     title: "Search mail",
-    description: `Mail in your pile (as list_mail) holding every word of \`query\` (case and accents ignored, word forms in the mail's language), newest first, with up to 3 snippets each, each saying where it was found: subject, sender, the mail's own text, a quoted or forwarded part (with its claimed author) or, with summary access, its summary. Signatures and disclaimers are not read, nor a quoted part whose original mail is itself in the searched pile and filters (it is found there). Mail is encrypted, so one call reads at most 500 mails (or 10 s, or 50 matches) and reports scanned, complete and continue_before: pass continue_before back as before to search further back. ${MAIL_TEXT}`,
+    description: `Mail in your pile (as list_mail) holding every word of \`query\` (case and accents ignored, word forms in each part's language), newest first, with up to 3 snippets each, each saying where it was found: subject, sender, the mail's own text, a quoted or forwarded part (with its claimed author) or, with summary access, its summary. Signatures and disclaimers are not read, nor a quoted part whose original mail is itself in the searched pile and filters (it is found there). Mail is encrypted, so one call reads at most 500 mails (or 10 s, or 50 matches) and reports scanned, complete and continue_before: pass continue_before back as before to search further back. ${MAIL_TEXT}`,
     annotations: READ_ONLY,
     input: {
         query: z
@@ -417,8 +426,8 @@ const searchMail = defineTool({
                 "Too many searches; retry in a minute",
                 "denied",
             );
-        if (!prepareQuery(args.query, null).length)
-            throw new McpToolError("Give words to search for");
+        const wordCount = prepareQuery(args.query, null).length;
+        if (!wordCount) throw new McpToolError("Give words to search for");
         const { filters, resolved } = await resolveRecordingFilters(
             caller,
             args,
@@ -427,6 +436,21 @@ const searchMail = defineTool({
             caller,
             filters,
         );
+        const viewerId = viewerOf(caller);
+        const [viewer] = await db
+            .select({
+                locale: users.uiLocale,
+                transcriptionLanguage:
+                    userSettings.defaultTranscriptionLanguage,
+            })
+            .from(users)
+            .leftJoin(userSettings, eq(userSettings.userId, viewerId))
+            .where(eq(users.id, viewerId))
+            .limit(1);
+        const locale = normalizeLocale(viewer?.locale);
+        const viewerLanguage = locale
+            ? (locale.split("-")[0] ?? null)
+            : stemmingLanguage(viewer?.transcriptionLanguage);
         const queries = new Map<string, PreparedQuery>();
         let mails = new Map<string, SearchableMail>();
         const scan = await boundedScan({
@@ -445,35 +469,35 @@ const searchMail = defineTool({
             visit: (row) => {
                 const found = mails.get(row.id);
                 if (!found) return null;
-                const key = found.language ?? "";
-                let query = queries.get(key);
-                if (!query) {
-                    query = prepareQuery(args.query, found.language);
-                    queries.set(key, query);
-                }
-                const hits = matchText(
-                    found.parts.map((part) => part.text).join("\n"),
-                    query,
-                    found.language,
-                );
-                if (!hits) return null;
+                const matched = new Set<number>();
+                const parts = found.parts.map((part) => {
+                    const language =
+                        detectLanguage(part.text) ??
+                        found.language ??
+                        viewerLanguage;
+                    const key = language ?? "";
+                    let query = queries.get(key);
+                    if (!query) {
+                        query = prepareQuery(args.query, language);
+                        queries.set(key, query);
+                    }
+                    const words = matchQueryWords(part.text, query, language);
+                    for (let index = 0; index < words.length; index++)
+                        if (words[index].length) matched.add(index);
+                    return {
+                        part,
+                        hits: words
+                            .flat()
+                            .sort((a, b) => a.start - b.start || a.end - b.end),
+                    };
+                });
+                if (matched.size !== wordCount) return null;
                 const excerpts: {
                     part: "subject" | "from" | "body" | "quoted" | "summary";
                     author: string | null;
                     text: string;
                 }[] = [];
-                let offset = 0;
-                for (const part of found.parts) {
-                    const localHits = hits
-                        .filter(
-                            (hit) =>
-                                hit.start >= offset &&
-                                hit.end <= offset + part.text.length,
-                        )
-                        .map((hit) => ({
-                            start: hit.start - offset,
-                            end: hit.end - offset,
-                        }));
+                for (const { part, hits: localHits } of parts) {
                     for (const text of snippets(
                         part.text,
                         localHits,
@@ -487,7 +511,6 @@ const searchMail = defineTool({
                                 : text.replace(/^…|…$/g, ""),
                         });
                     }
-                    offset += part.text.length + 1;
                     if (excerpts.length === 3) break;
                 }
                 return { mail: found.mail, snippets: excerpts };

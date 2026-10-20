@@ -27,6 +27,7 @@ import {
     peopleByAddress,
 } from "@/lib/mail/known-quotes";
 import { knownSignaturesFor } from "@/lib/mail/known-signatures";
+import { detectMailLanguage } from "@/lib/mail/language";
 import type { ParsedMessage } from "@/lib/mail/parse";
 import type { MessageFacts } from "@/lib/mail/policy";
 import { deleteRawMail, storeRawMail } from "@/lib/mail/raw-storage";
@@ -311,6 +312,7 @@ export async function storeMailForOwner(input: {
                 userId: owner,
                 revision: 0,
                 parserVersion: MAIL_PARSER_VERSION,
+                language: detectMailLanguage(segments),
                 segments: encryptJsonField(segments),
             });
             await fileInTx(tx, delivery, itemId);

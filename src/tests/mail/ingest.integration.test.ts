@@ -37,6 +37,7 @@ import {
     getTestDatabaseUrl,
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
+import { runBackfillMailLanguage } from "../../../scripts/backfill-mail-language";
 import { runMailSegmentationDiff } from "../../../scripts/mail-segmentation-diff";
 
 const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
@@ -1525,6 +1526,194 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 expect(response.status).toBe(404);
             } finally {
                 mockEnv.MAIL_DOMAIN = "klepna.example";
+            }
+        });
+    });
+
+    describe("mail language", () => {
+        const czech =
+            "Dobrý den, posílám požadavek na změnu, který jsme pro vás připravili, aby vše bylo v pořádku.";
+        const english =
+            "Please review the documents that we have prepared for you and let us know if the schedule is correct.";
+
+        it.each([
+            [czech, "cs"],
+            [english, "en"],
+            ["Dobrý den.\nDěkuji za odpověď.", null],
+        ])("stores the detected language through ingest: %s", async (text, language) => {
+            const [owner] = await db()
+                .select({ email: users.email })
+                .from(users)
+                .where(eq(users.id, "u-jan"));
+            const raw = await signMessage(
+                rawMessage(
+                    headers(owner?.email ?? "", "jan@klepna.example"),
+                    text ?? "",
+                ),
+                company,
+            );
+            expect(
+                (await deliver(raw, ["jan@klepna.example"])).ingest?.outcomes[0]
+                    ?.outcome,
+            ).toBe("accepted");
+            const [message] = await db()
+                .select()
+                .from(mailMessages)
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-jan"),
+                        eq(mailMessages.sizeBytes, raw.length),
+                    ),
+                )
+                .orderBy(desc(mailMessages.createdAt))
+                .limit(1);
+            const [content] = await db()
+                .select()
+                .from(mailContents)
+                .where(
+                    and(
+                        eq(mailContents.userId, "u-jan"),
+                        eq(mailContents.itemId, message?.id ?? ""),
+                    ),
+                );
+            expect(content?.language).toBe(language);
+        });
+
+        it("backfills only null languages, respects the owner and dry run, and changes no other columns", async () => {
+            const owner = "language-backfill-owner";
+            const other = "language-backfill-other";
+            await ssoUser(owner, "language-owner@example.test");
+            await ssoUser(other, "language-other@example.test");
+            const makeMail = async (userId: string, text: string) => {
+                const raw = Buffer.from(
+                    rawMessage(
+                        [
+                            "From: Language Writer <language@example.test>",
+                            "To: archive@example.test",
+                            `Message-ID: <${Math.random().toString(36).slice(2)}@example.test>`,
+                            "MIME-Version: 1.0",
+                            "Content-Type: text/plain; charset=utf-8",
+                        ],
+                        text,
+                    ),
+                );
+                const parsed = await parseMessage(raw);
+                const receivedAt = new Date();
+                return storeMailForOwner({
+                    delivery: {
+                        ownerUserId: userId,
+                        senderVerified: true,
+                        folderIds: [],
+                        pendingShareFolderIds: [],
+                        addresses: [],
+                        recipients: [],
+                    },
+                    raw,
+                    parsed,
+                    facts: {
+                        fromHeaders: 1,
+                        fromAddresses: parsed.from.map((from) => from.address),
+                        dkim: [],
+                        receivedAt,
+                    },
+                    spf: null,
+                    receivedAt,
+                });
+            };
+            const first = await makeMail(owner, czech);
+            const set = await makeMail(owner, english);
+            const short = await makeMail(owner, "Děkuji za zprávu.");
+            const foreign = await makeMail(other, english);
+            for (const [userId, itemId] of [
+                [owner, first.itemId],
+                [other, foreign.itemId],
+            ])
+                await db()
+                    .update(mailContents)
+                    .set({ language: null })
+                    .where(
+                        and(
+                            eq(mailContents.userId, userId),
+                            eq(mailContents.itemId, itemId),
+                        ),
+                    );
+            const read = (userId: string) =>
+                db()
+                    .select()
+                    .from(mailContents)
+                    .where(eq(mailContents.userId, userId))
+                    .orderBy(mailContents.id);
+            const before = await read(owner);
+            const beforeOther = await read(other);
+            const processingBefore = await db()
+                .select()
+                .from(itemProcessing)
+                .where(eq(itemProcessing.userId, owner));
+            const output = vi
+                .spyOn(console, "log")
+                .mockImplementation(() => undefined);
+            try {
+                expect(
+                    await runBackfillMailLanguage([
+                        "--user",
+                        owner,
+                        "--dry-run",
+                    ]),
+                ).toEqual({
+                    checked: 2,
+                    updated: 0,
+                    languages: { cs: 1, null: 1 },
+                });
+                expect(await read(owner)).toEqual(before);
+                expect(
+                    await runBackfillMailLanguage(["--user", owner]),
+                ).toEqual({
+                    checked: 2,
+                    updated: 1,
+                    languages: { cs: 1, null: 1 },
+                });
+                expect(await read(owner)).toEqual(
+                    before.map((row) =>
+                        row.itemId === first.itemId
+                            ? { ...row, language: "cs" }
+                            : row,
+                    ),
+                );
+                expect(
+                    (await read(owner)).find((row) => row.itemId === set.itemId)
+                        ?.language,
+                ).toBe("en");
+                expect(
+                    (await read(owner)).find(
+                        (row) => row.itemId === short.itemId,
+                    )?.language,
+                ).toBeNull();
+                expect(await read(other)).toEqual(beforeOther);
+                expect(
+                    await db()
+                        .select()
+                        .from(itemProcessing)
+                        .where(eq(itemProcessing.userId, owner)),
+                ).toEqual(processingBefore);
+                expect(
+                    (await runBackfillMailLanguage(["--user", owner])).updated,
+                ).toBe(0);
+                expect(
+                    (await runBackfillMailLanguage([])).updated,
+                ).toBeGreaterThanOrEqual(1);
+                expect((await read(other))[0]?.language).toBe("en");
+                expect(output).toHaveBeenCalledTimes(4);
+                const printed = JSON.stringify(output.mock.calls);
+                for (const value of [
+                    czech,
+                    english,
+                    owner,
+                    other,
+                    first.itemId,
+                ])
+                    expect(printed).not.toContain(value);
+            } finally {
+                output.mockRestore();
             }
         });
     });

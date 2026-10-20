@@ -31,6 +31,7 @@ import {
     recordingFolders,
     recordingTasks,
     taskMentions,
+    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -126,7 +127,11 @@ vi.mock("openai", async (importOriginal) => {
 import { POST } from "@/app/api/mcp/route";
 import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptJsonField,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { addRecordingToFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { createEntity } from "@/lib/knowledge/entities";
 import { confirmFactFromMailInTx } from "@/lib/knowledge/facts";
@@ -2064,6 +2069,255 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 await expect(search(reader(), args)).rejects.toMatchObject({
                     outcome: "invalid",
                 });
+        });
+
+        describe("language through ingest", () => {
+            async function ingestText(
+                text: string,
+                subject = "Language fixture",
+            ) {
+                const raw = await signMessage(
+                    rawMessage(
+                        [
+                            "From: Search Writer <owner@example.test>",
+                            `To: ${searchToken}@klepna.example`,
+                            `Subject: ${subject}`,
+                            `Message-ID: <${Math.random().toString(36).slice(2)}@example.test>`,
+                            "MIME-Version: 1.0",
+                            "Content-Type: text/plain; charset=utf-8",
+                        ],
+                        text,
+                    ),
+                    company,
+                );
+                const receivedAt = new Date();
+                expect(
+                    (
+                        await ingestMail({
+                            raw,
+                            recipients: [`${searchToken}@klepna.example`],
+                            spf: "pass",
+                            receivedAt,
+                            resolver,
+                        })
+                    ).outcomes[0]?.outcome,
+                ).toBe("accepted");
+                const [message] = await db()
+                    .select()
+                    .from(mailMessages)
+                    .where(
+                        and(
+                            eq(mailMessages.userId, OWNER),
+                            eq(mailMessages.sizeBytes, raw.length),
+                        ),
+                    )
+                    .orderBy(desc(mailMessages.createdAt))
+                    .limit(1);
+                if (!message) throw new Error("missing ingested mail");
+                const [content] = await db()
+                    .select()
+                    .from(mailContents)
+                    .where(
+                        and(
+                            eq(mailContents.userId, OWNER),
+                            eq(mailContents.itemId, message.id),
+                        ),
+                    );
+                await db().insert(recordingFolderAssignments).values({
+                    userId: OWNER,
+                    itemId: message.id,
+                    folderId: orgFolder,
+                });
+                return {
+                    id: message.id,
+                    language: content?.language,
+                    segments:
+                        decryptJsonField<ContentSegment[]>(content?.segments) ??
+                        [],
+                };
+            }
+
+            it("finds Czech inflections with the detected stored language, including a short subject", async () => {
+                const mail = await ingestText(
+                    "Dobrý den, posílám podklady k požadavku, který jsme pro vás připravili, aby vše bylo v pořádku.",
+                    "Nabídku",
+                );
+                expect(mail.language).toBe("cs");
+                const result = await search(owner(), {
+                    query: "požadavek nabídka",
+                });
+                expect(ids(result)).toContain(mail.id);
+                expect(
+                    result.results
+                        .find((row) => row.mail.id === mail.id)
+                        ?.snippets.map((snippet) => snippet.part),
+                ).toEqual(["subject", "body"]);
+            });
+
+            it("matches across a Czech body and an English quote in their own languages", async () => {
+                const quoted =
+                    "Please review the documents that we have prepared for you and let us know if the schedule is correct. We will send the documents to you when the review is complete and the team is ready.";
+                const mail = await ingestText(
+                    [
+                        "Dobrý den, posílám podklady k požadavku, který jsme pro vás připravili, aby vše bylo v pořádku.",
+                        "",
+                        "On Tue, 20 Oct 2026 at 10:00, Earlier Writer <earlier@example.test> wrote:",
+                        `> ${quoted}`,
+                    ].join("\n"),
+                );
+                expect(mail.segments.map((segment) => segment.role)).toEqual([
+                    "body",
+                    "quoted",
+                ]);
+                const result = await search(reader(), {
+                    query: "požadavek schedule",
+                });
+                expect(ids(result)).toContain(mail.id);
+                expect(
+                    result.results.find((row) => row.mail.id === mail.id)
+                        ?.snippets,
+                ).toEqual([
+                    expect.objectContaining({
+                        part: "body",
+                        text: expect.stringContaining("požadavku"),
+                    }),
+                    expect.objectContaining({
+                        part: "quoted",
+                        author: "Earlier Writer",
+                        text: expect.stringContaining("schedule"),
+                    }),
+                ]);
+                expect(
+                    ids(
+                        await search(reader(), {
+                            query: "požadavek missinglanguageword",
+                        }),
+                    ),
+                ).not.toContain(mail.id);
+            });
+
+            it("uses the viewer locale, settings fallback and Organization locale only when mail and part are undetected", async () => {
+                const mail = await ingestText("Prosím o doplnění požadavku.");
+                expect(mail.language).toBeNull();
+                const [before] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, READER));
+                const [orgBefore] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, orgUserId));
+                const [settingsBefore] = await db()
+                    .select()
+                    .from(userSettings)
+                    .where(eq(userSettings.userId, READER));
+                try {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).toContain(mail.id);
+                    await db()
+                        .insert(userSettings)
+                        .values({
+                            userId: READER,
+                            defaultTranscriptionLanguage: "cs",
+                        })
+                        .onConflictDoUpdate({
+                            target: userSettings.userId,
+                            set: { defaultTranscriptionLanguage: "cs" },
+                        });
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "en" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).not.toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: null })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, orgUserId));
+                    expect(
+                        ids(
+                            await search(
+                                serviceCaller(orgUserId, ["mail:read"]),
+                                { query: "požadavek" },
+                            ),
+                        ),
+                    ).toContain(mail.id);
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "en" })
+                        .where(eq(users.id, orgUserId));
+                    expect(
+                        ids(
+                            await search(
+                                serviceCaller(orgUserId, ["mail:read"]),
+                                { query: "požadavek" },
+                            ),
+                        ),
+                    ).not.toContain(mail.id);
+                } finally {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: before?.locale ?? null })
+                        .where(eq(users.id, READER));
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: orgBefore?.locale ?? null })
+                        .where(eq(users.id, orgUserId));
+                    if (settingsBefore)
+                        await db()
+                            .update(userSettings)
+                            .set({
+                                defaultTranscriptionLanguage:
+                                    settingsBefore.defaultTranscriptionLanguage,
+                            })
+                            .where(eq(userSettings.userId, READER));
+                    else
+                        await db()
+                            .delete(userSettings)
+                            .where(eq(userSettings.userId, READER));
+                }
+            });
+
+            it("keeps a detected English part unstemmed even for a Czech viewer", async () => {
+                const mail = await ingestText(
+                    "Please review the document with the label požadavku and let us know if the document is ready for the next step.",
+                );
+                expect(mail.language).toBe("en");
+                const [before] = await db()
+                    .select({ locale: users.uiLocale })
+                    .from(users)
+                    .where(eq(users.id, READER));
+                try {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: "cs-CZ" })
+                        .where(eq(users.id, READER));
+                    expect(
+                        ids(await search(reader(), { query: "požadavek" })),
+                    ).not.toContain(mail.id);
+                    expect(
+                        ids(await search(reader(), { query: "požadavku" })),
+                    ).toContain(mail.id);
+                } finally {
+                    await db()
+                        .update(users)
+                        .set({ uiLocale: before?.locale ?? null })
+                        .where(eq(users.id, READER));
+                }
+            });
         });
     });
 });

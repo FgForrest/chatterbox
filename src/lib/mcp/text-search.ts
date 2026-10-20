@@ -57,20 +57,27 @@ export function matchText(
     language: string | null,
 ): TextHit[] | null {
     if (query.length === 0) return null;
+    const hits = matchQueryWords(text, query, language);
+    if (hits.some((word) => word.length === 0)) return null;
+    return hits.flat().sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+/** Matches each query word independently, preserving empty entries for words absent from this part. */
+export function matchQueryWords(
+    text: string,
+    query: PreparedQuery,
+    language: string | null,
+): TextHit[][] {
     const words = tokens(text, language);
-    const hits: TextHit[] = [];
-    for (const forms of query) {
+    return query.map((forms) => {
         const wanted = new Set(forms);
-        let found = false;
+        const hits: TextHit[] = [];
         for (const word of words) {
-            if (word.forms.some((form) => wanted.has(form))) {
+            if (word.forms.some((form) => wanted.has(form)))
                 hits.push({ start: word.start, end: word.end });
-                found = true;
-            }
         }
-        if (!found) return null;
-    }
-    return hits.sort((a, b) => a.start - b.start || a.end - b.end);
+        return hits;
+    });
 }
 
 /**
