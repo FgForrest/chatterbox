@@ -40,6 +40,7 @@ export const STORAGE_KEYS = {
     installationId: "installationId",
     microphoneId: "microphoneId",
     micReminderDismissed: "micReminderDismissed",
+    microphoneSetupSkipped: "microphoneSetupSkipped",
     noticeText: "noticeText",
     channelMode: "channelMode",
     /** { [platformId]: "off" | "prompt" | "auto" } -- the user's own choices. */

@@ -9,11 +9,18 @@ import {
     Trash2,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    type ReactNode,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import { ConnectedLine } from "@/components/connected-line";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useRecorderSetupMarker } from "@/hooks/use-recorder-setup-marker";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import {
     browserRecorderExtensionClient,
@@ -78,6 +85,17 @@ function hostOf(value: string | null): string {
     }
 }
 
+function StepMark({ children }: { children: ReactNode }) {
+    return (
+        <span
+            className="flex size-6 shrink-0 items-center justify-center rounded-full border text-xs text-muted-foreground"
+            aria-hidden="true"
+        >
+            {children}
+        </span>
+    );
+}
+
 /** Shared Meeting Recorder install, detection, pairing, and manual setup flow. */
 export function MeetingRecorderSetup({
     storeUrl,
@@ -104,6 +122,9 @@ export function MeetingRecorderSetup({
         typeof browserRecorderExtensionClient
     > | null>(null);
     const detectingRef = useRef(false);
+    const connectingRef = useRef(false);
+    const autoPairAttemptedRef = useRef(false);
+    useRecorderSetupMarker(compatible !== false);
 
     const detect = useCallback(async () => {
         if (detectingRef.current) return null;
@@ -198,9 +219,14 @@ export function MeetingRecorderSetup({
     }, [extension, i18n]);
 
     const connect = useCallback(async () => {
-        if (!clientRef.current || extension?.kind !== "reachable") {
+        if (
+            !clientRef.current ||
+            extension?.kind !== "reachable" ||
+            connectingRef.current
+        ) {
             return;
         }
+        connectingRef.current = true;
         setBusy(true);
         try {
             const minted = await mintKey();
@@ -209,6 +235,7 @@ export function MeetingRecorderSetup({
                 RECORDER_EXTENSION_ID,
                 extension.channel,
                 { serverUrl, apiKey: minted.api_key },
+                extension.setupPending ? 15000 : 3000,
             );
             if (!result.ok) {
                 throw new Error(
@@ -227,9 +254,27 @@ export function MeetingRecorderSetup({
                 error instanceof Error ? error.message : i18n("Pairing failed"),
             );
         } finally {
+            connectingRef.current = false;
             setBusy(false);
         }
     }, [detect, extension, i18n, loadStatus, mintKey, pageOrigin]);
+
+    useEffect(() => {
+        if (extension?.kind !== "reachable") return;
+        if (!extension.setupPending) {
+            autoPairAttemptedRef.current = false;
+            return;
+        }
+        if (
+            !pageOrigin ||
+            busy ||
+            (extension.paired && extension.pairedHere) ||
+            autoPairAttemptedRef.current
+        )
+            return;
+        autoPairAttemptedRef.current = true;
+        void connect();
+    }, [extension, pageOrigin, busy, connect]);
 
     const generateManual = useCallback(async () => {
         setBusy(true);
@@ -318,6 +363,8 @@ export function MeetingRecorderSetup({
     const connectedHost = hostOf(
         connectedHere ? extension.pairedTo : manualServerUrl,
     );
+    const extensionFound =
+        extension !== null && extension.kind !== "not-installed";
     const unsupportedInOnboarding =
         mode === "onboarding" && compatible === false;
     const centered = mode === "onboarding";
@@ -349,35 +396,72 @@ export function MeetingRecorderSetup({
                     "Requires desktop Chrome, Edge, Brave, or another Chromium browser.",
                 )}
             </p>
-            {extension?.kind === "not-installed" &&
-                (mode === "settings" || compatible === true) && (
-                    <Button
-                        asChild
-                        variant={
-                            extension?.kind === "not-installed"
-                                ? "default"
-                                : "outline"
-                        }
-                    >
-                        <a
-                            href={storeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            <ExternalLink
-                                className="size-4"
-                                aria-hidden="true"
-                            />
-                            {i18n("Install from Chrome Web Store")}
-                        </a>
-                    </Button>
+            <ol className="space-y-3 text-sm">
+                <li className="flex items-start gap-3">
+                    <StepMark>
+                        {extensionFound ? <Check className="size-3.5" /> : "1"}
+                    </StepMark>
+                    <div className="space-y-2">
+                        <p>{i18n("Install the extension")}</p>
+                        {extensionFound && (
+                            <p className="text-xs text-muted-foreground">
+                                {i18n("Extension found")}
+                            </p>
+                        )}
+                        {extension?.kind === "not-installed" &&
+                            (mode === "settings" || compatible === true) && (
+                                <Button asChild>
+                                    <a
+                                        href={storeUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        <ExternalLink
+                                            className="size-4"
+                                            aria-hidden="true"
+                                        />
+                                        {i18n("Install from Chrome Web Store")}
+                                    </a>
+                                </Button>
+                            )}
+                    </div>
+                </li>
+                <li className="flex items-start gap-3">
+                    <StepMark>2</StepMark>
+                    <div className="space-y-1">
+                        <p>
+                            {i18n(
+                                "Click the extension icon in your browser toolbar and choose Connect to {host}.",
+                                { host: hostOf(pageOrigin) },
+                            )}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Can't see the icon? Open the puzzle piece (Extensions) in the toolbar.",
+                            )}
+                        </p>
+                    </div>
+                </li>
+                <li className="flex items-start gap-3">
+                    <StepMark>3</StepMark>
+                    <p>
+                        {i18n(
+                            "Complete the three steps in the extension. This page will then connect automatically.",
+                        )}
+                    </p>
+                </li>
+            </ol>
+            {extension?.kind === "reachable" &&
+                extension.setupPending &&
+                !connectedHere && (
+                    <output className="block text-sm text-muted-foreground">
+                        {busy
+                            ? i18n("Sending the recorder key to the extension…")
+                            : i18n(
+                                  "Extension found. Complete setup in the extension; this page will connect automatically.",
+                              )}
+                    </output>
                 )}
-
-            <p className="text-sm text-muted-foreground">
-                {i18n(
-                    "After installing, open the extension's toolbar icon on this page and connect it to this server. Follow its consent, site access and microphone prompts, then return here, click Connect and confirm the server in the extension.",
-                )}
-            </p>
             {extension?.kind === "reachable" &&
                 extension.micPermission &&
                 extension.micPermission !== "granted" && (
@@ -413,9 +497,6 @@ export function MeetingRecorderSetup({
             )}
             {extension?.kind === "reachable" && !extension.paired && (
                 <div className={cn("space-y-2", centered && "text-center")}>
-                    <ConnectedLine align={centered ? "center" : "start"}>
-                        {i18n("Extension found")}
-                    </ConnectedLine>
                     <Button onClick={() => void connect()} disabled={busy}>
                         <Plug className="size-4" />
                         {i18n("Connect")}
