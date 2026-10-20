@@ -9,15 +9,24 @@ export interface RenamedRecordPlace {
     replacement: string;
 }
 
+function wordsOf(name: string): string[] {
+    return name.normalize("NFC").match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
+}
+
+/** Whether a rename preserves a nonempty name's number of words. */
+export function keepsWordCount(proposed: string, renamed: string): boolean {
+    const count = wordsOf(proposed).length;
+    return count > 0 && wordsOf(renamed).length === count;
+}
+
 /** Grounded places a review rename can rewrite without guessing declension. */
 export function renamedRecordPlaces(
     proposed: string,
     renamed: string,
     turns: readonly TranscriptTurn[],
 ): RenamedRecordPlace[] {
-    const original =
-        proposed.normalize("NFC").match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
-    const edited = renamed.normalize("NFC").match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
+    const original = wordsOf(proposed);
+    const edited = wordsOf(renamed);
     if (original.length === 0 || edited.length !== original.length) return [];
     const places: RenamedRecordPlace[] = [];
     turns.forEach((turn, turnIndex) => {
@@ -48,7 +57,6 @@ export function renamedRecordPlaces(
             if (suffixes.every((suffix) => suffix === "")) {
                 replacement = renamed;
             } else if (
-                edited.length === original.length &&
                 edited.every(
                     (word, offset) =>
                         (nameWords(word)[0] ?? "").slice(-2) ===

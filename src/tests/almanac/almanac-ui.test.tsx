@@ -62,6 +62,7 @@ function respond(routes: Record<string, Route>) {
 
 afterEach(async () => {
     cleanup();
+    // Radix schedules a focus callback after unmount; let it run before jsdom is torn down.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
     vi.clearAllMocks();

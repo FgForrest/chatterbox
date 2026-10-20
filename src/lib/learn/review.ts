@@ -89,7 +89,10 @@ import type {
     MailTextAnchor,
 } from "@/lib/learn/mail-candidates";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
-import { renamedRecordPlaces } from "@/lib/learn/new-record-rename";
+import {
+    keepsWordCount,
+    renamedRecordPlaces,
+} from "@/lib/learn/new-record-rename";
 import {
     type RecordTarget,
     recordNameKey,
@@ -1370,6 +1373,7 @@ function finishInTx(
                     !target ||
                     !choice ||
                     !("name" in choice) ||
+                    !keepsWordCount(payload.name, choice.name) ||
                     choice.name.normalize("NFC") ===
                         payload.name.normalize("NFC")
                 ) {
@@ -1607,7 +1611,7 @@ function finishInTx(
                 { kind: "correction" }
             >["payload"];
             const renamed =
-                "newRef" in proposed.target
+                proposed.kind === "correct" && "newRef" in proposed.target
                     ? renamedRefs.get(proposed.target.newRef)
                     : undefined;
             if (renamed) {

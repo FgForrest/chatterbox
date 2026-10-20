@@ -191,7 +191,6 @@ export function nameSaidIn(name: string, texts: readonly string[]): boolean {
     );
 }
 
-/** How many places in the transcript's words say one of `names`, inflected or not. */
 function mentionsOf(
     names: readonly string[],
     wordsByTurn: readonly string[][],
