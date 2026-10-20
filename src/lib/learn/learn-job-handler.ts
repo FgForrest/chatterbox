@@ -99,6 +99,7 @@ import {
 import type { ProviderPin } from "@/lib/profiles/settings";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
+import "@/lib/learn/review-message-catalog";
 
 const FINGERPRINT_DOMAIN = "learn-fingerprint";
 /**
