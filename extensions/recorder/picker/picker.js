@@ -1,8 +1,10 @@
 import { createCaptureHost, openSystemAudio } from "../lib/capture-host.js";
 import { STATE } from "../lib/constants.js";
+import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 
 localizeDocument();
+fitWindowToContent();
 
 const requestId = new URL(location.href).searchParams.get("requestId");
 const status = document.getElementById("picker-status");
