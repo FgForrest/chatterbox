@@ -6,7 +6,6 @@ import { type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
 import type { WorkflowWidgetFooter } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
-import { getApiErrorMessage } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 
 interface LearnReviewRowProps {
@@ -127,8 +126,9 @@ export async function handleLearnReviewFailure(
     response: Response,
     fallbackMessage: string,
     reload: () => Promise<unknown>,
+    errorMessage: (response: Response, fallback: string) => Promise<string>,
 ): Promise<void> {
-    toast.error(await getApiErrorMessage(response, fallbackMessage));
+    toast.error(await errorMessage(response, fallbackMessage));
     await reload();
 }
 

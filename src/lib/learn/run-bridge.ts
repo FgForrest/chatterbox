@@ -21,6 +21,7 @@ import {
     parseLearnOutput,
 } from "@/lib/learn/output";
 import { learnReviewLanguageRule } from "@/lib/learn/review-language";
+import { repairLearnReviewProse } from "@/lib/learn/review-prose";
 import {
     anchorCorrections,
     type FallbackResult,
@@ -123,7 +124,7 @@ export async function runBridgePass(
     };
     const languageRule = learnReviewLanguageRule(input.reviewLocale);
     let reply = await input.chat.complete({
-        system: `${BRIDGE_SYSTEM} ${languageRule}`,
+        system: `${languageRule} ${BRIDGE_SYSTEM}`,
         user,
         schema,
         mcp: {
@@ -150,7 +151,15 @@ export async function runBridgePass(
             throw new LearnOutputUnusable(answer.error);
         }
     }
-    const output: LearnOutput = answer.output;
+    const output: LearnOutput = await repairLearnReviewProse(
+        answer.output,
+        input.reviewLocale,
+        (request) => {
+            result.calls++;
+            result.repairs++;
+            return input.chat.complete({ ...request, mcp: null });
+        },
+    );
     result.output = {
         ...output,
         corrections: anchorCorrections(output.corrections, input.turns),

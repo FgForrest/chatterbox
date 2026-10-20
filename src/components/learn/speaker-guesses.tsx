@@ -8,9 +8,9 @@ import type {
     LearnMarks,
     LearnSpeakerMark,
 } from "@/components/learn/learn-marks";
+import { useLearnApiErrorMessage } from "@/components/learn/review-error";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { Button } from "@/components/ui/button";
-import { getApiErrorMessage } from "@/lib/api-errors";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
 /**
@@ -43,6 +43,7 @@ export function SpeakerGuesses({
     onSeek?: (ms: number) => void;
 }) {
     const i18n = useExtracted();
+    const getApiErrorMessage = useLearnApiErrorMessage();
     const speakerLabel = useSpeakerLabel();
     const [busy, setBusy] = useState<string | null>(null);
     // Accepted here, until the strip has read them back.

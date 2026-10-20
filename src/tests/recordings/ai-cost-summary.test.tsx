@@ -134,11 +134,11 @@ describe("AI cost summary", () => {
             "Estimated AI spend: $0.45",
         );
         expect(
-            within(panel).getByText("summary").parentElement?.textContent,
-        ).toBe("summary$0.30");
+            within(panel).getByText("Summary").parentElement?.textContent,
+        ).toBe("Summary$0.30");
         expect(
-            within(panel).getByText("title").parentElement?.textContent,
-        ).toBe("title$0.15");
+            within(panel).getByText("Title").parentElement?.textContent,
+        ).toBe("Title$0.15");
         expect(
             within(panel).getByText("Codex · model").parentElement?.textContent,
         ).toBe("Codex · model$0.45");
@@ -243,7 +243,7 @@ describe("AI cost summary", () => {
                         suffix.parentElement?.parentElement?.textContent,
                 ),
             ).toEqual([
-                `summary· ${label}$0.10`,
+                `Summary· ${label}$0.10`,
                 `Codex · model· ${label}$0.10`,
                 `Local AI · model· ${label}1 unpriced`,
             ]);

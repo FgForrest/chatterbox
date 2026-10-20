@@ -30,10 +30,15 @@ describeWithDatabase("Learn reviewer locale (PostgreSQL)", () => {
                 uiLocale: "de",
             },
             { id: "auto-cs", email: "auto-cs@example.test" },
+            { id: "auto-auto", email: "auto-auto@example.test" },
         ]);
         await database.db.insert(userSettings).values({
             userId: "auto-cs",
             defaultTranscriptionLanguage: "cs",
+        });
+        await database.db.insert(userSettings).values({
+            userId: "auto-auto",
+            defaultTranscriptionLanguage: "auto",
         });
     }, 120_000);
 
@@ -142,6 +147,66 @@ describeWithDatabase("Learn reviewer locale (PostgreSQL)", () => {
                 { userId: "owner", scopeUserId: "owner", view: "private" },
                 "en",
             ),
+        ).toBe("cs-CZ");
+    });
+
+    it.each([
+        "unset",
+        "auto-auto",
+    ])("preserves the Czech Auto browser for %s even with unknown content language", async (userId) => {
+        const run = {
+            userId,
+            scopeUserId: userId,
+            actorUserId: userId,
+            view: "private" as const,
+            inputs: { requestLocale: "cs-CZ" },
+        };
+        for (const language of [undefined, null, "unknown", "auto"]) {
+            expect(
+                await resolveLearnReviewLocale(database.db, run, language),
+            ).toBe("cs-CZ");
+        }
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                ...run,
+                inputs: null,
+            }),
+        ).toBe("en");
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                ...run,
+                inputs: { requestLocale: 42 },
+            }),
+        ).toBe("en");
+    });
+
+    it("keeps explicit owner and Organization choices ahead of a browser hint", async () => {
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                userId: "owner",
+                scopeUserId: "owner",
+                actorUserId: "owner",
+                view: "private",
+                inputs: { requestLocale: "en" },
+            }),
+        ).toBe("cs-CZ");
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                userId: "owner",
+                scopeUserId: "org",
+                actorUserId: "curator",
+                view: "org",
+                inputs: { requestLocale: "cs-CZ" },
+            }),
+        ).toBe("en");
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                userId: "owner",
+                scopeUserId: "unset",
+                actorUserId: "auto-auto",
+                view: "org",
+                inputs: { requestLocale: "cs-CZ" },
+            }),
         ).toBe("cs-CZ");
     });
 

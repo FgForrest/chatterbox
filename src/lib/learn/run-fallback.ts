@@ -35,6 +35,7 @@ import {
     parseLearnOutput,
 } from "@/lib/learn/output";
 import { learnReviewLanguageRule } from "@/lib/learn/review-language";
+import { repairLearnReviewProse } from "@/lib/learn/review-prose";
 import type { FoundEntity } from "@/lib/learn/tools";
 import { formatClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -45,7 +46,11 @@ export interface LearnChatMessage {
 }
 
 export interface LearnChat {
-    complete(messages: LearnChatMessage[], maxTokens: number): Promise<string>;
+    complete(
+        messages: LearnChatMessage[],
+        maxTokens: number,
+        options?: { retry: false },
+    ): Promise<string>;
 }
 
 export interface LearnLookup {
@@ -409,7 +414,7 @@ export async function runFallbackPass(
     const mail = input.framing === "mail";
     const mentionsSystem = mail ? MAIL_MENTIONS_SYSTEM : MENTIONS_SYSTEM;
     const languageRule = learnReviewLanguageRule(input.reviewLocale);
-    const answerSystem = `${mail ? MAIL_ANSWER_SYSTEM : ANSWER_SYSTEM} ${languageRule}`;
+    const answerSystem = `${languageRule} ${mail ? MAIL_ANSWER_SYSTEM : ANSWER_SYSTEM}`;
     const windows = windowsOf(input.turns, input.windowChars ?? WINDOW_CHARS);
     for (const [windowIndex, window] of windows.entries()) {
         input.signal?.throwIfAborted();
@@ -645,5 +650,21 @@ export async function runFallbackPass(
     if (result.windows > 0 && result.failedWindows === result.windows) {
         throw new LearnOutputUnusable(lastError);
     }
+    result.output = await repairLearnReviewProse(
+        result.output,
+        input.reviewLocale,
+        (request) => {
+            result.calls++;
+            result.repairs++;
+            return input.chat.complete(
+                [
+                    { role: "system", content: request.system },
+                    { role: "user", content: request.user },
+                ],
+                request.maxTokens,
+                { retry: false },
+            );
+        },
+    );
     return result;
 }
