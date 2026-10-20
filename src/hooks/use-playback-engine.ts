@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { PlaybackState } from "@/hooks/use-transcript-follow";
 import type { Recording } from "@/types/recording";
 
 export const PLAYBACK_SPEED_OPTIONS = [
@@ -15,25 +16,20 @@ export const PLAYBACK_SPEED_OPTIONS = [
 
 interface Options {
     recording: Recording;
-    /** Called when audio finishes playing AND autoPlayNext is on. */
     onEnded?: () => void;
     initialPlaybackSpeed?: number;
     initialVolume?: number;
     initialAutoPlayNext?: boolean;
 }
 
-/**
- * Owns the HTMLAudioElement and all of its lifecycle: src swap on
- * recording change, listener wiring (timeupdate / loadedmetadata /
- * durationchange / ended / seeked), and the derived playback state
- * (isPlaying, currentTime, duration, volume, playbackSpeed).
- *
- * Returns a stable `audioRef` (attach to a hidden <audio>), the
- * derived state, and imperative handlers (toggle, seek, cycleSpeed,
- * toggleMute). Keyboard bindings live in usePlaybackKeyboard so the
- * test surface for "given an audio element, control playback" stays
- * separate from "given a player UI, react to keys".
- */
+function elementState(audio: HTMLAudioElement | null): PlaybackState {
+    return {
+        ms: (audio?.currentTime ?? 0) * 1000,
+        playing: Boolean(audio && !audio.paused && !audio.ended),
+    };
+}
+
+/** Own the audio transport and derive its UI state from the media element. */
 export function usePlaybackEngine({
     recording,
     onEnded,
@@ -48,181 +44,234 @@ export function usePlaybackEngine({
     const [playbackSpeed, setPlaybackSpeed] = useState(initialPlaybackSpeed);
     const [autoPlayNext] = useState(initialAutoPlayNext);
     const audioRef = useRef<HTMLAudioElement>(null);
-    const isSeekingRef = useRef(false);
+    const listeners = useRef(new Set<(state: PlaybackState) => void>());
+    const stopAt = useRef<number | null>(null);
+    const pendingSeek = useRef<number | null>(null);
+    const playRequest = useRef(0);
+    const onEndedRef = useRef(onEnded);
+    onEndedRef.current = onEnded;
 
-    // Reset transport state and re-point src whenever the recording
-    // *id* changes. Filename edits must not remount playback.
-    useEffect(() => {
-        setCurrentTime(0);
-        setDuration(0);
-        setIsPlaying(false);
-        if (audioRef.current) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.src = `/api/recordings/${recording.id}/audio`;
-            audioRef.current.load();
-        }
-    }, [recording.id]);
+    const syncPlaying = useCallback(() => {
+        const state = elementState(audioRef.current);
+        setIsPlaying(state.playing);
+        for (const listener of listeners.current) listener(state);
+    }, []);
 
-    useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.volume = volume / 100;
-        }
-    }, [volume]);
+    const subscribe = useCallback(
+        (listener: (state: PlaybackState) => void) => {
+            listeners.current.add(listener);
+            listener(elementState(audioRef.current));
+            return () => {
+                listeners.current.delete(listener);
+            };
+        },
+        [],
+    );
 
-    useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.playbackRate = playbackSpeed;
-        }
-    }, [playbackSpeed]);
+    const pause = useCallback(() => {
+        playRequest.current++;
+        stopAt.current = null;
+        audioRef.current?.pause();
+        syncPlaying();
+    }, [syncPlaying]);
 
-    // Listener wiring. Re-runs whenever the recording changes (so the
-    // ended handler closes over the right onEnded / autoPlayNext) but
-    // the listener identities themselves are stable within a single
-    // mount of the recording.
-    useEffect(() => {
-        if (!audioRef.current) return;
+    const play = useCallback(() => {
         const audio = audioRef.current;
-        const recordingId = recording.id;
+        if (!audio) return;
+        const request = ++playRequest.current;
+        audio.playbackRate = playbackSpeed;
+        audio.play().catch((error: unknown) => {
+            if (request !== playRequest.current) return;
+            stopAt.current = null;
+            syncPlaying();
+            if (error instanceof Error && error.name === "AbortError") return;
+            console.error("Error playing audio:", error);
+            toast.error("Failed to play audio");
+        });
+        syncPlaying();
+    }, [playbackSpeed, syncPlaying]);
 
+    const setPosition = useCallback((seconds: number) => {
+        const audio = audioRef.current;
+        if (!audio || !Number.isFinite(seconds)) return;
+        const requested = Math.max(0, seconds);
+        const next =
+            Number.isFinite(audio.duration) && audio.duration > 0
+                ? Math.min(audio.duration, requested)
+                : requested;
+        if (audio.readyState === 0) {
+            pendingSeek.current = next;
+        } else {
+            pendingSeek.current = null;
+            audio.currentTime = next;
+        }
+        setCurrentTime(next);
+    }, []);
+
+    const seekToTime = useCallback(
+        (seconds: number) => {
+            if (!Number.isFinite(seconds)) return;
+            stopAt.current = null;
+            setPosition(seconds);
+        },
+        [setPosition],
+    );
+
+    const playFrom = useCallback(
+        (seconds: number, untilSeconds?: number) => {
+            if (!Number.isFinite(seconds)) return;
+            stopAt.current =
+                untilSeconds !== undefined &&
+                Number.isFinite(untilSeconds) &&
+                untilSeconds > Math.max(0, seconds)
+                    ? untilSeconds
+                    : null;
+            setPosition(seconds);
+            play();
+        },
+        [setPosition, play],
+    );
+
+    const togglePlayPause = useCallback(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        stopAt.current = null;
+        if (audio.paused || audio.ended) play();
+        else pause();
+    }, [play, pause]);
+
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
         const updateTime = () => {
-            if (!isSeekingRef.current) {
-                setCurrentTime(audio.currentTime);
+            setCurrentTime(audio.currentTime);
+            if (
+                stopAt.current !== null &&
+                pendingSeek.current === null &&
+                !audio.seeking &&
+                !audio.paused &&
+                audio.currentTime >= stopAt.current
+            ) {
+                pause();
             }
+            syncPlaying();
         };
         const updateDuration = () => {
-            if (audio.duration && !Number.isNaN(audio.duration)) {
+            if (Number.isFinite(audio.duration) && audio.duration > 0) {
                 setDuration(audio.duration);
             }
         };
-        const handleEnded = () => {
-            setIsPlaying(false);
-            if (autoPlayNext && onEnded) {
-                onEnded();
+        const loadedMetadata = () => {
+            updateDuration();
+            if (pendingSeek.current !== null) setPosition(pendingSeek.current);
+            syncPlaying();
+        };
+        const stopped = () => {
+            if (audio.paused || audio.ended) stopAt.current = null;
+            syncPlaying();
+        };
+        const emptied = () => {
+            if (audio.paused && audio.readyState === 0) {
+                playRequest.current++;
+                setCurrentTime(0);
+                setDuration(0);
             }
+            stopped();
         };
-        const handleSeeked = () => {
-            isSeekingRef.current = false;
-            setCurrentTime(audio.currentTime);
+        const ended = () => {
+            stopped();
+            if (audio.ended && autoPlayNext) onEndedRef.current?.();
         };
-
-        if (audio.src !== `/api/recordings/${recordingId}/audio`) {
-            audio.src = `/api/recordings/${recordingId}/audio`;
-            audio.load();
+        const handlers: [keyof HTMLMediaElementEventMap, () => void][] = [
+            ["play", syncPlaying],
+            ["playing", syncPlaying],
+            ["pause", stopped],
+            ["emptied", emptied],
+            ["error", stopped],
+            ["ended", ended],
+            ["timeupdate", updateTime],
+            ["seeking", updateTime],
+            ["seeked", updateTime],
+            ["loadedmetadata", loadedMetadata],
+            ["durationchange", updateDuration],
+        ];
+        for (const [type, handler] of handlers) {
+            audio.addEventListener(type, handler);
         }
-
-        audio.addEventListener("timeupdate", updateTime);
-        audio.addEventListener("loadedmetadata", updateDuration);
-        audio.addEventListener("durationchange", updateDuration);
-        audio.addEventListener("ended", handleEnded);
-        audio.addEventListener("seeked", handleSeeked);
-
-        if (audio.duration && !Number.isNaN(audio.duration)) {
-            setDuration(audio.duration);
-        }
-
+        stopAt.current = null;
+        pendingSeek.current = null;
+        setCurrentTime(0);
+        setDuration(0);
+        audio.src = `/api/recordings/${recording.id}/audio`;
+        audio.load();
+        syncPlaying();
         return () => {
-            audio.removeEventListener("timeupdate", updateTime);
-            audio.removeEventListener("loadedmetadata", updateDuration);
-            audio.removeEventListener("durationchange", updateDuration);
-            audio.removeEventListener("ended", handleEnded);
-            audio.removeEventListener("seeked", handleSeeked);
+            playRequest.current++;
+            stopAt.current = null;
+            pendingSeek.current = null;
+            for (const [type, handler] of handlers) {
+                audio.removeEventListener(type, handler);
+            }
+            if (!audio.paused) audio.pause();
         };
-    }, [recording.id, autoPlayNext, onEnded]);
+    }, [recording.id, autoPlayNext, pause, setPosition, syncPlaying]);
 
-    const togglePlayPause = useCallback(() => {
-        if (!audioRef.current) return;
-        if (isPlaying) {
-            audioRef.current.pause();
-        } else {
-            audioRef.current.playbackRate = playbackSpeed;
-            audioRef.current.play().catch((error) => {
-                console.error("Error playing audio:", error);
-                toast.error("Failed to play audio");
-            });
-        }
-        setIsPlaying(!isPlaying);
-    }, [isPlaying, playbackSpeed]);
+    useEffect(() => {
+        if (audioRef.current) audioRef.current.volume = volume / 100;
+    }, [volume]);
 
-    /**
-     * Seek to a ratio in [0, 1] of the audio's duration. Used by both
-     * the slider (which translates 0-100 -> 0-1 itself) and the
-     * waveform click handler. Centralising means seek semantics stay
-     * identical regardless of which control the user touches.
-     */
-    const seekToRatio = useCallback((ratio: number) => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        const audioDuration = audio.duration;
-        if (!audioDuration || Number.isNaN(audioDuration)) {
-            audio.load();
-            return;
-        }
-        const newTime = Math.max(
-            0,
-            Math.min(audioDuration, ratio * audioDuration),
-        );
-        isSeekingRef.current = true;
-        audio.currentTime = newTime;
-        setCurrentTime(newTime);
-    }, []);
+    useEffect(() => {
+        if (audioRef.current) audioRef.current.playbackRate = playbackSpeed;
+    }, [playbackSpeed]);
 
-    /** Seek to an absolute offset in seconds, used by timed transcript turns. */
-    const seekToTime = useCallback((seconds: number) => {
-        const audio = audioRef.current;
-        if (!audio || !Number.isFinite(seconds)) return;
-        const requestedTime = Math.max(0, seconds);
-        const newTime =
-            audio.duration > 0 && Number.isFinite(audio.duration)
-                ? Math.min(audio.duration, requestedTime)
-                : requestedTime;
-        isSeekingRef.current = true;
-        audio.currentTime = newTime;
-        setCurrentTime(newTime);
-    }, []);
+    const seekToRatio = useCallback(
+        (ratio: number) => {
+            const audio = audioRef.current;
+            if (
+                !audio ||
+                !Number.isFinite(ratio) ||
+                !Number.isFinite(audio.duration) ||
+                audio.duration <= 0
+            )
+                return;
+            seekToTime(Math.max(0, Math.min(1, ratio)) * audio.duration);
+        },
+        [seekToTime],
+    );
 
-    /**
-     * Seek by signed seconds offset (used by keyboard left/right).
-     * Clamps to [0, duration].
-     */
     const seekRelative = useCallback(
         (deltaSeconds: number) => {
             const audio = audioRef.current;
-            if (!audio || duration <= 0) return;
-            const newTime = Math.max(
-                0,
-                Math.min(duration, currentTime + deltaSeconds),
+            if (!audio) return;
+            seekToTime(
+                (pendingSeek.current ?? audio.currentTime) + deltaSeconds,
             );
-            audio.currentTime = newTime;
-            setCurrentTime(newTime);
         },
-        [currentTime, duration],
+        [seekToTime],
     );
 
     const cycleSpeed = useCallback(() => {
-        const currentIndex = PLAYBACK_SPEED_OPTIONS.findIndex(
-            (opt) => opt.value === playbackSpeed,
-        );
-        const nextIndex = (currentIndex + 1) % PLAYBACK_SPEED_OPTIONS.length;
-        const nextSpeed = PLAYBACK_SPEED_OPTIONS[nextIndex].value;
-        setPlaybackSpeed(nextSpeed);
-        if (audioRef.current) {
-            audioRef.current.playbackRate = nextSpeed;
-        }
-    }, [playbackSpeed]);
+        setPlaybackSpeed((speed) => {
+            const index = PLAYBACK_SPEED_OPTIONS.findIndex(
+                (option) => option.value === speed,
+            );
+            return PLAYBACK_SPEED_OPTIONS[
+                (index + 1) % PLAYBACK_SPEED_OPTIONS.length
+            ].value;
+        });
+    }, []);
 
-    // Mute toggle stashes the previous volume so unmute restores it.
-    // A pure 0/75 toggle would be surprising for users who set their
-    // own preferred level.
     const previousVolumeRef = useRef<number>(volume > 0 ? volume : 75);
     useEffect(() => {
         if (volume > 0) previousVolumeRef.current = volume;
     }, [volume]);
     const toggleMute = useCallback(() => {
-        setVolume((v) => (v > 0 ? 0 : previousVolumeRef.current || 75));
+        setVolume((value) => (value > 0 ? 0 : previousVolumeRef.current || 75));
     }, []);
 
     return {
         audioRef,
+        subscribe,
         isPlaying,
         currentTime,
         duration,
@@ -230,6 +279,8 @@ export function usePlaybackEngine({
         setVolume,
         playbackSpeed,
         togglePlayPause,
+        playFrom,
+        pause,
         seekToRatio,
         seekToTime,
         seekRelative,
