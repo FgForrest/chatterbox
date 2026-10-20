@@ -18,6 +18,7 @@ import {
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { learnRunOpen } from "@/lib/learn/learn-open";
+import { llmRendering } from "@/lib/learn/llm-input";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { mailShareProblems } from "@/lib/mail/share-gate";
 import { readProcessing } from "@/lib/pipeline/state";
@@ -329,7 +330,12 @@ export async function gatherFacts(
         contentPromise,
         mailPromise,
         db
-            .select({ id: aiEnhancements.id })
+            .select({
+                id: aiEnhancements.id,
+                inputs: aiEnhancements.inputs,
+                transcriptionId: aiEnhancements.transcriptionId,
+                inputFingerprint: aiEnhancements.inputFingerprint,
+            })
             .from(aiEnhancements)
             .where(
                 and(
@@ -701,6 +707,21 @@ export async function gatherFacts(
                 )
               : await loadShareGate(db, itemId, userId);
     const summaryExists = summary !== undefined;
+    const summaryStale = summaryExists
+        ? await isSummaryStale(userId, itemId)
+        : false;
+    const staleFingerprint =
+        summaryStale && summary?.inputFingerprint && summary.transcriptionId
+            ? (await llmRendering(summary.transcriptionId))?.fingerprint
+            : undefined;
+    const summarySource =
+        item.kind === "mail"
+            ? "mail"
+            : summary?.inputs?.contentSourceId === "plaud"
+              ? "plaud"
+              : "riffado";
+    const summaryContent =
+        summarySource === "plaud" ? plaudTranscript : content;
     return {
         item: {
             exists: true,
@@ -805,7 +826,16 @@ export async function gatherFacts(
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,
-            stale: summaryExists ? await isSummaryStale(userId, itemId) : false,
+            stale: summaryStale,
+            staleFingerprint,
+            current:
+                !summaryStale &&
+                summaryContent !== null &&
+                summary?.inputs?.contentId === summaryContent.id &&
+                summary.inputs.contentRevision === summaryContent.revision &&
+                summary.inputs.contentSourceId === summarySource &&
+                summary.inputs.itemProfileRevisionId ===
+                    processing?.profileRevisionId,
             jobActive: activeSummaryJobs.some(
                 (job) => job.kind === SUMMARY_JOB_KIND,
             ),

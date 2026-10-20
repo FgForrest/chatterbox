@@ -369,6 +369,7 @@ describe("generateTopicsForTranscript", () => {
                     contentSourceId: "plaud",
                     contentRevision: 7,
                 },
+                inputFingerprint: "input-fingerprint",
             },
         );
     });

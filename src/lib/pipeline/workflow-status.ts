@@ -152,6 +152,15 @@ function currentLearnRun(data: ItemProcessingPresentation) {
         : null;
 }
 
+function summaryJobState(data: ItemProcessingPresentation) {
+    return (
+        data.jobs.summary ??
+        (data.outputs.summary
+            ? null
+            : (data.jobs.topics ?? data.jobs.title ?? null))
+    );
+}
+
 function displayState(
     data: ItemProcessingPresentation,
     phase: PhaseName,
@@ -178,8 +187,8 @@ function displayState(
         if (data.learnFindingsWaiting > 0) return "review";
         if (record.reason === "review_pending") return "working";
     }
-    if (phase === "summary" && data.jobs.summary) {
-        return data.jobs.summary === "queued" ? "queued" : "working";
+    if (phase === "summary" && summaryJobState(data)) {
+        return summaryJobState(data) === "queued" ? "queued" : "working";
     }
     if (
         phase === "learn" &&
@@ -535,10 +544,10 @@ function deriveStatus(
     ) {
         return { actor: "working", message: "learnCorrecting" };
     }
-    if (data.jobs.summary === "queued") {
+    if (summaryJobState(data) === "queued") {
         return { actor: "queued", message: "summaryQueued" };
     }
-    if (data.jobs.summary === "running") {
+    if (summaryJobState(data) === "running") {
         return { actor: "working", message: "summaryRunning" };
     }
     if (
