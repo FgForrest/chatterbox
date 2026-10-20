@@ -38,8 +38,8 @@ export async function openStartRequest(input) {
             ),
             type: "popup",
             focused: true,
-            width: 500,
-            height: 560,
+            width: 440,
+            height: 490,
         });
         await chrome.storage.session.set({
             [START_REQUEST_KEY]: { ...request, windowId: window.id },

@@ -120,6 +120,7 @@ vi.mock("../../../extensions/recorder/lib/settings.js", () => ({
     saveSettings: harness.saveSettings,
     isPaired: vi.fn(async () => true),
     anyPlatformAuto: vi.fn(() => false),
+    effectiveNoticeText: vi.fn(() => "Inform participants."),
     effectivePlatformModes: harness.platformModes,
     effectiveQuietSeconds: vi.fn(() => 30),
 }));
@@ -977,24 +978,50 @@ describe("meeting notification actions", () => {
         return tab;
     }
 
-    it("offers Record and Not now, and Record opens the notice/microphone surface", async () => {
+    it("offers Record with consent and Not now; Record opens Chrome's sharing dialog", async () => {
         await detectMeeting();
         expect(chrome.notifications.create).toHaveBeenCalledWith(
             "nudge:7",
             expect.objectContaining({
                 title: "meetingRecordQuestion",
-                buttons: [{ title: "record" }, { title: "notNow" }],
+                contextMessage: expect.any(String),
+                buttons: [{ title: "recordWithConsent" }, { title: "notNow" }],
             }),
         );
+        harness.readToken.mockResolvedValue("recorder-token");
+        harness.listeners.notificationButton("nudge:7", 0);
+        await vi.waitFor(() =>
+            expect(chrome.windows.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    url: expect.stringContaining(
+                        "/picker/picker.html?requestId=",
+                    ),
+                }),
+            ),
+        );
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            state: "awaiting-picker",
+            captureMode: "desktop",
+            tabId: 7,
+            noticeAcknowledgedAt: expect.any(String),
+        });
+        expect(harness.sessionValues.recorderStartRequest).toBeUndefined();
+        expect(harness.createSession).not.toHaveBeenCalled();
+    });
+
+    it("Record with the mic not yet allowed opens the microphone step with consent given", async () => {
+        await detectMeeting();
+        navigator.permissions.query.mockResolvedValue({ state: "prompt" });
+        harness.readToken.mockResolvedValue("recorder-token");
         harness.listeners.notificationButton("nudge:7", 0);
         await vi.waitFor(() =>
             expect(harness.sessionValues.recorderStartRequest).toBeDefined(),
         );
         const request = harness.sessionValues.recorderStartRequest;
-        expect(request.input.noticeAcknowledgedAt).toBeUndefined();
-        expect(await resumeRequest(request)).toEqual({
-            ok: false,
-            error: "participantAckRequired",
+        expect(request.input).toMatchObject({
+            tabId: 7,
+            platformHint: "google-meet",
+            noticeAcknowledgedAt: expect.any(String),
         });
         expect(harness.createSession).not.toHaveBeenCalled();
     });

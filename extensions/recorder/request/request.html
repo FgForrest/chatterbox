@@ -4,20 +4,23 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Chatterbox Meeting Recorder</title>
-        <link rel="stylesheet" href="../options/options.css">
+        <link rel="stylesheet" href="../popup/popup.css">
+        <link rel="stylesheet" href="../picker/picker.css">
+        <link rel="stylesheet" href="request.css">
     </head>
     <body>
-        <main>
-            <h1 data-i18n="extensionName"></h1>
-            <p id="meeting-title"></p>
-            <p data-i18n="micRequestIntro"></p>
-            <p id="mic-status" role="status"></p>
-            <p id="notice-text"></p>
-            <label id="notice-label" class="check">
-                <input id="notice-check" type="checkbox">
-                <span data-i18n="participantAck"></span>
-            </label>
-            <p data-i18n="meetingPickerHint"></p>
+        <header class="picker-header">
+            <img src="../icons/icon-128.png" alt="" width="58" height="58">
+            <div>
+                <h1 data-i18n="extensionName"></h1>
+                <p id="meeting-title"></p>
+            </div>
+        </header>
+        <p data-i18n="micRequestIntro"></p>
+        <p id="mic-status" role="status"></p>
+        <p id="notice-text" class="hint"></p>
+        <p class="hint" data-i18n="meetingPickerHint"></p>
+        <div class="actions">
             <button
                 id="grant-mic"
                 class="primary"
@@ -37,7 +40,7 @@
                 data-i18n="recordWithoutMic"
             ></button>
             <button id="cancel" type="button" data-i18n="cancel"></button>
-        </main>
+        </div>
         <script type="module" src="request.js"></script>
     </body>
 </html>
