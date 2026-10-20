@@ -1388,6 +1388,11 @@ function finishInTx(
                           )
                         : turns,
                 );
+                const declinedAnchors: {
+                    turnIndex: number;
+                    charStart: number;
+                    charEnd: number;
+                }[] = [];
                 for (const candidate of items) {
                     if (candidate.kind !== "correction") continue;
                     const correction = candidate.payload as Extract<
@@ -1396,10 +1401,14 @@ function finishInTx(
                     >["payload"];
                     if (
                         !("newRef" in correction.target) ||
-                        correction.target.newRef !== payload.ref ||
-                        !correction.replacement
+                        correction.target.newRef !== payload.ref
                     )
                         continue;
+                    if (!candidate.accepted) {
+                        declinedAnchors.push(...correction.anchors);
+                        continue;
+                    }
+                    if (!correction.replacement) continue;
                     const [renamed] = renamedRecordPlaces(
                         payload.name,
                         choice.name,
@@ -1425,7 +1434,11 @@ function finishInTx(
                             anchor.charEnd,
                             correction.heard,
                         );
-                        if (heard)
+                        if (
+                            heard &&
+                            heard.normalize("NFC") !==
+                                renamed.replacement.normalize("NFC")
+                        )
                             places.push({
                                 ...anchor,
                                 heard,
@@ -1436,6 +1449,15 @@ function finishInTx(
                 for (const place of places.sort(
                     (a, b) => a.heard.length - b.heard.length,
                 )) {
+                    if (
+                        declinedAnchors.some(
+                            (anchor) =>
+                                anchor.turnIndex === place.turnIndex &&
+                                anchor.charStart < place.charEnd &&
+                                place.charStart < anchor.charEnd,
+                        )
+                    )
+                        continue;
                     if (
                         payload.kind === "person" &&
                         heardIsFirstNameOnly(place.heard, { name: choice.name })

@@ -458,6 +458,250 @@ describeWithDatabase("Learn renamed new records (PostgreSQL)", () => {
         ).toEqual([]);
     });
 
+    it.each([
+        "CHVEX",
+        "ČVEX",
+    ])("preserves declined occurrences while renaming other occurrences of %s", async (proposedName) => {
+        const itemId = await proposal(proposedName);
+        const [item] = await db()
+            .select()
+            .from(learnReviewItems)
+            .where(
+                and(
+                    eq(learnReviewItems.id, itemId),
+                    eq(learnReviewItems.userId, OWNER),
+                ),
+            );
+        const lastStart = TURNS[0]?.text.lastIndexOf("CHVEX") ?? -1;
+        const corrections = await db()
+            .insert(learnReviewItems)
+            .values(
+                [
+                    {
+                        decision: null,
+                        heard: "Klient CHVEX",
+                        replacement: "Klient ČVEX",
+                        anchor: { turnIndex: 0, charStart: 0, charEnd: 12 },
+                    },
+                    {
+                        decision: "rejected" as const,
+                        heard: "CHVEXem",
+                        replacement: "ČVEXem",
+                        anchor: { turnIndex: 1, charStart: 2, charEnd: 9 },
+                    },
+                    {
+                        decision: "accepted" as const,
+                        heard: "CHVEX",
+                        replacement: "ČVEX",
+                        anchor: {
+                            turnIndex: 0,
+                            charStart: lastStart,
+                            charEnd: lastStart + 5,
+                        },
+                    },
+                ].map((correction, index) => ({
+                    runId: item?.runId ?? "",
+                    userId: OWNER,
+                    kind: "correction" as const,
+                    preTicked: correction.decision === "rejected",
+                    decision: correction.decision,
+                    fingerprintHmac: `fixture-declined-${index}`,
+                    payload: encryptJsonField({
+                        kind: "correct",
+                        heard: correction.heard,
+                        replacement: correction.replacement,
+                        target: { newRef: "n1" },
+                        anchors: [correction.anchor],
+                    }),
+                })),
+            )
+            .returning({ id: learnReviewItems.id });
+        const access = await requireRecordingView(OWNER, REC, "private");
+        const editedName = proposedName === "CHVEX" ? "ČVEX" : "ŠVEX";
+        await decideReviewItem(access, itemId, {
+            version: 0,
+            decision: "accepted",
+            choice: { name: editedName, typeKey: "organization" },
+        });
+        const finished = await finishReview(access, OWNER, {
+            versions: {
+                [itemId]: 1,
+                ...Object.fromEntries(corrections.map((row) => [row.id, 0])),
+            },
+        });
+        expect(finished).toMatchObject({
+            status: "finished",
+            applied: 2,
+            dismissed: 2,
+            skipped: [],
+        });
+        expect(await listCorrections(OWNER, transcriptionId)).toEqual([
+            expect.objectContaining({
+                turnIndex: 0,
+                charStart: lastStart,
+                charEnd: lastStart + 5,
+                heard: "CHVEX",
+                replacement: editedName,
+            }),
+        ]);
+        const outcomes = await db()
+            .select({
+                id: learnReviewItems.id,
+                outcome: learnReviewItems.outcome,
+            })
+            .from(learnReviewItems)
+            .where(
+                and(
+                    eq(learnReviewItems.runId, item?.runId ?? ""),
+                    eq(learnReviewItems.userId, OWNER),
+                ),
+            );
+        expect(outcomes).toEqual(
+            expect.arrayContaining([
+                { id: corrections[0]?.id, outcome: "rejected" },
+                { id: corrections[1]?.id, outcome: "rejected" },
+                { id: corrections[2]?.id, outcome: "applied" },
+            ]),
+        );
+    });
+
+    it.each([
+        null,
+        "rejected",
+    ] as const)("skips accepted corrections referring to a new record with decision %s", async (decision) => {
+        const itemId = await proposal();
+        const [item] = await db()
+            .select()
+            .from(learnReviewItems)
+            .where(
+                and(
+                    eq(learnReviewItems.id, itemId),
+                    eq(learnReviewItems.userId, OWNER),
+                ),
+            );
+        const [correction] = await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: item?.runId ?? "",
+                userId: OWNER,
+                kind: "correction",
+                preTicked: true,
+                fingerprintHmac: "fixture-unadded-correction",
+                payload: encryptJsonField({
+                    kind: "correct",
+                    heard: "CHVEX",
+                    replacement: "ČVEX",
+                    target: { newRef: "n1" },
+                    anchors: [{ turnIndex: 0, charStart: 7, charEnd: 12 }],
+                }),
+            })
+            .returning({ id: learnReviewItems.id });
+        const access = await requireRecordingView(OWNER, REC, "private");
+        await decideReviewItem(access, itemId, {
+            version: 0,
+            decision,
+            choice: { name: "ČVEX", typeKey: "organization" },
+        });
+        expect(
+            await finishReview(access, OWNER, {
+                versions: { [itemId]: 1, [correction?.id ?? ""]: 0 },
+            }),
+        ).toMatchObject({
+            status: "finished",
+            applied: 0,
+            dismissed: 1,
+            skipped: [{ itemId: correction?.id, code: "record_not_added" }],
+        });
+        expect(await listCorrections(OWNER, transcriptionId)).toEqual([]);
+        expect(
+            await db()
+                .select()
+                .from(knowledgeEntities)
+                .where(eq(knowledgeEntities.userId, OWNER)),
+        ).toEqual([]);
+        expect(
+            await db()
+                .select()
+                .from(knowledgeAliases)
+                .where(eq(knowledgeAliases.userId, OWNER)),
+        ).toEqual([]);
+    });
+
+    it.each([
+        "CHVEX",
+        "C\u030cVEX",
+    ])("finishes when the edited name equals the correction's heard spelling %s after NFC normalization", async (heard) => {
+        const turns = [{ ...TURNS[0], text: `Klient ${heard}.` }];
+        await db()
+            .update(transcriptions)
+            .set({
+                text: encryptText(turns[0]?.text ?? ""),
+                turns: encryptJsonField(turns),
+            })
+            .where(
+                and(
+                    eq(transcriptions.id, transcriptionId),
+                    eq(transcriptions.userId, OWNER),
+                ),
+            );
+        const itemId = await proposal("ČVIX");
+        const [item] = await db()
+            .select()
+            .from(learnReviewItems)
+            .where(
+                and(
+                    eq(learnReviewItems.id, itemId),
+                    eq(learnReviewItems.userId, OWNER),
+                ),
+            );
+        const [correction] = await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: item?.runId ?? "",
+                userId: OWNER,
+                kind: "correction",
+                preTicked: true,
+                fingerprintHmac: "fixture-unchanged-correction",
+                payload: encryptJsonField({
+                    kind: "correct",
+                    heard,
+                    replacement: "ČVIX",
+                    target: { newRef: "n1" },
+                    anchors: [
+                        {
+                            turnIndex: 0,
+                            charStart: 7,
+                            charEnd: 7 + heard.length,
+                        },
+                    ],
+                }),
+            })
+            .returning({ id: learnReviewItems.id });
+        const access = await requireRecordingView(OWNER, REC, "private");
+        await decideReviewItem(access, itemId, {
+            version: 0,
+            decision: "accepted",
+            choice: { name: heard.normalize("NFC"), typeKey: "organization" },
+        });
+        expect(
+            await finishReview(access, OWNER, {
+                versions: { [itemId]: 1, [correction?.id ?? ""]: 0 },
+            }),
+        ).toMatchObject({ status: "finished", applied: 1 });
+        expect(await listCorrections(OWNER, transcriptionId)).toEqual([]);
+        const [entity] = await db()
+            .select()
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.userId, OWNER));
+        expect(decryptText(entity?.name ?? "")).toBe(heard.normalize("NFC"));
+        expect(
+            await db()
+                .select()
+                .from(knowledgeAliases)
+                .where(eq(knowledgeAliases.userId, OWNER)),
+        ).toEqual([]);
+    });
+
     it("does not teach a person's first name alone as a global mishearing", async () => {
         const itemId = await proposal("Jitka");
         await db()
