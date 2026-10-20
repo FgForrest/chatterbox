@@ -96,6 +96,7 @@ import {
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -933,7 +934,10 @@ async function mailSourceInTx(
         language: async () => content.language,
         speakerPerson: async (label) => {
             const [row] = await tx
-                .select({ personId: mailParticipants.personId })
+                .select({
+                    personId: mailParticipants.personId,
+                    address: mailParticipants.address,
+                })
                 .from(mailParticipants)
                 .where(
                     and(
@@ -943,7 +947,10 @@ async function mailSourceInTx(
                     ),
                 )
                 .limit(1);
-            return row?.personId ?? null;
+            return row?.address &&
+                isInternalMailAddress(decryptText(row.address))
+                ? null
+                : (row?.personId ?? null);
         },
         confirm: async (sp, args) => {
             if (!args.place.text) throw recordMissing();
@@ -976,23 +983,46 @@ async function linkParticipantInTx(
     tx: Tx,
     run: LatestRun,
     writerUserId: string,
+    readScopes: readonly string[],
     link: { ref: string; personId: string; address: string | null },
 ): Promise<void> {
     const [participant] = await tx
-        .update(mailParticipants)
-        .set({ personId: link.personId })
+        .select({
+            address: mailParticipants.address,
+            personId: mailParticipants.personId,
+        })
+        .from(mailParticipants)
         .where(
             and(
                 eq(mailParticipants.itemId, run.itemId),
                 eq(mailParticipants.userId, run.userId),
                 eq(mailParticipants.ref, link.ref),
-                isNull(mailParticipants.personId),
             ),
         )
-        .returning({ address: mailParticipants.address });
+        .for("update");
+    const address = participant?.address
+        ? decryptText(participant.address)
+        : null;
+    if (
+        (address && isInternalMailAddress(address)) ||
+        (link.address && isInternalMailAddress(link.address))
+    )
+        return;
+    if (participant && participant.personId === null) {
+        await tx
+            .update(mailParticipants)
+            .set({ personId: link.personId })
+            .where(
+                and(
+                    eq(mailParticipants.itemId, run.itemId),
+                    eq(mailParticipants.userId, run.userId),
+                    eq(mailParticipants.ref, link.ref),
+                    isNull(mailParticipants.personId),
+                ),
+            );
+    }
     const email =
-        link.address ??
-        (participant?.address ? decryptText(participant.address) : null);
+        link.address ?? (participant?.personId === null ? address : null);
     if (!email) return;
     const hash = lookupHash(email);
     try {
@@ -1003,7 +1033,12 @@ async function linkParticipantInTx(
                     primaryEmailHash: people.primaryEmailHash,
                 })
                 .from(people)
-                .where(eq(people.id, link.personId))
+                .where(
+                    and(
+                        eq(people.id, link.personId),
+                        inArray(people.userId, [...readScopes]),
+                    ),
+                )
                 .limit(1);
             if (!person || person.primaryEmailHash === hash) return;
             if (
@@ -1016,7 +1051,12 @@ async function linkParticipantInTx(
                         primaryEmail: encryptText(email),
                         primaryEmailHash: hash,
                     })
-                    .where(eq(people.id, link.personId));
+                    .where(
+                        and(
+                            eq(people.id, link.personId),
+                            eq(people.userId, writerUserId),
+                        ),
+                    );
                 return;
             }
             // Another address of theirs: what their next mail is known by.
@@ -1331,7 +1371,7 @@ function finishInTx(
                 ) {
                     continue;
                 }
-                await linkParticipantInTx(tx, latest, scopeUserId, {
+                await linkParticipantInTx(tx, latest, scopeUserId, readScopes, {
                     ref: payload.speakerLabel,
                     personId: target.personId,
                     address: payload.address ?? null,

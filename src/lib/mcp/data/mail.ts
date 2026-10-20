@@ -32,6 +32,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { folderRecordingCondition } from "@/lib/folders/condition";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { participantAddressHash } from "@/lib/mail/hash";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import type { AttachmentMeta } from "@/lib/mail/parse";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { searchableMailParts } from "@/lib/mail/searchable-parts";
@@ -66,7 +67,7 @@ async function personCondition(
         knowledgeContextFor(caller),
         caller.orgUserId,
     );
-    const [primary, additional] = await Promise.all([
+    const [primary, additional, linked] = await Promise.all([
         db
             .select({ email: people.primaryEmail })
             .from(people)
@@ -82,17 +83,46 @@ async function personCondition(
                     inArray(personEmails.userId, scopes),
                 ),
             ),
+        db
+            .selectDistinctOn([mailParticipants.addressHash], {
+                email: mailParticipants.address,
+            })
+            .from(mailParticipants)
+            .innerJoin(
+                chatterItems,
+                and(
+                    eq(chatterItems.id, mailParticipants.itemId),
+                    eq(chatterItems.userId, mailParticipants.userId),
+                ),
+            )
+            .where(
+                and(
+                    eq(mailParticipants.personId, personId),
+                    mcpItemCondition(caller, ["mail"]),
+                ),
+            ),
     ]);
     const addresses = [...primary, ...additional].flatMap((row) =>
         row.email ? [decryptText(row.email)] : [],
     );
     const mask = await secretAddressMasker(addresses);
     const hashes = addresses
-        .filter((address) => mask(address) === address)
+        .filter(
+            (address) =>
+                !isInternalMailAddress(address) && mask(address) === address,
+        )
         .map(participantAddressHash);
-    const secrets = addresses
-        .filter((address) => mask(address) !== address)
-        .map(participantAddressHash);
+    const secrets = [
+        ...new Set([
+            ...addresses.filter(
+                (address) =>
+                    isInternalMailAddress(address) || mask(address) !== address,
+            ),
+            ...linked
+                .flatMap((row) => (row.email ? [decryptText(row.email)] : []))
+                .filter(isInternalMailAddress),
+        ]),
+    ].map(participantAddressHash);
     const condition = exists(
         db
             .select({ one: sql`1` })

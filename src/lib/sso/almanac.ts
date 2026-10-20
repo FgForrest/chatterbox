@@ -9,6 +9,7 @@ import {
     bumpScopeInTx,
     scopesNamingInTx,
 } from "@/lib/knowledge/scope-generation";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 
 export interface SsoAlmanacUser {
@@ -23,12 +24,13 @@ export interface SsoAlmanacUser {
  * Matched by email; a missing record is created and a known one takes the
  * provider's current name. Nicknames, notes and facts are left alone.
  *
- * Returns the person's id.
+ * Returns the person's id, or null for an internal routing address.
  */
 export async function recordSsoUserInAlmanac(
     user: SsoAlmanacUser,
-): Promise<string> {
+): Promise<string | null> {
     const email = user.email.trim();
+    if (isInternalMailAddress(email)) return null;
     const name = user.name?.trim() || email;
     const orgUserId = isOrgScopeEnabled() ? await getOrgUserId() : null;
     const ownerId = orgUserId ?? user.id;

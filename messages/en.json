@@ -1381,6 +1381,7 @@
   "TBX7za": "{count, plural, one {# recording} other {# recordings}}",
   "daqlCi": "No matching people",
   "LPZ6Lq": "Nobody matches “{query}”. Try another name or email.",
+  "vA8KJO": "An inbound mail address cannot be used as a person's email address.",
   "FPFHAC": "Could not save this person",
   "PqTm_2": "Could not merge these people",
   "Cekh6k": "Give this person your account email, so Learn names you as the one who made your recordings.",

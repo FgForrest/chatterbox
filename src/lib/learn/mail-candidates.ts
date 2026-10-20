@@ -3,6 +3,7 @@ import { type MailPart, mailPartAt, mailRangeAt } from "@/lib/learn/mail-parts";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 
 /** Where in a mail's content something was written: one segment's range. */
 export interface MailTextAnchor {
@@ -110,11 +111,23 @@ export function mailCandidates(
                 return part ? [anchorOf(part)] : [];
             });
             if (evidence.length === 0) continue;
+            const internalSpeaker = participants.some(
+                (participant) =>
+                    participant.ref === rest.speakerLabel &&
+                    participant.address &&
+                    isInternalMailAddress(participant.address),
+            );
             candidates.push({
                 kind: "new_record",
                 fingerprint: item.fingerprint,
                 preTicked: false,
-                payload: { ...rest, evidence },
+                payload: {
+                    ...rest,
+                    speakerLabel: internalSpeaker
+                        ? undefined
+                        : rest.speakerLabel,
+                    evidence,
+                },
             });
             continue;
         }
@@ -190,7 +203,13 @@ export function participantProposals(
     for (const participant of participants) {
         const name = participant.displayName?.trim();
         const address = participant.address?.trim().toLowerCase();
-        if (participant.personId || !name || !address || !fullName(name)) {
+        if (
+            participant.personId ||
+            !name ||
+            !address ||
+            isInternalMailAddress(address) ||
+            !fullName(name)
+        ) {
             continue;
         }
         if (proposed.has(fold(name)) || proposed.has(participant.ref)) {

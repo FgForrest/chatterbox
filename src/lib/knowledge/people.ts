@@ -29,6 +29,7 @@ import {
     bumpScopeInTx,
     scopesNamingInTx,
 } from "@/lib/knowledge/scope-generation";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 
 /** The bound on `people.displayName`, shared by every route that writes it. */
 export const MAX_DISPLAY_NAME_LENGTH = 200;
@@ -159,6 +160,7 @@ async function viewerNotesFor(
  * only some people will ever have one.
  */
 export async function createPerson(args: CreatePersonArgs): Promise<Person> {
+    assertPersonEmail(args.primaryEmail);
     return db.transaction(async (tx) => {
         const person = await createPersonInTx(tx, args);
         await bumpScopeInTx(tx, [args.userId]);
@@ -184,7 +186,10 @@ export async function createPersonInTx(
     if (!trimmedName) {
         throw new Error("A person needs a name");
     }
-    const email = primaryEmail?.trim() || null;
+    const email =
+        primaryEmail && !isInternalMailAddress(primaryEmail)
+            ? primaryEmail.trim() || null
+            : null;
 
     const [created] = await executor
         .insert(people)
@@ -215,6 +220,7 @@ export async function findPersonByEmail(
     userId: string,
     email: string,
 ): Promise<Person | null> {
+    if (isInternalMailAddress(email)) return null;
     const [row] = await db
         .select(personColumns)
         .from(people)
@@ -267,6 +273,26 @@ export async function getPerson(
             ? (await viewerNotesFor(userId, [row.id])).get(row.id)
             : undefined;
     return toPerson(row, notes);
+}
+
+function assertPersonEmail(email: string | null | undefined): void {
+    if (email && isInternalMailAddress(email)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "An inbound mail address cannot be used as a person's email address.",
+            400,
+            { field: "primaryEmail", reason: "internal_mail_address" },
+        );
+    }
+}
+
+function hasInternalPrimaryEmail(row: {
+    primaryEmail: string | null;
+}): boolean {
+    return Boolean(
+        row.primaryEmail &&
+            isInternalMailAddress(decryptText(row.primaryEmail)),
+    );
 }
 
 function curatorOnly(): AppError {
@@ -350,6 +376,7 @@ async function updatePersonInTx(
     }
     if (changes.primaryEmail !== undefined) {
         const email = changes.primaryEmail?.trim() || null;
+        assertPersonEmail(email);
         if (email) {
             const holder = await findPersonByEmail(actorId, email);
             if (holder && holder.id !== personId) {
@@ -365,7 +392,10 @@ async function updatePersonInTx(
         set.primaryEmailHash = email ? lookupHash(email) : null;
     }
 
-    await tx.update(people).set(set).where(eq(people.id, personId));
+    await tx
+        .update(people)
+        .set(set)
+        .where(and(eq(people.id, personId), eq(people.userId, actorId)));
 }
 
 /**
@@ -779,7 +809,7 @@ export async function planPersonPromotionInTx(
         .from(people)
         .where(eq(people.id, row.id))
         .limit(1);
-    if (emailRow?.hash) {
+    if (emailRow?.hash && !hasInternalPrimaryEmail(row)) {
         const [known] = await tx
             .select({ id: people.id })
             .from(people)
@@ -829,6 +859,9 @@ export async function promotePersonInTx(
         .update(people)
         .set({
             userId: orgUserId,
+            ...(hasInternalPrimaryEmail(row)
+                ? { primaryEmail: null, primaryEmailHash: null }
+                : {}),
             createdByUserId: row.userId,
             updatedAt: new Date(),
         })
