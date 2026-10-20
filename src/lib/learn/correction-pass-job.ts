@@ -267,7 +267,11 @@ async function runPass({
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
-        const reviewLocale = await resolveLearnReviewLocale(db, pass);
+        const reviewLocale = await resolveLearnReviewLocale(
+            db,
+            pass,
+            transcript.detectedLanguage,
+        );
         reportProgress({ phase: "reading" });
         const result = await runCorrectionPass({
             path,

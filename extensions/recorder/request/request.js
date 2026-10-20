@@ -10,21 +10,17 @@ const requestId = new URL(location.href).searchParams.get("requestId");
 let request;
 let busy = false;
 
-function acknowledged() {
-    return Boolean(
-        request?.input.noticeAcknowledgedAt || el("notice-check").checked,
-    );
+// The popup's and the notification's buttons already carry consent;
+// otherwise this page's record buttons do, by their wording.
+function consented() {
+    return Boolean(request?.input.noticeAcknowledgedAt);
 }
+
+const MIC_STATUS = { denied: "micReallow", granted: "micGranted" };
 
 async function renderPermission() {
     const state = await microphonePermission();
-    el("mic-status").textContent = t(
-        state === "denied"
-            ? "micReallow"
-            : state === "granted"
-              ? "micGranted"
-              : "micWarning",
-    );
+    el("mic-status").textContent = t(MIC_STATUS[state] ?? "micWarning");
     if (state === "denied")
         el("mic-status").textContent += ` (${chrome.runtime.id})`;
     el("grant-mic").hidden = state === "denied" || state === "granted";
@@ -34,10 +30,6 @@ async function renderPermission() {
 
 async function resume(withoutMicrophone = false) {
     if (!request || busy) return;
-    if (!acknowledged()) {
-        el("mic-status").textContent = t("participantAckRequired");
-        return;
-    }
     busy = true;
     try {
         const response = await chrome.runtime.sendMessage({
@@ -58,16 +50,11 @@ async function resume(withoutMicrophone = false) {
 }
 
 el("grant-mic").addEventListener("click", async () => {
-    if (!acknowledged()) {
-        el("mic-status").textContent = t("participantAckRequired");
-        return;
-    }
     if ((await renderPermission()) === "denied") return;
     try {
         await requestMicrophone();
-        el("mic-status").textContent = t("micGranted");
         await chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
-        await resume();
+        if ((await renderPermission()) === "granted" && consented()) await resume();
     } catch {
         const state = await renderPermission();
         if (state !== "denied") el("mic-status").textContent = t("micDenied");
@@ -77,8 +64,7 @@ el("start").addEventListener("click", () => resume());
 el("without-mic").addEventListener("click", () => resume(true));
 el("cancel").addEventListener("click", () => window.close());
 window.addEventListener("focus", async () => {
-    if ((await renderPermission()) === "granted" && acknowledged())
-        await resume();
+    if ((await renderPermission()) === "granted" && consented()) await resume();
 });
 
 async function restore() {
@@ -96,8 +82,13 @@ async function restore() {
         return;
     }
     const settings = await getSettings();
+    const asks = !consented();
     el("notice-text").textContent = effectiveNoticeText(settings);
-    el("notice-label").hidden = Boolean(request.input.noticeAcknowledgedAt);
+    el("notice-text").hidden = !asks;
+    el("start").textContent = t(asks ? "recordWithConsent" : "record");
+    el("without-mic").textContent = t(
+        asks ? "recordWithoutMicWithConsent" : "recordWithoutMic",
+    );
     el("meeting-title").textContent = meetingLabel(request.tabUrl);
     await renderPermission();
 }

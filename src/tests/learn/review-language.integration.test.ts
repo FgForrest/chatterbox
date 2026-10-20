@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { users } from "@/db/schema";
+import { userSettings, users } from "@/db/schema";
 import { locales } from "@/lib/i18n/config";
 import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
 import {
@@ -29,7 +29,12 @@ describeWithDatabase("Learn reviewer locale (PostgreSQL)", () => {
                 email: "unsupported@example.test",
                 uiLocale: "de",
             },
+            { id: "auto-cs", email: "auto-cs@example.test" },
         ]);
+        await database.db.insert(userSettings).values({
+            userId: "auto-cs",
+            defaultTranscriptionLanguage: "cs",
+        });
     }, 120_000);
 
     afterAll(async () => {
@@ -100,6 +105,44 @@ describeWithDatabase("Learn reviewer locale (PostgreSQL)", () => {
                 }),
             ).toBe("en");
         }
+    });
+
+    it("follows the default transcription language when the interface locale is Auto", async () => {
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                userId: "auto-cs",
+                scopeUserId: "auto-cs",
+                view: "private",
+            }),
+        ).toBe("cs-CZ");
+        expect(
+            await resolveLearnReviewLocale(database.db, {
+                userId: "auto-cs",
+                scopeUserId: "org",
+                view: "org",
+            }),
+        ).toBe("en");
+    });
+
+    it("falls back to the content language before English", async () => {
+        const run = {
+            userId: "unset",
+            scopeUserId: "unset",
+            view: "private" as const,
+        };
+        expect(await resolveLearnReviewLocale(database.db, run, "cs")).toBe(
+            "cs-CZ",
+        );
+        expect(await resolveLearnReviewLocale(database.db, run, "de")).toBe(
+            "en",
+        );
+        expect(
+            await resolveLearnReviewLocale(
+                database.db,
+                { userId: "owner", scopeUserId: "owner", view: "private" },
+                "en",
+            ),
+        ).toBe("cs-CZ");
     });
 
     it.each(

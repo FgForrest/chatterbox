@@ -106,7 +106,7 @@ select:focus-visible {
     font-size: 12px;
 }
 
-.field select {
+.field input[type="text"] {
     width: 100%;
     padding: 7px 8px;
     border: 1px solid var(--border);
@@ -317,4 +317,56 @@ input[type="checkbox"] {
         animation-duration: 0.01ms;
         animation-delay: 0ms;
     }
+}
+
+#folder-picker,
+.folder-option {
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+}
+
+#folder-picker:focus {
+    direction: ltr;
+}
+
+.folder-option::after {
+    content: "\200E";
+}
+
+#folder-results {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface);
+    overflow: hidden;
+}
+
+#folder-listbox {
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.folder-option {
+    padding: 7px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.folder-option:hover,
+.folder-option[data-active="true"] {
+    background: var(--muted);
+    outline: 1px solid var(--primary);
+    outline-offset: -1px;
+}
+
+#folder-status {
+    margin: 0;
+    padding: 7px 8px;
+}
+
+#folder-status:empty {
+    display: none;
 }

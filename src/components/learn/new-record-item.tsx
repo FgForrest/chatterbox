@@ -7,6 +7,7 @@ import {
     RecordPicker,
 } from "@/components/almanac/record-picker";
 import { LearnEvidence, LearnReviewRow } from "@/components/learn/review-parts";
+import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -122,6 +123,7 @@ export function NewRecordItem({
     onLinked: (choice: NewRecordChoice) => Promise<void>;
 }) {
     const i18n = useExtracted();
+    const speakerLabel = useSpeakerLabel();
     const labels = useVocabularyLabels();
     const current = newRecordAs(payload, choice);
     const [name, setName] = useState(current.name);
@@ -199,7 +201,7 @@ export function NewRecordItem({
                         </Button>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @[560px]/learn:grid-cols-[minmax(0,1fr)_minmax(6rem,10rem)_auto]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @[560px]/learn:grid-cols-[minmax(0,1fr)_minmax(6rem,13rem)_auto]">
                         <Input
                             className="col-span-2 h-8 w-full min-w-0 @[560px]/learn:col-span-1"
                             value={name}
@@ -340,7 +342,7 @@ export function NewRecordItem({
                             )}
                             {payload.reason}
                             {payload.speakerLabel &&
-                                ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}{" "}
+                                ` · ${i18n("speaks as {label}", { label: speakerLabel(payload.speakerLabel) })}`}{" "}
                             {payload.evidenceMs.map((ms) => (
                                 <span key={ms} className="mr-1">
                                     {seek(ms)}

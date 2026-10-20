@@ -26,27 +26,57 @@ repository.
 
 ## Connect it to Chatterbox
 
-The setup has three moments:
+1. After installing, open your Chatterbox dashboard and click the extension's
+   toolbar icon. Choose **Connect to** followed by your server address.
+2. In the setup tab, read the data-use disclosure, check the agreement box and
+   click **Agree and continue**.
+3. Allow access to this server in Chrome, then allow the microphone when
+   prompted. The setup tab shows the result. If you already agreed to the
+   disclosure, use **Allow this server and set up microphone**.
+4. Click **Return to Chatterbox and connect**. In Chatterbox, open
+   **Settings → Meeting Recorder** (or return to the recorder step in setup)
+   and click **Connect** once the extension is detected.
+5. The same extension setup tab opens for confirmation. Check the server
+   address and explicitly click **Connect** there.
+6. Chatterbox regains focus. Check that it shows **Connected to** followed by
+   your server's host name.
 
-1. Install the extension from the Chrome Web Store.
-2. Return to **Settings → Meeting Recorder**. Once Chatterbox detects the
-   extension, click **Connect**.
-3. Check that the page says **Connected to your-server**.
-
-If detection is unavailable, expand **Connect manually** and paste the server
-address and generated key into the extension's Options.
+For manual pairing, expand **Connect manually** in Chatterbox and click
+**Generate recorder key**. Open the extension's **Options**, read and agree to
+the data-use disclosure, and paste the address into **Server URL** and the key
+into **Recorder key**. Click **Save and grant access** and allow this server in
+Chrome. Open tabs of that server detect the extension without a reload.
 
 Revoke a recorder key any time from the same page or under **API Keys**.
 
 ## Automatic recording
 
-Off by default. In the extension's **Options → Automatic recording**, set a
-platform to **Auto** and confirm the recording policy once. From then on,
-when you open a meeting on that platform:
+Google Meet, Microsoft Teams (web) and Zoom (web) default to **Prompt**. This
+also applies after updating an installation with no saved platform choice.
+Other platforms stay **Off** unless you or the server choose otherwise. Saved
+choices take precedence over server defaults, except when the server locks a
+platform to **Auto**. Server defaults take precedence over the initial modes.
+
+With **Prompt**, when a detected meeting becomes audible, a notification with
+the participant reminder offers **Consent confirmed · Record** and **Not now**.
+To keep only the **REC?** badge, turn off **Show a notification when a meeting
+is detected** in **Options**. Chrome does not let a notification capture a tab,
+so **Consent confirmed · Record** opens Chrome's sharing dialog: choose the
+meeting tab and keep **Share tab audio** on. A window or the screen carries no
+meeting audio, and the recorder window says so when the **Others** meter stays
+silent. If the microphone is not allowed yet, a small window asks for it first,
+or offers **Record without my microphone**. Clicking the toolbar icon instead
+records the meeting tab directly, without the dialog. **Not now** dismisses the
+prompt for that tab.
+
+For one-click recording, open **Options → Automatic recording**, set a platform
+to **Auto**, confirm the recording policy once and click **Save settings**.
+From then on, when you open a meeting on that platform:
 
 1. The toolbar icon shows **REC?** (and, if enabled, a notification).
-2. One click on the icon, or the keyboard shortcut, starts recording
-   immediately: no popup, no picker, no checkbox.
+2. With microphone access already allowed, one click on the icon or the keyboard
+   shortcut starts recording directly, without the popup or picker. If microphone
+   permission is missing, recording waits for your choice as described below.
 3. Recording stops by itself when you leave the meeting page, close the tab,
    or the meeting goes quiet for a few minutes (3 by default).
 
@@ -54,13 +84,12 @@ That single click is required by Chrome: an extension may only start
 capturing after you invoke it. Nothing can start a recording on its own, and
 not clicking is how you skip a meeting you do not want recorded.
 
-**Prompt** mode only notifies you and leaves recording to the manual flow.
-
 A self-hosted server can set defaults for everyone with
 `RECORDER_AUTO_RECORD_PLATFORMS` (for example `google-meet,zoom,teams` or
 `all`), plus `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT` and
-`RECORDER_LOCK_DEFAULTS`. Users can still change them in the extension unless
-locked. Supported platforms: Google Meet, Zoom (web), Microsoft Teams (web),
+`RECORDER_LOCK_DEFAULTS`. Users can override the defaults in the extension;
+locking prevents changing server-selected **Auto** platforms. Supported
+platforms: Google Meet, Zoom (web), Microsoft Teams (web),
 Webex, Slack huddles, Whereby, Jitsi Meet. Native desktop apps have no tab to
 detect and keep the manual screen-picker flow.
 
@@ -70,18 +99,23 @@ settings.
 
 ## Record a meeting
 
-1. Click the extension icon, read the short participant reminder, and choose
+1. Click the extension icon, read the short participant reminder and choose
    **Consent confirmed · Record**.
-2. Talk. Stop from the extension popup, or with the keyboard shortcut
+2. If asked, allow the microphone or choose **Record without my microphone**.
+   If Chrome opens its audio picker, choose the meeting tab and turn on
+   **Share tab audio**, or choose a screen as described below.
+3. Talk. Stop from the extension popup, or with the keyboard shortcut
    (`Ctrl+Shift+U` by default).
 
-There is nothing to configure. The recorder uses your system default
-microphone, and captures the meeting audio automatically:
+How meeting audio is captured depends on how you start:
 
 - **Meeting in a browser tab** (Google Meet, or Zoom/Teams web): the extension
-  records that tab's audio directly. No screen picker, no "share system audio"
-  step, and other apps' sounds are not captured.
-- **Another browser tab**: select the tab in Chrome's picker and enable audio.
+  can record that tab's audio directly when started from the toolbar with
+  microphone access already allowed. Starts from the notification or microphone
+  permission prompt use Chrome's picker instead. Choose the meeting tab and turn on
+  **Share tab audio**. Other apps' sounds are not captured.
+- **Another browser tab**: select the tab in Chrome's picker and turn on
+  **Share tab audio**.
 - **Native Zoom or Teams desktop app**: there is no tab to capture, so the
   extension opens Chrome's picker. Choose **Entire screen** and turn on
   **Share system audio** if available. If Chrome says screen audio cannot be
@@ -91,15 +125,40 @@ microphone, and captures the meeting audio automatically:
   closing it stops capture and uploads the audio saved so far. The same window
   appears when you select another browser tab in Chrome's picker.
 
-The microphone is always your system default input. An extension cannot read
-which device another tab chose, but the default is almost always the same mic
-your meeting app uses. If yours is on a non-default mic, set an override in the
-extension's Options.
-
 When you stop, the extension finishes uploading the audio, then the server
 assembles and saves the recording. The extension opens your dashboard with the
 new recording selected after the server confirms it is saved. You can download
 a playable copy from that recording's page.
+
+## Microphone
+
+The recorder uses your system default input unless you choose another device
+under **Options → Microphone → Input device (override)**. Choose
+**Default (recommended)** to follow the system default, or select a microphone
+from the list, then click **Save settings**. The extension cannot read which
+microphone your meeting app chose.
+
+Missing microphone permission pauses a start until you allow access or choose
+**Record without my microphone**. The popup warns beforehand and offers
+**Grant microphone access**. The toolbar can show **MIC!** beforehand; on detected
+meetings in **Prompt** or **Auto**, it shows **REC?** instead.
+
+If Chrome blocks access, the extension shows this path:
+`chrome://settings/content/microphone` → **Not allowed to use your microphone**
+→ **Chatterbox Meeting Recorder**. Reset the microphone permission there, return
+to the extension and allow access. For a managed browser, ask your administrator.
+
+If the selected microphone is missing or unplugged when recording starts,
+the extension retries the system default input. If that also fails, meeting
+audio keeps recording. A persistent notification and a warning in the popup
+explain the failure. If a microphone disconnects during recording, meeting audio
+also continues with these warnings.
+
+After explicitly starting without your microphone, you can choose
+**Dismiss microphone permission reminders** in the popup. To restore them,
+enable **Show microphone permission reminders in the popup and toolbar** in
+**Options** and click **Save settings**. Microphone failure warnings during a
+recording remain visible.
 
 ## Reliability
 

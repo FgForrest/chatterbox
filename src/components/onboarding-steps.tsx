@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useState } from "react";
+import { ConnectedLine } from "@/components/connected-line";
 import { MeetingRecorderSetup } from "@/components/meeting-recorder-setup";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
 import { useProductName } from "@/components/product-name-provider";
@@ -44,15 +45,6 @@ function StepHeading({
             <h3 className="text-xl font-semibold">{title}</h3>
             <p className="text-muted-foreground">{description}</p>
         </div>
-    );
-}
-
-function ConnectedLine({ children }: { children: React.ReactNode }) {
-    return (
-        <p className="led-active flex items-center justify-center gap-2 text-sm">
-            <CircleCheck className="size-4" />
-            {children}
-        </p>
     );
 }
 

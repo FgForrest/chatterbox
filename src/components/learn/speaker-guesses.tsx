@@ -8,10 +8,10 @@ import type {
     LearnMarks,
     LearnSpeakerMark,
 } from "@/components/learn/learn-marks";
+import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
-import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 
 /**
  * The speakers a waiting Learn review proposes to name, above the
@@ -43,6 +43,7 @@ export function SpeakerGuesses({
     onSeek?: (ms: number) => void;
 }) {
     const i18n = useExtracted();
+    const speakerLabel = useSpeakerLabel();
     const [busy, setBusy] = useState<string | null>(null);
     // Accepted here, until the strip has read them back.
     const [accepted, setAccepted] = useState<ReadonlySet<string>>(new Set());
@@ -160,7 +161,7 @@ export function SpeakerGuesses({
             </div>
             <div className="flex flex-wrap gap-2">
                 {shown.map((guess) => {
-                    const speaker = formatSpeakerLabel(guess.label);
+                    const speaker = speakerLabel(guess.label);
                     const evidenceMs = guess.evidenceMs[0];
                     const declined = guess.declined;
                     const saving = busy === guess.label || busy === "*";

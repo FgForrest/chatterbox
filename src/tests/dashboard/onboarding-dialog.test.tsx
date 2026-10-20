@@ -472,8 +472,8 @@ describe("status hydration and explicit decisions", () => {
         detectRecorder.mockResolvedValue(paired);
         await act(async () => vi.advanceTimersByTimeAsync(2000));
         expect(
-            screen.getByText(`Connected to ${window.location.host}`),
-        ).toBeTruthy();
+            screen.getByText(`Connected to ${window.location.host}`).className,
+        ).toContain("led-active");
         expect(detectRecorder).toHaveBeenCalledTimes(2);
         act(() => presence.mock.calls[0][0]({ kind: "not-installed" }));
         expect(
@@ -671,6 +671,8 @@ describe("Google status", () => {
     ] as const)("shows %s honestly", (status, text) => {
         render(<OnboardingStepGoogle status={status} />);
         expect(screen.getByText(text)).toBeTruthy();
+        if (status !== "needs-reconnect")
+            expect(screen.getByText(text).className).toContain("led-active");
         if (status === "needs-reconnect")
             expect(screen.queryByText("Calendar is connected")).toBeNull();
     });

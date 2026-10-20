@@ -37,6 +37,8 @@ import {
     getTestDatabaseUrl,
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
+import { runBackfillMailLanguage } from "../../../scripts/backfill-mail-language";
+import { runMailSegmentationDiff } from "../../../scripts/mail-segmentation-diff";
 
 const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
@@ -100,10 +102,12 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 
 import { POST as ingestRoute } from "@/app/api/internal/mail/ingest/route";
 import { POST as precheckRoute } from "@/app/api/internal/mail/precheck/route";
+import type { ContentSegment } from "@/lib/content/types";
 import { decryptBuffer } from "@/lib/encryption";
 import {
     decryptJsonField,
     decryptText,
+    encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
@@ -123,8 +127,11 @@ import { collectArchivedMail } from "@/lib/mail/archive";
 import { loadMailDetail, mailRawFor } from "@/lib/mail/detail";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
+import { knownSignaturesFor } from "@/lib/mail/known-signatures";
 import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { deleteMail } from "@/lib/mail/manage";
+import { parseMessage } from "@/lib/mail/parse";
+import { storeMailForOwner } from "@/lib/mail/store";
 import { loadDeliveryLog } from "@/lib/mail/views";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
@@ -1032,6 +1039,395 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
         );
     });
 
+    describe("signature history through store", () => {
+        async function storeSignature(
+            owner: string,
+            text: string,
+            html = false,
+            from = "Petra Nováková <petra@example.cz>",
+            receivedAt = new Date(),
+        ) {
+            const raw = Buffer.from(
+                rawMessage(
+                    [
+                        `From: ${from}`,
+                        "To: archive@example.cz",
+                        "Subject: Signature detection fixture",
+                        `Message-ID: <${Math.random().toString(36).slice(2)}@example.cz>`,
+                        "MIME-Version: 1.0",
+                        `Content-Type: ${html ? "text/html" : "text/plain"}; charset=utf-8`,
+                    ],
+                    text,
+                ),
+            );
+            const parsed = await parseMessage(raw);
+            const result = await storeMailForOwner({
+                delivery: {
+                    ownerUserId: owner,
+                    senderVerified: true,
+                    folderIds: [],
+                    pendingShareFolderIds: [],
+                    addresses: [],
+                    recipients: [],
+                },
+                raw,
+                parsed,
+                facts: {
+                    fromHeaders: 1,
+                    fromAddresses: parsed.from.map(
+                        (mailbox) => mailbox.address,
+                    ),
+                    dkim: [],
+                    receivedAt,
+                },
+                spf: null,
+                receivedAt,
+            });
+            const [row] = await db()
+                .select()
+                .from(mailContents)
+                .where(
+                    and(
+                        eq(mailContents.userId, owner),
+                        eq(mailContents.itemId, result.itemId),
+                    ),
+                );
+            return {
+                ...result,
+                parserVersion: row?.parserVersion,
+                segments:
+                    decryptJsonField<ContentSegment[]>(row?.segments) ?? [],
+            };
+        }
+
+        it("stores a signature-only forward and learns markup for later uncued mail in that owner's pile", async () => {
+            const html = readFileSync(
+                join(__dirname, "fixtures/signature-gmail-forward.html"),
+                "utf8",
+            );
+            const first = await storeSignature("u-jan", html, true);
+            expect(first.parserVersion).toBe(2);
+            expect(first.segments.map((segment) => segment.role)).toEqual([
+                "signature",
+                "quoted",
+            ]);
+            expect(first.segments[0]?.signatureCue).toBe("markup");
+            const text = first.segments[0]?.text ?? "";
+            const otherOwner = await storeSignature("u-eva", text);
+            expect(otherOwner.segments[0]?.signatureCue).toBe("contact");
+            const second = await storeSignature(
+                "u-jan",
+                `Nové podklady.\n${text}`,
+            );
+            expect(second.segments.map((segment) => segment.role)).toEqual([
+                "body",
+                "signature",
+            ]);
+            expect(second.segments[1]?.signatureCue).toBe("known");
+            expect(
+                (await loadMailDetail("u-jan", second.itemId))?.segments[1]
+                    ?.signatureCue,
+            ).toBe("known");
+            const archived = (
+                await collectArchivedMail({ kind: "personal", userId: "u-jan" })
+            ).find((mail) => mail.id === second.itemId);
+            expect(archived?.segments).toEqual(second.segments);
+            expect(
+                decryptJsonField(encryptJsonField(archived?.segments)),
+            ).toEqual(second.segments);
+            class ArchiveCapture extends LocalStorage {
+                bytes: Buffer = Buffer.alloc(0);
+                override async uploadStream(
+                    key: string,
+                    stream: Readable,
+                ): Promise<string> {
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of stream)
+                        chunks.push(Buffer.from(chunk));
+                    this.bytes = Buffer.concat(chunks);
+                    return key;
+                }
+            }
+            const archive = new ArchiveCapture(storageDir);
+            await buildAndUploadExportArchive({
+                scope: { kind: "personal", userId: "u-jan" },
+                sourceStorage: new LocalStorage(storageDir),
+                destinationStorage: archive,
+                storageKey: "signature-test.zip",
+            });
+            const zip = await unzipper.Open.buffer(archive.bytes);
+            const entry = zip.files.find(
+                (file) =>
+                    file.path.includes(second.itemId) &&
+                    file.path.endsWith("/mail.json"),
+            );
+            expect(entry).toBeDefined();
+            expect(
+                JSON.parse((await entry?.buffer())?.toString() ?? "{}")
+                    .segments,
+            ).toEqual(second.segments);
+        });
+
+        it("does not learn contact, footer, known, legacy, recipient or quoted signatures", async () => {
+            const from = "Petra Nováková <untrusted@example.cz>";
+            const contact =
+                "Petra Nováková\npetra@example.cz\n+420 600 000 000";
+            expect(
+                (await storeSignature("u-jan", contact, false, from))
+                    .segments[0]?.signatureCue,
+            ).toBe("contact");
+            expect(
+                (
+                    await storeSignature(
+                        "u-jan",
+                        "Sent from my iPhone",
+                        false,
+                        from,
+                    )
+                ).segments[0]?.signatureCue,
+            ).toBe("footer");
+            const legacy = await storeSignature(
+                "u-jan",
+                "-- \nExample department",
+                false,
+                from,
+            );
+            await db()
+                .update(mailContents)
+                .set({
+                    segments: encryptJsonField(
+                        legacy.segments.map(
+                            ({ signatureCue: _cue, ...segment }) => segment,
+                        ),
+                    ),
+                })
+                .where(
+                    and(
+                        eq(mailContents.userId, "u-jan"),
+                        eq(mailContents.itemId, legacy.itemId),
+                    ),
+                );
+            await storeSignature(
+                "u-jan",
+                "> -- \n> Example quoted department",
+                false,
+                from,
+            );
+            await storeSignature(
+                "u-jan",
+                '<div id="Signature">Example recipient signature</div>',
+                true,
+                "Other Writer <other@example.cz>",
+            );
+            expect(
+                await knownSignaturesFor("u-jan", "untrusted@example.cz"),
+            ).toEqual([]);
+            const trusted = await storeSignature(
+                "u-jan",
+                '<div id="Signature">Example department<br>Project team</div>',
+                true,
+                "Other Writer <learned@example.cz>",
+            );
+            const learned = await storeSignature(
+                "u-jan",
+                "Example department\nProject team",
+                false,
+                "Other Writer <learned@example.cz>",
+            );
+            expect(learned.segments[0]?.signatureCue).toBe("known");
+            await db()
+                .delete(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.userId, "u-jan"),
+                        eq(chatterItems.id, trusted.itemId),
+                    ),
+                );
+            expect(
+                await knownSignaturesFor("u-jan", "learned@example.cz"),
+            ).toEqual([]);
+        });
+
+        it("measures one owner or all owners, limits samples, and never writes", async () => {
+            const stored = await storeSignature(
+                "u-eva",
+                '<div id="Signature">Example department<br>Measurement team</div>',
+                true,
+                "Example Writer <measurement@example.cz>",
+            );
+            await db()
+                .update(mailContents)
+                .set({
+                    parserVersion: 1,
+                    segments: encryptJsonField(
+                        stored.segments.map(
+                            ({ signatureCue: _cue, ...segment }) => ({
+                                ...segment,
+                                role: "body",
+                            }),
+                        ),
+                    ),
+                })
+                .where(
+                    and(
+                        eq(mailContents.userId, "u-eva"),
+                        eq(mailContents.itemId, stored.itemId),
+                    ),
+                );
+            await storeSignature(
+                "u-eva",
+                "Reaped raw fixture",
+                false,
+                "Example Writer <measurement@example.cz>",
+            );
+            const [reaped] = await db()
+                .select()
+                .from(mailMessages)
+                .where(eq(mailMessages.userId, "u-eva"))
+                .orderBy(desc(mailMessages.receivedAt))
+                .limit(1);
+            if (!reaped?.rawStoragePath) throw new Error("missing raw fixture");
+            await new LocalStorage(storageDir).deleteFile(
+                reaped.rawStoragePath,
+            );
+            await db()
+                .update(mailMessages)
+                .set({ rawStoragePath: null, rawReapedAt: new Date() })
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-eva"),
+                        eq(mailMessages.id, reaped.id),
+                    ),
+                );
+            const before = await db()
+                .select()
+                .from(mailContents)
+                .orderBy(mailContents.id);
+            const files = readdirSync(storageDir, { recursive: true });
+            const output = vi
+                .spyOn(console, "log")
+                .mockImplementation(() => undefined);
+            try {
+                const counts = await runMailSegmentationDiff([
+                    "--user",
+                    "u-eva",
+                ]);
+                expect(counts.changed).toBeGreaterThanOrEqual(1);
+                expect(counts.newSignatureByCue.markup).toBeGreaterThanOrEqual(
+                    1,
+                );
+                expect(counts.bodyEmptied).toBeGreaterThanOrEqual(1);
+                expect(counts.skippedRawReaped).toBeGreaterThanOrEqual(1);
+                expect(output).toHaveBeenCalledTimes(1);
+                expect(output.mock.calls[0]?.[0]).not.toContain(stored.itemId);
+                output.mockClear();
+                await runMailSegmentationDiff([
+                    "--user",
+                    "u-eva",
+                    "--samples",
+                    "1",
+                ]);
+                expect(output).toHaveBeenCalledTimes(2);
+                expect(
+                    JSON.parse(String(output.mock.calls[0]?.[0])),
+                ).toHaveProperty("itemId");
+                output.mockClear();
+                const all = await runMailSegmentationDiff([]);
+                expect(all.checked).toBeGreaterThan(counts.checked);
+                expect(output).toHaveBeenCalledTimes(1);
+                await expect(
+                    runMailSegmentationDiff(["--samples", "1"]),
+                ).rejects.toThrow("--user");
+            } finally {
+                output.mockRestore();
+            }
+            expect(
+                await db().select().from(mailContents).orderBy(mailContents.id),
+            ).toEqual(before);
+            expect(readdirSync(storageDir, { recursive: true })).toEqual(files);
+        });
+
+        it("uses only the five latest From mails and history before the compared mail", async () => {
+            const from = "Other Writer <history@example.cz>";
+            const initial = await storeSignature(
+                "u-jan",
+                '<div id="Signature">Example department<br>Project team</div>',
+                true,
+                from,
+                new Date("2026-10-01T00:00:00Z"),
+            );
+            expect(
+                await knownSignaturesFor("u-jan", "history@example.cz"),
+            ).toHaveLength(1);
+            expect(
+                await knownSignaturesFor("u-jan", "history@example.cz", {
+                    id: initial.itemId,
+                    receivedAt: new Date("2026-10-01T00:00:00Z"),
+                }),
+            ).toEqual([]);
+            for (let i = 0; i < 5; i++)
+                await storeSignature(
+                    "u-jan",
+                    `Message ${i}`,
+                    false,
+                    from,
+                    new Date(`2026-10-0${i + 2}T00:00:00Z`),
+                );
+            expect(
+                await knownSignaturesFor("u-jan", "history@example.cz"),
+            ).toEqual([]);
+            const [latest] = await db()
+                .select({ id: mailMessages.id })
+                .from(mailMessages)
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-jan"),
+                        eq(
+                            mailMessages.receivedAt,
+                            new Date("2026-10-06T00:00:00Z"),
+                        ),
+                    ),
+                )
+                .limit(1);
+            if (!latest) throw new Error("missing history fixture");
+            await db()
+                .delete(mailContents)
+                .where(
+                    and(
+                        eq(mailContents.userId, "u-jan"),
+                        eq(mailContents.itemId, latest.id),
+                    ),
+                );
+            expect(
+                await knownSignaturesFor("u-jan", "history@example.cz"),
+            ).toEqual([]);
+        });
+
+        it("learns no signature from mail whose sender is not verified", async () => {
+            const stored = await storeSignature(
+                "u-jan",
+                '<div id="Signature">Example department<br>Unverified team</div>',
+                true,
+                "Spoofed Writer <unverified@example.cz>",
+            );
+            expect(
+                await knownSignaturesFor("u-jan", "unverified@example.cz"),
+            ).toHaveLength(1);
+            await db()
+                .update(mailMessages)
+                .set({ senderVerified: false })
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-jan"),
+                        eq(mailMessages.id, stored.itemId),
+                    ),
+                );
+            expect(
+                await knownSignaturesFor("u-jan", "unverified@example.cz"),
+            ).toEqual([]);
+        });
+    });
+
     describe("the receiver's endpoints", () => {
         const secret = `Bearer ${"i".repeat(40)}`;
 
@@ -1157,6 +1553,194 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 expect(response.status).toBe(404);
             } finally {
                 mockEnv.MAIL_DOMAIN = "klepna.example";
+            }
+        });
+    });
+
+    describe("mail language", () => {
+        const czech =
+            "Dobrý den, posílám požadavek na změnu, který jsme pro vás připravili, aby vše bylo v pořádku.";
+        const english =
+            "Please review the documents that we have prepared for you and let us know if the schedule is correct.";
+
+        it.each([
+            [czech, "cs"],
+            [english, "en"],
+            ["Dobrý den.\nDěkuji za odpověď.", null],
+        ])("stores the detected language through ingest: %s", async (text, language) => {
+            const [owner] = await db()
+                .select({ email: users.email })
+                .from(users)
+                .where(eq(users.id, "u-jan"));
+            const raw = await signMessage(
+                rawMessage(
+                    headers(owner?.email ?? "", "jan@klepna.example"),
+                    text ?? "",
+                ),
+                company,
+            );
+            expect(
+                (await deliver(raw, ["jan@klepna.example"])).ingest?.outcomes[0]
+                    ?.outcome,
+            ).toBe("accepted");
+            const [message] = await db()
+                .select()
+                .from(mailMessages)
+                .where(
+                    and(
+                        eq(mailMessages.userId, "u-jan"),
+                        eq(mailMessages.sizeBytes, raw.length),
+                    ),
+                )
+                .orderBy(desc(mailMessages.createdAt))
+                .limit(1);
+            const [content] = await db()
+                .select()
+                .from(mailContents)
+                .where(
+                    and(
+                        eq(mailContents.userId, "u-jan"),
+                        eq(mailContents.itemId, message?.id ?? ""),
+                    ),
+                );
+            expect(content?.language).toBe(language);
+        });
+
+        it("backfills only null languages, respects the owner and dry run, and changes no other columns", async () => {
+            const owner = "language-backfill-owner";
+            const other = "language-backfill-other";
+            await ssoUser(owner, "language-owner@example.test");
+            await ssoUser(other, "language-other@example.test");
+            const makeMail = async (userId: string, text: string) => {
+                const raw = Buffer.from(
+                    rawMessage(
+                        [
+                            "From: Language Writer <language@example.test>",
+                            "To: archive@example.test",
+                            `Message-ID: <${Math.random().toString(36).slice(2)}@example.test>`,
+                            "MIME-Version: 1.0",
+                            "Content-Type: text/plain; charset=utf-8",
+                        ],
+                        text,
+                    ),
+                );
+                const parsed = await parseMessage(raw);
+                const receivedAt = new Date();
+                return storeMailForOwner({
+                    delivery: {
+                        ownerUserId: userId,
+                        senderVerified: true,
+                        folderIds: [],
+                        pendingShareFolderIds: [],
+                        addresses: [],
+                        recipients: [],
+                    },
+                    raw,
+                    parsed,
+                    facts: {
+                        fromHeaders: 1,
+                        fromAddresses: parsed.from.map((from) => from.address),
+                        dkim: [],
+                        receivedAt,
+                    },
+                    spf: null,
+                    receivedAt,
+                });
+            };
+            const first = await makeMail(owner, czech);
+            const set = await makeMail(owner, english);
+            const short = await makeMail(owner, "Děkuji za zprávu.");
+            const foreign = await makeMail(other, english);
+            for (const [userId, itemId] of [
+                [owner, first.itemId],
+                [other, foreign.itemId],
+            ])
+                await db()
+                    .update(mailContents)
+                    .set({ language: null })
+                    .where(
+                        and(
+                            eq(mailContents.userId, userId),
+                            eq(mailContents.itemId, itemId),
+                        ),
+                    );
+            const read = (userId: string) =>
+                db()
+                    .select()
+                    .from(mailContents)
+                    .where(eq(mailContents.userId, userId))
+                    .orderBy(mailContents.id);
+            const before = await read(owner);
+            const beforeOther = await read(other);
+            const processingBefore = await db()
+                .select()
+                .from(itemProcessing)
+                .where(eq(itemProcessing.userId, owner));
+            const output = vi
+                .spyOn(console, "log")
+                .mockImplementation(() => undefined);
+            try {
+                expect(
+                    await runBackfillMailLanguage([
+                        "--user",
+                        owner,
+                        "--dry-run",
+                    ]),
+                ).toEqual({
+                    checked: 2,
+                    updated: 0,
+                    languages: { cs: 1, null: 1 },
+                });
+                expect(await read(owner)).toEqual(before);
+                expect(
+                    await runBackfillMailLanguage(["--user", owner]),
+                ).toEqual({
+                    checked: 2,
+                    updated: 1,
+                    languages: { cs: 1, null: 1 },
+                });
+                expect(await read(owner)).toEqual(
+                    before.map((row) =>
+                        row.itemId === first.itemId
+                            ? { ...row, language: "cs" }
+                            : row,
+                    ),
+                );
+                expect(
+                    (await read(owner)).find((row) => row.itemId === set.itemId)
+                        ?.language,
+                ).toBe("en");
+                expect(
+                    (await read(owner)).find(
+                        (row) => row.itemId === short.itemId,
+                    )?.language,
+                ).toBeNull();
+                expect(await read(other)).toEqual(beforeOther);
+                expect(
+                    await db()
+                        .select()
+                        .from(itemProcessing)
+                        .where(eq(itemProcessing.userId, owner)),
+                ).toEqual(processingBefore);
+                expect(
+                    (await runBackfillMailLanguage(["--user", owner])).updated,
+                ).toBe(0);
+                expect(
+                    (await runBackfillMailLanguage([])).updated,
+                ).toBeGreaterThanOrEqual(1);
+                expect((await read(other))[0]?.language).toBe("en");
+                expect(output).toHaveBeenCalledTimes(4);
+                const printed = JSON.stringify(output.mock.calls);
+                for (const value of [
+                    czech,
+                    english,
+                    owner,
+                    other,
+                    first.itemId,
+                ])
+                    expect(printed).not.toContain(value);
+            } finally {
+                output.mockRestore();
             }
         });
     });

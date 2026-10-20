@@ -2,7 +2,7 @@
 
 import { ArrowDownWideNarrow, ListChecks, Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
@@ -22,7 +22,12 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useOrgEvents } from "@/hooks/use-org-events";
-import type { TaskChange, TaskListItem, TaskView } from "@/lib/tasks/tasks";
+import type {
+    TaskAssignee,
+    TaskChange,
+    TaskListItem,
+    TaskView,
+} from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 
@@ -110,11 +115,12 @@ function flattenFolders(
 
 /**
  * The viewer's tasks across recordings: theirs to do, or the ones they keep
- * track of; filtered by state, folder and deadline, newest first or by due
- * date. Filters live in the URL, so a filtered list can be bookmarked.
+ * track of; filtered by state, folder, assignee and deadline, newest first
+ * or by due date. Filters live in the URL, so a filtered list can be bookmarked.
  */
 export function TaskList({ organization }: { organization: boolean }) {
     const i18n = useExtracted();
+    const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname();
     const params = useSearchParams();
@@ -125,14 +131,24 @@ export function TaskList({ organization }: { organization: boolean }) {
           : "mine";
     const state = params.get("state") ?? "open";
     const folder = params.get("folder") ?? ALL;
+    const assignee = tab === "tracked" ? params.get("assignee") || ALL : ALL;
     const due = params.get("due") ?? ALL;
     const sort = params.get("sort") === "due" ? "due" : "created";
 
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
     const [folders, setFolders] = useState<RecordingFolder[]>([]);
+    const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
+    const assigneeNames = useRef(new Map<string, string>());
+    const assigneeRequest = useRef(0);
+    const sortedAssignees = useMemo(
+        () =>
+            [...assignees].sort((a, b) => a.name.localeCompare(b.name, locale)),
+        [assignees, locale],
+    );
     const setParam = (key: string, value: string | null) => {
         const next = new URLSearchParams(params.toString());
-        if (value === null || value === ALL) next.delete(key);
+        if (value === null || (value === ALL && key !== "state"))
+            next.delete(key);
         else next.set(key, value);
         const query = next.toString();
         router.replace(query ? `${pathname}?${query}` : pathname, {
@@ -143,12 +159,63 @@ export function TaskList({ organization }: { organization: boolean }) {
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
         if (folder !== ALL) search.set("folder", folder);
+        if (assignee !== ALL) search.set("assignee", assignee);
         if (due !== ALL) {
             search.set("due", due);
             search.set("today", localToday());
         }
         return search.toString();
-    }, [tab, state, sort, folder, due]);
+    }, [tab, state, sort, folder, assignee, due]);
+
+    const loadAssignees = useCallback(async () => {
+        if (tab !== "tracked") return;
+        const request = ++assigneeRequest.current;
+        try {
+            const response = await fetch("/api/tasks/assignees");
+            if (!response.ok) throw new Error();
+            const body = (await response.json()) as {
+                assignees: TaskAssignee[];
+            };
+            if (request !== assigneeRequest.current) return;
+            for (const person of body.assignees) {
+                assigneeNames.current.set(person.personId, person.name);
+            }
+            if (
+                assignee !== ALL &&
+                assignee !== "none" &&
+                !body.assignees.some((person) => person.personId === assignee)
+            ) {
+                let name = assigneeNames.current.get(assignee);
+                if (!name) {
+                    const personResponse = await fetch(
+                        `/api/people/${encodeURIComponent(assignee)}`,
+                    );
+                    if (personResponse.ok) {
+                        const { person } = (await personResponse.json()) as {
+                            person: { displayName: string };
+                        };
+                        name = person.displayName;
+                        assigneeNames.current.set(assignee, name);
+                    }
+                }
+                body.assignees.push({
+                    personId: assignee,
+                    name: name ?? i18n("Assignee"),
+                });
+            }
+            if (request === assigneeRequest.current)
+                setAssignees(body.assignees);
+        } catch {
+            return;
+        }
+    }, [tab, assignee, i18n]);
+
+    useEffect(() => {
+        void loadAssignees();
+        return () => {
+            assigneeRequest.current++;
+        };
+    }, [loadAssignees]);
 
     const load = useCallback(async () => {
         try {
@@ -186,8 +253,12 @@ export function TaskList({ organization }: { organization: boolean }) {
             .catch(() => {});
     }, []);
 
-    // Someone changed a shared recording: its tasks may have moved.
-    useOrgEvents(true, () => void load());
+    const reload = useCallback(
+        () => Promise.all([load(), loadAssignees()]),
+        [load, loadAssignees],
+    );
+
+    useOrgEvents(true, () => void reload());
 
     // Per row: the version the server last returned, and the write in
     // flight, so quick changes to one row go one after another.
@@ -220,6 +291,7 @@ export function TaskList({ organization }: { organization: boolean }) {
                             ) ?? null,
                     );
                 }
+                if (change.assigneePersonId !== undefined) await reload();
             })
             .catch(async (error: unknown) => {
                 toast.error(
@@ -230,7 +302,7 @@ export function TaskList({ organization }: { organization: boolean }) {
                           : i18n("Could not save the task"),
                 );
                 versions.current.clear();
-                await load();
+                await reload();
             })
             .finally(() => {
                 if (pending.current.get(task.id) === run) {
@@ -248,6 +320,7 @@ export function TaskList({ organization }: { organization: boolean }) {
         try {
             const result = await mergeTaskIntoTarget(task.id, targetTaskId);
             announceTasksChanged();
+            void loadAssignees();
             return { ownerNotified: result.mergeOwnerNotified };
         } catch (error) {
             setTasks(snapshot);
@@ -396,6 +469,35 @@ export function TaskList({ organization }: { organization: boolean }) {
                         )}
                     </SelectContent>
                 </Select>
+                {tab === "tracked" && (
+                    <Select
+                        value={assignee}
+                        onValueChange={(value) => setParam("assignee", value)}
+                    >
+                        <SelectTrigger
+                            className="h-8 w-48 text-xs"
+                            aria-label={i18n("Assignee")}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={ALL}>
+                                {i18n("All assignees")}
+                            </SelectItem>
+                            <SelectItem value="none">
+                                {i18n("No assignee")}
+                            </SelectItem>
+                            {sortedAssignees.map((person) => (
+                                <SelectItem
+                                    key={person.personId}
+                                    value={person.personId}
+                                >
+                                    {person.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
                 <Select
                     value={due}
                     onValueChange={(value) => setParam("due", value)}

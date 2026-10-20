@@ -298,10 +298,11 @@ extension, which uploads audio in chunks as it is captured. The flow is:
 5. `DELETE /api/v1/recording-sessions/{id}` — abort and delete buffered chunks.
 
 A paired extension also reads its server defaults from
-`GET /api/v1/recorder/config` (same scope): which platforms record
-automatically, the auto-stop quiet period, the notice text, and whether
-users may override them. These come from the `RECORDER_*` environment
-variables and are inert when unset.
+`GET /api/v1/recorder/config` (same scope): platforms defaulting to **Auto**,
+the auto-stop quiet period, the notice text, and whether those **Auto** platforms
+are locked. These come from the `RECORDER_*` environment variables. Without a
+saved choice or a server-selected **Auto** mode, extension 0.3.0 defaults to
+**Prompt** for Meet, Teams and Zoom web, and **Off** for other platforms.
 
 The same recorder key can call `GET /api/v1/recorder/folders`. It returns the
 key holder's non-root personal folders and writable Organization folders:

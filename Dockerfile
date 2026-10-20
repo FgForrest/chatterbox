@@ -97,6 +97,12 @@ RUN bun build src/db/migrate-idempotent.ts --target=bun --outfile=migrate-idempo
 #   docker compose exec app bun encrypt-backfill.js [--dry-run]
 RUN bun build scripts/encrypt-backfill.ts --target=bun --outfile=encrypt-backfill.js
 
+# Bundle the mail maintenance scripts, run by an operator via:
+#   docker compose exec app bun backfill-mail-language.js [--dry-run] [--user <id>]
+#   docker compose exec app bun mail-segmentation-diff.js [--user <id>] [--samples N]
+RUN bun build scripts/backfill-mail-language.ts --target=bun --outfile=backfill-mail-language.js \
+    && bun build scripts/mail-segmentation-diff.ts --target=bun --outfile=mail-segmentation-diff.js
+
 # Final runtime image
 FROM base AS runner
 WORKDIR /app
@@ -131,6 +137,10 @@ COPY --from=builder /app/migrate-idempotent.js ./migrate-idempotent.js
 
 # Copy bundled encryption backfill script
 COPY --from=builder /app/encrypt-backfill.js ./encrypt-backfill.js
+
+# Copy bundled mail maintenance scripts
+COPY --from=builder /app/backfill-mail-language.js ./backfill-mail-language.js
+COPY --from=builder /app/mail-segmentation-diff.js ./mail-segmentation-diff.js
 
 # Copy migrations folder
 COPY --from=builder /app/src/db/migrations ./src/db/migrations

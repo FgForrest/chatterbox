@@ -4,8 +4,8 @@ import { Play } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
 import type { SpeakerAccent } from "@/components/people/speaker-accents";
+import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { Button } from "@/components/ui/button";
-import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 
 /** Whom a speaker of the review is: someone, explicitly nobody, or not yet. */
 export type ReviewSpeakerPerson = { name: string } | { unknown: true } | null;
@@ -52,7 +52,8 @@ export function ReviewSpeaker({
     onPlay?: () => void;
 }) {
     const i18n = useExtracted();
-    const speaker = formatSpeakerLabel(label);
+    const speakerLabel = useSpeakerLabel();
+    const speaker = speakerLabel(label);
     const unknown = person !== null && "unknown" in person;
     const name = person && "name" in person ? person.name : null;
     const named = ticked && !blocked && !unknown && name !== null;
@@ -75,7 +76,7 @@ export function ReviewSpeaker({
                 checked={ticked && !blocked}
                 disabled={blocked || disabled}
                 aria-label={i18n("Accept {label} as {name}", {
-                    label,
+                    label: speaker,
                     name: unknown ? i18n("unknown") : (name ?? "?"),
                 })}
                 onChange={(event) => onTick(event.target.checked)}

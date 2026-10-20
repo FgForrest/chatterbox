@@ -16,8 +16,9 @@ import {
     completeSession,
     createSession,
     getSession,
-    getRecorderFolders,
+    getRecorderFolder,
     recoverSession,
+    searchRecorderFolders,
     sha256Hex,
     uploadChunk,
 } from "./lib/api.js";
@@ -55,6 +56,7 @@ import { canPumpUploads } from "./lib/upload-state.js";
 import { readToken } from "./lib/token-vault.js";
 import {
     anyPlatformAuto,
+    effectiveNoticeText,
     effectivePlatformModes,
     effectiveQuietSeconds,
     getSettings,
@@ -866,6 +868,9 @@ async function notify(title, message, options = {}) {
             title,
             message,
             requireInteraction: options.requireInteraction ?? false,
+            ...(options.contextMessage
+                ? { contextMessage: options.contextMessage }
+                : {}),
             ...(options.buttons ? { buttons: options.buttons } : {}),
         });
     } catch {
@@ -912,10 +917,14 @@ async function handleMeetingNotification(id, button) {
     const platform = tab?.url ? detectMeetingPlatform(tab.url) : null;
     if (!platform || platform.id !== entry.platformId) return;
     if (!(await isPaired())) return;
-    await openStartRequest({
+    // A notification is no invocation, so Chrome refuses tab capture here:
+    // the meeting tab is shared through Chrome's dialog instead.
+    await startRecording({
         tabId,
         platformHint: platform.id,
         auto: entry.mode === "auto",
+        noticeAcknowledgedAt: new Date().toISOString(),
+        forceDesktop: true,
     });
 }
 
@@ -999,7 +1008,11 @@ async function nudge(tabId, platform) {
         {
             id: `${NUDGE_PREFIX}${tabId}`,
             requireInteraction: true,
-            buttons: [{ title: t("record") }, { title: t("notNow") }],
+            contextMessage: effectiveNoticeText(settings),
+            buttons: [
+                { title: t("recordWithConsent") },
+                { title: t("notNow") },
+            ],
         },
     );
 }
@@ -1380,16 +1393,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "get-folders":
             getSettings()
-                .then(async (settings) =>
-                    getRecorderFolders({
+                .then(async (settings) => {
+                    const auth = {
                         serverUrl: settings.serverUrl,
                         apiKey: await readToken(),
-                    }),
-                )
+                    };
+                    if (typeof message.id === "string")
+                        return getRecorderFolder(auth, message.id);
+                    if (typeof message.q === "string")
+                        return searchRecorderFolders(auth, message.q);
+                    return [];
+                })
                 .then((folders) => sendResponse({ ok: true, folders }))
                 .catch((error) =>
                     sendResponse({
                         ok: false,
+                        status: error?.status,
                         error: error?.message ?? String(error),
                     }),
                 );
