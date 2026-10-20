@@ -5,6 +5,11 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { followJob } from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+
+vi.mock("@/lib/pipeline/item-processing-events", () => ({
+    invalidateItemProcessing: vi.fn(),
+}));
 
 vi.mock("sonner", () => ({
     toast: { success: vi.fn(), error: vi.fn() },
@@ -66,6 +71,9 @@ describe("useTranscribeQueue", () => {
             await Promise.resolve();
         });
 
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "recording-1",
+        );
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/recording-1/transcribe",
@@ -96,6 +104,7 @@ describe("useTranscribeQueue", () => {
         expect(hook.result.current.inFlightActions.has("recording-1")).toBe(
             false,
         );
+        expect(invalidateItemProcessing).toHaveBeenCalledTimes(2);
         expect(onTranscribeComplete).toHaveBeenCalledTimes(1);
         expect(toast.success).toHaveBeenCalledWith("Transcription complete");
     });
@@ -194,6 +203,9 @@ describe("useTranscribeQueue", () => {
         expect(hook.result.current.inFlightActions.get("recording-1")).toBe(
             "transcribing",
         );
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "recording-1",
+        );
         expect(followJob).toHaveBeenCalledWith("job-sync", {
             signal: expect.any(AbortSignal),
         });
@@ -202,8 +214,116 @@ describe("useTranscribeQueue", () => {
         await act(async () => {
             await observing;
         });
+        expect(invalidateItemProcessing).toHaveBeenCalledTimes(2);
         expect(hook.result.current.inFlightActions.has("recording-1")).toBe(
             false,
         );
     });
+
+    it.each([
+        { code: "NO_TRANSCRIPTION_PROVIDER", status: 400 },
+        { code: "INTERNAL_ERROR", status: 500 },
+    ])("invalidates processing after a rejected request with $code", async ({
+        code,
+        status,
+    }) => {
+        vi.stubGlobal(
+            "fetch",
+            vi
+                .fn()
+                .mockResolvedValue(
+                    jsonResponse(
+                        { code, error: "Transcription unavailable" },
+                        status,
+                    ),
+                ),
+        );
+        const onTranscribeComplete = vi.fn();
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById("recording-1");
+        });
+
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "recording-1",
+        );
+        expect(toast.error).toHaveBeenCalledWith("Transcription unavailable");
+        expect(onTranscribeComplete).not.toHaveBeenCalled();
+        expect(followJob).not.toHaveBeenCalled();
+        expect(hook.result.current.inFlightActions.has("recording-1")).toBe(
+            false,
+        );
+    });
+
+    it.each([
+        "network",
+        "response",
+    ])("invalidates processing after a %s failure", async (failure) => {
+        const fetchMock = vi.fn();
+        if (failure === "network")
+            fetchMock.mockRejectedValue(new TypeError("Connection lost"));
+        else fetchMock.mockResolvedValue(new Response("{", { status: 202 }));
+        vi.stubGlobal("fetch", fetchMock);
+        const onTranscribeComplete = vi.fn();
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete }),
+        );
+
+        await act(async () => {
+            await hook.result.current.transcribeById(
+                "org-recording",
+                undefined,
+                "org",
+            );
+        });
+
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "org-recording",
+        );
+        expect(toast.error).toHaveBeenCalledWith(
+            "Failed to transcribe recording",
+        );
+        expect(onTranscribeComplete).not.toHaveBeenCalled();
+        expect(followJob).not.toHaveBeenCalled();
+        expect(
+            hook.result.current.inFlightActions.has("org:org-recording"),
+        ).toBe(false);
+    });
+});
+
+it("invalidates the item after a failed job on the Organization view", async () => {
+    vi.mocked(followJob).mockResolvedValue({
+        id: "failed-job",
+        kind: "transcription",
+        status: "failed",
+        attempts: 1,
+        maxAttempts: 3,
+        progress: null,
+        result: null,
+        error: "Unavailable",
+        errorCode: "NO_PROVIDER",
+    });
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse({ jobId: "failed-job" }, 202)),
+    );
+    const onTranscribeComplete = vi.fn();
+    const hook = renderHook(() => useTranscribeQueue({ onTranscribeComplete }));
+    vi.mocked(invalidateItemProcessing).mockClear();
+    await act(async () => {
+        await hook.result.current.transcribeById(
+            "org-recording",
+            undefined,
+            "org",
+        );
+    });
+    expect(vi.mocked(invalidateItemProcessing).mock.calls).toEqual([
+        ["org-recording"],
+        ["org-recording"],
+    ]);
+    expect(onTranscribeComplete).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
 });

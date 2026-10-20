@@ -1,0 +1,1 @@
+CREATE INDEX "item_processing_provider_recovery_idx" ON "item_processing" USING btree ("user_id","updated_at") WHERE "item_processing"."view" = 'private' and not "item_processing"."manual_only";

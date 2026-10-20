@@ -82,6 +82,17 @@ describeWithDatabase("item_processing schema", () => {
         );
     });
 
+    it("indexes the provider recovery scan", async () => {
+        if (!database) throw new Error("test database was not initialized");
+
+        const [index] = await database.sql<
+            { indexdef: string }[]
+        >`select indexdef from pg_indexes where schemaname = 'public' and indexname = 'item_processing_provider_recovery_idx'`;
+        expect(index?.indexdef).toContain("(user_id, updated_at)");
+        expect(index?.indexdef).toContain("((view)::text = 'private'::text)");
+        expect(index?.indexdef).toContain("(NOT manual_only)");
+    });
+
     it("rejects a view outside private and org", async () => {
         if (!database) throw new Error("test database was not initialized");
 

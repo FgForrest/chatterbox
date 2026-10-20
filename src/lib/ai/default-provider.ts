@@ -5,6 +5,8 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import { nudge } from "@/lib/jobs/nudge";
+import { requestProviderRecoveryInTx } from "@/lib/pipeline/provider-recovery";
 import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 
 export type ProviderRole =
@@ -167,8 +169,8 @@ export async function setDefaultProvider(
             .from(users)
             .where(eq(users.id, userId))
             .for("update");
+        const pointers = await loadDefaultProviderPointers(userId, tx);
         if (options.onlyIf !== undefined) {
-            const pointers = await loadDefaultProviderPointers(userId, tx);
             if (pointers[role] !== options.onlyIf) return false;
         }
         const [settings] = await tx
@@ -194,6 +196,8 @@ export async function setDefaultProvider(
                 set: { ...settingsValues, updatedAt: new Date() },
             });
 
+        if (pointers[role] !== value)
+            await requestProviderRecoveryInTx(tx, userId);
         if (role === "topics" || role === "title") return true;
         if (role === "transcription") {
             await tx
@@ -266,5 +270,7 @@ export async function setDefaultProvider(
     if (options.transaction) {
         return apply(options.transaction);
     }
-    return db.transaction(apply);
+    const changed = await db.transaction(apply);
+    if (changed) nudge();
+    return changed;
 }

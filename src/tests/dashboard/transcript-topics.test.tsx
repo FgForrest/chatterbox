@@ -20,9 +20,13 @@ import { IntlProvider } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import type * as JobClient from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
+vi.mock("@/lib/pipeline/item-processing-events", () => ({
+    invalidateItemProcessing: vi.fn(),
+}));
 vi.mock("@/lib/jobs/client", async (importOriginal) => {
     const actual = await importOriginal<typeof JobClient>();
     // Polls a few milliseconds apart instead of seconds.
@@ -456,6 +460,46 @@ describe("transcript topics", () => {
         expect(screen.queryByRole("button", { name: /Topics \(/ })).toBeNull();
     });
 
+    it("refreshes the workflow once on entry and once on settling a followed job", async () => {
+        fetchMock.mockImplementation(
+            async (url: string, init?: RequestInit) => {
+                if (init?.method === "POST") {
+                    return json({ jobId: "job-9", jobKind: "topics" }, 202);
+                }
+                if (url === "/api/jobs/job-9") {
+                    return json({
+                        id: "job-9",
+                        kind: "topics",
+                        status: "completed",
+                    });
+                }
+                return json({ topics: TOPICS, jobId: null });
+            },
+        );
+        const hook = renderHook(
+            () => useTranscriptTopics("rec-1", "plaud", null, true),
+            {
+                wrapper: ({ children }: PropsWithChildren) => (
+                    <IntlProvider
+                        locale={defaultLocale}
+                        messages={messagesForLocale(defaultLocale)}
+                    >
+                        {children}
+                    </IntlProvider>
+                ),
+            },
+        );
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+        vi.mocked(invalidateItemProcessing).mockClear();
+        await act(async () => {
+            await hook.result.current.detect();
+        });
+        expect(hook.result.current.topics).toEqual(TOPICS);
+        expect(invalidateItemProcessing).toHaveBeenCalledTimes(2);
+    });
+
     it("shows the saved topics when a re-check finds nothing running", async () => {
         const redone = [{ title: "Kontrola", fromMs: 0, toMs: 300_000 }];
         fetchMock.mockImplementation(
@@ -490,10 +534,14 @@ describe("transcript topics", () => {
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 10));
         });
+        vi.mocked(invalidateItemProcessing).mockClear();
         await act(async () => {
             await hook.result.current.detect();
         });
         expect(hook.result.current.topics).toEqual(TOPICS);
+        expect(invalidateItemProcessing).toHaveBeenCalledExactlyOnceWith(
+            "rec-1",
+        );
 
         hook.rerender({ revision: 1 });
 

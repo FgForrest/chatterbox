@@ -236,6 +236,7 @@ export function LearnWidget({
         [kind, recordingId, view, source],
     );
 
+    const observedRun = useRef<string | null>(null);
     const load = useCallback(async (): Promise<ReviewState | null> => {
         const response = await fetch(url("review"));
         if (!response.ok) return null;
@@ -243,11 +244,20 @@ export function LearnWidget({
         versions.current = new Map(
             (next.items ?? []).map((item) => [item.id, item.version]),
         );
+        const previousStatus = observedRun.current;
+        observedRun.current = next.run?.status ?? null;
+        if (
+            (previousStatus === "queued" || previousStatus === "running") &&
+            next.run?.status !== "queued" &&
+            next.run?.status !== "running"
+        )
+            invalidateItemProcessing(recordingId);
         setState(next);
         return next;
-    }, [url]);
+    }, [recordingId, url]);
 
     useEffect(() => {
+        observedRun.current = null;
         void load();
     }, [load]);
 
@@ -372,6 +382,7 @@ export function LearnWidget({
                 );
             }
         } finally {
+            invalidateItemProcessing(recordingId);
             setRunning(false);
         }
     };

@@ -8,7 +8,8 @@ import {
 } from "@/lib/jobs/types";
 import { executePipelineAction } from "@/lib/pipeline/execute";
 import { gatherFacts } from "@/lib/pipeline/facts";
-import { planAdvance } from "@/lib/pipeline/plan";
+import { isProviderBlockedReason, planAdvance } from "@/lib/pipeline/plan";
+import { sweepAutomaticTranscriptionRetries } from "@/lib/pipeline/sweep";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
 
@@ -30,6 +31,18 @@ async function advancePipeline(
         const facts = await gatherFacts(payload.itemId, payload.view, userId, {
             legacyIfEmpty: payload.reason !== "arrival",
         });
+        const transcribe = facts.phases.transcribe;
+        if (
+            payload.view === "private" &&
+            transcribe?.state === "failed" &&
+            transcribe.automatic &&
+            isProviderBlockedReason(transcribe.reason) &&
+            (await sweepAutomaticTranscriptionRetries(1, {
+                userId,
+                itemId: payload.itemId,
+            })) > 0
+        )
+            continue;
         const generation = facts.generation;
         const plan = planAdvance(facts);
         for (const action of plan.actions) {

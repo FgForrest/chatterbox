@@ -1,6 +1,7 @@
 "use client";
 
 import { parseApiError } from "@/lib/api-errors";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type {
     AcceptResult,
     RecordingTasks,
@@ -88,14 +89,19 @@ export function mergeTaskProposals(
 }
 
 /** Accept the review the reviewer saw: its proposals' and follow-ups' ids. */
-export function acceptTaskReview(
+export async function acceptTaskReview(
     recordingId: string,
     shown: { proposals: string[]; updates: string[]; matches: string[] },
 ): Promise<AcceptResult> {
-    return send(recordingUrl(recordingId, "/accept"), {
-        method: "POST",
-        json: shown,
-    });
+    const result = await send<AcceptResult>(
+        recordingUrl(recordingId, "/accept"),
+        {
+            method: "POST",
+            json: shown,
+        },
+    );
+    invalidateItemProcessing(recordingId);
+    return result;
 }
 
 export function tickTaskUpdate(

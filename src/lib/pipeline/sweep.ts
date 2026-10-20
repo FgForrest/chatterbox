@@ -8,6 +8,7 @@ import {
 } from "@/db/queries/pipeline";
 import { asyncJobs, itemProcessing } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
+import { isProviderBlockedReason } from "@/lib/pipeline/plan";
 import {
     markSummaryStepFailedInTx,
     updatePhaseInTx,
@@ -16,6 +17,8 @@ import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvanceInTx,
 } from "@/lib/pipeline/trigger";
+import { resolveStepProviderSelection } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -49,12 +52,54 @@ export async function sweepStalledPipelines(limit = 500): Promise<number> {
 /** Request bounded retries for automatic transcription failures older than 30 minutes. */
 export async function sweepAutomaticTranscriptionRetries(
     limit = AUTO_TRANSCRIBE_RETRY_LIMIT,
+    scope?: { userId: string; itemId: string },
 ): Promise<number> {
-    const rows = await listAutomaticTranscriptionRetryRows(limit);
+    const rows = await listAutomaticTranscriptionRetryRows(limit, scope);
     let requested = 0;
     for (const row of rows) {
+        if (isProviderBlockedReason(row.reason)) {
+            try {
+                const profile = await resolveItemProfile(
+                    row.itemId,
+                    "private",
+                    row.userId,
+                );
+                if (
+                    !("transcribe" in profile.settings.steps) ||
+                    !profile.settings.steps.transcribe.automatic
+                )
+                    continue;
+                await resolveStepProviderSelection({
+                    step: "transcription",
+                    pin: profile.settings.steps.transcribe.provider,
+                    actorUserId: row.userId,
+                });
+            } catch {
+                continue;
+            }
+        }
         const didRequest = await db.transaction(async (tx) => {
-            const generation = row.requestedGeneration + 1;
+            const [current] = await tx
+                .select({
+                    phases: itemProcessing.phases,
+                    generation: itemProcessing.requestedGeneration,
+                })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, row.itemId),
+                        eq(itemProcessing.userId, row.userId),
+                        eq(itemProcessing.view, row.view),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (
+                current?.phases.transcribe?.state !== "failed" ||
+                current.generation !== row.requestedGeneration
+            )
+                return false;
+            const generation = current.generation + 1;
             const marked = await updatePhaseInTx(
                 tx,
                 row.itemId,

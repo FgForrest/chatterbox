@@ -18,6 +18,8 @@ import { requireApiSession } from "@/lib/auth-server";
 import { encrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { nudge } from "@/lib/jobs/nudge";
+import { requestProviderRecoveryInTx } from "@/lib/pipeline/provider-recovery";
 import {
     organizationAccountProviderAuditContext,
     writeOrganizationProviderAudit,
@@ -186,6 +188,9 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         if (!after) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        if (before.disabledAt !== null && after.disabledAt === null) {
+            await requestProviderRecoveryInTx(tx, session.user.id);
+        }
         if (auditContext) {
             let action = "org_provider.update";
             if (before.disabledAt === null && after.disabledAt !== null) {
@@ -205,6 +210,8 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             });
         }
     });
+
+    nudge();
 
     if (isDefaultTranscription === true) {
         await setDefaultTranscriptionProvider(session.user.id, id);

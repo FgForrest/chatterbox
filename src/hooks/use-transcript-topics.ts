@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 
@@ -128,6 +129,7 @@ export function useTranscriptTopics(
             signal: AbortSignal,
             jobKind?: string | null,
         ) => {
+            invalidateItemProcessing(recordingId);
             const deadline = new AbortController();
             const stop = () => deadline.abort();
             signal.addEventListener("abort", stop);
@@ -165,11 +167,12 @@ export function useTranscriptTopics(
                     currentJobKind = next.jobKind;
                 }
             } finally {
+                invalidateItemProcessing(recordingId);
                 clearTimeout(timer);
                 signal.removeEventListener("abort", stop);
             }
         },
-        [showStored],
+        [recordingId, showStored],
     );
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: probeRevision is an intentional re-check trigger
@@ -241,6 +244,7 @@ export function useTranscriptTopics(
         const controller = restart(topicSource);
         const { signal } = controller;
         const { failed, detected } = messagesRef.current;
+        let followed = false;
 
         try {
             const response = await fetch(
@@ -262,12 +266,14 @@ export function useTranscriptTopics(
                 return;
             }
             // The job outlived the request; follow it until it settles.
+            followed = true;
             await settle(topicSource, body.jobId, signal);
         } catch (error) {
             if (signal.aborted) return;
             console.error("Topic detection failed:", error);
             toast.error(failed);
         } finally {
+            if (!followed) invalidateItemProcessing(recordingId);
             release(controller);
         }
     }, [recordingId, source, view, restart, release, settle]);

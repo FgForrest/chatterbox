@@ -44,6 +44,7 @@ export type WorkflowMessageCode =
     | "learnReview"
     | "manualLearnReview"
     | "learnTimedOut"
+    | "manualSummary"
     | "summaryQueued"
     | "summaryRunning"
     | "taskReviewQueued"
@@ -67,6 +68,7 @@ export type WorkflowActionCode =
     | "file"
     | "chooseProfile"
     | "transcribe"
+    | "summarize"
     | "reviewLearn"
     | "reviewTasks"
     | "shareNow"
@@ -186,6 +188,15 @@ function displayState(
     ) {
         return "manual";
     }
+    if (
+        phase === "summary" &&
+        !data.outputs.summary &&
+        record?.state === "done" &&
+        Object.values(record.steps ?? {}).some(
+            (step) => step.state === "skipped" && step.reason === "no_provider",
+        )
+    )
+        return "next";
     if (
         data.failures.some(
             (failure) =>
@@ -395,10 +406,18 @@ function failureMessage(reasonCode: string): WorkflowMessageCode {
     return "stepFailed";
 }
 
+function active(status: string | null | undefined): boolean {
+    return status === "queued" || status === "running";
+}
+
 function failureStatus(
     data: ItemProcessingPresentation,
 ): WorkflowStatusSentence | null {
     const learnRun = currentLearnRun(data);
+    const retrying: Partial<Record<PhaseName, boolean>> = {
+        learn: active(learnRun?.status),
+        summary: active(data.jobs.summary),
+    };
     const failure =
         learnRun?.status === "failed"
             ? {
@@ -408,7 +427,8 @@ function failureStatus(
               }
             : phaseOrder.flatMap((phase) =>
                   data.failures.filter(
-                      (candidate) => candidate.phase === phase,
+                      (candidate) =>
+                          candidate.phase === phase && !retrying[phase],
                   ),
               )[0];
     if (!failure || failure.reasonCode === "profile_unavailable") return null;
@@ -473,15 +493,15 @@ function deriveStatus(
         return { actor: "others", message: "curatorProfile" };
     }
 
-    const failed = failureStatus(data);
-    if (failed) return failed;
-
     if (data.jobs.transcription === "queued") {
         return { actor: "queued", message: "transcriptionQueued" };
     }
     if (data.jobs.transcription === "running") {
         return { actor: "working", message: "transcribing" };
     }
+    const failed = failureStatus(data);
+    if (failed) return failed;
+
     const learnRun = currentLearnRun(data);
     if (learnRun?.status === "queued") {
         return { actor: "queued", message: "learnQueued" };
@@ -559,12 +579,36 @@ function deriveStatus(
             action: "transcribe",
         };
     }
+    if (learnBlockedByProvider(data)) {
+        return {
+            actor: "problem",
+            message: "failureNoProvider",
+            params: { step: "learn" },
+            action: "retry",
+        };
+    }
+    if (steps.find((step) => step.id === "summary")?.state === "next") {
+        return {
+            actor: "yours",
+            message: "manualSummary",
+            action: "summarize",
+        };
+    }
     const inferredQueued = steps.find((step) => step.state === "queued");
     if (inferredQueued) {
         const message = queuedMessage(inferredQueued.id);
         return { actor: "queued", message };
     }
     return null;
+}
+
+function learnBlockedByProvider(data: ItemProcessingPresentation): boolean {
+    return (
+        !data.manualOnly &&
+        data.phases.learn?.state === "skipped" &&
+        data.phases.learn.reason === "no_provider" &&
+        data.profile?.automatic.learn === true
+    );
 }
 
 function currentStepId(
@@ -599,6 +643,7 @@ function currentStepId(
         return "learn";
     }
     if (
+        status.message === "manualSummary" ||
         status.message === "summaryQueued" ||
         status.message === "summaryRunning"
     ) {
@@ -659,19 +704,20 @@ export function deriveWorkflowStatus(
     const current = currentStepId(steps, status);
     const visible =
         !data.legacy &&
-        steps.some((step) =>
-            step.reason === "erased"
-                ? step.state === "manual"
-                : [
-                      "next",
-                      "review",
-                      "working",
-                      "queued",
-                      "others",
-                      "problem",
-                      "outdated",
-                  ].includes(step.state),
-        );
+        (learnBlockedByProvider(data) ||
+            steps.some((step) =>
+                step.reason === "erased"
+                    ? step.state === "manual"
+                    : [
+                          "next",
+                          "review",
+                          "working",
+                          "queued",
+                          "others",
+                          "problem",
+                          "outdated",
+                      ].includes(step.state),
+            ));
     return {
         visible,
         steps: steps.map((step) => ({

@@ -12,6 +12,7 @@ import { recordingJobSubject } from "@/lib/sharing/view";
 export const PIPELINE_ADVANCE_JOB_KIND = "pipeline.advance";
 
 export type PipelineAdvanceReason =
+    | "provider-changed"
     | "transcript"
     | "arrival"
     | "learn-released"
