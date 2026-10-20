@@ -38,6 +38,10 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.4.1
+
+- The recorder window is as tall as what it shows: picking a source, recording, saving and done no longer leave an empty area below the content, also when Chrome's sharing bar appears or goes away. The microphone window fits the same way.
+
 ## What changed in 0.4.0
 
 - The popup's folder picker is a search field: type part of a folder path to find it among hundreds of folders. The last folder used stays offered.

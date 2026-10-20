@@ -1,3 +1,4 @@
+import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { meetingLabel } from "../lib/meeting-target.js";
 import { microphonePermission, requestMicrophone } from "../lib/microphone.js";
@@ -5,6 +6,7 @@ import { effectiveNoticeText, getSettings } from "../lib/settings.js";
 import { START_REQUEST_KEY, START_REQUEST_TTL_MS } from "../lib/start-request.js";
 
 localizeDocument();
+fitWindowToContent();
 const el = (id) => document.getElementById(id);
 const requestId = new URL(location.href).searchParams.get("requestId");
 let request;

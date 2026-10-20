@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaptureHost } from "../../../extensions/recorder/lib/capture-host.js";
 
+vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
+    fitWindowToContent: () => {},
+}));
+
 beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
 
