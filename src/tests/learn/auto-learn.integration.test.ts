@@ -92,6 +92,7 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 
 import { encrypt } from "@/lib/encryption";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { addRecordingToFolder } from "@/lib/folders/folders";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import {
     AUTO_LEARN_HOLD_MS,
@@ -375,21 +376,23 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
     async function setLearnAutomation(input: {
         automatic: boolean;
         followUpsAutomatic?: boolean;
+        ownerUserId?: string;
     }): Promise<void> {
-        const resolved = await resolveDefaultProfile(OWNER, "audio");
+        const profileOwner = input.ownerUserId ?? OWNER;
+        const resolved = await resolveDefaultProfile(profileOwner, "audio");
         const settings = resolved.settings;
         if (!("transcribe" in settings.steps)) {
             throw new Error("audio profile");
         }
         await updateProfile({
-            ownerUserId: OWNER,
+            ownerUserId: profileOwner,
             profileId: resolved.profile.id,
             actor: {
                 kind: "user",
-                actorId: OWNER,
+                actorId: profileOwner,
                 issuer: null,
                 subject: null,
-                capabilities: new Set(["use"]),
+                capabilities: new Set(["use", "org.curate"]),
                 clientId: null,
                 clientPermissions: new Set(),
                 verifiedAt: null,
@@ -471,7 +474,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual([]);
     });
 
-    it("refuses hosted and shared Learn, but defers rate-limited work", async () => {
+    it("refuses hosted Learn, follows the Organization profile while shared, and defers rate-limited work", async () => {
         mockEnv.IS_HOSTED = true;
         await expect(
             startAutomaticLearn({
@@ -512,7 +515,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 source: "riffado",
                 timed: true,
             }),
-        ).resolves.toEqual({ status: "skipped", reason: "shared" });
+        ).resolves.toEqual({ status: "skipped", reason: "profile_off" });
         await db()
             .delete(recordingFolderAssignments)
             .where(eq(recordingFolderAssignments.folderId, orgRoot?.id ?? ""));
@@ -536,6 +539,81 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         });
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual([]);
+    });
+
+    it("cancels private Learn at share, starts Organization Learn, and keeps its hold until review finishes", async () => {
+        await db().delete(apiRateLimitBuckets);
+        const orgUserId = await ensureOrgAccount();
+        if (!orgUserId) throw new Error("Organization missing");
+        await setLearnAutomation({ automatic: true, ownerUserId: orgUserId });
+        expect(
+            await startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).toEqual({ status: "started" });
+        const [privateRun] = await db().select().from(learnRuns);
+        await db()
+            .update(learnRuns)
+            .set({ status: "ready" })
+            .where(eq(learnRuns.id, privateRun?.id ?? ""));
+        await db()
+            .insert(transcriptSpeakers)
+            .values(
+                [riffadoId, plaudId].map((transcriptionId) => ({
+                    userId: OWNER,
+                    transcriptionId,
+                    label: "speaker_0",
+                    source: "user" as const,
+                    status: "confirmed" as const,
+                    markedUnknown: true,
+                    confirmedByUserId: OWNER,
+                })),
+            );
+        const [root] = await db()
+            .select()
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: REC,
+            folderId: root?.id ?? "",
+        });
+        expect(
+            (
+                await db()
+                    .select()
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, privateRun?.id ?? ""))
+            )[0]?.status,
+        ).toBe("cancelled");
+        expect(await sweepAutoLearnHolds()).toBe(0);
+        expect(await dueAt()).not.toBeNull();
+        await runAdvance();
+        const [orgRun] = await db()
+            .select()
+            .from(learnRuns)
+            .where(eq(learnRuns.view, "org"));
+        expect(orgRun).toMatchObject({
+            scopeUserId: orgUserId,
+            actorUserId: OWNER,
+            trigger: "auto",
+            status: "queued",
+        });
+        expect(await sweepAutoLearnHolds()).toBe(0);
+        await db()
+            .update(learnRuns)
+            .set({ status: "ready" })
+            .where(eq(learnRuns.id, orgRun?.id ?? ""));
+        expect(await sweepAutoLearnHolds()).toBe(0);
+        const access = await requireRecordingView(OWNER, REC, "private");
+        await expect(
+            finishReview({ ...access, view: "org" }, OWNER, { versions: {} }),
+        ).resolves.toMatchObject({ status: "finished" });
+        expect(await dueAt()).toBeNull();
+        expect(await sweepAutoLearnHolds()).toBe(0);
     });
 
     it("starts one automatic Learn run and consumes its bucket once after a transcript write", async () => {

@@ -98,7 +98,11 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import type { ProviderPin } from "@/lib/profiles/settings";
-import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
+import {
+    type contentWriterRefusal,
+    contentWriterScope,
+    sharingOrgUserId,
+} from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import "@/lib/learn/review-message-catalog";
 
@@ -221,7 +225,7 @@ export async function mayStillRun(
         run.view === "org"
             ? (curates ?? (await userCuratesOrganizationNow(run.actorUserId)))
             : false;
-    const refusal = await contentWriterRefusal(executor, {
+    const { refusal, scopeUserId } = await contentWriterScope(executor, {
         recordingId: run.itemId,
         ownerUserId: run.userId,
         actorUserId: run.actorUserId,
@@ -230,8 +234,10 @@ export async function mayStillRun(
     });
     if (refusal) return false;
     return run.view === "private"
-        ? run.actorUserId === run.userId
-        : orgUserId !== null && actsForOrganization;
+        ? run.actorUserId === run.userId && scopeUserId === run.userId
+        : orgUserId !== null &&
+              scopeUserId === orgUserId &&
+              (run.actorUserId === run.userId || actsForOrganization);
 }
 
 type Executor = Pick<typeof db, "select">;

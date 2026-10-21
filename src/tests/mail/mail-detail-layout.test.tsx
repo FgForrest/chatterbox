@@ -373,10 +373,13 @@ describe("mail detail layout", () => {
         expect(screen.queryByText(/Retention removed/)).toBeNull();
     });
 
-    it("keeps a shared mail read-only on its private view", async () => {
+    it.each([
+        "private",
+        "org",
+    ] as const)("lets the owner edit shared mail from its %s view", async (view) => {
         render(
             <MailDetailPane
-                mail={mail}
+                mail={{ ...mail, isOwn: true, view }}
                 shared
                 dateTimeFormat="absolute"
                 onBackToList={vi.fn()}
@@ -392,14 +395,14 @@ describe("mail detail layout", () => {
         );
 
         await screen.findByTestId("mail-summary");
-        expect(screen.queryByRole("button", { name: "Summarize" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Learn" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Learn" })).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Re-match tasks" }),
-        ).toBeNull();
+            screen.getByRole("button", { name: "Re-match tasks" }),
+        ).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Rename {name}" }),
-        ).toBeNull();
+            screen.getByRole("button", { name: "Rename {name}" }),
+        ).toBeTruthy();
     });
 
     it("uses the shared Organization marker without Organization view text", async () => {
@@ -441,6 +444,14 @@ describe("mail detail layout", () => {
         );
         expect(screen.getByText("Shared by {owner}")).toBeTruthy();
         expect(screen.queryByText("Organization view")).toBeNull();
+        for (const name of [
+            "Summarize",
+            "Learn",
+            "Re-match tasks",
+            "Rename {name}",
+        ]) {
+            expect(screen.queryByRole("button", { name })).toBeNull();
+        }
         expect(
             screen.queryByRole("link", { name: "Download the message" }),
         ).toBeNull();

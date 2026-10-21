@@ -438,12 +438,33 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
             });
     }
 
-    it("lets only the organization account change them while shared, with Organization people", async () => {
+    it("lets owners and the organization account correct shared transcripts using Organization people", async () => {
         await correct();
         await share();
 
+        const owners = await correct({ anchor: anchorIn(FIRST, 1, "Tavesi") });
+        const [ownerCorrection] = await db()
+            .select()
+            .from(transcriptCorrections)
+            .where(eq(transcriptCorrections.id, owners));
+        expect(ownerCorrection).toMatchObject({
+            userId: orgUserId,
+            createdByUserId: OWNER,
+        });
+        await revertCorrection({
+            userId: OWNER,
+            transcriptionId: transcriptId,
+            actorUserId: OWNER,
+            orgUserId,
+            correctionId: owners,
+        });
         expect(
-            await refusal(correct({ anchor: anchorIn(FIRST, 1, "Tavesi") })),
+            await refusal(
+                correct({
+                    anchor: anchorIn(FIRST, 1, "Tavesi"),
+                    actorUserId: BOB,
+                }),
+            ),
         ).toMatchObject({ statusCode: 409, code: "RECORDING_SHARED" });
         const [unknown] = await db()
             .insert(people)

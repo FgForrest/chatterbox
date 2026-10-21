@@ -14,6 +14,7 @@ import {
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { canChangeItem } from "@/lib/sharing/change-permission";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
@@ -248,6 +249,57 @@ describe("transcription dialog", () => {
         );
         expect(await screen.findByText("Transcribing audio…")).toBeTruthy();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it.each([
+        true,
+        false,
+    ])("offers shared recording actions only to its owner (isOwn=%s)", (isOwn) => {
+        const { rerender } = render(
+            <TranscriptionPanel
+                recording={{ ...recording, view: "org", isOwn }}
+                shared
+                readOnly={
+                    !canChangeItem({
+                        view: "org",
+                        shared: true,
+                        isOwn,
+                        isOrgAccount: false,
+                        canCurate: false,
+                    })
+                }
+                transcripts={[]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Transcribe" })),
+        ).toBe(isOwn);
+        rerender(
+            <TranscriptionPanel
+                recording={{ ...recording, view: "org", isOwn }}
+                shared
+                readOnly={
+                    !canChangeItem({
+                        view: "org",
+                        shared: true,
+                        isOwn,
+                        isOrgAccount: false,
+                        canCurate: false,
+                    })
+                }
+                transcripts={[{ source: "riffado", text: "Hello." }]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Re-transcribe" })),
+        ).toBe(isOwn);
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Summarize" })),
+        ).toBe(isOwn);
     });
 
     it("starts a summary without opening a dialog", async () => {

@@ -23,7 +23,6 @@ export interface ShareGateInput {
         personId: string | null;
         markedUnknown: boolean;
     }[];
-    unfinishedLearnRuns: number;
     /** Task proposals of the recording not yet accepted or rejected. */
     waitingTaskProposals?: number;
 }
@@ -56,12 +55,6 @@ export function evaluateShareGate(input: ShareGateInput): ShareGateProblem[] {
                 labels,
             });
         }
-    }
-    if (input.unfinishedLearnRuns > 0) {
-        problems.push({
-            kind: "learn_unfinished",
-            runs: input.unfinishedLearnRuns,
-        });
     }
     if ((input.waitingTaskProposals ?? 0) > 0) {
         problems.push({

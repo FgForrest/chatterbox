@@ -10,10 +10,10 @@ type Executor = Parameters<typeof isRecordingShared>[2];
  * Who may change a recording's content: its transcripts, speakers,
  * summaries, topics and title.
  *
- * A shared recording is one recording, and sharing hands it over: while it
- * is shared only the organization account changes it, and its owner reads
- * it, withdraws it, or erases it (which withdraws it). Otherwise only its
- * owner changes it. Withdrawal gives it back as the Organization left it.
+ * A shared recording is one recording. Its owner, the organization account
+ * and vouched-for curators may change it in the Organization scope.
+ * Otherwise only its owner changes it. Withdrawal gives it back as the
+ * Organization left it.
  *
  * Not content: caches derived from the audio (waveform peaks, which only
  * fill a missing value), storage housekeeping (file names following the
@@ -30,8 +30,8 @@ type Executor = Parameters<typeof isRecordingShared>[2];
  * which (`actsForOrganization`, decided by the server from the actor's
  * verified access); left out, only the organization account does.
  *
- * - `"shared"`: shared, and the actor does not act for the Organization;
- *   for the owner that is a 409 (withdraw it first).
+ * - `"shared"`: shared, and the actor is neither its owner nor acting
+ *   for the Organization.
  * - `"withdrawn"`: not shared, and the actor is not the owner; to them the
  *   recording is gone (a queued Organization run after a withdrawal).
  */
@@ -58,7 +58,9 @@ export function writerRefusal(input: {
 }): WriterRefusal | null {
     const { actorUserId, ownerUserId, orgUserId, shared } = input;
     if (shared && orgUserId !== null) {
-        return actsForOrg(input) ? null : "shared";
+        return actorUserId === ownerUserId || actsForOrg(input)
+            ? null
+            : "shared";
     }
     return actorUserId === ownerUserId ? null : "withdrawn";
 }
@@ -66,7 +68,7 @@ export function writerRefusal(input: {
 /**
  * Whether `actorUserId` may change the recording's content now. Call it
  * under the recording lock, which sharing and withdrawal take too, so a
- * run that began before either and ends after it writes nothing.
+ * run rechecks its permission against the current sharing state.
  */
 export async function contentWriterRefusal(
     executor: Executor,

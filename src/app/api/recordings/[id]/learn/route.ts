@@ -74,10 +74,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 });
 
 /**
- * Whoever may change the recording in the view asked for: the owner on
- * the private view; while it is shared, a curator (or the organization
- * account) on the Organization view, who acts for the Organization there
- * only (Learn's unconfirmed suggestions are theirs alone).
+ * The owner, or an Organization curator while shared. Learn always follows
+ * the item's current scope, including requests from the owner's private view.
  */
 async function authorizeLearn(request: Request, recordingId: string) {
     const { session, actor } = await requireApiSessionActor(request);
@@ -89,5 +87,12 @@ async function authorizeLearn(request: Request, recordingId: string) {
     );
     const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, session.user.id, curates);
-    return { access, actorUserId: session.user.id, curates };
+    return {
+        access: {
+            ...access,
+            view: access.shared ? ("org" as const) : access.view,
+        },
+        actorUserId: session.user.id,
+        curates,
+    };
 }

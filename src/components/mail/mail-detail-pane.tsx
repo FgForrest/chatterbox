@@ -245,6 +245,7 @@ export function MailDetailPane({
         isOrgAccount,
         canCurate,
     });
+    const contentMail = shared ? { ...mail, view: "org" as const } : mail;
     const metadata = [
         mail.mail?.from ?? i18n("Unknown sender"),
         formatDateTime(
@@ -596,7 +597,7 @@ export function MailDetailPane({
 
             {detail && (!widgets || widgets.learn.visible) && (
                 <MailLearnCard
-                    mail={mail}
+                    mail={contentMail}
                     detail={detail}
                     canChange={canChange}
                     widget={widgets?.learn}
@@ -607,7 +608,7 @@ export function MailDetailPane({
                 !detail.unreadable &&
                 (!widgets || widgets.summary.visible) && (
                     <MailSummaryCard
-                        mail={mail}
+                        mail={contentMail}
                         detail={detail}
                         processing={processing}
                         canChange={canChange}

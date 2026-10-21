@@ -129,12 +129,12 @@ interface TranscriptionPanelProps {
     /** The player, for the transcript's sentences to play from and follow. */
     playback?: TranscriptPlayback;
     /**
-     * The recording is not the viewer's to change: while it is shared only
-     * the organization account changes it, on the Organization view.
+     * The viewer is neither the owner nor a curator of the shared recording.
      * Speakers are shown read-only, and no transcription, summary or topic
      * detection is offered.
      */
     readOnly?: boolean;
+    shared?: boolean;
     processing?: ItemProcessingPresentation | null;
 }
 
@@ -211,6 +211,7 @@ export function TranscriptionPanel({
     getPlaybackMs,
     playback,
     readOnly = false,
+    shared = false,
     processing = null,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
@@ -225,7 +226,7 @@ export function TranscriptionPanel({
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its
     // summaries made with the Organization's templates.
-    const view = recording.view;
+    const view = shared ? "org" : recording.view;
     const orgView = view === "org";
 
     const [activeSource, setActiveSource] = useState<string | undefined>(
@@ -291,7 +292,7 @@ export function TranscriptionPanel({
         transcriptMissing,
     ]);
     const canHavePlaudSummary =
-        !orgView &&
+        recording.view !== "org" &&
         (recording.deviceSn !== "local" ||
             transcriptList.some((candidate) => candidate.source === "plaud"));
     const speakerTags = useMemo(
@@ -616,7 +617,7 @@ export function TranscriptionPanel({
         follow: followReleased,
     } = useLearnFollowUps({
         recordingId: recording.id,
-        enabled: canLearn && !orgView,
+        enabled: canLearn && recording.isOwn !== false,
         onChange: () => {
             setFollowUpRevision((count) => count + 1);
             // The correction pass may have corrected it meanwhile.
@@ -932,7 +933,7 @@ export function TranscriptionPanel({
                                                 <Sparkles className="size-4 mr-2" />{" "}
                                                 {i18n("Transcribe")}
                                             </Button>
-                                            {!orgView && (
+                                            {recording.isOwn !== false && (
                                                 <TranscribeInBrowserButton
                                                     recordingId={recording.id}
                                                     disabled={

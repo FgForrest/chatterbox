@@ -3,8 +3,8 @@
  *
  * Both read the owner's rows: a shared recording is one recording. `private`
  * is the owner's view, `org` the Organization's view of a shared recording,
- * where only the organization account changes it and its runs follow the
- * Organization's prompts and language.
+ * where the owner and Organization writers change it. Runs on a shared
+ * recording follow the Organization's prompts and language in either view.
  *
  * Dependency-free so client components and the light job-queueing modules
  * can import it.

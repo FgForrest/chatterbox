@@ -33,7 +33,7 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
-import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
+import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 export const LEARN_JOB_KIND = "learn.run";
@@ -102,7 +102,11 @@ export async function startLearnRun(input: {
     /** Whether the actor acts for the Organization; see `writerRefusal`. */
     actsForOrganization?: boolean;
 }): Promise<StartedLearnRun> {
-    const { access, actorUserId, source, trigger, actsForOrganization } = input;
+    const { actorUserId, source, trigger, actsForOrganization } = input;
+    const access = {
+        ...input.access,
+        view: input.access.shared ? ("org" as const) : input.access.view,
+    };
     if (input.calendarEventId && input.calendarEventId.length > 1024) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -223,7 +227,7 @@ export async function startLearnRun(input: {
                 400,
             );
         }
-        const refusal = await contentWriterRefusal(tx, {
+        const { refusal, scopeUserId } = await contentWriterScope(tx, {
             recordingId: access.recordingId,
             ownerUserId: access.ownerUserId,
             actorUserId,
@@ -231,6 +235,14 @@ export async function startLearnRun(input: {
             actsForOrganization,
         });
         if (refusal) throw writerRefusalError(refusal);
+        if (
+            scopeUserId !==
+            (access.view === "org" ? access.orgUserId : access.ownerUserId)
+        ) {
+            throw writerRefusalError(
+                access.view === "org" ? "withdrawn" : "shared",
+            );
+        }
         // One open run per transcript and view: one learning, or one whose
         // review waits (a second would leave that review unreachable).
         const [open] = await tx
@@ -460,7 +472,7 @@ async function insertMailRunInTx(
             400,
         );
     }
-    const refusal = await contentWriterRefusal(tx, {
+    const { refusal, scopeUserId } = await contentWriterScope(tx, {
         recordingId: access.recordingId,
         ownerUserId: access.ownerUserId,
         actorUserId,
@@ -468,6 +480,14 @@ async function insertMailRunInTx(
         actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
+    if (
+        scopeUserId !==
+        (access.view === "org" ? access.orgUserId : access.ownerUserId)
+    ) {
+        throw writerRefusalError(
+            access.view === "org" ? "withdrawn" : "shared",
+        );
+    }
     const [open] = await tx
         .select({ id: learnRuns.id, jobId: learnRuns.jobId })
         .from(learnRuns)

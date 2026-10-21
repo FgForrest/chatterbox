@@ -1,11 +1,4 @@
-/**
- * Sync and a shared recording: it is the organization account's to change,
- * so Plaud's transcript would be refused and its summary is imported only
- * beside that transcript. Nothing is fetched from Plaud for them while it is
- * shared, and both are imported once it is not; a new Plaud version of it
- * waits the same way. (Review 1B, finding H; the harness is the one of the
- * #274 regression test.)
- */
+/** The owner's sync continues importing and updating shared recordings. */
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
@@ -79,6 +72,12 @@ vi.mock("@/lib/sharing/shared", async () => {
 
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/knowledge/transcript-rewrite", () => ({
+    audioReplacedInTx: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/recordings/storage-reconciliation-job", () => ({
+    enqueueStorageReconciliationJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { db } from "@/db";
@@ -372,6 +371,10 @@ describe("sync of a shared recording", () => {
     });
 
     async function syncTwice(recording: Fixture) {
+        vi.mocked(upsertTranscription).mockImplementation(async () => {
+            recording.hasPlaudTranscript = true;
+            return { committed: true };
+        });
         const { getFileDetail } = mockPlaudPages([[recording.rec]], {
             getFileDetail: vi.fn(async (fileId: string) =>
                 readyDetail(fileId, { summary: true }),
@@ -384,12 +387,12 @@ describe("sync of a shared recording", () => {
         return getFileDetail;
     }
 
-    it("fetches nothing from Plaud for its transcript and summary while it is shared", async () => {
+    it("imports the transcript and summary while shared", async () => {
         const getFileDetail = await syncTwice(fixture(0, { is_summary: true }));
 
-        expect(getFileDetail).not.toHaveBeenCalled();
-        expect(upsertTranscription).not.toHaveBeenCalled();
-        expect(upsertEnhancement).not.toHaveBeenCalled();
+        expect(getFileDetail).toHaveBeenCalled();
+        expect(upsertTranscription).toHaveBeenCalled();
+        expect(upsertEnhancement).toHaveBeenCalled();
     });
 
     it("imports them once it is no longer shared", async () => {
@@ -418,7 +421,7 @@ describe("sync of a shared recording", () => {
         );
     });
 
-    it("leaves a new Plaud version of it for after the withdrawal", async () => {
+    it("downloads a new Plaud version while shared and after withdrawal", async () => {
         const updated = fixture(0);
         updated.rec = plaudRecording(0, { version_ms: 2000 });
         const sync = async () => {
@@ -428,13 +431,13 @@ describe("sync of a shared recording", () => {
             return downloadRecording;
         };
 
-        expect(await sync()).not.toHaveBeenCalled();
+        expect(await sync()).toHaveBeenCalledWith("plaud-0", false);
 
         sharing.shared = false;
         expect(await sync()).toHaveBeenCalledWith("plaud-0", false);
     });
 
-    it("writes no new Plaud version over its audio when it is shared during the download", async () => {
+    it("updates its audio under the lock when shared during the download", async () => {
         sharing.shared = false;
         const updated = fixture(0);
         updated.rec = plaudRecording(0, { version_ms: 2000 });
@@ -451,18 +454,20 @@ describe("sync of a shared recording", () => {
             for: () => lock,
             limit: async () => [{ deletedAt: null, titleEditedAt: null }],
         };
-        const txUpdate = vi.fn();
+        const txUpdate = vi.fn(() => ({
+            set: () => ({ where: async () => undefined }),
+        }));
         (db.transaction as Mock).mockImplementation(
             async (run: (tx: unknown) => Promise<unknown>) =>
                 run({ select: () => lock, update: txUpdate }),
         );
         mockSelects({ importPlaudContent: false, fixtures: [updated] });
 
-        await syncRecordingsForUser(USER_ID);
+        const result = await syncRecordingsForUser(USER_ID);
 
         expect(downloadRecording).toHaveBeenCalled();
-        // Its audio and its row stay as they were shared.
-        expect(storage.uploadFile).not.toHaveBeenCalled();
-        expect(txUpdate).not.toHaveBeenCalled();
+        expect(storage.uploadFile).toHaveBeenCalled();
+        expect(txUpdate).toHaveBeenCalled();
+        expect(result.updatedRecordings).toBe(1);
     });
 });

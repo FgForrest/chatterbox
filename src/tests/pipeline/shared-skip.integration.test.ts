@@ -68,6 +68,7 @@ vi.mock("@/lib/env", () => ({
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "shared-skip-org",
+    isOrgScopeEnabled: () => true,
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/learn/hold", () => ({ isHeldForLearn: async () => false }));
@@ -109,12 +110,14 @@ import {
     readProcessing,
 } from "@/lib/pipeline/state";
 import { sweepOrphanedPipelineSteps } from "@/lib/pipeline/sweep";
+import * as profileResolver from "@/lib/profiles/resolve";
 import * as titleAfterSummary from "@/lib/recordings/title-after-summary";
 import * as generateSummary from "@/lib/summary/generate-summary";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import * as generateTopics from "@/lib/topics/generate-topics";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 const OWNER = "shared-skip-owner";
 const OTHER = "shared-skip-other";
@@ -257,30 +260,23 @@ describeWithDatabase("settling automatic shared skips (PostgreSQL)", () => {
             });
     });
 
-    it("settles summary, its dependent title, and topics without calling either provider when already shared", async () => {
+    it("settles refused member jobs without changing the owner's pipeline", async () => {
         await share();
-        await expect(summaryJobHandler.run(context())).resolves.toEqual({
+        const member = {
+            ...context(),
+            userId: OTHER,
+            payload: { ...context().payload, view: "org" as const },
+        };
+        await expect(summaryJobHandler.run(member)).resolves.toEqual({
             skipped: "shared",
-        });
-        expect((await stored())?.summary?.steps?.summary).toMatchObject({
-            state: "skipped",
-            reason: "shared",
-        });
-        expect((await stored())?.summary?.steps?.title).toMatchObject({
-            state: "skipped",
-            reason: "shared",
         });
         await expect(
             topicsJobHandler.run({
-                ...context(),
-                payload: { ...context().payload, source: "riffado" },
+                ...member,
+                payload: { ...member.payload, source: "riffado" },
             }),
         ).resolves.toEqual({ skipped: "shared" });
-        expect((await stored())?.summary).toMatchObject({
-            state: "skipped",
-            reason: "shared",
-            steps: { topics: { state: "skipped", reason: "shared" } },
-        });
+        expect((await stored())?.summary).toEqual(summaryPhase());
         expect(summaryProvider).not.toHaveBeenCalled();
         expect(topicsProvider).not.toHaveBeenCalled();
     });
@@ -345,6 +341,18 @@ describeWithDatabase("settling automatic shared skips (PostgreSQL)", () => {
 
     it("keeps manual summary, topics and transcription refusals visible without settling their pipeline steps", async () => {
         await share();
+        vi.spyOn(
+            generateSummary,
+            "generateSummaryForRecording",
+        ).mockRejectedValueOnce(
+            new AppError(ErrorCode.RECORDING_SHARED, "Refused member", 409),
+        );
+        vi.spyOn(
+            generateTopics,
+            "generateTopicsForTranscript",
+        ).mockRejectedValueOnce(
+            new AppError(ErrorCode.RECORDING_SHARED, "Refused member", 409),
+        );
         await expect(
             summaryJobHandler.run(context("manual")),
         ).rejects.toMatchObject({ code: ErrorCode.RECORDING_SHARED });
@@ -367,8 +375,17 @@ describeWithDatabase("settling automatic shared skips (PostgreSQL)", () => {
         expect((await stored())?.summary).toEqual(summaryPhase());
     });
 
-    it("settles a title skipped before its provider call", async () => {
+    it("allows the owner's title provider while shared", async () => {
         await share();
+        vi.spyOn(profileResolver, "resolveItemProfile").mockResolvedValueOnce({
+            ...resolvedAudioProfile(),
+            profile: {
+                ...resolvedAudioProfile().profile,
+                deletedAt: null,
+                version: 1,
+            },
+        });
+        titleProvider.mockResolvedValueOnce(true);
         const phase = summaryPhase();
         if (phase.steps?.summary) phase.steps.summary.state = "done";
         if (phase.steps?.topics) phase.steps.topics.state = "done";
@@ -379,11 +396,9 @@ describeWithDatabase("settling automatic shared skips (PostgreSQL)", () => {
             summary: "Summary",
             keyPoints: [],
         });
-        expect(titleProvider).not.toHaveBeenCalled();
-        expect((await stored())?.summary).toMatchObject({
-            state: "skipped",
-            reason: "shared",
-            steps: { title: { state: "skipped", reason: "shared" } },
+        expect(titleProvider).toHaveBeenCalledOnce();
+        expect((await stored())?.summary?.steps?.title).toMatchObject({
+            state: "pending",
         });
     });
 
@@ -417,7 +432,13 @@ describeWithDatabase("settling automatic shared skips (PostgreSQL)", () => {
 
     it("permits a later summary commit after unsharing", async () => {
         await share();
-        await summaryJobHandler.run(context());
+        await expect(
+            summaryJobHandler.run({
+                ...context(),
+                userId: OTHER,
+                payload: { ...context().payload, view: "org" },
+            }),
+        ).resolves.toEqual({ skipped: "shared" });
         await db()
             .delete(recordingFolderAssignments)
             .where(

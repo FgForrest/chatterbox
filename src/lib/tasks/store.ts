@@ -12,6 +12,10 @@ import {
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
+import {
+    orgOwnedCondition,
+    visibleOwnerCondition,
+} from "@/lib/knowledge/org-people";
 import type { TaskViewer } from "@/lib/tasks/access";
 import {
     fieldProposalIsLater,
@@ -285,6 +289,12 @@ export async function writeTaskProposalsInTx(
                       .where(
                           and(
                               inArray(people.id, assignees),
+                              view === "org"
+                                  ? orgOwnedCondition(people.userId)
+                                  : visibleOwnerCondition(
+                                        people.userId,
+                                        ownerUserId,
+                                    ),
                               isNull(people.mergedIntoId),
                           ),
                       )
@@ -317,7 +327,15 @@ export async function writeTaskProposalsInTx(
                                   "dropped",
                               ]),
                               isNull(chatterItems.deletedAt),
-                              taskVisible(proposals.reviewer, ANY_TASK_ITEM),
+                              taskVisible(
+                                  {
+                                      ...proposals.reviewer,
+                                      isOrg:
+                                          view === "org" ||
+                                          proposals.reviewer.isOrg,
+                                  },
+                                  ANY_TASK_ITEM,
+                              ),
                           ),
                       )
               ).map((row) => [row.id, row] as const)

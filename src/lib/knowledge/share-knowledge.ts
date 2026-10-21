@@ -80,6 +80,7 @@ import {
     adoptTypesForShareInTx,
     dropUnusedAdoptionsInTx,
 } from "@/lib/knowledge/vocabulary";
+import { cancelPrivateLearnAtShareInTx } from "@/lib/learn/sharing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -185,6 +186,7 @@ export async function publishKnowledgeInTx(
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<PublishedKnowledge> {
+    await cancelPrivateLearnAtShareInTx(tx, recordingId, ownerUserId);
     const result: PublishedKnowledge = {
         corrections: 0,
         facts: 0,

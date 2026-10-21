@@ -274,17 +274,6 @@ export async function listAutomaticTranscriptionRetryRows(
           and item_processing.phases -> 'transcribe' ->> 'at' < ${retryBefore}
           and not exists (
               select 1
-              from recording_folder_assignments
-              inner join recording_folders
-                  on recording_folders.id = recording_folder_assignments.folder_id
-              inner join users organization_user
-                  on organization_user.id = recording_folders.user_id
-                 and organization_user.role = 'org'
-              where recording_folder_assignments.recording_id = item_processing.item_id
-                and recording_folder_assignments.user_id = item_processing.user_id
-          )
-          and not exists (
-              select 1
               from async_jobs
               where async_jobs.user_id = item_processing.user_id
                 and async_jobs.kind = 'transcription'

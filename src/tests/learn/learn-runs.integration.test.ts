@@ -659,28 +659,60 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         );
     });
 
-    it("keeps an owner's unfinished run from sharing, and lets only the organization account run it while shared", async () => {
+    it.each([
+        "queued",
+        "running",
+        "ready",
+    ] as const)("cancels private %s Learn at share and lets the owner review Organization Learn", async (status) => {
         await provider(OWNER);
         await provider(orgUserId);
-        await learn(OWNER);
-        await expect(share()).rejects.toMatchObject({
-            code: "SHARE_REQUIREMENTS_UNMET",
-        });
-
-        await db().delete(learnRuns);
-        await share();
-        const ownerTry = await learn(OWNER);
-        expect(ownerTry.status).toBe(409);
+        const privateStarted = await learn(OWNER);
+        const { runId: privateRunId } = (await privateStarted.json()) as {
+            runId: string;
+        };
+        await db()
+            .update(learnRuns)
+            .set({ status })
+            .where(eq(learnRuns.id, privateRunId));
+        await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: privateRunId,
+                userId: OWNER,
+                kind: "fact",
+                fingerprintHmac: "private",
+                payload: encryptJsonField({ secret: "private finding" }),
+            });
+        await expect(share()).resolves.toBeUndefined();
+        expect(await statusOf(privateRunId)).toBe("cancelled");
         expect((await learn(BOB, { view: "org" })).status).toBe(403);
+        const ownerTry = await learn(OWNER);
+        expect(ownerTry.status).toBe(202);
+        const { runId } = (await ownerTry.json()) as { runId: string };
+        const [row] = await db()
+            .select()
+            .from(learnRuns)
+            .where(eq(learnRuns.id, runId));
+        expect(row).toMatchObject({
+            scopeUserId: orgUserId,
+            view: "org",
+            actorUserId: OWNER,
+        });
         const curated = await learn(orgUserId, { view: "org" });
         expect(curated.status).toBe(202);
-        const [row] = await db()
-            .select({
-                scopeUserId: learnRuns.scopeUserId,
-                view: learnRuns.view,
-            })
-            .from(learnRuns);
-        expect(row).toEqual({ scopeUserId: orgUserId, view: "org" });
+        expect(await curated.json()).toMatchObject({ runId, created: false });
+        const review = await getReviewRoute(
+            new Request(`http://localhost/api/recordings/${REC}/review`, {
+                headers: { "x-test-user": OWNER },
+            }),
+            { params: Promise.resolve({ id: REC }) },
+        );
+        expect(review.status).toBe(200);
+        expect(JSON.stringify(await review.json())).not.toContain(
+            "private finding",
+        );
+        const [finding] = await db().select().from(learnReviewItems);
+        expect(finding).toMatchObject({ runId: privateRunId, userId: OWNER });
     });
 
     describe("running", () => {

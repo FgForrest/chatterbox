@@ -27,7 +27,6 @@ function gate(overrides: Partial<ShareGateInput>): ShareGateInput {
             { id: "t1", source: "riffado", labels: ["speaker_0", "speaker_1"] },
         ],
         attributions: [],
-        unfinishedLearnRuns: 0,
         ...overrides,
     };
 }
@@ -127,16 +126,5 @@ describe("evaluateShareGate", () => {
                 }),
             ),
         ).toEqual([]);
-    });
-
-    it("waits for unfinished Learn runs", () => {
-        expect(
-            evaluateShareGate(
-                gate({
-                    transcripts: [{ id: "t1", source: "riffado", labels: [] }],
-                    unfinishedLearnRuns: 2,
-                }),
-            ),
-        ).toEqual([{ kind: "learn_unfinished", runs: 2 }]);
     });
 });

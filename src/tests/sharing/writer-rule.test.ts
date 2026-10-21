@@ -1,7 +1,6 @@
 /**
- * The writer rule of a shared recording: by default only the organization
- * account changes it; a caller the server vouched for (a curator) acts for
- * the Organization when told so, and nobody else does.
+ * The writer rule of a shared recording: its owner, the organization
+ * account and a curator vouched for by the server may change it.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +13,7 @@ import { writerRefusal } from "@/lib/sharing/writer-rule";
 const base = { ownerUserId: "owner", orgUserId: "org" };
 
 describe("writerRefusal", () => {
-    it("keeps the organization account the only writer of a shared recording by default", () => {
+    it("allows the owner and organization account while refusing other members", () => {
         expect(
             writerRefusal({ ...base, actorUserId: "org", shared: true }),
         ).toBeNull();
@@ -23,7 +22,7 @@ describe("writerRefusal", () => {
         ).toBe("shared");
         expect(
             writerRefusal({ ...base, actorUserId: "owner", shared: true }),
-        ).toBe("shared");
+        ).toBeNull();
     });
 
     it("lets a vouched-for curator write a shared recording, under their own id", () => {

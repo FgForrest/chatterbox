@@ -23,6 +23,7 @@ import {
     getProfile,
     type ProfileRecord,
 } from "@/lib/profiles/store";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import type { RecordingView } from "@/lib/sharing/view";
 
 type StoredProfile = typeof processingProfiles.$inferSelect;
@@ -322,6 +323,14 @@ export async function resolveItemProfile(
             404,
         );
     }
+    const orgUserId = await getOrgUserId();
+    if (
+        view === "private" &&
+        orgUserId &&
+        (await isRecordingShared(itemId, orgUserId))
+    ) {
+        return resolveItemProfile(itemId, "org", ownerUserId, actorUserId);
+    }
     const channel = item.kind;
     const [processing] = await db
         .select({
@@ -337,8 +346,6 @@ export async function resolveItemProfile(
             ),
         )
         .limit(1);
-    const orgUserId = await getOrgUserId();
-
     if (processing?.profileId) {
         if (view === "private") {
             const personal = await readProfileRevision({

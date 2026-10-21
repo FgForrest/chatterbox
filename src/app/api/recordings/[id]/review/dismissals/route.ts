@@ -27,5 +27,10 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     );
     const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, session.user.id, curates);
-    return NextResponse.json({ forgotten: await forgetDismissals(access) });
+    return NextResponse.json({
+        forgotten: await forgetDismissals({
+            ...access,
+            view: access.shared ? "org" : access.view,
+        }),
+    });
 });

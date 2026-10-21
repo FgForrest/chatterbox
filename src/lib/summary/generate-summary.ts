@@ -207,7 +207,8 @@ export async function generateSummaryForRecording(
     if (item?.kind === "mail") {
         return generateMailSummary(ctx, recordingId, opts);
     }
-    const orgView = ctx.view === "org";
+    const orgView =
+        ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
     // Before the provider is paid; the write checks again under the lock.
@@ -280,7 +281,7 @@ export async function generateSummaryForRecording(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "audio",
-                view: ctx.view,
+                view: orgView ? "org" : ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -321,7 +322,7 @@ export async function generateSummaryForRecording(
                   refs: new Map<string, string>(),
                   scopeFingerprint: await itemScopeFingerprint(
                       recordingId,
-                      ctx.view,
+                      orgView ? "org" : ctx.view,
                       ctx.ownerUserId,
                   ),
               };

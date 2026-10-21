@@ -23,7 +23,7 @@ describe("canChangeItem", () => {
                 isOrgAccount: false,
                 canCurate: false,
             },
-            expected: false,
+            expected: true,
         },
         {
             name: "private not own",
@@ -35,6 +35,17 @@ describe("canChangeItem", () => {
                 canCurate: true,
             },
             expected: false,
+        },
+        {
+            name: "owner in Organization view",
+            input: {
+                view: "org",
+                isOwn: true,
+                shared: true,
+                isOrgAccount: false,
+                canCurate: false,
+            },
+            expected: true,
         },
         {
             name: "Organization account",

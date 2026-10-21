@@ -76,7 +76,8 @@ export async function generateMailSummary(
     itemId: string,
     opts: GenerateSummaryOptions,
 ): Promise<GenerateSummaryResult> {
-    const orgView = ctx.view === "org";
+    const orgView =
+        ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     const refusal = await contentWriterRefusalNow({
         recordingId: itemId,
         ownerUserId: ctx.ownerUserId,
@@ -145,7 +146,7 @@ export async function generateMailSummary(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "mail",
-                view: ctx.view,
+                view: orgView ? "org" : ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -190,7 +191,7 @@ export async function generateMailSummary(
                   refs: new Map<string, string>(),
                   scopeFingerprint: await itemScopeFingerprint(
                       itemId,
-                      ctx.view,
+                      orgView ? "org" : ctx.view,
                       ctx.ownerUserId,
                   ),
               };

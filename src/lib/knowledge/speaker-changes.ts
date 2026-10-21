@@ -51,8 +51,8 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
      * (`sharingOrgUserId`), or null when this instance shows none. Unless
      * the actor may change the recording now (`writerRefusal`) the change
      * is refused, under the recording lock sharing and withdrawal take:
-     * 409 for the owner of a shared recording, 404 for the organization
-     * account after a withdrawal.
+     * 409 for an unauthorized writer of a shared recording, 404 for a
+     * non-owner after a withdrawal.
      */
     orgUserId: string | null;
     /**

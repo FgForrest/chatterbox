@@ -424,6 +424,15 @@ function learnSkipReason(
     return null;
 }
 
+function autoLearnSource(
+    facts: PipelineFacts,
+    content: NonNullable<PipelineFacts["content"]>,
+): Extract<PipelineAction, { type: "startAutoLearn" }>["source"] {
+    if (facts.item.kind === "mail") return "mail";
+    if (content.contentSourceId === "plaud") return "plaud";
+    return "riffado";
+}
+
 function learnSkipMatches(
     learn: PhaseRecord | undefined,
     reason: NonNullable<ReturnType<typeof learnSkipReason>>,
@@ -910,9 +919,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         ? "content_reaped"
         : facts.transcription?.audioReaped
           ? "audio_reaped"
-          : facts.transcription?.shared
-            ? "shared"
-            : null;
+          : null;
     if (!content) {
         if (
             facts.item.kind === "audio" &&
@@ -1176,6 +1183,20 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         return { actions };
     }
 
+    if (learn?.reason === "scope_changed" && !facts.learnRunOpen) {
+        const skip = learnSkipReason(facts, content);
+        if (skip) {
+            actions.push(markPhase(facts, "learn", "skipped", skip, input));
+        } else {
+            actions.push({
+                type: "startAutoLearn",
+                input,
+                source: autoLearnSource(facts, content),
+            });
+        }
+        return { actions };
+    }
+
     if (facts.summaryDueAt) {
         if (Date.parse(facts.summaryDueAt) < Date.parse(facts.at)) {
             actions.push({ type: "releaseLearnTimeout" });
@@ -1317,9 +1338,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (
         learn !== undefined &&
         learn.state === "skipped" &&
-        ["erased", "gone", "shared", "start_failed"].includes(
-            learn.reason ?? "",
-        ) &&
+        ["erased", "gone", "start_failed"].includes(learn.reason ?? "") &&
         sameInput(learn, input) &&
         (minimumGeneration === undefined ||
             learn.generation >= minimumGeneration)
@@ -1331,12 +1350,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     actions.push({
         type: "startAutoLearn",
         input,
-        source:
-            facts.item.kind === "mail"
-                ? "mail"
-                : content.contentSourceId === "plaud"
-                  ? "plaud"
-                  : "riffado",
+        source: autoLearnSource(facts, content),
     });
     return { actions };
 }

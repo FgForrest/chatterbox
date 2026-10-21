@@ -20,6 +20,7 @@ import { decryptText } from "@/lib/encryption/fields";
 import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
+import { learnRunCurrentScope } from "@/lib/learn/learn-open";
 import { getOrgUserId } from "@/lib/org/config";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import {
@@ -353,8 +354,8 @@ export async function loadPrivateItemProcessing(
         .limit(1);
     if (!item) return null;
 
+    const orgUserId = await getOrgUserId();
     const [
-        orgUserId,
         placementRows,
         intentRows,
         activeJobs,
@@ -367,7 +368,6 @@ export async function loadPrivateItemProcessing(
         summaries,
         learnRunRows,
     ] = await Promise.all([
-        getOrgUserId(),
         db
             .select({
                 id: recordingFolders.id,
@@ -497,7 +497,7 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                 ),
@@ -562,7 +562,7 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt)),

@@ -1,8 +1,7 @@
 /**
  * Where a Learn review waits, for the lists that point at it: the
  * recordings with a run ready for review, and how many. A review is the
- * owner's on their private recordings, and the organization account's on
- * shared ones (Learn's unconfirmed suggestions are theirs alone).
+ * owner's in either scope, and the organization account's on shared ones.
  */
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -15,7 +14,6 @@ function waitingFor(viewerUserId: string, viewerIsOrgAccount: boolean) {
     return viewerIsOrgAccount
         ? and(eq(learnRuns.view, "org"), eq(learnRuns.status, "ready"))
         : and(
-              eq(learnRuns.view, "private"),
               eq(learnRuns.userId, viewerUserId),
               eq(learnRuns.status, "ready"),
           );

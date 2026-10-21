@@ -10,10 +10,9 @@ interface ItemChangePermission {
 export function canChangeItem({
     view,
     isOwn,
-    shared,
     isOrgAccount,
     canCurate,
 }: ItemChangePermission): boolean {
-    if (view === "org") return isOrgAccount || canCurate;
-    return isOwn && !shared;
+    if (view === "org") return isOwn || isOrgAccount || canCurate;
+    return isOwn;
 }

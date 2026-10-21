@@ -87,15 +87,6 @@ export async function executePipelineAction(
             });
             return;
         case "startAutoLearn": {
-            await db.transaction((tx) =>
-                updatePhaseInTx(tx, itemId, view, userId, "learn", {
-                    state: "running",
-                    reason: "started",
-                    generation,
-                    inputs: action.input,
-                    at: new Date().toISOString(),
-                }),
-            );
             const outcome =
                 action.source === "mail"
                     ? await autoLearnMail(userId, itemId)
@@ -105,7 +96,18 @@ export async function executePipelineAction(
                           source: action.source,
                           timed: true,
                       });
-            if (outcome.status === "started") return;
+            if (outcome.status === "started") {
+                await db.transaction((tx) =>
+                    updatePhaseInTx(tx, itemId, view, userId, "learn", {
+                        state: "running",
+                        reason: "started",
+                        generation,
+                        inputs: action.input,
+                        at: new Date().toISOString(),
+                    }),
+                );
+                return;
+            }
             if (outcome.status === "deferred") {
                 throw new JobDeferredError(
                     outcome.delayMs,

@@ -1,8 +1,7 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { db } from "@/db";
-import { learnRuns, transcriptions, transcriptSpeakers } from "@/db/schema";
+import { transcriptions, transcriptSpeakers } from "@/db/schema";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
-import { learnRunOpen } from "@/lib/learn/learn-open";
 import {
     evaluateShareGate,
     type ShareGateProblem,
@@ -57,19 +56,6 @@ export async function loadShareGate(
                       ),
                   )
             : [];
-    // The owner's Learn runs not yet finished (in flight with their job
-    // alive, or ready for review): what they propose is private until
-    // reviewed. A run whose job died holds nothing.
-    const [unfinished] = await executor
-        .select({ count: sql<number>`count(*)::int` })
-        .from(learnRuns)
-        .where(
-            and(
-                eq(learnRuns.itemId, recordingId),
-                eq(learnRuns.view, "private"),
-                learnRunOpen(),
-            ),
-        );
     const taskDecisions = await waitingTaskDecisions(
         executor,
         recordingId,
@@ -82,7 +68,6 @@ export async function loadShareGate(
             labels: transcriptSpeakerLabels(transcript),
         })),
         attributions,
-        unfinishedLearnRuns: unfinished?.count ?? 0,
         waitingTaskProposals: taskDecisions.total,
     });
 }

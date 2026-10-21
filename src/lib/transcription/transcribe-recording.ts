@@ -97,8 +97,8 @@ export type TranscribeErrorCode =
     | "HOSTED_LOCKED_OUT"
     | "MYNAH_BUDGET_EXHAUSTED"
     /**
-     * Shared with the Organization: only the organization account changes
-     * it, on the Organization view; its owner withdraws it first.
+     * Shared with the Organization and the actor is neither its owner nor
+     * a vouched-for Organization writer.
      */
     | "RECORDING_SHARED"
     | "TRANSCRIPTION_FAILED";
@@ -442,7 +442,8 @@ async function transcribeRecordingInner(
             errorCode: "RECORDING_NOT_FOUND",
         };
     }
-    const orgView = ctx.view === "org";
+    const orgView =
+        ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     // `userId` is the owner of the recording and of the rows this run reads
     // and writes, in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
@@ -614,7 +615,7 @@ async function transcribeRecordingInner(
                   .limit(1);
 
         const defaultLanguage =
-            (opts.trigger ?? "manual") === "manual"
+            (opts.trigger ?? "manual") === "manual" && !orgView
                 ? settings?.defaultTranscriptionLanguage || undefined
                 : transcribeStep.language || undefined;
         const quality = transcribeStep.quality;
@@ -667,7 +668,7 @@ async function transcribeRecordingInner(
                     itemId: recordingId,
                     scopeFolderIds: await itemScopeFolderIds(
                         recordingId,
-                        ctx.view,
+                        orgView ? "org" : ctx.view,
                         ctx.ownerUserId,
                     ),
                 });
@@ -1112,7 +1113,7 @@ async function transcribeRecordingInner(
 }
 
 function recordingSharedResult(
-    error = "This recording is shared with the Organization; only its account transcribes it",
+    error = "Only the owner, the organization account or a curator may transcribe this shared recording",
 ): TranscribeResult {
     return { success: false, error, errorCode: "RECORDING_SHARED" };
 }

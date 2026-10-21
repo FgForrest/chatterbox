@@ -17,9 +17,10 @@ import {
 } from "@/db/schema";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
-import { learnRunOpen } from "@/lib/learn/learn-open";
+import { learnRunCurrentScope, learnRunOpen } from "@/lib/learn/learn-open";
 import { staleReadingFingerprint } from "@/lib/learn/summary-refresh";
 import { mailShareProblems } from "@/lib/mail/share-gate";
+import { getOrgUserId } from "@/lib/org/config";
 import { readProcessing } from "@/lib/pipeline/state";
 import type {
     PhaseRecord,
@@ -38,6 +39,7 @@ import {
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import type { ProviderPin } from "@/lib/profiles/settings";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -148,6 +150,11 @@ export async function gatherFacts(
     userId: string,
     options: { legacyIfEmpty?: boolean } = {},
 ): Promise<PipelineFacts> {
+    const orgUserId = await getOrgUserId();
+    const contentView =
+        orgUserId && (await isRecordingShared(itemId, orgUserId))
+            ? "org"
+            : view;
     const [processing, [item]] = await Promise.all([
         readProcessing(itemId, view, userId),
         db
@@ -468,7 +475,7 @@ export async function gatherFacts(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, userId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                     learnRunOpen(),
                 ),
             )
@@ -484,7 +491,7 @@ export async function gatherFacts(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, userId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt)),
@@ -506,15 +513,14 @@ export async function gatherFacts(
                   )
                   .where(
                       and(
-                          eq(asyncJobs.userId, userId),
                           eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
                           eq(
                               asyncJobs.subjectId,
-                              recordingJobSubject(itemId, view),
+                              recordingJobSubject(itemId, contentView),
                           ),
                           inArray(asyncJobs.status, ["pending", "processing"]),
                           eq(transcriptCorrectionPasses.userId, userId),
-                          eq(transcriptCorrectionPasses.view, view),
+                          eq(transcriptCorrectionPasses.view, contentView),
                       ),
                   )
             : Promise.resolve([]),

@@ -1618,7 +1618,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 ),
             );
 
-        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(1);
+        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(2);
         await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(0);
 
         expect(
@@ -1638,7 +1638,9 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             );
-        expect(pipelineSubjects).toEqual([{ subjectId: ids.eligible }]);
+        expect(pipelineSubjects.map((row) => row.subjectId).sort()).toEqual(
+            [ids.eligible, ids.shared].sort(),
+        );
     });
 
     it("sweeps only old, unclaimed, non-poison stalled rows", async () => {
