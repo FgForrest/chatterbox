@@ -23,6 +23,8 @@ interface ItemHeaderProps {
     title: string;
     metadata: string[];
     view?: RecordingView;
+    /** The private item has been shared into the Organization. */
+    shared?: boolean;
     isOwn?: boolean;
     ownerName?: string | null;
     readOnly?: boolean;
@@ -38,6 +40,7 @@ export function ItemHeader({
     title,
     metadata,
     view,
+    shared = false,
     isOwn = true,
     ownerName,
     readOnly = false,
@@ -53,7 +56,7 @@ export function ItemHeader({
                 window.location.origin + itemDetailHref(itemId, { view }),
             );
             toast.success(
-                organization
+                organization || shared
                     ? i18n(
                           "Link copied. Other members of your Organization can open it.",
                       )

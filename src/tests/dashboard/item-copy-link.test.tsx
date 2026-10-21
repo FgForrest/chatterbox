@@ -83,6 +83,30 @@ describe.each(["audio", "mail"] as const)("%s item copy link", (kind) => {
     });
 });
 
+it("tells the owner of a shared item that Organization members can open its private-view link", async () => {
+    render(
+        <TooltipProvider>
+            <ItemHeader
+                itemId="item"
+                kind="audio"
+                title="Item"
+                metadata={[]}
+                view="private"
+                shared
+            />
+        </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    await waitFor(() =>
+        expect(mocks.success).toHaveBeenCalledExactlyOnceWith(
+            "Link copied. Other members of your Organization can open it.",
+        ),
+    );
+    expect(mocks.writeText).toHaveBeenCalledExactlyOnceWith(
+        `${window.location.origin}/dashboard?recording=item`,
+    );
+});
+
 it("exposes the Copy link tooltip", async () => {
     render(
         <TooltipProvider>

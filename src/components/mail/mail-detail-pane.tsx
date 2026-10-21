@@ -315,6 +315,7 @@ export function MailDetailPane({
                 title={title || i18n("(no subject)")}
                 metadata={metadata}
                 view={mail.view}
+                shared={shared}
                 isOwn={isOwn}
                 ownerName={mail.ownerName}
                 readOnly={!canChange}
