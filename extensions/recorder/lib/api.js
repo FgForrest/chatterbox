@@ -124,7 +124,7 @@ export async function recoverSession(auth, sessionId) {
 /**
  * @param {{serverUrl: string, apiKey: string}} auth
  * @param {string} sessionId
- * @param {{chunkCount: number, endedAt: string, stopReason: string}} body
+ * @param {{chunkCount: number, endedAt: string, stopReason: string, folderId?: string|null}} body
  */
 export async function completeSession(auth, sessionId, body) {
     const response = await request(

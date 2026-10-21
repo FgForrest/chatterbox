@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaptureHost } from "../../../extensions/recorder/lib/capture-host.js";
 
-vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
-    fitWindowToContent: () => {},
+const { fitWindowToContent } = vi.hoisted(() => ({
+    fitWindowToContent: vi.fn(),
 }));
 
-beforeEach(() => vi.resetModules());
+vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
+    fitWindowToContent,
+}));
+
+beforeEach(() => {
+    vi.resetModules();
+    fitWindowToContent.mockReset();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 function setupPicker(chooseDesktopMedia) {
@@ -42,6 +49,14 @@ function setupPicker(chooseDesktopMedia) {
         events.push(message.type);
         return { ok: true };
     });
+    const windows = {
+        getCurrent: vi.fn(async () => ({ id: 7, state: "normal" })),
+        update: vi.fn(async () => {
+            events.push("window-narrowed");
+            return {};
+        }),
+    };
+    fitWindowToContent.mockImplementation(() => events.push("window-fitted"));
 
     vi.stubGlobal("location", {
         href: "chrome-extension://test/picker/picker.html?requestId=request-1",
@@ -66,11 +81,13 @@ function setupPicker(chooseDesktopMedia) {
             },
         },
         desktopCapture: { chooseDesktopMedia },
+        windows,
     });
 
     return {
         node,
         events,
+        windows,
         getUserMedia,
         sendMessage,
         stream,
@@ -131,6 +148,8 @@ describe("desktop recorder extension window", () => {
         });
         expect(events).toEqual([
             "opened-in-picker-frame",
+            "window-narrowed",
+            "window-fitted",
             "desktop-capture-ready",
         ]);
         expect(sendMessage.mock.calls.flat()).not.toEqual(
@@ -138,6 +157,32 @@ describe("desktop recorder extension window", () => {
                 expect.objectContaining({ streamId: "desktop-stream" }),
             ]),
         );
+    });
+
+    it("leaves the window at full size while Chrome's dialog is open", async () => {
+        let choose;
+        const chooseDesktopMedia = vi.fn((_sources, callback) => {
+            choose = callback;
+            return 123;
+        });
+        const { windows, sendMessage } = setupPicker(chooseDesktopMedia);
+
+        await import("../../../extensions/recorder/picker/picker.js");
+        await vi.waitFor(() => expect(chooseDesktopMedia).toHaveBeenCalled());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(windows.update).not.toHaveBeenCalled();
+        expect(fitWindowToContent).not.toHaveBeenCalled();
+
+        choose("desktop-stream", { canRequestAudioTrack: true });
+        await vi.waitFor(() =>
+            expect(sendMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: "desktop-capture-ready" }),
+            ),
+        );
+        expect(windows.update).toHaveBeenCalledExactlyOnceWith(7, {
+            width: 430,
+        });
+        expect(fitWindowToContent).toHaveBeenCalledOnce();
     });
 
     it("reports capture API failure without creating a server session", async () => {
@@ -155,7 +200,14 @@ describe("desktop recorder extension window", () => {
             }),
         );
 
-        expect(node("picker-status").textContent).toBe("Picker unavailable");
+        await vi.waitFor(() =>
+            expect(node("picker-status").textContent).toBe(
+                "Picker unavailable",
+            ),
+        );
+        await vi.waitFor(() =>
+            expect(fitWindowToContent).toHaveBeenCalledOnce(),
+        );
     });
 
     it("keeps the recorder window visible through upload, server save, and confirmation", async () => {

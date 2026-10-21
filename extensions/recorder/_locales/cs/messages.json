@@ -60,7 +60,7 @@
   "recordWithConsent": {"message": "Souhlas potvrzen · Nahrávat"},
   "startingCapture": {"message": "Spouští se nahrávání…"},
   "openingPicker": {"message": "Otevírá se výběr zvuku…"},
-  "pickerHint": {"message": "Chrome vás požádá o výběr karty nebo obrazovky se zvukem."},
+  "pickerHint": {"message": "Pro jinou obrazovku nebo aplikaci vyberte zdroj se zvukem v dialogu Chromu."},
   "pickerInstruction": {"message": "V dialogu Chromu vyberte kartu nebo obrazovku se zvukem."},
   "minimize": {"message": "Minimalizovat"},
   "you": {"message": "Vy"},
@@ -110,7 +110,7 @@
   "connectTo": {"message": "Propojit s $1"},
   "recordThis": {"message": "Nahrát schůzku na $1."},
   "autoTip": {"message": "Tip: zapněte automatické nahrávání pro $1 v Možnostech. Ikona pak nabídne nahrávání jedním kliknutím."},
-  "noMeeting": {"message": "V této kartě nebyla rozpoznána schůzka."},
+  "noMeeting": {"message": "Nahrajte zvuk přehrávaný v této kartě."},
   "uploadedOf": {"message": "Odesláno $1 z $2 částí"},
   "segmentsUploaded": {"message": "Odeslané části: $1"},
   "waitingPicker": {"message": "Čeká se na výběr zvuku v Chromu…"},
@@ -144,7 +144,7 @@
   "accessWithdrawn": {"message": "Váš přístup do Klepny byl odebrán. Nahrávka zůstává šifrovaně uložená v tomto prohlížeči: až vám přístup obnoví, zvolte „Opakovat odeslání“, nebo se znovu přihlaste a nahrávání spárujte."},
   "accessUnverifiable": {"message": "Server teď nemůže ověřit váš přístup; nahrávka zůstává uložená a nahrávání se samo obnoví."},
   "finalizeFailed": {"message": "Nahrávání nelze dokončit. Šifrované části zůstávají v prohlížeči pro obnovení."},
-  "folder": {"message": "Složka"},
+  "folder": {"message": "Cílová složka v Klepně"},
   "folderSearchHint": {"message": "Pro hledání složek napište alespoň 2 znaky."},
   "foldersLoading": {"message": "Načítání složek…"},
   "noFoldersFound": {"message": "Žádné složky nenalezeny"},
@@ -223,5 +223,9 @@
   "micManaged": {"message": "Přístup k mikrofonu pro $1 musí povolit správce."},
   "micManagedHint": {"message": "Pokud je prohlížeč $1 spravovaný a mikrofon blokují zásady, musí ho povolit správce."},
   "setupExpired": {"message": "Toto nastavení vypršelo. Klikněte znovu na Propojit a spusťte nové 15minutové nastavení."},
-  "setupSiteGranted": {"message": "Přístup k webu $1 je povolen."}
+  "setupSiteGranted": {"message": "Přístup k webu $1 je povolen."},
+  "recordTabWithConsent": {"message": "Souhlas potvrzen · Nahrávat tuto kartu"},
+  "recordAnotherSource": {"message": "Nahrávat jinou obrazovku nebo aplikaci"},
+  "folderFixedAtStart": {"message": "Tento server uloží nahrávku do složky vybrané na začátku."},
+  "folderChangeFailed": {"message": "Cílovou složku nelze změnit. Zkuste to znovu."}
 }
