@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewSpeaker } from "@/components/learn/review-speaker";
+import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import type { AppLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
@@ -74,4 +75,30 @@ describe.each(["cs-CZ", "en"] as const)("ReviewSpeaker in %s", (locale) => {
         );
         expect(onPlay).toHaveBeenCalledOnce();
     });
+});
+
+it("uses a confirmed merged voice's colour in the review", () => {
+    reviewLocale = "en";
+    const { container } = render(
+        <SpeakerAccentContext value={new Map([["speaker_1", 0]])}>
+            <ReviewSpeaker
+                label="speaker_1"
+                person={{ name: "Jan" }}
+                accent={speakerAccent(1)}
+                ticked
+                blocked={false}
+                disabled={false}
+                recorder={false}
+                onlyFirstName={false}
+                reason=""
+                evidence={null}
+                waits={null}
+                onTick={vi.fn()}
+                onPick={vi.fn()}
+                onUnknown={vi.fn()}
+            />
+        </SpeakerAccentContext>,
+    );
+    expect(container.querySelector(".bg-primary.rounded-full")).toBeTruthy();
+    expect(container.querySelector(".bg-emerald-500")).toBeNull();
 });

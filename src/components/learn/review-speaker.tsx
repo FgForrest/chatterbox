@@ -3,6 +3,7 @@
 import { Play } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
+import { useSpeakerAccent } from "@/components/people/speaker-accent-context";
 import type { SpeakerAccent } from "@/components/people/speaker-accents";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ export type ReviewSpeakerPerson = { name: string } | { unknown: true } | null;
 export function ReviewSpeaker({
     label,
     person,
-    accent,
+    accent: fallbackAccent,
     ticked,
     blocked,
     disabled,
@@ -52,6 +53,7 @@ export function ReviewSpeaker({
     onPlay?: () => void;
 }) {
     const i18n = useExtracted();
+    const accent = useSpeakerAccent(label, fallbackAccent);
     const speakerLabel = useSpeakerLabel();
     const speaker = speakerLabel(label);
     const unknown = person !== null && "unknown" in person;
