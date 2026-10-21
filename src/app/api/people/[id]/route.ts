@@ -54,8 +54,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 /**
  * Rename a person or change their email.
  *
- * An Organization person is renamed for everyone, so only the organization
- * account may do it; the others get a 403 that says so.
+ * An Organization person is renamed for everyone by an Organization curator.
  */
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -109,7 +108,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
  * explicit action instead of riding along on a field edit.
  *
  * Anyone may fold a private person into an Organization one; only the
- * organization account may merge Organization people.
+ * Organization curators may merge Organization people.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -168,7 +167,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
  * A named third party asking to be removed is a data-subject request, so it
  * is one action. The transcript keeps its raw speaker label and simply loses
  * the name, which is right -- the recording is not the thing being erased.
- * Only the organization account erases an Organization person.
+ * Only an Organization curator erases an Organization person.
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);

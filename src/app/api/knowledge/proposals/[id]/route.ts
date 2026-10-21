@@ -33,7 +33,7 @@ const bodySchema = z.discriminatedUnion("action", [
 ]);
 
 /**
- * The organization account decides a relation phrase members suggested
+ * An Organization curator decides a relation phrase members suggested
  * (Phase 6): `{action: "create", spec}` makes it an Organization relation,
  * `{action: "map", key}` points it at one the Organization or the core
  * has, `{action: "reject"}` declines it. Anyone else: 403.

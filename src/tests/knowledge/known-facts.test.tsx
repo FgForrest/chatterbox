@@ -30,7 +30,6 @@ const EDITING = {
         },
     ],
     typeLabels: { project: "Project" },
-    ownScope: "personal" as const,
 };
 
 function respond(status = 200, body: unknown = {}) {
@@ -257,7 +256,7 @@ describe("editing what is known", () => {
                     },
                     { id: "a-org", text: "JN", kind: "alias", scope: "org" },
                 ]}
-                editing={{ target: { personId: "jan" }, ownScope: "personal" }}
+                editing={{ target: { personId: "jan" } }}
             />,
         );
         expect(

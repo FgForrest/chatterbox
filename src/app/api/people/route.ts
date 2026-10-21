@@ -8,7 +8,7 @@ import {
     listPeople,
     MAX_DISPLAY_NAME_LENGTH,
 } from "@/lib/knowledge/people";
-import { isOrgAccount } from "@/lib/org/config";
+import { assertOwnScopeWritable, isOrgAccount } from "@/lib/org/config";
 
 const MAX_EMAIL_LENGTH = 320;
 const MAX_NOTES_LENGTH = 4000;
@@ -48,6 +48,8 @@ export const POST = apiHandler(async (request: Request) => {
     );
     const notes = readString(body?.notes, MAX_NOTES_LENGTH, "notes");
 
+    await assertOwnScopeWritable(session.user.id);
+
     // Two people with one address is always a mistake rather than an intent,
     // and catching it here is friendlier than surfacing a unique violation.
     if (primaryEmail) {
@@ -67,6 +69,7 @@ export const POST = apiHandler(async (request: Request) => {
     const isOrg = await isOrgAccount(session.user.id);
     const person = await createPerson({
         userId: session.user.id,
+        createdByUserId: session.user.id,
         displayName,
         primaryEmail,
         notes: isOrg ? null : notes,

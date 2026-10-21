@@ -11,11 +11,12 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listPeople } from "@/lib/knowledge/people";
 import { pendingReviewCount } from "@/lib/learn/pending";
-import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
+import { getOrgUserId } from "@/lib/org/config";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
 export const dynamic = "force-dynamic";
@@ -63,8 +64,15 @@ export default async function PeoplePage() {
             )
             .groupBy(transcriptSpeakers.personId),
         isLearnDeploymentAvailable()
-            ? isOrgAccount(userId).then((organization) =>
-                  pendingReviewCount(userId, organization),
+            ? userCuratesOrganizationNow(userId).then((organization) =>
+                  Promise.all([
+                      userId !== orgUserId
+                          ? pendingReviewCount(userId, false)
+                          : 0,
+                      organization && orgUserId
+                          ? pendingReviewCount(orgUserId, true)
+                          : 0,
+                  ]).then(([own, shared]) => own + shared),
               )
             : 0,
     ]);
