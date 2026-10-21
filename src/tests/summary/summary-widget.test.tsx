@@ -230,6 +230,39 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.getByText("Customer follow-up")).toBeTruthy();
     });
 
+    it("hides tasks, summary and metadata until expanded", () => {
+        const rendered = renderWidget(kind);
+        const content = screen.getByRole("region", { name: "Summary content" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Collapse summary" }),
+        );
+        state.summaryExpanded = false;
+        rendered.rerender(getWidget(kind));
+        expect(
+            screen.getByRole("button", { name: "Expand summary" }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("region", { name: "Summary content" }),
+        ).toBeNull();
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeTruthy();
+        expect(
+            screen.getByText("Send the proposal").closest("[hidden]"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Expand summary" }));
+        state.summaryExpanded = true;
+        rendered.rerender(getWidget(kind));
+        expect(screen.getByRole("region", { name: "Summary content" })).toBe(
+            content,
+        );
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeNull();
+        expect(screen.getByText("Send the proposal")).toBeTruthy();
+        expect(screen.getByText("gpt-summary")).toBeTruthy();
+    });
+
     it("starts a first summary from the compact line in one click", () => {
         state.summaryData = null;
         renderWidget(kind, {
