@@ -169,6 +169,43 @@ afterEach(() => {
 });
 
 describe("mail detail layout", () => {
+    it("keeps captured mail evidence after consuming the URL and clears it on traversal", async () => {
+        const scroll = vi.fn();
+        const originalScroll = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scroll;
+        const props = {
+            mail,
+            dateTimeFormat: "absolute" as const,
+            onBackToList: vi.fn(),
+            hiddenOnMobile: false,
+            onChanged: vi.fn(),
+            folders: [],
+            folderAssignments: [],
+            onSelectFolder: vi.fn(),
+            onAddToFolder: vi.fn(),
+            onRemoveFromFolder: vi.fn(),
+            onMoveBetweenFolders: vi.fn(),
+        };
+        const { container, rerender } = render(
+            <MailDetailPane
+                {...props}
+                itemLinkQuery="recording=mail-1&evidenceSegment=0&evidenceStart=4&evidenceEnd=11"
+            />,
+        );
+        await waitFor(() =>
+            expect(container.querySelector("mark")?.textContent).toBe(
+                "message",
+            ),
+        );
+        rerender(
+            <TooltipProvider>
+                <MailDetailPane {...props} itemLinkQuery="recording=mail-1" />
+            </TooltipProvider>,
+        );
+        expect(container.querySelector("mark")).toBeNull();
+        Element.prototype.scrollIntoView = originalScroll;
+    });
+
     it("orders the title, workflow, folder row, metadata, and detail cards", async () => {
         const { container } = render(
             <MailDetailPane

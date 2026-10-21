@@ -6,6 +6,7 @@ import {
     fireEvent,
     render,
     screen,
+    waitFor,
     within,
 } from "@testing-library/react";
 import { type ComponentProps, type Ref, useImperativeHandle } from "react";
@@ -18,6 +19,7 @@ import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
+    error: vi.fn(),
     paletteProps: null as ComponentProps<typeof CommandPaletteComponent> | null,
     uploadOptions: null as null | {
         onUploadStarted?: (upload: {
@@ -42,6 +44,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("next-intl", () => ({
     useExtracted: () => (text: string) => text,
 }));
+
+vi.mock("sonner", () => ({ toast: { error: mocks.error, success: vi.fn() } }));
 
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
 
@@ -177,10 +181,27 @@ vi.mock("@/components/dashboard/recording-list", () => ({
     },
 }));
 vi.mock("@/components/dashboard/folder-tree", () => ({
-    FolderTree: ({ onNewFolder }: { onNewFolder?: () => void }) => (
+    FolderTree: ({
+        onNewFolder,
+        onSelectFolder,
+        onRecent,
+    }: {
+        onNewFolder?: () => void;
+        onSelectFolder: (folder: typeof personalChildFolder) => void;
+        onRecent: () => void;
+    }) => (
         <section aria-label="Folder tree">
             <button type="button" onClick={onNewFolder}>
                 New folder
+            </button>
+            <button
+                type="button"
+                onClick={() => onSelectFolder(personalChildFolder)}
+            >
+                Open folder
+            </button>
+            <button type="button" onClick={onRecent}>
+                Recent
             </button>
         </section>
     ),
@@ -188,9 +209,41 @@ vi.mock("@/components/dashboard/folder-tree", () => ({
 vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
     WorkstationDetailPane: ({
         currentRecording,
+        itemLinkQuery,
+        onSelectRecording,
+        onDelete,
+        onBackToList,
     }: {
         currentRecording: Recording | null;
-    }) => <div>Selected: {currentRecording?.filename ?? "none"}</div>,
+        itemLinkQuery: string;
+        onSelectRecording: (recording: Recording) => void;
+        onDelete: (recording: Recording) => Promise<void>;
+        onBackToList: () => void;
+    }) => (
+        <div>
+            Selected: {currentRecording?.filename ?? "none"}
+            <span data-testid="item-link-query">{itemLinkQuery}</span>
+            <button
+                type="button"
+                onClick={() =>
+                    onSelectRecording(recording("second", "Second recording"))
+                }
+            >
+                Auto advance
+            </button>
+            <button
+                type="button"
+                onClick={() =>
+                    currentRecording && void onDelete(currentRecording)
+                }
+            >
+                Delete selected
+            </button>
+            <button type="button" onClick={onBackToList}>
+                Back to list
+            </button>
+        </div>
+    ),
 }));
 vi.mock("@/components/dashboard/command-palette", () => ({
     CommandPalette: (props: ComponentProps<typeof CommandPaletteComponent>) => {
@@ -208,7 +261,11 @@ vi.mock("@/components/dashboard/plaud-reconnect-banner", () => ({
     PlaudReconnectBanner: () => null,
 }));
 vi.mock("@/components/dashboard/folder-recording-pane", () => ({
-    FolderRecordingPane: () => null,
+    FolderRecordingPane: ({
+        folder,
+    }: {
+        folder: typeof personalChildFolder;
+    }) => <div>Folder: {folder.name}</div>,
 }));
 vi.mock("@/components/mail/mail-detail-pane", () => ({
     MailDetailPane: () => <div>Mail details</div>,
@@ -286,6 +343,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
     mocks.refresh.mockClear();
+    mocks.error.mockClear();
     mocks.uploadOptions = null;
     mocks.paletteProps = null;
     window.history.replaceState({}, "", "/dashboard");
@@ -706,5 +764,281 @@ describe("Workstation search selection", () => {
         expect(screen.getByText("Selected: Second")).toBeTruthy();
         fireEvent.keyDown(window, { key: "k" });
         expect(screen.getByText("Selected: First")).toBeTruthy();
+    });
+});
+
+describe("Workstation selection history", () => {
+    const first = recording("first", "First recording");
+    const second = recording("second", "Second recording");
+    const shared = {
+        ...recording("shared", "Shared recording"),
+        view: "org" as const,
+        isOwn: false,
+    };
+    const props = {
+        ...baseProps,
+        recordings: [first, second],
+        organizationLibrary: {
+            recordings: [shared],
+            transcriptions: new Map(),
+            transcriptVariants: new Map(),
+        },
+        initialFolderOrganization: {
+            folders: [rootFolder, personalChildFolder],
+            assignments: [],
+        },
+    };
+
+    it("replaces the first-load entry and pushes a person's selection without server navigation", () => {
+        const push = vi.spyOn(window.history, "pushState");
+        const replace = vi.spyOn(window.history, "replaceState");
+        render(<Workstation {...props} />);
+        expect(window.location.search).toBe("?recording=first");
+        expect(replace).toHaveBeenCalled();
+        expect(push).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(window.location.search).toBe("?recording=second");
+        expect(push).toHaveBeenCalledTimes(1);
+        expect(mocks.refresh).not.toHaveBeenCalled();
+        push.mockRestore();
+        replace.mockRestore();
+    });
+
+    it("drops playback and every evidence parameter while keeping unrelated query parameters and the hash", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&playFrom=165980&evidenceSegment=0&evidenceStart=4&evidenceEnd=9&evidenceExtra=1&search=meeting#section",
+        );
+        render(<Workstation {...props} />);
+        expect(window.location.search).not.toContain("playFrom");
+        expect(screen.getByTestId("item-link-query").textContent).toContain(
+            "playFrom=165980",
+        );
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(window.location.search).toBe("?search=meeting&recording=second");
+        expect(window.location.hash).toBe("#section");
+    });
+
+    it("restores selections on Back and Forward without replaying the linked position", async () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&playFrom=165980&evidenceStart=4",
+        );
+        render(<Workstation {...props} />);
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(window.location.search).toBe("?recording=first");
+        expect(screen.getByTestId("item-link-query").textContent).not.toContain(
+            "playFrom",
+        );
+        await act(async () => {
+            window.history.forward();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+    });
+
+    it("replaces the URL on auto advance and keeps selection when returning to the mobile list", () => {
+        render(<Workstation {...props} />);
+        const push = vi.spyOn(window.history, "pushState");
+        fireEvent.click(screen.getByRole("button", { name: "Auto advance" }));
+        expect(window.location.search).toBe("?recording=second");
+        fireEvent.click(screen.getByRole("button", { name: "Back to list" }));
+        expect(window.location.search).toBe("?recording=second");
+        expect(push).not.toHaveBeenCalled();
+        push.mockRestore();
+    });
+
+    it("replaces the URL after deletion", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response("{}")),
+        );
+        render(<Workstation {...props} />);
+        const push = vi.spyOn(window.history, "pushState");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Delete selected" }),
+        );
+        await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+        expect(window.location.search).toBe("?recording=second");
+        expect(push).not.toHaveBeenCalled();
+        push.mockRestore();
+        vi.unstubAllGlobals();
+    });
+
+    it("drops a deep link's context when Recent or a delete re-selects an item", async () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&playFrom=165980&evidenceStart=4",
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response("{}")),
+        );
+        render(<Workstation {...props} />);
+        expect(screen.getByTestId("item-link-query").textContent).toContain(
+            "playFrom=165980",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
+        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(screen.getByTestId("item-link-query").textContent).toBe("");
+
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&evidenceStart=4",
+        );
+        act(() => {
+            window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Delete selected" }),
+        );
+        await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(screen.getByTestId("item-link-query").textContent).toBe("");
+        vi.unstubAllGlobals();
+    });
+
+    it("pushes a folder and restores it with Back", async () => {
+        render(<Workstation {...props} />);
+        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
+        fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+        expect(window.location.search).toBe("?folder=personal-child");
+        expect(screen.getByText("Folder: Meetings")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        expect(window.location.search).toBe("?recording=first");
+        expect(screen.getByTestId("item-link-query").textContent).not.toContain(
+            "playFrom",
+        );
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByText("Folder: Meetings")).toBeTruthy();
+    });
+
+    it.each([
+        "?recording=missing",
+        "?recording=missing&view=org",
+    ])("explains unavailable links: %s", (query) => {
+        window.history.replaceState({}, "", `/dashboard${query}`);
+        render(<Workstation {...props} />);
+        expect(mocks.error).toHaveBeenCalledExactlyOnceWith(
+            "This item is not available to you. It may belong to someone else, no longer be shared with your Organization, or have been deleted.",
+        );
+        expect(screen.getByText("Selected: none")).toBeTruthy();
+        expect(window.location.search).toBe("");
+    });
+
+    it.each([
+        "",
+        "&view=org",
+    ])("opens Organization-only links with or without their view: %s", (view) => {
+        window.history.replaceState(
+            {},
+            "",
+            `/dashboard?recording=shared${view}`,
+        );
+        render(<Workstation {...props} />);
+        expect(screen.getByText("Selected: Shared recording")).toBeTruthy();
+        expect(window.location.search).toBe("?recording=shared&view=org");
+        expect(mocks.error).not.toHaveBeenCalled();
+    });
+
+    it("normalizes captured evidence context when falling back to Organization", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=shared&playFrom=12500",
+        );
+        render(<Workstation {...props} />);
+        const context = new URLSearchParams(
+            screen.getByTestId("item-link-query").textContent ?? "",
+        );
+        expect(context.get("view")).toBe("org");
+        expect(context.get("playFrom")).toBe("12500");
+        expect(window.location.search).toBe("?recording=shared&view=org");
+    });
+
+    it("pushes Organization selections from the search palette", () => {
+        render(<Workstation {...props} />);
+        const push = vi.spyOn(window.history, "pushState");
+        act(() => {
+            mocks.paletteProps?.onOpenSearchHit?.({
+                id: "shared",
+                title: "Shared",
+                snippet: null,
+                href: "/dashboard?recording=shared&view=org",
+            });
+        });
+        expect(window.location.search).toBe("?recording=shared&view=org");
+        expect(push).toHaveBeenCalledTimes(1);
+        push.mockRestore();
+    });
+
+    it("opens mail through the same item parameter", () => {
+        const mail = {
+            ...first,
+            id: "mail-1",
+            kind: "mail" as const,
+            filename: "Mail item",
+        };
+        render(<Workstation {...props} recordings={[first, mail]} />);
+        fireEvent.click(screen.getByRole("button", { name: "Mail item" }));
+        expect(window.location.search).toBe("?recording=mail-1");
+        expect(screen.getByText("Mail details")).toBeTruthy();
+    });
+
+    it("falls back to Private for a stale Organization view", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=second&view=org",
+        );
+        render(<Workstation {...props} />);
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(window.location.search).toBe("?recording=second");
+    });
+
+    it("opens a link outside the rendered list window", () => {
+        const recordings = Array.from({ length: 201 }, (_, index) =>
+            recording(`item-${index}`, `Recording ${index}`),
+        );
+        window.history.replaceState({}, "", "/dashboard?recording=item-200");
+        render(<Workstation {...props} recordings={recordings} />);
+        expect(screen.getByText("Selected: Recording 200")).toBeTruthy();
+        expect(mocks.error).not.toHaveBeenCalled();
+    });
+
+    it("clears selection for a plain dashboard history entry", () => {
+        render(<Workstation {...props} />);
+        act(() => {
+            window.history.replaceState({}, "", "/dashboard");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        expect(screen.getByText("Selected: none")).toBeTruthy();
+        expect(window.location.search).toBe("");
+    });
+
+    it("clears the URL when refreshed data no longer contains the selected item", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[second]} />);
+        expect(screen.getByText("Selected: none")).toBeTruthy();
+        expect(window.location.search).toBe("");
     });
 });

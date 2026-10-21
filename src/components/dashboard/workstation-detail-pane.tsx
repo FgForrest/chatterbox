@@ -40,6 +40,7 @@ interface TranscriptionData {
 
 interface Props {
     currentRecording: Recording | null;
+    itemLinkQuery?: string;
     currentTranscription: TranscriptionData | undefined;
     transcripts: TranscriptOption[] | undefined;
     isCurrentTranscribing: boolean;
@@ -98,6 +99,7 @@ interface Props {
  */
 export function WorkstationDetailPane({
     currentRecording,
+    itemLinkQuery,
     currentTranscription,
     transcripts,
     isCurrentTranscribing,
@@ -152,7 +154,9 @@ export function WorkstationDetailPane({
             currentRecording.audioReaped
         )
             return;
-        const params = new URLSearchParams(window.location.search);
+        const params = new URLSearchParams(
+            itemLinkQuery ?? window.location.search,
+        );
         if (params.get("recording") !== currentRecording.id) return;
         if (
             (params.get("view") === "org") !==
@@ -160,7 +164,11 @@ export function WorkstationDetailPane({
         )
             return;
         const raw = params.get("playFrom");
-        if (raw === null || !/^\d+$/.test(raw)) return;
+        if (raw === null) {
+            playedLink.current = null;
+            return;
+        }
+        if (!/^\d+$/.test(raw)) return;
         const startMs = Number(raw);
         if (!Number.isSafeInteger(startMs)) return;
         const link = `${currentRecording.id}:${currentRecording.view}:${raw}`;
@@ -168,7 +176,7 @@ export function WorkstationDetailPane({
         if (!playerRef.current) return;
         playedLink.current = link;
         playerRef.current.playFrom(startMs / 1000);
-    }, [currentRecording]);
+    }, [currentRecording, itemLinkQuery]);
     const hasTranscript =
         currentRecording?.hasTranscript ??
         Boolean(
