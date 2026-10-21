@@ -357,6 +357,105 @@ export async function markSummaryStepFailed(input: {
     return marked;
 }
 
+function unsettledState(state: PhaseRecord["state"] | undefined): boolean {
+    return (
+        state === undefined ||
+        state === "pending" ||
+        state === "running" ||
+        state === "waiting"
+    );
+}
+
+function sharedSkipSteps(
+    step: "transcribe" | SummaryStepName,
+): SummaryStepName[] {
+    if (step === "transcribe") return [];
+    if (step === "summary") return ["summary", "title"];
+    return [step];
+}
+
+/** Settle automatic work refused because the recording is shared. */
+export async function markAutomaticStepShared(input: {
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+    step: "transcribe" | SummaryStepName;
+}): Promise<boolean> {
+    const marked = await db.transaction(async (tx) => {
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, input.itemId),
+                    eq(itemProcessing.userId, input.userId),
+                    eq(itemProcessing.view, input.view),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        const transcribe = input.step === "transcribe";
+        const phase = transcribe ? "transcribe" : "summary";
+        const record = processing?.phases[phase];
+        if (!record || record.state === "outdated") return false;
+        const steps = { ...record.steps };
+        const names = sharedSkipSteps(input.step);
+        const hasUnsettledWork = transcribe
+            ? unsettledState(record.state)
+            : names.some(
+                  (name) =>
+                      steps[name] !== undefined &&
+                      unsettledState(steps[name]?.state),
+              );
+        if (!hasUnsettledWork) return false;
+        const advance = await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.userId,
+            view: input.view,
+            reason: transcribe ? "transcript" : "summary",
+        });
+        if (!advance) return false;
+        const generation = advance.requestedGeneration;
+        for (const name of names) {
+            const step = steps[name];
+            if (!step || !unsettledState(step.state)) continue;
+            steps[name] = {
+                ...step,
+                state: "skipped",
+                reason: "shared",
+                generation,
+            };
+        }
+        const currentSteps = Object.values(steps).filter(
+            (step) =>
+                !record.inputs || stepUsesInput(step, record, record.inputs),
+        );
+        const settled =
+            transcribe ||
+            (currentSteps.length > 0 &&
+                currentSteps.every(
+                    (step) => step.state === "done" || step.state === "skipped",
+                ));
+        return updatePhaseInTx(
+            tx,
+            input.itemId,
+            input.view,
+            input.userId,
+            phase,
+            {
+                ...record,
+                ...(transcribe ? {} : { steps }),
+                state: settled ? "skipped" : record.state,
+                reason: settled ? "shared" : record.reason,
+                generation,
+                at: new Date().toISOString(),
+            },
+        );
+    });
+    if (marked) nudge();
+    return marked;
+}
+
 /**
  * Persist that Learn released the current content, or timed out awaiting review.
  *

@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
     emitEvent: vi.fn(),
     limit: vi.fn(),
     markAutomaticTitleSkipped: vi.fn(),
+    markAutomaticStepShared: vi.fn(),
+    contentWriterRefusalNow: vi.fn(),
     readProcessing: vi.fn(),
     resolveItemProfile: vi.fn(),
 }));
@@ -24,7 +26,11 @@ vi.mock("@/db", () => ({
 }));
 vi.mock("@/lib/pipeline/state", () => ({
     markAutomaticTitleSkipped: mocks.markAutomaticTitleSkipped,
+    markAutomaticStepShared: mocks.markAutomaticStepShared,
     readProcessing: mocks.readProcessing,
+}));
+vi.mock("@/lib/sharing/writer", () => ({
+    contentWriterRefusalNow: mocks.contentWriterRefusalNow,
 }));
 vi.mock("@/lib/recordings/apply-generated-title", () => ({
     applyGeneratedTitle: mocks.applyGeneratedTitle,
@@ -53,6 +59,8 @@ const input = {
 describe("title after summary", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.contentWriterRefusalNow.mockReset().mockResolvedValue(null);
+        mocks.markAutomaticStepShared.mockResolvedValue(true);
         mocks.readProcessing.mockResolvedValue({ phases: {} });
         mocks.resolveItemProfile.mockResolvedValue({
             assigned: true,
@@ -60,6 +68,7 @@ describe("title after summary", () => {
             settings: { steps: { title: { automatic: true } } },
         });
         mocks.limit
+            .mockReset()
             .mockResolvedValueOnce([
                 {
                     kind: "audio",
@@ -91,6 +100,40 @@ describe("title after summary", () => {
             "user-1",
             "rec-1",
         );
+    });
+
+    it("settles a shared title before calling its provider", async () => {
+        mocks.contentWriterRefusalNow.mockResolvedValue("shared");
+        await updateTitleAfterSummary(input);
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.markAutomaticStepShared).toHaveBeenCalledWith({
+            itemId: input.recordingId,
+            userId: input.userId,
+            view: "private",
+            step: "title",
+        });
+    });
+
+    it("settles a title refused at save time because it was shared during generation", async () => {
+        mocks.contentWriterRefusalNow
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce("shared");
+        mocks.applyGeneratedTitle.mockResolvedValueOnce(false);
+        await updateTitleAfterSummary(input);
+        expect(mocks.markAutomaticStepShared).toHaveBeenCalledOnce();
+        expect(mocks.markAutomaticTitleSkipped).not.toHaveBeenCalled();
+    });
+
+    it("tries a shared-skipped title again after unsharing", async () => {
+        mocks.readProcessing.mockResolvedValue({
+            phases: {
+                summary: {
+                    steps: { title: { state: "skipped", reason: "shared" } },
+                },
+            },
+        });
+        await updateTitleAfterSummary(input);
+        expect(mocks.applyGeneratedTitle).toHaveBeenCalledOnce();
     });
 
     it("does not generate again after the automatic title step is done", async () => {
