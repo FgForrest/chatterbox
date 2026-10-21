@@ -24,6 +24,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
+import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
 import {
     BUILTIN_PROMPTS_VERSION,
@@ -83,6 +84,10 @@ export async function generateMailSummary(
         actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
+
+    const itemProfileRevisionId =
+        (await readProcessing(itemId, ctx.view, ctx.ownerUserId))
+            ?.profileRevisionId ?? null;
 
     const [mail] = await db
         .select({
@@ -154,9 +159,6 @@ export async function generateMailSummary(
         | MailProfileSettings
         | undefined;
     const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
-    const itemProfileRevisionId =
-        opts.profileRevisionId ??
-        (profile?.assigned ? profile.revisionId : null);
     const titleFence: TitleInputFence = {
         contentId: stored.sourceId,
         contentSourceId: "mail",

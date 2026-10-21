@@ -773,6 +773,8 @@ export async function upsertEnhancement(
                     },
                     generation: advance.requestedGeneration,
                     inputFingerprint: args.inputFingerprint,
+                    currentInputsVerified:
+                        "itemProfileRevisionId" in args.inputs,
                 });
             }
             return { advance, outdated: false };

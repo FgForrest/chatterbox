@@ -31,13 +31,15 @@ export async function updateTitleAfterSummary(input: {
         input.userId,
     );
     const title = profile.settings.steps.title;
-    const fenceInput = input.fence ?? processing?.phases.summary?.inputs;
-    const fence = fenceInput
-        ? {
-              ...fenceInput,
-              profileRevisionId: profile.assigned ? profile.revisionId : null,
-          }
-        : undefined;
+    const summaryInputs = processing?.phases.summary?.inputs;
+    const fence =
+        input.fence ??
+        (summaryInputs
+            ? {
+                  ...summaryInputs,
+                  profileRevisionId: processing?.profileRevisionId ?? null,
+              }
+            : undefined);
     const settleSkipped = async (
         reason:
             | "first_summary_title_disabled"
