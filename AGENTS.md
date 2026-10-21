@@ -41,6 +41,7 @@ Design rationale goes in the commit message.
 - When running check/typecheck/test commands, capture the full output — do not pipe through `| tail`, `| head`, or otherwise truncate. Hidden errors are the whole problem these commands are supposed to surface.
 - Tests: `pnpm test` (from repo root). Integration tests are opt-in via `PLAUD_BEARER_TOKEN=... bun test src/tests/plaud.integration.test.ts`.
 - If you create or modify a test file, run it and iterate until it passes.
+- Before pushing, run the tests your change reaches, not the whole suite: `pnpm vitest run --changed origin/dev` (or `pnpm vitest related <changed files> --run`), plus the integration tests of the area you touched. CI runs the whole suite on every push; a PR is not ready until its Test job is green, and a red Test job is yours to fix. Run the whole suite locally when a change reaches tests outside the import graph: `src/db/schema.ts` and migrations, `messages/*.json`, shared test helpers and fixtures, or `vitest.config.ts`.
 - Regression tests for a specific bug go at `src/tests/regressions/<issue-number>-<short-slug>.test.ts` (create the directory the first time).
 - **NEVER run without user instruction:** `pnpm dev`, `pnpm build`, `pnpm db:migrate`, `pnpm db:generate`, `docker compose up`, any release command.
 - Dev diagnostics endpoint: `/api/dev/plaud/info` (dev-only, hidden in production) — probes the stored Plaud connection and reports device + recording counts. Useful for "is the connection actually working" without digging into the DB.
