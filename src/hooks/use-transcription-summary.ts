@@ -74,6 +74,8 @@ export interface SummaryData {
      * names or terms in it may be stale.
      */
     stale?: boolean;
+    /** The summary was made from a different content row or revision. */
+    olderContent?: boolean;
     /** The item's effective folder scope differs from the summary run. */
     scopeChanged?: boolean;
     /**

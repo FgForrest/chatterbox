@@ -380,6 +380,53 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         }
     });
 
+    it.each([
+        false,
+        true,
+    ])("shows the earlier-content chip when stale is %s", (stale) => {
+        state.summaryData = summary({ olderContent: true, stale });
+        renderWidget(kind, { learnHold: "review" });
+
+        expect(
+            screen.getByText(
+                kind === "mail"
+                    ? "Made from an earlier version of the message"
+                    : "Made from an earlier transcript",
+            ),
+        ).toBeTruthy();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+        expect(
+            screen.queryByText("May contain stale names or terms"),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+    });
+
+    it("shows the earlier-content chip without Regenerate for a read-only viewer", () => {
+        state.summaryData = summary({ olderContent: true });
+        renderWidget(kind, { canChange: false });
+
+        expect(
+            screen.getByText(
+                kind === "mail"
+                    ? "Made from an earlier version of the message"
+                    : "Made from an earlier transcript",
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+    });
+
+    it("clears the note after a summary of the current content is loaded", () => {
+        state.summaryData = summary({ olderContent: true });
+        const rendered = renderWidget(kind);
+        state.summaryData = summary({ olderContent: false, stale: false });
+        rendered.rerender(getWidget(kind));
+
+        expect(screen.queryByText(/Made from an earlier/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+    });
+
     it("shows multi-pass progress and elapsed time while running", () => {
         state.isSummarizing = true;
         state.summaryProgress = { phase: "passes", completed: 2, total: 3 };

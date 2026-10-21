@@ -404,6 +404,16 @@ export function SummaryWidget({
         </div>
     );
 
+    let contentNote: string | null = null;
+    if (summaryData?.olderContent) {
+        contentNote =
+            kind === "mail"
+                ? i18n("Made from an earlier version of the message")
+                : i18n("Made from an earlier transcript");
+    } else if (summaryData?.stale) {
+        contentNote = i18n("May contain stale names or terms");
+    }
+
     let summaryContent: ReactNode;
     if (!summaryLoaded) {
         summaryContent = (
@@ -493,9 +503,9 @@ export function SummaryWidget({
                                     {multiPassBadge.label}
                                 </span>
                             )}
-                            {summaryData.stale && source === "riffado" && (
+                            {contentNote && source === "riffado" && (
                                 <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                    {i18n("May contain stale names or terms")}
+                                    {contentNote}
                                     {canChange && (
                                         <button
                                             type="button"
