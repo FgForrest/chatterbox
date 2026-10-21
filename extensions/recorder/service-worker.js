@@ -663,9 +663,11 @@ function updateRecordingFolder(message, sender) {
     const update = folderUpdates.catch(() => {}).then(async () => {
         const state = await getState();
         const popup = sender.url === chrome.runtime.getURL(POPUP_URL);
-        const picker = sender.url === chrome.runtime.getURL(
-            `picker/picker.html?requestId=${state.pickerRequestId}`,
-        ) && sender.tab?.windowId === state.captureWindowId;
+        const pickerUrl = chrome.runtime.getURL("picker/picker.html");
+        const picker = Boolean(sender.url?.startsWith(`${pickerUrl}?`)) &&
+            state.pickerRequestId != null &&
+            new URL(sender.url).searchParams.get("requestId") === state.pickerRequestId &&
+            sender.tab?.windowId === state.captureWindowId;
         if (!popup && !picker) throw new Error(t("unrecognizedSender"));
         const settings = await getSettings();
         if (state.sessionId !== message.sessionId || state.state !== STATE.recording ||
@@ -1924,7 +1926,7 @@ async function reconcileOnStartup() {
                 });
             } catch (error) {
                 await setState({
-                ...recordingFolderState(meta),
+                    ...recordingFolderState(meta),
                     state: STATE.error,
                     sessionId: serverSessionId,
                     bufferId: sessionId,

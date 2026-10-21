@@ -23,8 +23,8 @@ system audio to extensions.
    and enable **Share system audio** if Chrome offers it. The extension keeps
    only audio. The recorder window shows microphone and source levels; you can
    minimize it. Closing it stops capture and uploads the saved chunks. If Chrome
-   cannot share screen audio, use the meeting's browser version. Starts from a
-   notification or the microphone permission window also use the picker. If
+   cannot share screen audio, use the meeting's browser version. Starting from a
+   notification or the microphone permission window also uses the picker. If
    Chrome refuses direct capture of a tab, the picker opens instead.
 3. Audio is encoded in 5-second slices, encrypted with a server-issued
    per-recording key before it is written to browser storage, and uploaded to
