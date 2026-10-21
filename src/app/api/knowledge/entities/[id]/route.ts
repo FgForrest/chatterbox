@@ -34,7 +34,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Rename a thing, describe it, or give it another type, all or nothing. An
- * Organization thing is the organization account's to change (403 for
+ * Organization thing is an Organization curator's to change (403 for
  * others); a member's description of one becomes their private notes.
  */
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
@@ -86,7 +86,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 /**
  * Fold this thing into another of its type (`{mergeIntoId}`): a private
  * one into the caller's own or the Organization's, an Organization one
- * (its account only) into another of the Organization's.
+ * (its curators only) into another of the Organization's.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -122,7 +122,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Erase a thing, its nicknames, the facts about it and the corrections
- * linking to it. An Organization thing is its account's to erase.
+ * linking to it. An Organization thing is its curators' to erase.
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);

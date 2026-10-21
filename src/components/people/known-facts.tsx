@@ -78,6 +78,7 @@ export interface FactEditing {
     typeLabels: Record<string, string>;
     /** The scope of the viewer's own facts: the Organization's for its account. */
     ownScope: "personal" | "org";
+    canCurateOrganization?: boolean;
 }
 
 /**
@@ -216,7 +217,9 @@ export function KnownFacts({
                         {group.facts.map((fact) => {
                             const own =
                                 editing !== undefined &&
-                                fact.scope === editing.ownScope;
+                                (fact.scope === editing.ownScope ||
+                                    (fact.scope === "org" &&
+                                        editing.canCurateOrganization));
                             const relationKey = group.key.split("|")[0] ?? "";
                             const recordingsCount = new Set(
                                 fact.evidence
@@ -402,6 +405,7 @@ export function OtherNames({
         target: { personId: string } | { entityId: string };
         /** The scope of the viewer's own names. */
         ownScope: "personal" | "org";
+        canCurateOrganization?: boolean;
     };
 }) {
     const i18n = useExtracted();
@@ -465,7 +469,11 @@ export function OtherNames({
             </h2>
             <div className="flex flex-wrap items-center gap-1.5 text-sm">
                 {aliases.map((name) =>
-                    editing && name.id && name.scope === editing.ownScope ? (
+                    editing &&
+                    name.id &&
+                    (name.scope === editing.ownScope ||
+                        (name.scope === "org" &&
+                            editing.canCurateOrganization)) ? (
                         <span
                             key={name.id}
                             className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"

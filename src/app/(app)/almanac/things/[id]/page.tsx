@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { EntityDetail } from "@/components/people/entity-detail";
 import { requireAuth } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { listAliases } from "@/lib/knowledge/aliases";
 import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
 import { getEntity } from "@/lib/knowledge/entities";
@@ -31,7 +32,7 @@ export default async function EntityPage({ params }: Params) {
     }
 
     const orgUserId = await getOrgUserId();
-    const organization = userId === orgUserId;
+    const organization = await userCuratesOrganizationNow(userId);
     const [facts, otherNames, vocabulary] = await Promise.all([
         factsForPage(userId, orgUserId, { entityId: id }),
         listAliases(userId, { entityId: id }),
@@ -39,8 +40,6 @@ export default async function EntityPage({ params }: Params) {
     ]);
     const almanac = almanacVocabulary(vocabulary, labels);
     const typeLabel = almanac.typeLabels[entity.typeKey] ?? null;
-    // Private things are their owner's to change; the Organization's, its
-    // account's. Such a thing takes the Organization's types and the core's.
     const canManage = entity.scope === "personal" || organization;
     const types =
         entity.scope === "org"
@@ -76,7 +75,8 @@ export default async function EntityPage({ params }: Params) {
                     },
                     relations: almanac.relations,
                     typeLabels: almanac.typeLabels,
-                    ownScope: organization ? "org" : "personal",
+                    ownScope: "personal",
+                    canCurateOrganization: organization,
                 }}
             />
         </div>

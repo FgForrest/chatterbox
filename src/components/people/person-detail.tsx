@@ -197,6 +197,7 @@ export function PersonDetail({
                     editing && {
                         target: { personId: person.id },
                         ownScope: editing.ownScope,
+                        canCurateOrganization: editing.canCurateOrganization,
                     }
                 }
             />
