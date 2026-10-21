@@ -188,3 +188,65 @@ it("renders a compact line with one accessible expand control", () => {
     fireEvent.click(control);
     expect(onExpand).toHaveBeenCalledOnce();
 });
+
+function CompactWidget() {
+    const [expanded, setExpanded] = useState(false);
+    return (
+        <WorkflowWidget
+            id="compact-widget"
+            frame="inline"
+            tone="quiet"
+            title="Compact title"
+            onOpenChange={setExpanded}
+            inlineLine={expanded ? undefined : <p>Compact line</p>}
+        >
+            <p>Compact body</p>
+        </WorkflowWidget>
+    );
+}
+
+it("leaves the compact line and focuses the visible heading through openWidget", async () => {
+    render(<CompactWidget />);
+    expect(screen.getByText("Compact line")).toBeTruthy();
+    openWidget("compact-widget");
+
+    const heading = await screen.findByRole("heading", {
+        name: "Compact title",
+    });
+    expect(heading.closest("[hidden]")).toBeNull();
+    expect(screen.queryByText("Compact line")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+});
+
+it("keeps body state mounted while collapsed or replaced by a compact line", () => {
+    const contents = (collapsed: boolean, compact: boolean) => (
+        <WorkflowWidget
+            id="preserved"
+            frame="inline"
+            tone="quiet"
+            title="Preserved title"
+            description="Hidden description"
+            collapsed={collapsed}
+            inlineLine={compact ? <p>Compact line</p> : undefined}
+            headerAction={<button type="button">Header action</button>}
+            footer={{ status: "Footer status", actions: null }}
+        >
+            <input aria-label="Pending answer" defaultValue="" />
+        </WorkflowWidget>
+    );
+    const rendered = render(contents(false, false));
+    const input = screen.getByRole("textbox", { name: "Pending answer" });
+    fireEvent.change(input, { target: { value: "Unfinished answer" } });
+    rendered.rerender(contents(true, false));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("Hidden description")).toBeNull();
+    expect(screen.getByText("Footer status").closest("[hidden]")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Header action" })).toBeTruthy();
+    rendered.rerender(contents(true, true));
+    expect(screen.getByText("Compact line")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Header action" })).toBeNull();
+    rendered.rerender(contents(false, false));
+    expect(screen.getByRole("textbox", { name: "Pending answer" })).toBe(input);
+    expect(input).toHaveProperty("value", "Unfinished answer");
+    expect(screen.getByText("Footer status").closest("[hidden]")).toBeNull();
+});

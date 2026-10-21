@@ -6,7 +6,9 @@ import {
     aiEnhancements,
     chatterItems,
     itemProcessing,
+    mailContents,
     recordings,
+    transcriptions,
 } from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
@@ -41,6 +43,7 @@ import {
 import {
     readStoredSummaries,
     readStoredSummary,
+    type StoredSummary,
 } from "@/lib/summary/read-summary";
 import {
     enqueueSummaryJob,
@@ -476,6 +479,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         });
     }
 
+    const [stale, olderContent] = await Promise.all([
+        summaryIsStale(stored),
+        summaryUsesOlderContent(stored, access.contentUserId, id),
+    ]);
+
     return NextResponse.json({
         summary: stored.summary,
         keyPoints: stored.keyPoints,
@@ -488,7 +496,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         createdAt: stored.createdAt,
         // Made from the transcript before its corrections changed: names
         // or terms in it may be stale. Only when both fingerprints exist.
-        stale: await summaryIsStale(stored),
+        stale,
+        olderContent,
         scopeChanged: stored.scopeChanged,
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
@@ -504,6 +513,63 @@ async function summaryIsStale(stored: {
     if (!stored.inputFingerprint || !stored.transcriptionId) return false;
     const current = await llmRendering(stored.transcriptionId);
     return current !== null && current.fingerprint !== stored.inputFingerprint;
+}
+
+async function summaryUsesOlderContent(
+    stored: StoredSummary,
+    userId: string,
+    itemId: string,
+): Promise<boolean> {
+    const inputs = stored.runInputs;
+    if (
+        typeof inputs?.contentId !== "string" ||
+        typeof inputs.contentRevision !== "number"
+    ) {
+        return false;
+    }
+    const source = inputs.contentSourceId;
+    if (
+        source !== "mail" &&
+        source !== "riffado" &&
+        source !== "plaud" &&
+        source !== "mixed"
+    ) {
+        return false;
+    }
+    const [current] =
+        source === "mail"
+            ? await db
+                  .select({
+                      id: mailContents.id,
+                      revision: mailContents.revision,
+                  })
+                  .from(mailContents)
+                  .where(
+                      and(
+                          eq(mailContents.itemId, itemId),
+                          eq(mailContents.userId, userId),
+                      ),
+                  )
+                  .limit(1)
+            : await db
+                  .select({
+                      id: transcriptions.id,
+                      revision: transcriptions.revision,
+                  })
+                  .from(transcriptions)
+                  .where(
+                      and(
+                          eq(transcriptions.recordingId, itemId),
+                          eq(transcriptions.userId, userId),
+                          eq(transcriptions.source, source),
+                      ),
+                  )
+                  .limit(1);
+    return (
+        current !== undefined &&
+        (inputs.contentId !== current.id ||
+            inputs.contentRevision !== current.revision)
+    );
 }
 
 // DELETE - Remove summary
