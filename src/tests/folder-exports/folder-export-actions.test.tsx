@@ -65,7 +65,7 @@ function mockServer(options: {
                     available: true,
                     connection: options.connection
                         ? {
-                              email: "jane@example.com",
+                              email: "velnora@example.com",
                               hostedDomain: "example.com",
                               status: options.connection,
                           }
@@ -90,12 +90,14 @@ function mockServer(options: {
     return requests;
 }
 
-function renderActions() {
+function renderActions(reopen?: "form" | "list", onReopenHandled?: () => void) {
     render(
         <FolderExportActions
             folder={folder}
             providers={{ filesystem: false, googleDrive: true, mail: true }}
             privateTree
+            reopen={reopen}
+            onReopenHandled={onReopenHandled}
         />,
     );
 }
@@ -126,7 +128,7 @@ describe("folder export dialog with Google Drive", () => {
                 name: /Add Google Drive export/,
             }),
         );
-        await screen.findByText("Connected as jane@example.com");
+        await screen.findByText("Connected as velnora@example.com");
         const save = screen.getByRole("button", { name: "Save export" });
         expect(save).toHaveProperty("disabled", true);
         // Mail is on here, and off for a new export.
@@ -203,12 +205,14 @@ describe("folder export dialog with Google Drive", () => {
         window.history.replaceState(
             null,
             "",
-            "/dashboard?folder=f1&googleExport=f1&google=connected",
+            "/dashboard?folder=f1&google=connected",
         );
-        renderActions();
-        await screen.findByText("Connected as jane@example.com");
+        const handled = vi.fn();
+        renderActions("form", handled);
+        await screen.findByText("Connected as velnora@example.com");
         expect(screen.getByText("No folder chosen")).toBeTruthy();
         expect(window.location.search).toBe("?folder=f1&google=connected");
+        expect(handled).toHaveBeenCalledOnce();
     });
 
     it("lists a Drive export by its folder name", async () => {

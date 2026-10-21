@@ -201,7 +201,7 @@ describe("recording detail layout", () => {
         }
     });
 
-    it("uses the pile label and a kind-neutral empty state", () => {
+    it("uses the current location and a kind-neutral empty state", () => {
         const { rerender } = render(
             <WorkstationDetailPane
                 {...sharedProps}
@@ -209,9 +209,7 @@ describe("recording detail layout", () => {
             />,
         );
 
-        expect(
-            screen.getByRole("button", { name: "Back to the pile" }),
-        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Recent" })).toBeTruthy();
 
         rerender(
             <WorkstationDetailPane {...sharedProps} currentRecording={null} />,
@@ -222,6 +220,24 @@ describe("recording detail layout", () => {
         expect(screen.queryByText(/Select a recording/)).toBeNull();
     });
 
+    it.each([
+        "Recent",
+        "Private",
+        "Invented folder",
+    ])("names the current list location on the phone back button: %s", (backLabel) => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+                backLabel={backLabel}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: backLabel }).className,
+        ).toContain("lg:hidden");
+        fireEvent.click(screen.getByRole("button", { name: backLabel }));
+        expect(sharedProps.onBackToList).toHaveBeenCalled();
+    });
     it.each([
         ["a different recording", "recording=other&playFrom=12500", recording],
         [

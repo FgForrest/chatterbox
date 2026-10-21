@@ -8,14 +8,14 @@ description: Seznam nahrávek, přehrávač, nahrávání souborů, složky, maz
 
 ## Seznam nahrávek
 
-Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, seskupené podle dne. Každý řádek ukazuje název a první odpovídající slova, nebo odesílatele, délku a datum, pokud není k dispozici text.
+Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, seskupené podle dne. Každý řádek ukazuje název, případně podsložku a kdo položku sdílí, a potom náhled textu s délkou a datem.
 
 ![Seznam nahrávek s filtrem Potřebuje zkontrolovat](images/recording-list-needs-review.png)
 
 - **Hledat** prohledává pole vybraná v části **Hledat v**: názvy, přepisy a text zpráv nebo shrnutí. Prohledává opravené přepisy. Text pošty nezahrnuje citované dřívější zprávy, podpisy ani právní dovětky.
-- Nabídka **Vše · Nejnovější** určuje zobrazené kanály a řadí výsledek od nejnovějších, od nejstarších nebo podle názvu. Volba **Potřebuje zkontrolovat** se v nabídce objeví, když má Učení návrhy čekající na schválení. Viz [Učení](learn.md).
-- **Organizovat** přepne seznam do režimu složek. Viz [Soubory](#folders).
-- Nabídka **⋯** na řádku otevře detail nahrávky, stáhne zvuk nebo ji odstraní.
+- Nabídka **Vše · Nejnovější** určuje zobrazené kanály a řadí výsledek od nejnovějších, od nejstarších, podle názvu, délky nebo velikosti. Volba **Potřebuje zkontrolovat** se v nabídce objeví, když má Učení návrhy čekající na schválení. Viz [Učení](learn.md).
+- Výběrem **Nedávné**, **Soukromé**, **Organizace** nebo konkrétní složky změníte umístění seznamu. Viz [Složky](#folders).
+- Nabídka **⋯** na řádku otevře položku, z Nedávných či kořene knihovny ji přidá do složky, z vlastní složky ji přesune nebo stáhne zvuk či zprávu. Smazání je dostupné v soukromém pohledu; u sdílené položky upozorní na ztrátu přístupu kolegů.
 
 <span id="adding-recordings" />
 
@@ -26,7 +26,7 @@ Nahrávky přibývají dvěma způsoby:
 - **Z Vašeho záznamníku.** Klepna stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
 - **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. Nová nahrávka bude vybraná vpravo a pracovní postup bude na začátku. U videa si Klepna ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
 
-Účet bez nahrávek přesto zobrazuje panel složek vlevo. Pomocí **Nová složka** tak můžete knihovnu uspořádat ještě před první synchronizací nebo nahráním.
+Účet bez vlastních položek začíná v **Organizaci**, pokud už kolegové něco sdíleli. V detailu se otevře nejnovější sdílená položka a nad seznamem jsou akce pro synchronizaci a nahrání. Pokud jsou obě knihovny prázdné, začněte pomocí **Nová složka**, **Synchronizovat zařízení** nebo **Nahrát**.
 
 Pořizujete záznam schůzky v prohlížeči na Linuxu? Váš administrátor Vám může poskytnout **meetrec**, malý program z příkazového řádku, který zaznamená Vás i ostatní účastníky do jednoho souboru vhodného pro nahrání. Viz [Pro administrátory](administrators.md#meeting-recorder-meetrec).
 
@@ -75,19 +75,23 @@ Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá z
 
 **Vymazat** odstraní části nahrávky a zbytek ponechá:
 
-- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Klepna. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
+- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Klepně. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
 - **Vymazat přepisy** a **Vymazat souhrny** odstraní pouze tyto položky.
-- **Smazat všechna místní data** vymaže nahrávku z Klepna, ale originál zůstane ve Vašem cloudu rekordéru.
+- **Smazat všechna místní data** vymaže nahrávku z Klepny, ale originál zůstane ve Vašem cloudu rekordéru.
 - **Přemístit originál Plaud do Koše** přesune originál do Koše na Vašem cloudu rekordéru.
 - **Smazat všude** provede obojí. Akci potvrdíte opsáním názvu nahrávky.
 
-Nahrávka sdílená s organizací je nejprve odebrána z organizace. Viz [Organizace](organization.md).
+Nahrávka sdílená s Organizací je nejprve odebrána z Organizace. Viz [Organizace](organization.md).
 
 <span id="folders" />
 
 ## Složky
 
-Klikněte na **Organizovat** nad seznamem pro zobrazení svých složek.
+Od šířky 1280 px je vedle seznamu a detailu panel složek. Ikona sbalení panelu vedle **Najít složku** (**Skrýt složky**) jej nahradí dlaždicemi nad seznamem; **Zobrazit složky** jej vrátí. Na užších obrazovkách používají stejná umístění dlaždice a drobečkovou navigaci. Na telefonu se položka otevře v detailu; tlačítko návratu uvádí aktuální umístění, například **Nedávné**, **Soukromé** nebo název složky, a obnoví stejné umístění i posun seznamu.
+
+**Nedávné** obsahují vlastní položky. Účet Organizace zde vidí položky Organizace a nemá kořen Soukromé. Seznam složky zahrnuje i podsložky, jejichž názvy ukazuje na řádcích. Otevření položky zachová umístění; odkaz obsahuje složku i položku.
+
+Od šířky 1024 px se panel složek a seznam posouvají samostatně a postupně načítají další položky. Umístění a ovládání seznamu zůstávají nahoře; dlaždice složek se posouvají s položkami. Na menší obrazovce se posouvá celá stránka. Větve pod první úrovní začínají sbalené. Prohlížeč si pro Váš účet pamatuje rozbalení a viditelnost panelu. **Naposledy použité** ukazuje počty položek až u pěti vlastních složek, které jste otevřeli nebo do nich zařadili položku. Dlouhá úroveň ukáže osm aktivních složek v panelu, šest v dlaždicích, v běžném pořadí; **Všech N** zobrazí ostatní. Hledání složek prohledává názvy i cesty bez ohledu na diakritiku. Složky najde také **⌘K**. Bez dotazu ukazuje jen naposledy použité složky; hledání nabídne nejvýše osm shod.
 
 ![Složky](images/folders.png)
 
@@ -96,16 +100,18 @@ Klikněte na **Organizovat** nad seznamem pro zobrazení svých složek.
 
 První složku vyberte na vložené kartě **Zařadit nahrávku**, nebo přetáhněte řádek nahrávky na složku. Po zařazení přidáte další umístění pomocí **Přidat do složky** v řádku složek:
 
-![Řádek složek s nabídkou Přidat do složky](images/add-to-folder.png)
+![Řádek složek s výběrem Přidat do složky](images/add-to-folder.png)
+
+Výběr složky otevře rovnou vyhledávací pole. Před psaním ukazuje naposledy použité složky a odsazené hierarchie Soukromé a Organizace. Cesty uvádí u naposledy použitých složek a výsledků hledání. Shody názvu jsou před shodami cesty. Již přiřazené složky zůstávají označené a nelze je zvolit znovu. Šipkami a Enter vyberete složku, Escape výběr zavře. Pokud nic neodpovídá, **Vytvořit složku „…“** nabídne volbu nadřazené složky. Přímo pod Organizací mohou tvořit složky jen kurátoři.
 
 Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky. Zobrazuje se tu také zamýšlená složka Organizace; položka s volbou **Bez automatického zpracování** u ní nabízí **Sdílet nyní**, dokud ji nenasdílíte nebo umístění nezrušíte.
 
-Pro správu složek použijte nabídku **⋯** vedle složky: **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Odstranit**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
+Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
 
-Kliknutím na složku zobrazíte její nahrávky v tabulce, kterou lze řadit podle názvu, data, délky nebo velikosti:
+Kliknutím na složku zobrazíte její položky v seznamu. Název aktuální složky v drobečkové navigaci nebo **⋯** vedle počtu položek otevře přejmenování, poštovní adresy, výchozí profily, novou podsložku, přesun a smazání:
 
 ![Složka](images/folder-pane.png)
 
-**Zpracování** u složky určuje profily pro nahrávky a poštu. **Export** nastavuje export na disk či Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
+Nastavení složky ukazuje **Název** jako text; **Přejmenovat** otevře pole pro úpravu. **E-mail do složky** ukazuje adresu, kopírování a čas posledního e-mailu, pokud je příjem pošty zapnutý. **Výchozí profil zpracování** ukazuje aktuální profily nahrávek a pošty včetně zděděných hodnot; **Změnit** je upraví. **Export** ukazuje cíle nebo **Nenastaveno**, s akcí **Změnit** či **Nastavit** pro export na disk nebo Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
 
 Další: [Přepisy](transcripts.md)

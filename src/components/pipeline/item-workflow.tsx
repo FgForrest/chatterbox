@@ -39,6 +39,8 @@ import type {
 } from "@/types/folder";
 
 interface FolderActions {
+    canCurate?: boolean;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     folders: RecordingFolder[];
     folderAssignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
@@ -90,6 +92,8 @@ export function ProcessingFolderRow({
     onProfileChange,
     onCancelIntent,
     onShareNow,
+    canCurate,
+    onFolderCreated,
 }: ProcessingFolderRowProps) {
     const i18n = useExtracted();
     const profileChoice = processing?.manualOnly
@@ -144,6 +148,8 @@ export function ProcessingFolderRow({
                     canWithdraw={canWithdraw}
                     organizationOnly={organizationOnly}
                     onMove={onMoveBetweenFolders}
+                    canCurate={canCurate}
+                    onFolderCreated={onFolderCreated}
                 />
                 {!organizationOnly &&
                     processing?.intents.map((intent) => (
@@ -266,7 +272,6 @@ interface ItemWorkflowProps extends FolderActions {
     canWithdraw?: boolean;
     view?: "private" | "org";
     onChanged?: () => void;
-    onFolderCreated?: (folder: CreatedFolder) => void;
     onTranscribe?: (retranscribe?: boolean) => void;
     onLearn?: () => void;
     onSummary?: () => void;
@@ -291,6 +296,7 @@ export function ItemWorkflow({
     onMoveBetweenFolders,
     onChanged,
     onFolderCreated,
+    canCurate,
     onTranscribe,
     onLearn,
     onSummary,
@@ -640,6 +646,8 @@ export function ItemWorkflow({
         : undefined;
 
     const folderProps = {
+        canCurate,
+        onFolderCreated,
         folders,
         folderAssignments,
         onSelectFolder,

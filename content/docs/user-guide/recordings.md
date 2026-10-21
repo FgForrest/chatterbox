@@ -5,14 +5,14 @@ description: The recording list, the player, uploads, folders, erasing, and what
 
 ## The recording list
 
-The Chatter list on the left shows your newest recordings and mail first, grouped by day. Each row shows the title and the first matching words, or its sender, length and date when there is no text to show.
+The Chatter list on the left shows your newest recordings and mail first, grouped by day. Each row shows the title, its subfolder and who shared it when relevant, then a text preview with length and date.
 
 ![The recording list with the Needs review filter on](images/recording-list-needs-review.png)
 
 - **Search** reads the fields selected under **Search in**: titles, transcripts and message text, or summaries. It reads corrected transcripts. Mail text excludes quoted earlier messages, signatures and disclaimers.
-- The **All · Newest** menu chooses which channels to show and sorts the result by newest, oldest or name. **Needs review** appears in this menu when Learn has proposals waiting. See [Learn](learn.md).
-- **Organize** switches the list to your folders. See [Folders](#folders).
-- The **⋯** menu on a row opens the recording, downloads its audio, or deletes it.
+- The **All · Newest** menu chooses which channels to show and sorts the result by newest, oldest, name, duration or size. **Needs review** appears in this menu when Learn has proposals waiting. See [Learn](learn.md).
+- Choose **Recent**, **Private**, **Organization**, or a folder to change the list’s location. See [Folders](#folders).
+- The **⋯** menu on a row opens the item, adds it to a folder from Recent or a library root, moves it out of a custom folder, or downloads audio or the original message. Delete is available on your private view; deleting a shared item warns that colleagues lose access.
 
 ## Adding recordings
 
@@ -21,7 +21,7 @@ Recordings arrive in two ways:
 - **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
 - **By upload.** Click **Upload** on Recordings, Tasks, Almanac, or Settings and pick an audio or a video file. You can choose a folder before the upload; that recording skips the categorization wait and uses the folder's default profile. Without a folder it opens at **Categorize**. The new recording is selected on the right with its workflow at the start. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
 
-An account with no recordings still shows the folder panel on the left. Use **New folder** to organize the library before syncing or uploading anything.
+An account with no items of its own starts at **Organization** when colleagues have shared items. The newest shared item opens in the detail, with sync and upload actions above the list. When both libraries are empty, use **New folder**, **Sync device**, or **Upload** to get started.
 
 Recording a meeting held in the browser on Linux? Your administrator can give you **meetrec**, a small command-line recorder that captures both your microphone and the other participants into one file, ready to upload. See [For administrators](administrators.md#meeting-recorder-meetrec).
 
@@ -72,7 +72,11 @@ A recording shared with the Organization is taken out of the Organization first.
 
 ## Folders
 
-Click **Organize** above the list to see your folders.
+From 1280 px wide, a folder rail sits beside the item list and detail. The panel-collapse icon beside **Find a folder** (**Hide folders**) switches to folder tiles above the list; **Show folders** brings the rail back. Below 1280 px the same locations use tiles and breadcrumbs. On a phone, opening an item shows its detail; the back button names the current location, such as **Recent**, **Private**, or the folder name, and returns to the same list and scroll position.
+
+**Recent** shows your own items. The organization account sees Organization items here and has no Private root. Folder lists include descendants, with each subfolder named on its rows. Opening an item keeps the location; its link includes both folder and item.
+
+From 1024 px, the rail and list scroll independently and load more items as you scroll. The location and list controls stay pinned; folder tiles scroll with the items. Smaller screens use the page scrollbar. Folder branches start collapsed below the first level, and the browser remembers expansion and rail visibility for your account. **Recently used** shows counts for up to five custom folders you opened or filed into. A long level shows eight active folders in the rail, six in the tile grid, in their normal order; **All N** reveals the rest. Folder search ignores accents and searches names and paths. **⌘K** finds folders too. Before typing, it shows only recently used folders; a search shows up to eight folder matches.
 
 ![Folders](images/folders.png)
 
@@ -81,16 +85,18 @@ Click **Organize** above the list to see your folders.
 
 For the first folder, use the inline **Categorize recording** card or drag the recording's row onto a folder. Once categorized, use **Add to folder** in the folder row to add another placement:
 
-![The folder row with the Add to folder menu](images/add-to-folder.png)
+![The folder row with the Add to folder picker](images/add-to-folder.png)
+
+The picker focuses its search field. Before typing, it shows recently used folders and indented Private and Organization hierarchies. Paths appear for recent folders and search results. Search ranks name matches before path matches. Already assigned folders are marked and cannot be selected again. Use arrows and Enter to choose, or Escape to close. If nothing matches, **Create folder “…”** lets you choose a parent; only curators can create directly under Organization.
 
 A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder. An intended Organization folder also appears here; a **Nothing automatic** item offers **Share now** beside it until you share or cancel the placement.
 
-To manage folders, use the **⋯** menu next to a folder: **New subfolder**, **Rename**, **Move to…** and **Delete**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
+To manage folders, use **⋯ → Folder settings** next to a folder. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
 
-Click a folder to see its recordings in a table you can sort by title, date, length or size:
+Click a folder to show its items in the list. Use the current folder name in the breadcrumb or the **⋯** beside the list count to rename it, manage its mail addresses, change defaults, create a subfolder, move it, or delete it:
 
 ![A folder](images/folder-pane.png)
 
-**Processing** on a folder sets the profiles for recordings and mail. **Export** sets up an export to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
+Folder settings shows **Name** as text; **Rename** opens an inline field. **Mail to folder** shows the address, a copy button and when mail last arrived, when mail is enabled. **Default processing profile** shows the current recording and mail profiles, including inherited settings; **Change** edits them. **Export** shows its targets or **Not configured**, with **Change** or **Configure** to manage exports to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
 
 Next: [Transcripts](transcripts.md)

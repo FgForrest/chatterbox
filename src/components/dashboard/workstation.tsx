@@ -9,8 +9,9 @@ import { useAppChrome } from "@/components/app-chrome-provider";
 import { AppHeader } from "@/components/app-header";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
-import { FolderRecordingPane } from "@/components/dashboard/folder-recording-pane";
+import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
+import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
 import { PlaudReconnectBanner } from "@/components/dashboard/plaud-reconnect-banner";
 import {
     RecordingList,
@@ -27,7 +28,12 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import {
+    LibraryPreferencesContext,
+    useLibraryPreferencesState,
+} from "@/hooks/use-library-preferences";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import { useMailRefresh } from "@/hooks/use-mail-refresh";
 import { useOrgEvents } from "@/hooks/use-org-events";
@@ -40,7 +46,14 @@ import {
 } from "@/hooks/use-upload-queue";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
-import { sharedRecordingIds } from "@/lib/folders/hierarchy";
+import {
+    recordingIdsVisibleInFolder,
+    sharedRecordingIds,
+} from "@/lib/folders/hierarchy";
+import {
+    folderRowLocations,
+    libraryNavigation,
+} from "@/lib/folders/navigation";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -87,6 +100,7 @@ export interface OrganizationLibrary {
 }
 
 interface WorkstationProps {
+    userId?: string;
     recordings: Recording[];
     transcriptions: Map<string, TranscriptionData>;
     transcriptVariants?: Map<string, TranscriptOption[]>;
@@ -112,6 +126,7 @@ interface WorkstationProps {
 
 /** Recording library, selection, uploads and transcription actions. */
 export function Workstation({
+    userId,
     recordings,
     transcriptions,
     transcriptVariants,
@@ -135,8 +150,25 @@ export function Workstation({
     // The organization account has no library of its own; its "recent" list
     // is the Organization's.
     const libraryRecordings = isOrgAccount ? orgRecordings : recordings;
+    const locationQuery = useSearchParams().toString();
+    const initialQuery = locationQuery;
+    const newcomer =
+        !isOrgAccount && recordings.length === 0 && orgRecordings.length > 0;
+    const newest = (items: Recording[]) =>
+        [...items].sort(
+            (a, b) => Date.parse(b.startTime) - Date.parse(a.startTime),
+        )[0] ?? null;
+    const initialOrgRoot = initialFolderOrganization.folders.find(
+        (folder) => folder.scope === "org" && folder.parentId === null,
+    );
+    const initialLocation =
+        new URLSearchParams(initialQuery).get("folder") ??
+        (!new URLSearchParams(initialQuery).has("recording") && newcomer
+            ? initialOrgRoot?.id
+            : null) ??
+        "recent";
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
-        libraryRecordings[0] ?? null,
+        () => newest(newcomer ? orgRecordings : libraryRecordings),
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
     const {
@@ -162,14 +194,53 @@ export function Workstation({
     // toggle between them instead of stacking. Desktop ignores this
     // state entirely (both panes render via the grid).
     const [mobileView, setMobileView] = useState<"list" | "detail">("list");
-    const [libraryMode, setLibraryMode] = useState<"recent" | "organize">(
-        "recent",
+    const [location, setLocation] = useState<string>(initialLocation);
+    const selectedFolderId = location === "recent" ? null : location;
+    const setSelectedFolderId = useCallback(
+        (id: string | null) => setLocation(id ?? "recent"),
+        [],
     );
     const [folderOrganization, setFolderOrganization] =
         useState<FolderOrganization>(initialFolderOrganization);
-    const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
+    const [settingsFolderId, setSettingsFolderId] = useState<string | null>(
         null,
     );
+    const [exportReturn, setExportReturn] = useState<{
+        folderId: string;
+        view: "form" | "list";
+    } | null>(null);
+    const handleExportReopen = useCallback(() => setExportReturn(null), []);
+    const [settingsAction, setSettingsAction] = useState<
+        "create" | undefined
+    >();
+    const handleFolderCreated = useCallback((folder: CreatedFolder) => {
+        setFolderOrganization((current) =>
+            current.folders.some((item) => item.id === folder.id)
+                ? current
+                : { ...current, folders: [...current.folders, folder] },
+        );
+    }, []);
+    const navigationFolders = useMemo(
+        () =>
+            folderOrganization.folders.filter(
+                (folder) => !isOrgAccount || folder.scope === "org",
+            ),
+        [folderOrganization.folders, isOrgAccount],
+    );
+    const preferenceRecordings = useMemo(
+        () =>
+            (isOrgAccount ? orgRecordings : recordings).filter(
+                (item) => !hiddenIds.has(item.id),
+            ),
+        [recordings, orgRecordings, isOrgAccount, hiddenIds],
+    );
+    const libraryPreferences = useLibraryPreferencesState(
+        userId,
+        navigationFolders,
+        folderOrganization.assignments,
+        preferenceRecordings,
+    );
+    const { rememberFolder } = libraryPreferences;
     const selectedFolderIdRef = useRef(selectedFolderId);
     selectedFolderIdRef.current = selectedFolderId;
     const [firstLevelFolderOpen, setFirstLevelFolderOpen] = useState(false);
@@ -184,7 +255,6 @@ export function Workstation({
 
     useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
-    const locationQuery = useSearchParams().toString();
     const handledLocationQuery = useRef<string | null>(null);
     const [itemLinkQuery, setItemLinkQuery] = useState("");
     const writeSelection = useCallback(
@@ -198,9 +268,11 @@ export function Workstation({
             params.delete("recording");
             params.delete("folder");
             params.delete("view");
+            params.delete("googleExport");
             if (folderId) {
                 params.set("folder", folderId);
-            } else if (recording) {
+            }
+            if (recording) {
                 params.set("recording", recording.id);
                 if (recording.view === "org") params.set("view", "org");
             }
@@ -224,9 +296,8 @@ export function Workstation({
             setPendingUploadSelection(null);
             setItemLinkQuery("");
             setCurrentRecording(recording);
-            setSelectedFolderId(null);
             setMobileView("detail");
-            writeSelection(recording, null, method);
+            writeSelection(recording, selectedFolderIdRef.current, method);
         },
         [writeSelection],
     );
@@ -247,13 +318,47 @@ export function Workstation({
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             setItemLinkQuery("");
-            setLibraryMode("organize");
             setSelectedFolderId(folder.id);
-            setCurrentRecording(null);
-            setMobileView("detail");
-            writeSelection(null, folder.id, "push");
+            rememberFolder(folder.id);
+            const pool =
+                folder.scope === "org" ? orgRecordings : libraryRecordings;
+            const ids = recordingIdsVisibleInFolder(
+                folderOrganization.folders,
+                folderOrganization.assignments,
+                folder,
+                pool.map((item) => item.id),
+            );
+            const kept =
+                currentRecording &&
+                ids.has(currentRecording.id) &&
+                !hiddenIds.has(currentRecording.id)
+                    ? pool.find((item) => item.id === currentRecording.id)
+                    : null;
+            const first =
+                kept ??
+                [...pool]
+                    .filter(
+                        (item) => ids.has(item.id) && !hiddenIds.has(item.id),
+                    )
+                    .sort(
+                        (a, b) =>
+                            Date.parse(b.startTime) - Date.parse(a.startTime),
+                    )[0] ??
+                null;
+            setCurrentRecording(first);
+            setMobileView("list");
+            writeSelection(first, folder.id, "push");
         },
-        [writeSelection],
+        [
+            currentRecording,
+            folderOrganization,
+            hiddenIds,
+            libraryRecordings,
+            orgRecordings,
+            rememberFolder,
+            setSelectedFolderId,
+            writeSelection,
+        ],
     );
     const openSearchHit = useCallback(
         (hit: ChatterSearchHit): boolean => {
@@ -269,9 +374,17 @@ export function Workstation({
             if (!linked || hiddenIds.has(linked.id)) return false;
             selectRecordingByUser(linked);
             setSelectedFolderId(null);
+            writeSelection(linked, null, "replace");
             return true;
         },
-        [orgRecordings, recordings, hiddenIds, selectRecordingByUser],
+        [
+            orgRecordings,
+            recordings,
+            hiddenIds,
+            selectRecordingByUser,
+            setSelectedFolderId,
+            writeSelection,
+        ],
     );
 
     const readLocation = useCallback(
@@ -283,6 +396,28 @@ export function Workstation({
             )
                 return;
             const firstLoad = handledLocationQuery.current === null;
+            const reopenExport = params.get("googleExport");
+            if (reopenExport) {
+                const [exportFolderId, view] = reopenExport.split(".");
+                if (
+                    navigationFolders.some(
+                        (folder) => folder.id === exportFolderId,
+                    )
+                ) {
+                    setExportReturn({
+                        folderId: exportFolderId,
+                        view: view === "list" ? "list" : "form",
+                    });
+                    setSettingsFolderId(exportFolderId);
+                }
+                params.delete("googleExport");
+                window.history.replaceState(
+                    window.history.state,
+                    "",
+                    dashboardLocation(params),
+                );
+            }
+
             if (traversing) clearItemLinkContext(params);
             handledLocationQuery.current = params.toString();
             if (traversing)
@@ -294,56 +429,83 @@ export function Workstation({
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             const recordingId = params.get("recording");
+            const folderId = params.get("folder");
+            const folder = navigationFolders.find(
+                (folder) => folder.id === folderId,
+            );
+            const firstFolder =
+                firstLoad && !recordingId && !folderId && newcomer
+                    ? initialOrgRoot
+                    : null;
+            const locationFolder = folder ?? firstFolder;
+            setSelectedFolderId(locationFolder?.id ?? null);
+            if (locationFolder) rememberFolder(locationFolder.id);
             if (recordingId) {
                 const preferred =
-                    params.get("view") === "org" ? orgRecordings : recordings;
+                    params.get("view") === "org" ||
+                    isOrgAccount ||
+                    locationFolder?.scope === "org"
+                        ? orgRecordings
+                        : recordings;
                 const fallback =
-                    params.get("view") === "org" ? recordings : orgRecordings;
+                    preferred === orgRecordings ? recordings : orgRecordings;
                 const linked = hiddenIds.has(recordingId)
                     ? undefined
-                    : (preferred.find(
-                          (recording) => recording.id === recordingId,
-                      ) ??
-                      fallback.find(
-                          (recording) => recording.id === recordingId,
-                      ));
+                    : (preferred.find((item) => item.id === recordingId) ??
+                      fallback.find((item) => item.id === recordingId));
                 setCurrentRecording(linked ?? null);
                 if (linked?.view === "org") params.set("view", "org");
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
-                setSelectedFolderId(null);
                 setMobileView("detail");
-                if (!linked) {
+                if (!linked)
                     toast.error(
                         i18n(
                             "This item is not available to you. It may belong to someone else, no longer be shared with your Organization, or have been deleted.",
                         ),
                     );
-                }
-                writeSelection(linked ?? null, null);
+                writeSelection(linked ?? null, locationFolder?.id ?? null);
                 return;
             }
             setItemLinkQuery("");
-            const folderId = params.get("folder");
-            const folder = folderOrganization.folders.find(
-                (folder) => folder.id === folderId,
-            );
-            if (folder) {
-                setLibraryMode("organize");
-                setSelectedFolderId(folder.id);
-                setCurrentRecording(null);
-                setMobileView("detail");
-                writeSelection(null, folder.id);
-                return;
-            }
-            const initial = firstLoad ? (libraryRecordings[0] ?? null) : null;
-            setSelectedFolderId(null);
+            const pool =
+                locationFolder?.scope === "org"
+                    ? orgRecordings
+                    : libraryRecordings;
+            const ids = locationFolder
+                ? recordingIdsVisibleInFolder(
+                      folderOrganization.folders,
+                      folderOrganization.assignments,
+                      locationFolder,
+                      pool.map((item) => item.id),
+                  )
+                : null;
+            const initial =
+                firstLoad || locationFolder
+                    ? ([...pool]
+                          .filter(
+                              (item) =>
+                                  !hiddenIds.has(item.id) &&
+                                  (!ids || ids.has(item.id)),
+                          )
+                          .sort(
+                              (a, b) =>
+                                  Date.parse(b.startTime) -
+                                  Date.parse(a.startTime),
+                          )[0] ?? null)
+                    : null;
             setCurrentRecording(initial);
-            if (!initial) setMobileView("list");
-            writeSelection(initial, null);
+            setMobileView("list");
+            writeSelection(initial, locationFolder?.id ?? null);
         },
         [
-            folderOrganization.folders,
+            folderOrganization,
+            rememberFolder,
+            navigationFolders,
+            newcomer,
+            initialOrgRoot,
+            isOrgAccount,
+            setSelectedFolderId,
             hiddenIds,
             i18n,
             libraryRecordings,
@@ -422,6 +584,38 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
+    const locationRecordings = useMemo(() => {
+        const pool =
+            selectedFolder?.scope === "org"
+                ? visibleOrgRecordings
+                : visibleRecordings;
+        if (!selectedFolder) return pool;
+        const ids = recordingIdsVisibleInFolder(
+            folderOrganization.folders,
+            folderOrganization.assignments,
+            selectedFolder,
+            pool.map((item) => item.id),
+        );
+        return pool.filter((item) => ids.has(item.id));
+    }, [
+        folderOrganization,
+        selectedFolder,
+        visibleOrgRecordings,
+        visibleRecordings,
+    ]);
+    const rowLocations = useMemo(
+        () =>
+            folderRowLocations(
+                folderOrganization.folders,
+                folderOrganization.assignments,
+                selectedFolder,
+            ),
+        [folderOrganization, selectedFolder],
+    );
+    const locationIsOrg = selectedFolder?.scope === "org" || isOrgAccount;
+    const locationTranscriptions = locationIsOrg
+        ? (organizationLibrary?.transcriptions ?? transcriptions)
+        : transcriptions;
     // A shared recording is changed for the Organization, by its curators
     // (or the organization account), on the Organization view; read-only
     // there for anyone else, and in its owner's private copy.
@@ -527,7 +721,6 @@ export function Workstation({
                 selectionRevision: number,
                 historyMethod: "push" | "replace" = "replace",
             ) => {
-                setLibraryMode("recent");
                 setSelectedFolderId(null);
                 setResetToRecentKey((key) => key + 1);
                 setPendingUploadSelection({
@@ -555,7 +748,7 @@ export function Workstation({
             }
             selectUploadedRecording(uploadSelection);
         },
-        [i18n, refresh],
+        [i18n, refresh, setSelectedFolderId],
     );
 
     const handleUploadFailed = useCallback((uploadId: string) => {
@@ -606,34 +799,17 @@ export function Workstation({
     const uploadFolders = useMemo(
         () =>
             uploadFolderOptions(
-                folderOrganization.folders,
+                navigationFolders,
                 organizationLibrary !== null,
                 folderLabel,
             ),
-        [folderLabel, folderOrganization.folders, organizationLibrary],
+        [folderLabel, navigationFolders, organizationLibrary],
     );
     const uploadFolderParentOptions = useMemo(
-        () =>
-            uploadFolderParents(
-                folderOrganization.folders,
-                canCurate,
-                folderLabel,
-            ),
-        [canCurate, folderLabel, folderOrganization.folders],
+        () => uploadFolderParents(navigationFolders, canCurate, folderLabel),
+        [canCurate, folderLabel, navigationFolders],
     );
     const hasFilingFolder = uploadFolders.length > 0;
-
-    const handleFolderCreated = useCallback((folder: CreatedFolder) => {
-        setFolderOrganization((current) => {
-            if (current.folders.some((item) => item.id === folder.id)) {
-                return current;
-            }
-            return {
-                ...current,
-                folders: [...current.folders, folder],
-            };
-        });
-    }, []);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
@@ -669,8 +845,7 @@ export function Workstation({
     const libraryTranscriptions = isOrgAccount
         ? (organizationLibrary?.transcriptions ?? transcriptions)
         : transcriptions;
-    const libraryInFlightActions = useMemo(() => {
-        if (!isOrgAccount) return inFlightActions;
+    const orgInFlightActions = useMemo(() => {
         const prefix = recordingJobSubject("", "org");
         return new Map(
             [...inFlightActions].flatMap(([key, kind]) =>
@@ -679,7 +854,10 @@ export function Workstation({
                     : [],
             ),
         );
-    }, [inFlightActions, isOrgAccount]);
+    }, [inFlightActions]);
+    const libraryInFlightActions = isOrgAccount
+        ? orgInFlightActions
+        : inFlightActions;
 
     const handleTranscribe = useCallback(
         async (attributionSource?: string, retranscribe = false) => {
@@ -733,14 +911,14 @@ export function Workstation({
             setHiddenIds((prev) => new Set(prev).add(id));
             const wasCurrent = currentRecording?.id === id;
             if (wasCurrent) {
-                const idx = visibleRecordings.findIndex((r) => r.id === id);
+                const idx = locationRecordings.findIndex((r) => r.id === id);
                 const next =
-                    visibleRecordings[idx + 1] ??
-                    visibleRecordings[idx - 1] ??
+                    locationRecordings[idx + 1] ??
+                    locationRecordings[idx - 1] ??
                     null;
                 setItemLinkQuery("");
                 setCurrentRecording(next);
-                writeSelection(next, null);
+                writeSelection(next, selectedFolderIdRef.current);
             }
             try {
                 const res = await fetch(
@@ -768,12 +946,12 @@ export function Workstation({
                 });
                 if (wasCurrent) {
                     setCurrentRecording(recording);
-                    writeSelection(recording, null);
+                    writeSelection(recording, selectedFolderIdRef.current);
                 }
                 throw err;
             }
         },
-        [currentRecording, visibleRecordings, refresh, i18n, writeSelection],
+        [currentRecording, locationRecordings, refresh, i18n, writeSelection],
     );
 
     const handleRenamed = useCallback(
@@ -974,39 +1152,86 @@ export function Workstation({
                 );
                 throw new Error(i18n("Could not delete folder"));
             }
-            setFolderOrganization((current) => {
-                return {
-                    folders: current.folders.filter(
-                        (folder) => !deletedIds.has(folder.id),
-                    ),
-                    assignments: current.assignments.filter(
-                        (assignment) => !deletedIds.has(assignment.folderId),
-                    ),
-                };
-            });
-            // Deleting an Organization folder refiles its recordings in the
-            // Organization root; only the server knows where they landed.
-            if (
-                folderOrganization.folders.find(
-                    (folder) => folder.id === folderId,
-                )?.scope === "org"
-            ) {
+            const deletedFolder = folderOrganization.folders.find(
+                (folder) => folder.id === folderId,
+            );
+            const orgRoot = folderOrganization.folders.find(
+                (folder) => folder.scope === "org" && folder.parentId === null,
+            );
+            const remainingFolders = folderOrganization.folders.filter(
+                (folder) => !deletedIds.has(folder.id),
+            );
+            const remainingAssignments = folderOrganization.assignments.filter(
+                (assignment) => !deletedIds.has(assignment.folderId),
+            );
+            if (deletedFolder?.scope === "org" && orgRoot) {
+                const remainingOrgIds = new Set(
+                    remainingFolders
+                        .filter((folder) => folder.scope === "org")
+                        .map((folder) => folder.id),
+                );
+                for (const assignment of folderOrganization.assignments) {
+                    if (
+                        deletedIds.has(assignment.folderId) &&
+                        !remainingAssignments.some(
+                            (item) =>
+                                item.recordingId === assignment.recordingId &&
+                                remainingOrgIds.has(item.folderId),
+                        )
+                    )
+                        remainingAssignments.push({
+                            recordingId: assignment.recordingId,
+                            folderId: orgRoot.id,
+                        });
+                }
                 refresh();
             }
+            setFolderOrganization({
+                folders: remainingFolders,
+                assignments: remainingAssignments,
+            });
             const currentFolderId = selectedFolderIdRef.current;
             if (currentFolderId && deletedIds.has(currentFolderId)) {
-                const nextFolderId =
-                    folderOrganization.folders.find(
-                        (folder) =>
-                            folder.kind === "private" &&
-                            !deletedIds.has(folder.id),
-                    )?.id ?? null;
-                setSelectedFolderId(nextFolderId);
-                writeSelection(null, nextFolderId);
+                const parent =
+                    remainingFolders.find(
+                        (folder) => folder.id === deletedFolder?.parentId,
+                    ) ?? null;
+                const pool =
+                    parent?.scope === "org"
+                        ? visibleOrgRecordings
+                        : visibleRecordings;
+                const ids = parent
+                    ? recordingIdsVisibleInFolder(
+                          remainingFolders,
+                          remainingAssignments,
+                          parent,
+                          pool.map((item) => item.id),
+                      )
+                    : new Set(pool.map((item) => item.id));
+                const next =
+                    pool.find(
+                        (item) =>
+                            item.id === currentRecording?.id &&
+                            ids.has(item.id),
+                    ) ??
+                    pool.find((item) => ids.has(item.id)) ??
+                    null;
+                setSelectedFolderId(parent?.id ?? null);
+                setCurrentRecording(next);
+                writeSelection(next, parent?.id ?? null);
             }
             toast.success(i18n("Folder deleted"));
         },
-        [folderOrganization.folders, i18n, refresh, writeSelection],
+        [
+            folderOrganization,
+            currentRecording,
+            visibleRecordings,
+            visibleOrgRecordings,
+            i18n,
+            refresh,
+            writeSelection,
+            setSelectedFolderId,
+        ],
     );
 
     const handleFolderAssignment = useCallback(
@@ -1069,6 +1294,11 @@ export function Workstation({
                                   onClick: () => {
                                       selectRecordingByUser(recording);
                                       setSelectedFolderId(null);
+                                      writeSelection(
+                                          recording,
+                                          null,
+                                          "replace",
+                                      );
                                   },
                               }
                             : undefined,
@@ -1085,6 +1315,7 @@ export function Workstation({
                 }
                 throw new Error(i18n("Could not update folder assignment"));
             }
+            if (assigned) rememberFolder(folderId);
             // Sharing or unsharing changes the Organization library itself.
             if (
                 folderOrganization.folders.find(
@@ -1095,6 +1326,8 @@ export function Workstation({
             }
         },
         [
+            rememberFolder,
+            setSelectedFolderId,
             folderOrganization.assignments,
             folderOrganization.folders,
             i18n,
@@ -1102,6 +1335,7 @@ export function Workstation({
             refresh,
             shareRefusal,
             selectRecordingByUser,
+            writeSelection,
         ],
     );
 
@@ -1144,10 +1378,46 @@ export function Workstation({
                 );
                 throw new Error(i18n("Could not move recording"));
             }
+            rememberFolder(toFolderId);
+            if (
+                folderOrganization.folders.find(
+                    (folder) => folder.id === toFolderId,
+                )?.scope === "org"
+            )
+                refresh();
             toast.success(i18n("Recording moved"));
         },
-        [folderOrganization.assignments, i18n],
+        [
+            folderOrganization.assignments,
+            folderOrganization.folders,
+            i18n,
+            rememberFolder,
+            refresh,
+        ],
     );
+
+    const settingsFolder = folderOrganization.folders.find(
+        (folder) => folder.id === settingsFolderId,
+    );
+    const navigation = useMemo(
+        () =>
+            libraryNavigation(
+                navigationFolders,
+                folderOrganization.assignments,
+                treeRecordings,
+                folderLabel,
+            ),
+        [
+            navigationFolders,
+            folderOrganization.assignments,
+            treeRecordings,
+            folderLabel,
+        ],
+    );
+    const openFolderSettings = (folder: RecordingFolder, action?: "create") => {
+        setSettingsAction(action);
+        setSettingsFolderId(folder.id);
+    };
 
     // Keyboard shortcuts (global). Disabled while any modal is open
     // so the modal owns keyboard focus exclusively. The shortcuts
@@ -1161,13 +1431,53 @@ export function Workstation({
         onOpenSettings: () => setSettingsOpen(true),
         globalShortcuts: false,
         enabled:
-            !settingsOpen && !onboardingOpen && !paletteOpen && !shortcutsOpen,
+            !settingsOpen &&
+            !onboardingOpen &&
+            !paletteOpen &&
+            !shortcutsOpen &&
+            !settingsFolder &&
+            !firstLevelFolderOpen,
     });
 
+    const navigateRecent = () => {
+        selectionRevisionRef.current += 1;
+        setPendingUploadSelection(null);
+        setItemLinkQuery("");
+        setSelectedFolderId(null);
+        const next =
+            visibleRecordings.find(
+                (item) => item.id === currentRecording?.id,
+            ) ?? newest(visibleRecordings);
+        setCurrentRecording(next);
+        setMobileView("list");
+        writeSelection(next, null, "push");
+    };
+    const assignRecording = (id: string, folderId: string) =>
+        handleFolderAssignment(id, folderId, true);
+    const headerProps = {
+        organization: { ...folderOrganization, folders: navigationFolders },
+        recordings: treeRecordings,
+        navigation,
+        canCurate,
+        folder: selectedFolder,
+        onNavigate: (folder: RecordingFolder | null) =>
+            folder ? selectFolderByUser(folder) : navigateRecent(),
+        onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
+        onNewFolder: () =>
+            selectedFolder && (selectedFolder.scope !== "org" || canCurate)
+                ? openFolderSettings(selectedFolder, "create")
+                : setFirstLevelFolderOpen(true),
+        onAssign: assignRecording,
+        onMove: handleMoveBetweenFolders,
+    };
+    const settingsCount = settingsFolder
+        ? (navigation.counts.get(settingsFolder.id) ?? 0)
+        : 0;
+    const railCollapsed = libraryPreferences.preferences.collapsed;
     return (
-        <>
+        <LibraryPreferencesContext.Provider value={libraryPreferences}>
             <div className="bg-background">
-                <div className="container mx-auto max-w-7xl px-4 py-6">
+                <div className="container mx-auto max-w-7xl px-4 py-6 xl:max-w-[100rem]">
                     <TrialBanner isHosted={isHosted} />
                     <AppHeader
                         upload={{
@@ -1178,159 +1488,244 @@ export function Workstation({
                             onChange: handleUpload,
                         }}
                     />
-
                     <PlaudReconnectBanner
                         show={showReconnect}
                         onReconnected={handleReconnected}
                     />
-
-                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                        {/*
-                              Mobile master/detail: on <lg, only one
-                              pane renders at a time. `mobileView ===
-                              "detail"` hides the list (via `hidden`)
-                              while keeping its state mounted, so
-                              scroll position, search query, and
-                              selection survive the back-navigation.
-                              The `lg:block` override brings the list
-                              back on desktop where both panes coexist.
-                            */}
+                    <div
+                        className={cn(
+                            "grid grid-cols-1 items-start gap-4 lg:grid-cols-[350px_minmax(0,1fr)]",
+                            !railCollapsed &&
+                                "xl:grid-cols-[220px_330px_minmax(0,1fr)]",
+                        )}
+                    >
                         <div
                             className={cn(
-                                "lg:col-span-1 lg:block",
+                                "hidden xl:sticky xl:top-20 xl:h-[calc(100dvh-7rem)] xl:min-h-0",
+                                !railCollapsed && "xl:block",
+                            )}
+                        >
+                            <FolderTree
+                                folders={navigationFolders}
+                                assignments={folderOrganization.assignments}
+                                recordings={treeRecordings}
+                                selectedFolderId={selectedFolderId}
+                                onRecent={navigateRecent}
+                                onSelectFolder={selectFolderByUser}
+                                onMoveFolder={handleMoveFolder}
+                                onNewFolder={() =>
+                                    setFirstLevelFolderOpen(true)
+                                }
+                                onAssignRecording={assignRecording}
+                                onMoveRecording={handleMoveBetweenFolders}
+                                canCurate={canCurate}
+                                navigation={navigation}
+                                recentCount={visibleRecordings.length}
+                                onSettings={(folder) =>
+                                    openFolderSettings(folder)
+                                }
+                                onCollapse={() =>
+                                    libraryPreferences.setPreferences(
+                                        (value) => ({
+                                            ...value,
+                                            collapsed: true,
+                                        }),
+                                    )
+                                }
+                            />
+                        </div>
+                        <div
+                            className={cn(
+                                "min-h-0 min-w-0 lg:h-[calc(100dvh-7rem)] lg:sticky lg:top-20 lg:block",
                                 mobileView === "detail" && "hidden",
                             )}
                         >
-                            {libraryMode === "recent" ? (
-                                <RecordingList
-                                    ref={listRef}
-                                    searchView={
-                                        isOrgAccount ? "org" : "private"
-                                    }
-                                    recordings={visibleRecordings}
-                                    mailEnabled={mailEnabled}
-                                    transcriptions={libraryTranscriptions}
-                                    currentRecording={currentRecording}
-                                    pendingUploads={pendingUploads}
-                                    inFlightActions={libraryInFlightActions}
-                                    sharedItemIds={sharedIds}
-                                    onSelect={selectRecordingByUser}
-                                    onDelete={handleDelete}
-                                    onOrganize={() => {
-                                        setLibraryMode("organize");
-                                        setSelectedFolderId(null);
-                                    }}
-                                    initialDateTimeFormat={
-                                        initialSettings.dateTimeFormat
-                                    }
-                                    initialSortOrder={
-                                        initialSettings.recordingListSortOrder
-                                    }
-                                    initialKindFilter={
-                                        initialSettings.chatterKindFilter
-                                    }
-                                    initialChunkSize={
-                                        initialSettings.itemsPerPage
-                                    }
-                                    resetToRecentKey={resetToRecentKey}
-                                    emptyState={
-                                        visibleRecordings.length === 0 &&
-                                        visibleOrgRecordings.length === 0 &&
-                                        pendingUploads.length === 0 ? (
-                                            <div className="mt-4 lg:hidden">
-                                                <WorkstationEmptyState
-                                                    compact
-                                                    isSyncing={isAutoSyncing}
-                                                    onSync={handleSync}
-                                                    onUpload={triggerUpload}
-                                                    hasFilingFolder={
-                                                        hasFilingFolder
-                                                    }
-                                                    onNewFolder={() =>
-                                                        setFirstLevelFolderOpen(
-                                                            true,
-                                                        )
-                                                    }
-                                                />
-                                            </div>
-                                        ) : undefined
-                                    }
-                                />
-                            ) : (
-                                <FolderTree
-                                    folders={folderOrganization.folders}
-                                    assignments={folderOrganization.assignments}
-                                    recordings={treeRecordings}
-                                    selectedFolderId={selectedFolderId}
-                                    onRecent={() => {
-                                        setLibraryMode("recent");
-                                        setSelectedFolderId(null);
-                                        selectionRevisionRef.current += 1;
-                                        setPendingUploadSelection(null);
-                                        setItemLinkQuery("");
-                                        setCurrentRecording(
-                                            visibleRecordings[0] ?? null,
-                                        );
-                                        setMobileView("list");
-                                        writeSelection(
-                                            visibleRecordings[0] ?? null,
-                                            null,
-                                            "push",
-                                        );
-                                    }}
-                                    onSelectFolder={selectFolderByUser}
-                                    onCreateFolder={handleCreateFolder}
-                                    onRenameFolder={handleRenameFolder}
-                                    onMoveFolder={handleMoveFolder}
-                                    onDeleteFolder={handleDeleteFolder}
-                                    onNewFolder={() =>
-                                        setFirstLevelFolderOpen(true)
-                                    }
-                                    onAssignRecording={(
-                                        recordingId,
-                                        folderId,
-                                    ) =>
-                                        handleFolderAssignment(
-                                            recordingId,
-                                            folderId,
-                                            true,
-                                        )
-                                    }
-                                    onMoveRecording={handleMoveBetweenFolders}
-                                    mailEnabled={mailEnabled}
-                                    canCurate={canCurate}
-                                />
-                            )}
-                        </div>
-
-                        {libraryMode === "organize" && selectedFolder ? (
-                            <FolderRecordingPane
+                            <RecordingList
+                                ref={listRef}
+                                searchView={locationIsOrg ? "org" : "private"}
+                                isOrgAccount={isOrgAccount}
+                                recordings={locationRecordings}
+                                mailEnabled={mailEnabled}
+                                transcriptions={locationTranscriptions}
+                                currentRecording={currentRecording}
+                                pendingUploads={pendingUploads}
+                                inFlightActions={
+                                    locationIsOrg
+                                        ? orgInFlightActions
+                                        : inFlightActions
+                                }
+                                sharedItemIds={sharedIds}
+                                onSelect={selectRecordingByUser}
+                                onDelete={handleDelete}
+                                initialDateTimeFormat={
+                                    initialSettings.dateTimeFormat
+                                }
+                                initialSortOrder={
+                                    initialSettings.recordingListSortOrder
+                                }
+                                initialKindFilter={
+                                    initialSettings.chatterKindFilter
+                                }
+                                initialChunkSize={initialSettings.itemsPerPage}
+                                resetToRecentKey={resetToRecentKey}
+                                locationKey={location}
                                 folder={selectedFolder}
                                 folders={folderOrganization.folders}
+                                rowLocations={rowLocations}
                                 assignments={folderOrganization.assignments}
-                                recordings={
-                                    selectedFolder.scope === "org"
-                                        ? visibleOrgRecordings
-                                        : visibleRecordings
-                                }
-                                dateTimeFormat={initialSettings.dateTimeFormat}
-                                onSelectRecording={(recording) => {
-                                    selectRecordingByUser(recording);
-                                    setSelectedFolderId(null);
-                                }}
-                                onRenameFolder={handleRenameFolder}
-                                onDeleteFolder={handleDeleteFolder}
-                                hiddenOnMobile={mobileView === "list"}
-                                onBackToFolders={() => setMobileView("list")}
-                                exportProviders={exportProviders}
-                                isOrgAccount={isOrgAccount}
-                                mailEnabled={mailEnabled}
+                                onAssignRecording={assignRecording}
+                                onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
+                                onFolderCreated={handleFolderCreated}
+                                onFolderSettings={
+                                    selectedFolder
+                                        ? () =>
+                                              openFolderSettings(selectedFolder)
+                                        : undefined
+                                }
+                                header={
+                                    <>
+                                        <div
+                                            className={
+                                                railCollapsed
+                                                    ? "hidden"
+                                                    : "hidden xl:block"
+                                            }
+                                        >
+                                            <LibraryLocationHeader
+                                                {...headerProps}
+                                                variant="rail"
+                                                part="header"
+                                            />
+                                        </div>
+                                        <div
+                                            className={
+                                                railCollapsed
+                                                    ? "block"
+                                                    : "xl:hidden"
+                                            }
+                                        >
+                                            <LibraryLocationHeader
+                                                {...headerProps}
+                                                variant="walk"
+                                                part="header"
+                                                onShowRail={
+                                                    railCollapsed
+                                                        ? () =>
+                                                              libraryPreferences.setPreferences(
+                                                                  (value) => ({
+                                                                      ...value,
+                                                                      collapsed: false,
+                                                                  }),
+                                                              )
+                                                        : undefined
+                                                }
+                                            />
+                                        </div>
+                                    </>
+                                }
+                                navigationContent={
+                                    <>
+                                        <div
+                                            className={
+                                                railCollapsed
+                                                    ? "hidden"
+                                                    : "hidden xl:block"
+                                            }
+                                        >
+                                            <LibraryLocationHeader
+                                                {...headerProps}
+                                                variant="rail"
+                                                part="tiles"
+                                            />
+                                        </div>
+                                        <div
+                                            className={
+                                                railCollapsed
+                                                    ? "block"
+                                                    : "xl:hidden"
+                                            }
+                                        >
+                                            <LibraryLocationHeader
+                                                {...headerProps}
+                                                variant="walk"
+                                                part="tiles"
+                                                onShowRail={
+                                                    railCollapsed
+                                                        ? () =>
+                                                              libraryPreferences.setPreferences(
+                                                                  (value) => ({
+                                                                      ...value,
+                                                                      collapsed: false,
+                                                                  }),
+                                                              )
+                                                        : undefined
+                                                }
+                                            />
+                                        </div>
+                                        {newcomer &&
+                                            selectedFolder?.scope === "org" && (
+                                                <div className="m-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-xs">
+                                                    <p>
+                                                        {i18n(
+                                                            "You have no items of your own yet, so you start in the Organization. Your items will appear in Recent.",
+                                                        )}
+                                                    </p>
+                                                    <div className="mt-2 flex gap-2">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            disabled={
+                                                                isAutoSyncing
+                                                            }
+                                                            onClick={handleSync}
+                                                        >
+                                                            {i18n(
+                                                                "Sync Device",
+                                                            )}
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={
+                                                                triggerUpload
+                                                            }
+                                                        >
+                                                            {i18n("Upload")}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                    </>
+                                }
+                                emptyState={
+                                    visibleRecordings.length === 0 &&
+                                    visibleOrgRecordings.length === 0 &&
+                                    pendingUploads.length === 0 ? (
+                                        <div className="mt-4 lg:hidden">
+                                            <WorkstationEmptyState
+                                                compact
+                                                isSyncing={isAutoSyncing}
+                                                onSync={handleSync}
+                                                onUpload={triggerUpload}
+                                                hasFilingFolder={
+                                                    hasFilingFolder
+                                                }
+                                                onNewFolder={() =>
+                                                    setFirstLevelFolderOpen(
+                                                        true,
+                                                    )
+                                                }
+                                            />
+                                        </div>
+                                    ) : undefined
+                                }
                             />
-                        ) : visibleRecordings.length === 0 &&
-                          visibleOrgRecordings.length === 0 &&
-                          pendingUploads.length === 0 ? (
-                            <div className="hidden lg:col-span-2 lg:block lg:self-start">
+                        </div>
+                        {visibleRecordings.length === 0 &&
+                        visibleOrgRecordings.length === 0 &&
+                        pendingUploads.length === 0 ? (
+                            <div className="hidden min-w-0 lg:block lg:self-start">
                                 <WorkstationEmptyState
                                     isSyncing={isAutoSyncing}
                                     onSync={handleSync}
@@ -1347,6 +1742,11 @@ export function Workstation({
                                 itemLinkQuery={itemLinkQuery}
                                 shared={selectedShared}
                                 dateTimeFormat={initialSettings.dateTimeFormat}
+                                backLabel={
+                                    selectedFolder
+                                        ? folderLabel(selectedFolder)
+                                        : i18n("Recent")
+                                }
                                 onBackToList={() => setMobileView("list")}
                                 hiddenOnMobile={mobileView === "list"}
                                 onChanged={refresh}
@@ -1382,15 +1782,12 @@ export function Workstation({
                         ) : (
                             <WorkstationDetailPane
                                 currentRecording={selectedRecording}
+                                canCurate={canCurate}
                                 itemLinkQuery={itemLinkQuery}
                                 currentTranscription={currentTranscription}
                                 transcripts={currentTranscriptVariants}
                                 isCurrentTranscribing={isCurrentTranscribing}
-                                visibleRecordings={
-                                    currentIsOrgView
-                                        ? visibleOrgRecordings
-                                        : visibleRecordings
-                                }
+                                visibleRecordings={locationRecordings}
                                 onTranscribe={handleTranscribe}
                                 onTranscribeComplete={refresh}
                                 onTranscriptStale={refresh}
@@ -1401,6 +1798,11 @@ export function Workstation({
                                 onRenamed={handleRenamed}
                                 onDelete={handleDelete}
                                 onArtifactsChanged={refresh}
+                                backLabel={
+                                    selectedFolder
+                                        ? folderLabel(selectedFolder)
+                                        : i18n("Recent")
+                                }
                                 onBackToList={() => setMobileView("list")}
                                 hiddenOnMobile={mobileView === "list"}
                                 initialPlaybackSpeed={
@@ -1446,6 +1848,9 @@ export function Workstation({
             <CommandPalette
                 open={paletteOpen}
                 onOpenChange={setPaletteOpen}
+                folders={navigationFolders}
+                folderEntries={navigation.entries}
+                onSelectFolder={selectFolderByUser}
                 recordings={visibleRecordings}
                 transcriptions={libraryTranscriptions}
                 currentRecording={currentRecording}
@@ -1484,12 +1889,39 @@ export function Workstation({
             />
 
             <FirstLevelFolderDialog
-                folders={folderOrganization.folders}
+                folders={navigationFolders}
                 includeOrganization={canCurate}
                 open={firstLevelFolderOpen}
                 onOpenChange={setFirstLevelFolderOpen}
                 onCreated={handleFolderCreated}
             />
-        </>
+            {settingsFolder && (
+                <FolderSettingsPanel
+                    key={settingsFolder.id}
+                    folder={settingsFolder}
+                    folders={folderOrganization.folders}
+                    count={settingsCount}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setSettingsFolderId(null);
+                    }}
+                    onRename={handleRenameFolder}
+                    onCreate={handleCreateFolder}
+                    onMove={handleMoveFolder}
+                    onDelete={handleDeleteFolder}
+                    exportProviders={exportProviders}
+                    mailEnabled={mailEnabled}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                    initialAction={settingsAction}
+                    onReopenHandled={handleExportReopen}
+                    reopenExport={
+                        exportReturn?.folderId === settingsFolder.id
+                            ? exportReturn.view
+                            : undefined
+                    }
+                />
+            )}
+        </LibraryPreferencesContext.Provider>
     );
 }

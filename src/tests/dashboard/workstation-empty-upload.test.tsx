@@ -12,14 +12,19 @@ import {
 import { type ComponentProps, type Ref, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandPalette as CommandPaletteComponent } from "@/components/dashboard/command-palette";
+import type { FolderSettingsPanel as FolderSettingsPanelComponent } from "@/components/dashboard/folder-settings-panel";
 import type { RecordingListHandle } from "@/components/dashboard/recording-list";
 import type { Workstation as WorkstationComponent } from "@/components/dashboard/workstation";
 import type { UploadCompletionAction } from "@/hooks/use-upload-queue";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
+    inFlightActions: new Map<string, "transcribing" | "summarizing">(),
     refresh: vi.fn(),
     error: vi.fn(),
+    settingsProps: null as ComponentProps<
+        typeof FolderSettingsPanelComponent
+    > | null,
     paletteProps: null as ComponentProps<typeof CommandPaletteComponent> | null,
     uploadOptions: null as null | {
         onUploadStarted?: (upload: {
@@ -90,7 +95,7 @@ vi.mock("@/hooks/use-theme", () => ({
 }));
 vi.mock("@/hooks/use-transcribe-queue", () => ({
     useTranscribeQueue: () => ({
-        inFlightActions: new Map(),
+        inFlightActions: mocks.inFlightActions,
         observeTranscriptionById: vi.fn(),
         transcribeById: vi.fn(),
     }),
@@ -120,14 +125,20 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         recordings,
         currentRecording,
         onSelect,
-        onOrganize,
+        header,
+        navigationContent,
+        locationKey,
+        inFlightActions,
         emptyState,
     }: {
         ref?: Ref<RecordingListHandle>;
         recordings: Recording[];
         currentRecording: Recording | null;
         onSelect: (recording: Recording) => void;
-        onOrganize: () => void;
+        header?: React.ReactNode;
+        navigationContent?: React.ReactNode;
+        locationKey: string;
+        inFlightActions: Map<string, "transcribing" | "summarizing">;
         emptyState?: React.ReactNode;
     }) => {
         useImperativeHandle(ref, () => ({
@@ -157,9 +168,12 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         }));
         return (
             <section aria-label="Recent recordings">
-                <button type="button" onClick={onOrganize}>
-                    Organize
-                </button>
+                <span data-testid="location">{locationKey}</span>
+                <span data-testid="list-actions">
+                    {JSON.stringify([...inFlightActions])}
+                </span>
+                {header}
+                {navigationContent}
                 {recordings.map((recording) => (
                     <button
                         type="button"
@@ -180,12 +194,22 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         );
     },
 }));
+vi.mock("@/components/dashboard/folder-settings-panel", () => ({
+    FolderSettingsPanel: (
+        props: ComponentProps<typeof FolderSettingsPanelComponent>,
+    ) => {
+        mocks.settingsProps = props;
+        return <div>Folder settings</div>;
+    },
+}));
 vi.mock("@/components/dashboard/folder-tree", () => ({
     FolderTree: ({
         onNewFolder,
         onSelectFolder,
         onRecent,
+        onSettings,
     }: {
+        onSettings: (folder: typeof personalChildFolder) => void;
         onNewFolder?: () => void;
         onSelectFolder: (folder: typeof personalChildFolder) => void;
         onRecent: () => void;
@@ -203,8 +227,17 @@ vi.mock("@/components/dashboard/folder-tree", () => ({
             <button type="button" onClick={onRecent}>
                 Recent
             </button>
+            <button
+                type="button"
+                onClick={() => onSettings(personalChildFolder)}
+            >
+                Folder settings
+            </button>
         </section>
     ),
+}));
+vi.mock("@/components/dashboard/library-location-header", () => ({
+    LibraryLocationHeader: () => null,
 }));
 vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
     WorkstationDetailPane: ({
@@ -259,13 +292,6 @@ vi.mock("@/components/dashboard/trial-banner", () => ({
 }));
 vi.mock("@/components/dashboard/plaud-reconnect-banner", () => ({
     PlaudReconnectBanner: () => null,
-}));
-vi.mock("@/components/dashboard/folder-recording-pane", () => ({
-    FolderRecordingPane: ({
-        folder,
-    }: {
-        folder: typeof personalChildFolder;
-    }) => <div>Folder: {folder.name}</div>,
 }));
 vi.mock("@/components/mail/mail-detail-pane", () => ({
     MailDetailPane: () => <div>Mail details</div>,
@@ -342,10 +368,12 @@ function recording(id: string, filename: string): Recording {
 afterEach(cleanup);
 
 beforeEach(() => {
+    mocks.inFlightActions = new Map();
     mocks.refresh.mockClear();
     mocks.error.mockClear();
     mocks.uploadOptions = null;
     mocks.paletteProps = null;
+    mocks.settingsProps = null;
     window.history.replaceState({}, "", "/dashboard");
 });
 
@@ -363,7 +391,6 @@ describe("Workstation empty account", () => {
             ).length,
         ).toBeGreaterThan(0);
 
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
         const folderTree = screen.getByRole("region", { name: "Folder tree" });
         fireEvent.click(
             within(folderTree).getByRole("button", { name: "New folder" }),
@@ -415,7 +442,7 @@ describe("Workstation empty account", () => {
         expect(screen.queryByText("Start with a folder")).toBeNull();
     });
 
-    it("leaves Organization-only content unselected for a personal account", () => {
+    it("opens Organization content for a newcomer", () => {
         const shared = {
             ...recording("shared-1", "Shared recording"),
             view: "org" as const,
@@ -425,6 +452,21 @@ describe("Workstation empty account", () => {
         render(
             <Workstation
                 {...baseProps}
+                initialFolderOrganization={{
+                    folders: [
+                        rootFolder,
+                        {
+                            ...rootFolder,
+                            id: "org-root",
+                            name: "Organization",
+                            kind: "public",
+                            scope: "org",
+                        },
+                    ],
+                    assignments: [
+                        { recordingId: shared.id, folderId: "org-root" },
+                    ],
+                }}
                 organizationLibrary={{
                     recordings: [shared],
                     transcriptions: new Map(),
@@ -433,7 +475,14 @@ describe("Workstation empty account", () => {
             />,
         );
 
-        expect(screen.getByText("Selected: none")).toBeTruthy();
+        expect(screen.getByText("Selected: Shared recording")).toBeTruthy();
+        expect(screen.getByTestId("location").textContent).toBe("org-root");
+        expect(window.location.search).toBe(
+            "?folder=org-root&recording=shared-1&view=org",
+        );
+        expect(
+            screen.getByText(/You have no items of your own yet/),
+        ).toBeTruthy();
         expect(screen.queryByText("Start with a folder")).toBeNull();
     });
 
@@ -476,7 +525,6 @@ describe("Workstation upload completion", () => {
             <Workstation {...baseProps} recordings={[first]} />,
         );
 
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
         act(() =>
             mocks.uploadOptions?.onUploadStarted?.({
                 uploadId: "upload-1",
@@ -509,7 +557,6 @@ describe("Workstation upload completion", () => {
             <Workstation {...baseProps} recordings={[first]} />,
         );
 
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
         act(() =>
             mocks.uploadOptions?.onUploadStarted?.({
                 uploadId: "conversion:resumed",
@@ -890,7 +937,6 @@ describe("Workstation selection history", () => {
         expect(screen.getByTestId("item-link-query").textContent).toContain(
             "playFrom=165980",
         );
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
         fireEvent.click(screen.getByRole("button", { name: "Recent" }));
         expect(screen.getByText("Selected: First recording")).toBeTruthy();
         expect(screen.getByTestId("item-link-query").textContent).toBe("");
@@ -914,10 +960,11 @@ describe("Workstation selection history", () => {
 
     it("pushes a folder and restores it with Back", async () => {
         render(<Workstation {...props} />);
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
         fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
         expect(window.location.search).toBe("?folder=personal-child");
-        expect(screen.getByText("Folder: Meetings")).toBeTruthy();
+        expect(screen.getByTestId("location").textContent).toBe(
+            "personal-child",
+        );
         fireEvent.click(screen.getByRole("button", { name: "Recent" }));
         expect(window.location.search).toBe("?recording=first");
         expect(screen.getByTestId("item-link-query").textContent).not.toContain(
@@ -929,7 +976,9 @@ describe("Workstation selection history", () => {
                 window.addEventListener("popstate", resolve, { once: true }),
             );
         });
-        expect(screen.getByText("Folder: Meetings")).toBeTruthy();
+        expect(screen.getByTestId("location").textContent).toBe(
+            "personal-child",
+        );
     });
 
     it.each([
@@ -1040,5 +1089,344 @@ describe("Workstation selection history", () => {
         rerender(<Workstation {...props} recordings={[second]} />);
         expect(screen.getByText("Selected: none")).toBeTruthy();
         expect(window.location.search).toBe("");
+    });
+});
+
+describe("Workstation folder locations", () => {
+    const first = recording("first", "First recording");
+    const second = recording("second", "Second recording");
+    const organization = {
+        ...rootFolder,
+        id: "org-root",
+        kind: "public" as const,
+        scope: "org" as const,
+        name: "Organization",
+    };
+    const folderProps = {
+        ...baseProps,
+        recordings: [first, second],
+        initialFolderOrganization: {
+            folders: [rootFolder, personalChildFolder, organization],
+            assignments: [
+                { recordingId: first.id, folderId: personalChildFolder.id },
+                { recordingId: second.id, folderId: personalChildFolder.id },
+            ],
+        },
+    };
+    it.each([
+        "personal-child",
+        "personal-child.list",
+    ])("consumes a Google export return before an item link and requests the matching export dialog: %s", (googleExport) => {
+        window.history.replaceState(
+            {},
+            "",
+            `/dashboard?folder=personal-child&recording=second&googleExport=${googleExport}`,
+        );
+        render(<Workstation {...folderProps} />);
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(mocks.settingsProps?.folder.id).toBe("personal-child");
+        expect(mocks.settingsProps?.reopenExport).toBe(
+            googleExport.endsWith(".list") ? "list" : "form",
+        );
+        expect(window.location.search).toBe(
+            "?folder=personal-child&recording=second",
+        );
+        act(() => mocks.settingsProps?.onReopenHandled?.());
+        expect(mocks.settingsProps?.reopenExport).toBeUndefined();
+        act(() => mocks.settingsProps?.onOpenChange(false));
+        expect(
+            screen.queryByText("Folder settings", { selector: "div" }),
+        ).toBeNull();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Folder settings" }),
+        );
+        expect(mocks.settingsProps?.reopenExport).toBeUndefined();
+    });
+    it.each([
+        false,
+        true,
+    ])("keeps the item being read when opening Recent: Organization account=%s", (isOrgAccount) => {
+        const pool = [first, second].map((item) =>
+            isOrgAccount
+                ? { ...item, view: "org" as const, isOwn: true }
+                : item,
+        );
+        window.history.replaceState(
+            {},
+            "",
+            `/dashboard?folder=${isOrgAccount ? organization.id : personalChildFolder.id}&recording=second${isOrgAccount ? "&view=org" : ""}`,
+        );
+        render(
+            <Workstation
+                {...folderProps}
+                recordings={isOrgAccount ? [] : pool}
+                isOrgAccount={isOrgAccount}
+                organizationLibrary={
+                    isOrgAccount
+                        ? {
+                              recordings: pool,
+                              transcriptions: new Map(),
+                              transcriptVariants: new Map(),
+                          }
+                        : null
+                }
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        expect(screen.getByTestId("location").textContent).toBe("recent");
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(
+            new URLSearchParams(window.location.search).get("recording"),
+        ).toBe("second");
+        expect(new URLSearchParams(window.location.search).has("folder")).toBe(
+            false,
+        );
+    });
+    it("chooses the newest Recent item when the item being read belongs only to the Organization", () => {
+        const shared = {
+            ...recording("shared", "Shared"),
+            view: "org" as const,
+            isOwn: false,
+        };
+        const newest = { ...second, startTime: "2026-10-17T10:00:00Z" };
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=org-root&recording=shared&view=org",
+        );
+        render(
+            <Workstation
+                {...folderProps}
+                recordings={[first, newest]}
+                organizationLibrary={{
+                    recordings: [shared],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(window.location.search).toBe("?recording=second");
+    });
+    it("keeps the item being read when opening a folder containing it in a descendant", () => {
+        const nested = {
+            ...personalChildFolder,
+            id: "nested",
+            parentId: personalChildFolder.id,
+        };
+        window.history.replaceState({}, "", "/dashboard?recording=second");
+        render(
+            <Workstation
+                {...folderProps}
+                initialFolderOrganization={{
+                    folders: [
+                        ...folderProps.initialFolderOrganization.folders,
+                        nested,
+                    ],
+                    assignments: [
+                        {
+                            recordingId: first.id,
+                            folderId: personalChildFolder.id,
+                        },
+                        { recordingId: second.id, folderId: nested.id },
+                    ],
+                }}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(window.location.search).toBe(
+            "?folder=personal-child&recording=second",
+        );
+    });
+    it("chooses the newest visible item only when the current one is outside the opened folder", () => {
+        const older = { ...first, startTime: "2026-10-15T10:00:00Z" };
+        const newest = { ...second, startTime: "2026-10-16T10:00:00Z" };
+        const outside = recording("outside", "Outside");
+        window.history.replaceState({}, "", "/dashboard?recording=outside");
+        render(
+            <Workstation
+                {...folderProps}
+                recordings={[older, newest, outside]}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+    });
+    it("restores the previous item with Back within a folder without pushing automatic selection", async () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=second",
+        );
+        const push = vi.spyOn(window.history, "pushState");
+        render(<Workstation {...folderProps} />);
+        expect(push).not.toHaveBeenCalled();
+        fireEvent.click(
+            screen.getByRole("button", { name: "First recording" }),
+        );
+        expect(push).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(push).toHaveBeenCalledTimes(1);
+        push.mockRestore();
+    });
+    it.each([
+        rootFolder.id,
+        personalChildFolder.id,
+    ])("opens old folder-only links and writes both item and folder: %s", (folderId) => {
+        window.history.replaceState({}, "", `/dashboard?folder=${folderId}`);
+        render(<Workstation {...folderProps} />);
+        expect(screen.getByTestId("location").textContent).toBe(folderId);
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(new URLSearchParams(window.location.search).get("folder")).toBe(
+            folderId,
+        );
+        expect(
+            new URLSearchParams(window.location.search).get("recording"),
+        ).toBe("first");
+    });
+    it("retains a folder while selecting its items and restores it from the combined URL", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=second",
+        );
+        render(<Workstation {...folderProps} />);
+        expect(screen.getByTestId("location").textContent).toBe(
+            "personal-child",
+        );
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("button", { name: "First recording" }),
+        );
+        expect(window.location.search).toBe(
+            "?folder=personal-child&recording=first",
+        );
+        fireEvent.keyDown(window, { key: "j" });
+        expect(window.location.search).toBe(
+            "?folder=personal-child&recording=second",
+        );
+    });
+    it("opens a folder from the command palette and keeps the location when opening an item", () => {
+        render(<Workstation {...folderProps} />);
+        act(() => mocks.paletteProps?.onSelectFolder?.(personalChildFolder));
+        expect(screen.getByTestId("location").textContent).toBe(
+            "personal-child",
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Second recording" }),
+        );
+        expect(window.location.search).toBe(
+            "?folder=personal-child&recording=second",
+        );
+    });
+    it("returns from a deleted Organization folder to its parent, keeps the visible item, and re-enables j/k", async () => {
+        const orgChild = {
+            ...personalChildFolder,
+            id: "org-child",
+            parentId: organization.id,
+            scope: "org" as const,
+        };
+        const sharedFirst = { ...first, view: "org" as const, isOwn: false };
+        const sharedSecond = { ...second, view: "org" as const, isOwn: false };
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=org-child&recording=first&view=org&googleExport=org-child.list",
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ ok: true })),
+        );
+        render(
+            <Workstation
+                {...folderProps}
+                initialFolderOrganization={{
+                    folders: [
+                        ...folderProps.initialFolderOrganization.folders,
+                        orgChild,
+                    ],
+                    assignments: [
+                        { recordingId: first.id, folderId: orgChild.id },
+                        { recordingId: second.id, folderId: organization.id },
+                    ],
+                }}
+                organizationLibrary={{
+                    recordings: [sharedFirst, sharedSecond],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+            />,
+        );
+        await act(async () => {
+            await mocks.settingsProps?.onDelete(orgChild.id);
+        });
+        expect(screen.getByTestId("location").textContent).toBe("org-root");
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(window.location.search).toBe(
+            "?folder=org-root&recording=first&view=org",
+        );
+        fireEvent.keyDown(window, { key: "j" });
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        vi.unstubAllGlobals();
+    });
+    it("keeps Organization job status separate from the owner's private job", () => {
+        const shared = { ...first, view: "org" as const, isOwn: true };
+        mocks.inFlightActions = new Map([["first", "transcribing"]]);
+        window.history.replaceState({}, "", "/dashboard?folder=org-root");
+        const props = {
+            ...folderProps,
+            organizationLibrary: {
+                recordings: [shared],
+                transcriptions: new Map(),
+                transcriptVariants: new Map(),
+            },
+        };
+        const { rerender } = render(<Workstation {...props} />);
+        expect(screen.getByTestId("list-actions").textContent).toBe("[]");
+        mocks.inFlightActions = new Map([["org:first", "transcribing"]]);
+        rerender(<Workstation {...props} />);
+        expect(screen.getByTestId("list-actions").textContent).toBe(
+            '[["first","transcribing"]]',
+        );
+    });
+    it("uses the Organization for the organization account's Recent and omits Private navigation", () => {
+        const shared = { ...first, view: "org" as const, isOwn: false };
+        render(
+            <Workstation
+                {...folderProps}
+                recordings={[]}
+                isOrgAccount
+                canCurate
+                organizationLibrary={{
+                    recordings: [shared],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+            />,
+        );
+        expect(screen.getByTestId("location").textContent).toBe("recent");
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(
+            mocks.paletteProps?.folders?.every(
+                (folder) => folder.scope === "org",
+            ),
+        ).toBe(true);
+        expect(window.location.search).toBe("?recording=first&view=org");
+        fireEvent.click(
+            within(
+                screen.getByRole("region", { name: "Folder tree" }),
+            ).getByRole("button", { name: "New folder" }),
+        );
+        expect(
+            screen.getByRole("combobox", { name: "Parent folder" }).textContent,
+        ).toBe("Organization");
     });
 });

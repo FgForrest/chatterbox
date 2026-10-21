@@ -38,7 +38,7 @@ const ENUM_FIELDS = {
     listDensity: ["comfortable", "compact"],
     theme: ["light", "dark", "system"],
     dateTimeFormat: ["relative", "absolute", "iso"],
-    recordingListSortOrder: ["newest", "oldest", "name"],
+    recordingListSortOrder: ["newest", "oldest", "name", "duration", "size"],
     chatterKindFilter: ["all", "audio", "mail"],
     transcriptionQuality: ["fast", "balanced", "accurate"],
     // Shared with the exporter and the settings picker -- see

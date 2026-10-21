@@ -11,14 +11,14 @@ Pošta vyžaduje jednotné přihlášení: adresy dostanete, jakmile se přihlá
 
 Najdete je v **Nastavení → Pošta**.
 
-- Vaše **schránka** (`jan@…`) ukládá poštu do Klepů bez složky. Pruh pracovního postupu začíná krokem **Přijato** ve stavu **Hotovo** a krokem **Zařazení** ve stavu **Další**. Vložená karta **Zařadit e-mail** zobrazuje pole **Složka** a **Profil**, případně volbu **Bez automatického zpracování**. Žádný placený krok AI se nespustí, dokud nekliknete na **Zařadit e-mail**.
-- Každá složka má adresu (`jan+weekly@…`), která poštu uloží rovnou do ní. Pošta přeskočí čekání a použije výchozí profil pošty dané složky.
+- Vaše **schránka** (`zorven@…`) ukládá poštu do Klepů bez složky. Pruh pracovního postupu začíná krokem **Přijato** ve stavu **Hotovo** a krokem **Zařazení** ve stavu **Další**. Vložená karta **Zařadit e-mail** zobrazuje pole **Složka** a **Profil**, případně volbu **Bez automatického zpracování**. Žádný placený krok AI se nespustí, dokud nekliknete na **Zařadit e-mail**.
+- Každá složka má adresu (`zorven+weekly@…`), která poštu uloží rovnou do ní. Pošta přeskočí čekání a použije výchozí profil pošty dané složky.
 
 Na tyto adresy se přijímá jen pošta, kterou posíláte sami z účtu, kterým se přihlašujete: přepošlete na ni e-mail, nebo ji při psaní dejte do **Komu**, **Kopie** nebo **Skrytá kopie**. Klepna kontroluje podpis e-mailu, takže nikdo nemůže psát vaším jménem.
 
 ## Adresy složek
 
-Záhlaví složky ukazuje její adresu. Zkopírujte ji, nebo složce dejte vlastní: stará dál funguje jako vedlejší adresa, dokud ji neodeberete. Adresa, která už jednou byla přidělena, se nikdy nepřidělí nikomu jinému. Pošta na kteroukoli z těchto adres se zařadí a může automaticky spustit profil.
+Adresy složky zobrazíte v **Nastavení složky**, které otevřete u názvu složky nebo v nabídce **⋯**. Řádek **E-mail do složky** ukazuje adresu s tlačítkem kopírování a časem posledního e-mailu. Zkopírujte aktuální adresu, nebo složce dejte vlastní: stará dál funguje jako vedlejší adresa, dokud ji neodeberete. Adresa, která už jednou byla přidělena, se nikdy nepřidělí nikomu jinému. Pošta na kteroukoli z těchto adres se zařadí a může automaticky spustit profil.
 
 Smazání složky natrvalo zastaví její adresy i adresy podsložek. Klepna před potvrzením ukáže, kdy na každou naposledy přišla pošta.
 
@@ -30,7 +30,7 @@ Sdílet můžete i jakýkoli jiný svůj e-mail, když ho zařadíte do složky 
 
 ## Tajné adresy
 
-Pro poštu, kterou neposíláte sami, si v **Nastavení → Pošta** vytvořte **tajnou adresu**. Rozšiřuje Vaši schránku nebo adresu složky o náhodnou část (`jan.k3x9…@…`) a ukládá poštu stejně, od kohokoli. Tajná adresa rozšiřující schránku nechá poštu čekat na zařazení; adresa rozšiřující složku čekání přeskočí. Psát na ni může každý, kdo ji zná: pojmenujte ji, ať ji poznáte, a když unikne, **vyměňte** ji nebo ji **zastavte**.
+Pro poštu, kterou neposíláte sami, si v **Nastavení → Pošta** vytvořte **tajnou adresu**. Rozšiřuje Vaši schránku nebo adresu složky o náhodnou část (`zorven.k3x9…@…`) a ukládá poštu stejně, od kohokoli. Tajná adresa rozšiřující schránku nechá poštu čekat na zařazení; adresa rozšiřující složku čekání přeskočí. Psát na ni může každý, kdo ji zná: pojmenujte ji, ať ji poznáte, a když unikne, **vyměňte** ji nebo ji **zastavte**.
 
 ### Filtry Gmailu a automatické přeposílání
 

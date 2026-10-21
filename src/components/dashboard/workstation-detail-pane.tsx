@@ -51,6 +51,7 @@ interface Props {
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
     onTranscriptStale?: () => void;
     onFolderCreated?: (folder: CreatedFolder) => void;
+    canCurate?: boolean;
     /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
     transcriptReadOnly?: boolean;
     /** Whether the recording is in the Organization: erasing it withdraws it. */
@@ -60,6 +61,7 @@ interface Props {
     onDelete: (recording: Recording) => Promise<void>;
     onArtifactsChanged: () => void;
     onBackToList: () => void;
+    backLabel?: string;
     /** When true, the pane is hidden (mobile list view active). */
     hiddenOnMobile: boolean;
     initialPlaybackSpeed: number | undefined;
@@ -108,6 +110,7 @@ export function WorkstationDetailPane({
     onTranscribeComplete,
     onTranscriptStale,
     onFolderCreated,
+    canCurate,
     transcriptReadOnly,
     recordingShared = false,
     onSelectRecording,
@@ -115,6 +118,7 @@ export function WorkstationDetailPane({
     onDelete,
     onArtifactsChanged,
     onBackToList,
+    backLabel,
     hiddenOnMobile,
     initialPlaybackSpeed,
     initialVolume,
@@ -187,7 +191,7 @@ export function WorkstationDetailPane({
     return (
         <div
             className={cn(
-                "space-y-6 lg:col-span-2 lg:block lg:self-start",
+                "min-w-0 space-y-6 lg:block lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -203,7 +207,7 @@ export function WorkstationDetailPane({
                 onClick={onBackToList}
                 className="-ml-2 h-9 gap-1 px-2 lg:hidden"
             >
-                <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
+                <ArrowLeft className="size-4" /> {backLabel ?? i18n("Recent")}
             </Button>
             {currentRecording ? (
                 <>
@@ -249,6 +253,7 @@ export function WorkstationDetailPane({
                         onMoveBetweenFolders={onMoveBetweenFolders}
                         onChanged={onArtifactsChanged}
                         onFolderCreated={onFolderCreated}
+                        canCurate={canCurate}
                         onTranscribe={(retranscribe) =>
                             onTranscribe(undefined, retranscribe)
                         }

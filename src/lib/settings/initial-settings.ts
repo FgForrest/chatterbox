@@ -2,7 +2,7 @@ import type { userSettings } from "@/db/schema";
 
 export interface InitialSettings {
     dateTimeFormat: "relative" | "absolute" | "iso";
-    recordingListSortOrder: "newest" | "oldest" | "name";
+    recordingListSortOrder: "newest" | "oldest" | "name" | "duration" | "size";
     chatterKindFilter: "all" | "audio" | "mail";
     itemsPerPage: number;
     listDensity: "comfortable" | "compact";

@@ -8,7 +8,7 @@ import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
-import { FolderRecordingPane } from "@/components/dashboard/folder-recording-pane";
+import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import {
     UploadDialog,
@@ -97,12 +97,10 @@ describe("localized folder labels", () => {
                 assignments={[]}
                 recordings={[]}
                 selectedFolderId={null}
+                onSettings={vi.fn()}
                 onRecent={vi.fn()}
                 onSelectFolder={vi.fn()}
-                onCreateFolder={vi.fn()}
-                onRenameFolder={vi.fn()}
                 onMoveFolder={vi.fn()}
-                onDeleteFolder={vi.fn()}
                 onAssignRecording={vi.fn()}
             />,
             { wrapper: Czech },
@@ -118,7 +116,7 @@ describe("localized folder labels", () => {
         });
         fireEvent.pointerDown(actions, { button: 0, ctrlKey: false });
         expect(
-            screen.getByRole("menuitem", { name: cs("New subfolder") }),
+            screen.getByRole("menuitem", { name: cs("Folder settings") }),
         ).toBeTruthy();
         expect(
             screen.queryByRole("menuitem", { name: cs("Rename") }),
@@ -131,7 +129,7 @@ describe("localized folder labels", () => {
             },
         );
         expect(screen.getByRole("button", { name: /^Soukromé,/ })).toBeTruthy();
-        expect(screen.queryByRole("button", { name: /^Private,/ })).toBeNull();
+        expect(screen.getByRole("button", { name: /^Private,/ })).toBeTruthy();
     });
 
     it.each([
@@ -139,17 +137,16 @@ describe("localized folder labels", () => {
         nested,
     ])("localizes the folder pane and breadcrumb for $id", (folder) => {
         render(
-            <FolderRecordingPane
+            <FolderSettingsPanel
                 folder={folder}
                 folders={folders}
-                assignments={[]}
-                recordings={[]}
-                dateTimeFormat="relative"
-                onSelectRecording={vi.fn()}
-                onRenameFolder={vi.fn()}
-                onDeleteFolder={vi.fn()}
-                hiddenOnMobile={false}
-                onBackToFolders={vi.fn()}
+                count={0}
+                open
+                onOpenChange={vi.fn()}
+                onRename={vi.fn()}
+                onDelete={vi.fn()}
+                onCreate={vi.fn()}
+                onMove={vi.fn()}
                 exportProviders={{
                     filesystem: false,
                     googleDrive: false,
@@ -163,21 +160,15 @@ describe("localized folder labels", () => {
                 name: folder === privateRoot ? "Soukromé" : "Notes",
             }),
         ).toBeTruthy();
-        expect(screen.getAllByText("Soukromé")).toHaveLength(
-            folder === privateRoot ? 2 : 1,
-        );
-        if (folder === nested) {
-            expect(
-                screen.getByText("Private").parentElement?.parentElement
-                    ?.textContent,
-            ).toMatch(/^Soukromé\/Private\/Notes/);
-        } else {
+        expect(
+            screen.getByText(/Soukromé.*items|Soukromé.*polož/),
+        ).toBeTruthy();
+        if (folder === privateRoot)
             expect(
                 screen.queryByRole("button", { name: cs("Rename") }),
             ).toBeNull();
-        }
-        fireEvent.click(screen.getByRole("button", { name: cs("Export") }));
-        expect(screen.getByRole("dialog").textContent).toContain(
+        fireEvent.click(screen.getByRole("button", { name: cs("Configure") }));
+        expect(screen.getAllByRole("dialog").at(-1)?.textContent).toContain(
             folder === privateRoot ? "Soukromé" : "Notes",
         );
     });

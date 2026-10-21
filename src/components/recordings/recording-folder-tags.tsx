@@ -3,6 +3,7 @@
 import { Folder, FolderInput, FolderPlus, Users, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
+import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
     useWithdrawPreview,
     WithdrawRetentionWarning,
@@ -16,14 +17,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import type {
     RecordingFolder,
@@ -31,6 +24,8 @@ import type {
 } from "@/types/folder";
 
 interface RecordingFolderTagsProps {
+    canCurate?: boolean;
+    onFolderCreated?: (folder: RecordingFolder) => void;
     recordingId: string;
     kind?: "audio" | "mail";
     folders: RecordingFolder[];
@@ -81,8 +76,11 @@ export function RecordingFolderTags({
     canWithdraw = isOwn,
     organizationOnly = false,
     onMove,
+    canCurate,
+    onFolderCreated,
 }: RecordingFolderTagsProps) {
     const i18n = useExtracted();
+    const [pickerOpen, setPickerOpen] = useState(false);
     // The Organization folder whose removal would withdraw the recording,
     // while its owner confirms.
     const [withdrawing, setWithdrawing] = useState<RecordingFolder | null>(
@@ -105,16 +103,6 @@ export function RecordingFolderTags({
     const assigned = folders.filter(
         (folder) => assignedIds.has(folder.id) && inScope(folder),
     );
-    const unassigned = folders.filter(
-        (folder) =>
-            folder.kind !== "private" &&
-            !assignedIds.has(folder.id) &&
-            inScope(folder),
-    );
-    const personalAvailable = unassigned.filter(
-        (folder) => folder.scope !== "org",
-    );
-    const orgAvailable = unassigned.filter((folder) => folder.scope === "org");
     const assignedOrg = assigned.filter((folder) => folder.scope === "org");
     // Someone else's recording can be refiled but not shared or withdrawn,
     // and refiling needs to know which folder it leaves.
@@ -179,107 +167,43 @@ export function RecordingFolderTags({
                     )}
                 </span>
             ))}
-            {isOwn && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
-                        >
-                            <FolderPlus className="size-3.5" />{" "}
-                            {i18n("Add to folder")}
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                        align="start"
-                        className="max-h-72 overflow-y-auto"
+            {(isOwn || moveSource) && (
+                <>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
+                        onClick={() => setPickerOpen(true)}
                     >
-                        {personalAvailable.length > 0 && (
-                            <DropdownMenuLabel>
-                                {i18n("Folders")}
-                            </DropdownMenuLabel>
+                        {moveSource ? (
+                            <FolderInput className="size-3.5" />
+                        ) : (
+                            <FolderPlus className="size-3.5" />
                         )}
-                        {personalAvailable.map((folder) => (
-                            <DropdownMenuItem
-                                key={folder.id}
-                                onSelect={() => {
-                                    void onAdd(recordingId, folder.id).catch(
-                                        () => {},
-                                    );
-                                }}
-                            >
-                                <Folder />
-                                {label(folder)}
-                            </DropdownMenuItem>
-                        ))}
-                        {orgAvailable.length > 0 && (
-                            <>
-                                {personalAvailable.length > 0 && (
-                                    <DropdownMenuSeparator />
-                                )}
-                                <DropdownMenuLabel>
-                                    {i18n("Share with the Organization")}
-                                </DropdownMenuLabel>
-                                {orgAvailable.map((folder) => (
-                                    <DropdownMenuItem
-                                        key={folder.id}
-                                        onSelect={() => {
-                                            void onAdd(
-                                                recordingId,
-                                                folder.id,
-                                            ).catch(() => {});
-                                        }}
-                                    >
-                                        <Users />
-                                        {label(folder)}
-                                    </DropdownMenuItem>
-                                ))}
-                            </>
-                        )}
-                        {unassigned.length === 0 && (
-                            <DropdownMenuItem disabled>
-                                {i18n("No other folders")}
-                            </DropdownMenuItem>
-                        )}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            )}
-            {moveSource && onMove && orgAvailable.length > 0 && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
-                        >
-                            <FolderInput className="size-3.5" />{" "}
-                            {i18n("Move to…")}
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                        align="start"
-                        className="max-h-72 overflow-y-auto"
-                    >
-                        {orgAvailable.map((folder) => (
-                            <DropdownMenuItem
-                                key={folder.id}
-                                onSelect={() => {
-                                    void onMove(
-                                        recordingId,
-                                        moveSource.id,
-                                        folder.id,
-                                    ).catch(() => {});
-                                }}
-                            >
-                                <Users />
-                                {label(folder)}
-                            </DropdownMenuItem>
-                        ))}
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                        {moveSource ? i18n("Move to…") : i18n("Add to folder")}
+                    </Button>
+                    {pickerOpen && (
+                        <FolderPicker
+                            folders={folders}
+                            canCurate={canCurate}
+                            onCreated={onFolderCreated}
+                            assignedIds={assignedIds}
+                            open={pickerOpen}
+                            onOpenChange={setPickerOpen}
+                            organizationOnly={organizationOnly || !isOwn}
+                            onSelect={(folderId) =>
+                                moveSource && onMove
+                                    ? onMove(
+                                          recordingId,
+                                          moveSource.id,
+                                          folderId,
+                                      )
+                                    : onAdd(recordingId, folderId)
+                            }
+                        />
+                    )}
+                </>
             )}
             <Dialog
                 open={withdrawing !== null}
