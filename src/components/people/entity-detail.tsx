@@ -27,7 +27,7 @@ export interface EntityDetailProps {
     };
     facts: PageRelation[];
     otherNames: OtherName[];
-    /** Whether the viewer may change it: its owner, or the organization account. */
+    /** Whether the viewer may change it: its owner, or an Organization curator. */
     canManage?: boolean;
     /** The types it may take. */
     types?: { key: string; label: string }[];
@@ -96,7 +96,7 @@ export function EntityDetail({
                 editing={
                     editing && {
                         target: { entityId: entity.id },
-                        ownScope: editing.ownScope,
+                        canCurateOrganization: editing.canCurateOrganization,
                     }
                 }
             />

@@ -12,8 +12,9 @@
  * one sends the person to the vocabulary.
  */
 
-import { and, isNull, sql } from "drizzle-orm";
+import { and, isNull } from "drizzle-orm";
 import { db } from "@/db";
+import { lockAlmanacImport } from "@/db/queries/almanac-import";
 import { people as peopleTable } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -37,7 +38,7 @@ import {
 } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
-import { getOrgUserId } from "@/lib/org/config";
+import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 
 export const MAX_IMPORT_RECORDS = 500;
 export const MAX_IMPORT_NICKNAMES = 2000;
@@ -105,6 +106,7 @@ export async function importList(
 ): Promise<ImportResult> {
     const { names, problems } = parseImportList(text);
     if (names.length > MAX_IMPORT_RECORDS) throw tooMany();
+    await assertOwnScopeWritable(actorUserId);
     const vocabulary = await vocabularyVisibleTo(actorUserId);
     const types = [
         { key: "person", label: "Person" },
@@ -129,9 +131,7 @@ export async function importList(
             else await lockOrgPeopleShared(tx);
             // One import into a scope at a time: two at once would both
             // find a name missing, and people have no unique name.
-            await tx.execute(
-                sql`select pg_advisory_xact_lock(hashtext(${`riffado:import:${actorUserId}`}))`,
-            );
+            await lockAlmanacImport(tx, actorUserId);
         }
         // The people the actor sees, by name: names have no lookup hash,
         // so they are compared decrypted. Two of one name are ambiguous.
@@ -229,6 +229,7 @@ export async function importList(
                 if (row.kind === "person") {
                     const person = await createPersonInTx(tx, {
                         userId: actorUserId,
+                        createdByUserId: actorUserId,
                         displayName: parsed.name,
                     });
                     row.recordId = person.id;

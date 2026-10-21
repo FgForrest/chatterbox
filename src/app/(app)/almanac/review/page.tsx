@@ -1,7 +1,11 @@
+import { and, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { SuggestedRelations } from "@/components/people/suggested-relations";
+import { db } from "@/db";
+import { chatterItems } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { itemDetailHref } from "@/lib/item-detail";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { groupPhrases } from "@/lib/knowledge/phrase-groups";
@@ -11,7 +15,8 @@ import {
 } from "@/lib/knowledge/vocabulary";
 import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
 import { reviewQueue } from "@/lib/learn/pending";
-import { isOrgAccount } from "@/lib/org/config";
+import { getOrgUserId } from "@/lib/org/config";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { taskViewer } from "@/lib/tasks/access";
 import { recordingsAwaitingTaskReview } from "@/lib/tasks/tasks";
 
@@ -29,12 +34,48 @@ export default async function ReviewQueuePage() {
     const session = await requireAuth();
     const labels = await getVocabularyLabels();
     const i18n = await getExtracted();
-    const organization = await isOrgAccount(session.user.id);
-    const rows = isLearnDeploymentAvailable()
-        ? await reviewQueue(session.user.id, organization)
+    const organization = await userCuratesOrganizationNow(session.user.id);
+    const orgUserId = await getOrgUserId();
+    const queues = isLearnDeploymentAvailable()
+        ? await Promise.all([
+              session.user.id !== orgUserId
+                  ? reviewQueue(session.user.id, false).then((rows) =>
+                        rows.map((row) => ({
+                            ...row,
+                            view: "private" as const,
+                        })),
+                    )
+                  : [],
+              organization && orgUserId
+                  ? reviewQueue(orgUserId, true).then((rows) =>
+                        rows.map((row) => ({ ...row, view: "org" as const })),
+                    )
+                  : [],
+          ])
         : [];
+    const rows = queues
+        .flat()
+        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
     const taskRows = await recordingsAwaitingTaskReview(
         await taskViewer({ id: session.user.id, email: session.user.email }),
+    );
+    const sharedTaskItems = new Set(
+        orgUserId && taskRows.length > 0
+            ? (
+                  await db
+                      .select({ id: chatterItems.id })
+                      .from(chatterItems)
+                      .where(
+                          and(
+                              inArray(
+                                  chatterItems.id,
+                                  taskRows.map((row) => row.recordingId),
+                              ),
+                              sharedItemCondition(orgUserId),
+                          ),
+                      )
+              ).map((row) => row.id)
+            : [],
     );
     const phrases = organization
         ? await listVocabularyProposals(session.user.id)
@@ -73,7 +114,7 @@ export default async function ReviewQueuePage() {
                     <ul className="divide-y rounded-lg border">
                         {rows.map((row) => (
                             <li
-                                key={row.id}
+                                key={`${row.id}:${row.view}`}
                                 className="flex items-center justify-between gap-4 p-3 text-sm"
                             >
                                 <span className="min-w-0 truncate">
@@ -81,11 +122,11 @@ export default async function ReviewQueuePage() {
                                 </span>
                                 <Link
                                     href={itemDetailHref(row.id, {
-                                        view: organization ? "org" : "private",
+                                        view: row.view,
                                     })}
                                     className="shrink-0 text-primary hover:underline"
                                 >
-                                    {organization
+                                    {row.view === "org"
                                         ? i18n("Open the Organization library")
                                         : i18n("Review")}
                                 </Link>
@@ -117,13 +158,15 @@ export default async function ReviewQueuePage() {
                                     </span>
                                     <Link
                                         href={itemDetailHref(row.recordingId, {
-                                            view: organization
+                                            view: sharedTaskItems.has(
+                                                row.recordingId,
+                                            )
                                                 ? "org"
                                                 : "private",
                                         })}
                                         className="text-primary hover:underline"
                                     >
-                                        {organization
+                                        {sharedTaskItems.has(row.recordingId)
                                             ? i18n(
                                                   "Open the Organization library",
                                               )

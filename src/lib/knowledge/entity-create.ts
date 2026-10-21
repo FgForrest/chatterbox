@@ -13,6 +13,7 @@ import {
 } from "@/lib/knowledge/entities";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { assertOwnScopeWritable } from "@/lib/org/config";
 
 /**
  * Create a thing in the actor's own scope with its nicknames (one given
@@ -23,6 +24,7 @@ export async function createEntityWithNicknames(
     spec: { typeKey: string; name: string; description?: string | null },
     nicknames: readonly string[],
 ): Promise<Entity> {
+    await assertOwnScopeWritable(actorUserId);
     const id = await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         const created = await createEntityInTx(tx, actorUserId, spec);
