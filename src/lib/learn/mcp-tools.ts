@@ -1,3 +1,10 @@
+const READ_ONLY = {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+} as const;
+
 /**
  * Riffado's read-only knowledge tools, as a Learn run's model sees them
  * over MCP (`/api/mcp/learn`, `mcp.ts`). Apart from the endpoint so the
@@ -24,6 +31,7 @@ export const LEARN_MCP_TOOLS = [
             required: ["text"],
             additionalProperties: false,
         },
+        annotations: READ_ONLY,
     },
     {
         name: "get_entity",
@@ -35,6 +43,7 @@ export const LEARN_MCP_TOOLS = [
             required: ["id"],
             additionalProperties: false,
         },
+        annotations: READ_ONLY,
     },
     {
         name: "find_facts",
@@ -46,5 +55,6 @@ export const LEARN_MCP_TOOLS = [
             required: ["id"],
             additionalProperties: false,
         },
+        annotations: READ_ONLY,
     },
 ] as const;
