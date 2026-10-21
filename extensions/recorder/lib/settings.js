@@ -15,6 +15,8 @@ import { t } from "./i18n.js";
 
 /**
  * @typedef {Object} ServerDefaults
+ * @property {number} encryptedRecordingProtocol
+ * @property {boolean} recordingFolderOverride
  * @property {string[]} autoRecordPlatforms
  * @property {number} autoStopQuietSeconds
  * @property {string} noticeText

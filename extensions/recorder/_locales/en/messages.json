@@ -60,7 +60,7 @@
   "recordWithConsent": {"message": "Consent confirmed · Record"},
   "startingCapture": {"message": "Starting recording…"},
   "openingPicker": {"message": "Opening audio picker…"},
-  "pickerHint": {"message": "Chrome will ask you to choose a tab or screen with audio."},
+  "pickerHint": {"message": "For another screen or app, choose a source with audio in Chrome’s dialog."},
   "pickerInstruction": {"message": "Choose a tab or screen with audio in Chrome's dialog."},
   "minimize": {"message": "Minimize"},
   "you": {"message": "You"},
@@ -110,7 +110,7 @@
   "connectTo": {"message": "Connect to $1"},
   "recordThis": {"message": "Record this $1 meeting."},
   "autoTip": {"message": "Tip: turn on automatic recording for $1 in Options, and the icon will offer to record with one click."},
-  "noMeeting": {"message": "No meeting detected in this tab."},
+  "noMeeting": {"message": "Record audio playing in this tab."},
   "uploadedOf": {"message": "Uploaded $1 of $2 segments"},
   "segmentsUploaded": {"message": "$1 segment(s) uploaded"},
   "waitingPicker": {"message": "Waiting for Chrome's audio picker…"},
@@ -144,7 +144,7 @@
   "accessWithdrawn": {"message": "Your access to Chatterbox was withdrawn. The recording is kept encrypted in this browser: once your access is restored, choose Retry upload, or sign in again and pair the recorder."},
   "accessUnverifiable": {"message": "The server cannot verify your access right now; the recording is kept and uploads resume automatically."},
   "finalizeFailed": {"message": "Could not finalize the recording. Encrypted chunks remain in this browser for recovery."},
-  "folder": {"message": "Folder"},
+  "folder": {"message": "Target folder in Chatterbox"},
   "folderSearchHint": {"message": "Type at least 2 characters to search folders."},
   "foldersLoading": {"message": "Loading folders…"},
   "noFoldersFound": {"message": "No folders found"},
@@ -223,5 +223,9 @@
   "micManaged": {"message": "Your administrator must allow microphone access for $1."},
   "micManagedHint": {"message": "If $1 is managed and microphone access is blocked by policy, your administrator must allow it."},
   "setupExpired": {"message": "This setup expired. Click Connect again to start a new 15-minute setup."},
-  "setupSiteGranted": {"message": "Access to $1 is allowed."}
+  "setupSiteGranted": {"message": "Access to $1 is allowed."},
+  "recordTabWithConsent": {"message": "Consent confirmed · Record this tab"},
+  "recordAnotherSource": {"message": "Record another screen or app"},
+  "folderFixedAtStart": {"message": "This server files the recording in the folder chosen at the start."},
+  "folderChangeFailed": {"message": "Could not change the target folder. Try again."}
 }

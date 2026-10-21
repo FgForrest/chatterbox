@@ -217,6 +217,7 @@ export async function refreshServerConfig() {
     await chrome.storage.local.set({
         [STORAGE_KEYS.serverDefaults]: {
             encryptedRecordingProtocol: config.encrypted_recording_protocol,
+            recordingFolderOverride: config.recording_folder_override === true,
             autoRecordPlatforms: Array.isArray(defaults.auto_record_platforms)
                 ? defaults.auto_record_platforms.filter(
                       (id) => typeof id === "string",

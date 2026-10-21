@@ -214,7 +214,7 @@ curl -H "Authorization: Bearer op_..." \
       "speaker": "speaker_1",
       "start_ms": 18000,
       "end_ms": 40000,
-      "text": "Thanks. I'm Jan from Tavesy."
+      "text": "Thanks. The project is called Samplee."
     }
   ],
   "corrections": [
@@ -223,10 +223,10 @@ curl -H "Authorization: Bearer op_..." \
       "turn_index": 3,
       "char_start": 12,
       "char_end": 18,
-      "heard": "Tavesy",
+      "heard": "Samplee",
       "kind": "correct",
-      "replacement": "Tavesi",
-      "meaning": "Tavesi"
+      "replacement": "Sample",
+      "meaning": "Sample"
     }
   ]
 }
@@ -308,7 +308,12 @@ které odesílá zvuk po částech už během nahrávání:
    nuly a musí být souvislé.
 3. `POST /api/v1/recording-sessions/{id}/complete` označí relaci za dokončenou
    pomocí `chunkCount`, `endedAt` a `stopReason`. Server ověří části, sestaví je
-   a vytvoří nahrávku. Odpověď obsahuje `job_id`.
+   a vytvoří nahrávku. Odpověď obsahuje `job_id`. Nepovinné `folderId` změní
+   cíl před dokončením: vynechání zachová počáteční složku, neprázdný řetězec
+   vybere složku se stejným ověřením jako při vytvoření a `null` znamená
+   zařadit později. Neplatná nebo nepřístupná složka vrátí `400 INVALID_INPUT`
+   s `details.field: "folderId"`; relace zůstane otevřená pro opakování.
+   Opakované dokončení již zpracovávané relace složku nezmění.
 4. `GET /api/v1/recording-sessions/{id}` vrací stav a přijaté indexy částí pro
    obnovení po přerušení. Odpovědi relace obsahují také `folder_id` a
    `processing: { phase, state }`. Před vznikem nahrávky je zpracování
@@ -319,7 +324,10 @@ které odesílá zvuk po částech už během nahrávání:
 Spárované rozšíření načítá výchozí nastavení serveru z
 `GET /api/v1/recorder/config` se stejným oprávněním: platformy s výchozím režimem
 **Auto**, dobu ticha pro zastavení, text upozornění a to, zda jsou tyto platformy
-v režimu **Auto** uzamčené. Hodnoty pocházejí z proměnných prostředí `RECORDER_*`.
+v režimu **Auto** uzamčené. Odpověď také oznamuje
+`encrypted_recording_protocol: 1` a `recording_folder_override: true`.
+Druhé pole znamená podporu `folderId` při dokončení. U starších serverů klient
+změnu neposílá a zachová počáteční složku. Výchozí hodnoty pocházejí z proměnných prostředí `RECORDER_*`.
 Bez uložené volby nebo režimu **Auto** nastaveného serverem používá rozšíření
 0.3.0 pro Meet, Teams a webový Zoom výchozí režim **Výzva**, pro ostatní platformy
 **Vypnuto**.
@@ -344,7 +352,8 @@ oprávnění `recordings:write` vrátí `403` a vyčerpaný limit vrátí `429`.
 Je-li uvedeno `folderId`, dokončení nahrávku zařadí před pokračováním ve
 zpracování. Složka Organizace nejprve vytvoří záměr sdílení; zpracování
 automaticky pokračuje, jakmile se vyhodnotí použitelný profil složky, jinak v
-aplikaci čeká na volbu profilu nebo zásah kurátora. Bez `folderId` nahrávka čeká
+aplikaci čeká na volbu profilu nebo zásah kurátora. Je-li výsledná cílová složka
+`null`, nahrávka čeká
 v aplikaci, až ji vlastník zařadí.
 Webhooky `transcription.completed` a `summary.completed` se proto u takové
 nahrávky odešlou až poté, co ji vlastník zařadí a zpracování dosáhne příslušné

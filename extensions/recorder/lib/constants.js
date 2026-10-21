@@ -60,6 +60,15 @@ export const STORAGE_KEYS = {
     folderLabel: "folderLabel",
 };
 
+/** The recorder window's width once Chrome's sharing dialog has closed. */
+export const RECORDER_WINDOW_WIDTH = 430;
+
+/**
+ * The recorder window's size while Chrome's sharing dialog is open. On macOS
+ * and Linux Chrome draws that dialog inside the window and clips it there.
+ */
+export const PICKER_WINDOW_SIZE = { width: 800, height: 680 };
+
 /** Per-platform recording modes. */
 export const PLATFORM_MODES = ["off", "prompt", "auto"];
 export const DEFAULT_PLATFORM_MODE = "off";

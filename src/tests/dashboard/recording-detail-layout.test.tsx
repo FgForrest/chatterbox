@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { type Ref, useImperativeHandle } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RecordingPlayerHandle } from "@/components/dashboard/recording-player";
@@ -9,7 +9,13 @@ import type { Recording } from "@/types/recording";
 const playFrom = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/dashboard/recording-player", () => ({
-    RecordingPlayer: ({ ref }: { ref: Ref<RecordingPlayerHandle> }) => {
+    RecordingPlayer: ({
+        ref,
+        onEnded,
+    }: {
+        ref: Ref<RecordingPlayerHandle>;
+        onEnded?: () => void;
+    }) => {
         useImperativeHandle(ref, () => ({
             playFrom,
             seekTo: vi.fn(),
@@ -17,7 +23,15 @@ vi.mock("@/components/dashboard/recording-player", () => ({
             pause: vi.fn(),
             subscribe: () => () => {},
         }));
-        return <div data-testid="recording-player" />;
+        return (
+            <button
+                type="button"
+                data-testid="recording-player"
+                onClick={onEnded}
+            >
+                End playback
+            </button>
+        );
     },
     transcriptPlayback: () => undefined,
 }));
@@ -114,6 +128,54 @@ describe("recording detail layout", () => {
             />,
         );
         expect(playFrom).toHaveBeenCalledTimes(1);
+    });
+
+    it("plays captured link context after its URL parameters have been consumed", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=rec-1&view=org",
+        );
+        const linked = { ...recording, view: "org" as const };
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org&playFrom=12500"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledExactlyOnceWith(12.5);
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledTimes(1);
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org&playFrom=12500"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledTimes(2);
+    });
+
+    it("auto advances through the automatic selection callback", () => {
+        const onSelectRecording = vi.fn();
+        const next = { ...recording, id: "next" };
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+                visibleRecordings={[recording, next]}
+                onSelectRecording={onSelectRecording}
+            />,
+        );
+        fireEvent.click(screen.getByTestId("recording-player"));
+        expect(onSelectRecording).toHaveBeenCalledExactlyOnceWith(next);
     });
 
     it("orders the title, workflow, folder row, player, and detail panels", () => {

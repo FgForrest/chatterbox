@@ -20,6 +20,7 @@ import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
 import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
+import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import {
     confirmedAttributions,
     type SpeakerResponseRow,
@@ -59,6 +60,7 @@ import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import type { SummarySource } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
+import { speakerPositions } from "@/lib/knowledge/speaker-groups";
 import {
     speakerKey,
     speakerLabelsForTranscript,
@@ -499,16 +501,24 @@ export function TranscriptionPanel({
         [speakerAttributions, unknownByKey, attributionKey],
     );
     /** Play a speaker's next turn; `once`: only that turn. */
-    const handlePlaySpeaker = (speaker: string, once = false): boolean => {
+    const handlePlaySpeaker = (
+        voices: string | readonly string[],
+        once = false,
+    ): boolean => {
         const turns = activeTranscript?.turns;
         if (!turns?.length || !onPlayFromTurn) return false;
+        const labels = new Set(
+            (typeof voices === "string" ? [voices] : voices).map(speakerKey),
+        );
+        const speaker = JSON.stringify([...labels].sort());
         const matching = turns.flatMap((turn, index) =>
-            speakerKey(turn.speaker) === speaker &&
+            labels.has(speakerKey(turn.speaker)) &&
             Number.isFinite(turn.startMs) &&
             turn.startMs >= 0
                 ? [index]
                 : [],
         );
+        matching.sort((a, b) => turns[a].startMs - turns[b].startMs || a - b);
         if (matching.length === 0) return false;
         const transcript = `${attributionKey}:${activeTranscriptKey}`;
         const cursor = speakerCursorRef.current;
@@ -528,6 +538,14 @@ export function TranscriptionPanel({
         setSpeakerJump({ index });
         return true;
     };
+    const accentPositions = useMemo(
+        () =>
+            speakerPositions(
+                speakerTags.map(({ speaker }) => speaker),
+                speakerAttributions,
+            ),
+        [speakerTags, speakerAttributions],
+    );
     const handleAttributionsChange = useCallback(
         (values: SpeakerAttributions) => {
             setAttributionsByKey((current) => ({
@@ -1100,30 +1118,32 @@ export function TranscriptionPanel({
             {canLearn &&
                 activeTranscript &&
                 (!widgets || widgets.learn.visible) && (
-                    <LearnReview
-                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
-                        recordingId={recording.id}
-                        view={view}
-                        source={
-                            activeTranscript.source === "plaud"
-                                ? "plaud"
-                                : "riffado"
-                        }
-                        turns={activeTranscript.turns ?? []}
-                        onSeek={onSeekToTurn}
-                        onPlaySpeaker={
-                            onPlayFromTurn
-                                ? (label) => handlePlaySpeaker(label, true)
-                                : undefined
-                        }
-                        onFinished={handleReviewFinished}
-                        onMarks={setLearnMarks}
-                        frame={widgets?.learn.frame ?? "inline"}
-                        widgetId={`recording-learn-review-${recording.id}`}
-                        folderName={folderName}
-                        showTrigger={false}
-                        collapseReady
-                    />
+                    <SpeakerAccentContext value={accentPositions}>
+                        <LearnReview
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                            recordingId={recording.id}
+                            view={view}
+                            source={
+                                activeTranscript.source === "plaud"
+                                    ? "plaud"
+                                    : "riffado"
+                            }
+                            turns={activeTranscript.turns ?? []}
+                            onSeek={onSeekToTurn}
+                            onPlaySpeaker={
+                                onPlayFromTurn
+                                    ? (label) => handlePlaySpeaker(label, true)
+                                    : undefined
+                            }
+                            onFinished={handleReviewFinished}
+                            onMarks={setLearnMarks}
+                            frame={widgets?.learn.frame ?? "inline"}
+                            widgetId={`recording-learn-review-${recording.id}`}
+                            folderName={folderName}
+                            showTrigger={false}
+                            collapseReady
+                        />
+                    </SpeakerAccentContext>
                 )}
 
             {activeTranscript?.text &&
