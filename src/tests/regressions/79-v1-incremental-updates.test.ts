@@ -320,6 +320,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
         (db.select as Mock)
             // Which kind of item it is: a recording.
             .mockReturnValueOnce(selectRows([{ kind: "audio" }]))
+            // Its processing state: none yet.
+            .mockReturnValueOnce(selectRows([]))
             .mockReturnValueOnce(
                 selectRows([{ id: recordingId, deletedAt: null }]),
             )
@@ -407,6 +409,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
         (db.select as Mock)
             // Which kind of item it is: a recording.
             .mockReturnValueOnce(selectRows([{ kind: "audio" }]))
+            // Its processing state: none yet.
+            .mockReturnValueOnce(selectRows([]))
             .mockReturnValueOnce(
                 selectRows([{ id: recordingId, deletedAt: null }]),
             )

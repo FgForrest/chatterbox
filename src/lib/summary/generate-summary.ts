@@ -24,6 +24,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
+import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
 import {
     BUILTIN_PROMPTS_VERSION,
@@ -218,6 +219,10 @@ export async function generateSummaryForRecording(
     });
     if (refusal) throw writerRefusalError(refusal);
 
+    const itemProfileRevisionId =
+        (await readProcessing(recordingId, ctx.view, ctx.ownerUserId))
+            ?.profileRevisionId ?? null;
+
     const [recording] = await db
         .select(audioItemColumns)
         .from(recordings)
@@ -289,9 +294,6 @@ export async function generateSummaryForRecording(
         | AudioProfileSettings
         | undefined;
     const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
-    const itemProfileRevisionId =
-        opts.profileRevisionId ??
-        (profile?.assigned ? profile.revisionId : null);
     const titleFence: TitleInputFence = {
         contentId: transcription.id,
         contentSourceId: transcription.source,
