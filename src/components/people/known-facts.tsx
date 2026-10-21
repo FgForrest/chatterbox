@@ -1,10 +1,10 @@
 "use client";
 
 import {
+    ArrowUpRight,
     Building2,
     Mail,
     Pencil,
-    Play,
     Plus,
     Trash2,
     UserRound,
@@ -45,7 +45,7 @@ function recordingHref(evidence: PageEvidence): string {
     return itemDetailHref(evidence.recordingId, {
         view: evidence.view,
         playFrom:
-            evidence.kind === "audio" && evidence.startMs !== null
+            evidence.audioAvailable && evidence.startMs !== null
                 ? evidence.startMs
                 : undefined,
     });
@@ -351,7 +351,7 @@ export function KnownFacts({
                                                         "mail" ? (
                                                             <Mail className="size-3" />
                                                         ) : (
-                                                            <Play className="size-3" />
+                                                            <ArrowUpRight className="size-3" />
                                                         )}
                                                         {evidence.title}
                                                         {evidence.startMs !==

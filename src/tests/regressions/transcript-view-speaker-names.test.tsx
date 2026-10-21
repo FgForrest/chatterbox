@@ -5,6 +5,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 // Two speakers: a lone speaker is not named at all.
 const TURNS = [
@@ -64,13 +66,21 @@ describe("TranscriptView speaker names", () => {
     it("seeks to the provider-reported turn when its speaker is clicked", () => {
         const onSeekToTurn = vi.fn();
         render(
-            <TranscriptView
-                text={TEXT}
-                source="riffado"
-                model="gpt-4o-transcribe-diarize"
-                storedTurns={[{ ...TURNS[0], startMs: 1250 }, TURNS[1]]}
-                onSeekToTurn={onSeekToTurn}
-            />,
+            <PlaybackProvider
+                playback={
+                    createTestPlayback({
+                        seek: onSeekToTurn,
+                        play: onSeekToTurn,
+                    }).playback
+                }
+            >
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="gpt-4o-transcribe-diarize"
+                    storedTurns={[{ ...TURNS[0], startMs: 1250 }, TURNS[1]]}
+                />
+            </PlaybackProvider>,
         );
 
         fireEvent.click(
@@ -83,13 +93,7 @@ describe("TranscriptView speaker names", () => {
     });
 
     it("does not offer seeking for legacy turns without timestamps", () => {
-        render(
-            <TranscriptView
-                text={TEXT}
-                source="plaud"
-                onSeekToTurn={vi.fn()}
-            />,
-        );
+        render(<TranscriptView text={TEXT} source="plaud" />);
 
         expect(screen.queryByRole("button", { name: /Seek audio/ })).toBeNull();
         expect(screen.getByText("Speaker 0")).toBeDefined();
