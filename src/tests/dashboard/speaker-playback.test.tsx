@@ -214,3 +214,75 @@ describe("speaker playback navigation", () => {
         expect(onPlayFromTurn).toHaveBeenLastCalledWith(3000, 4000);
     });
 });
+
+it("cycles all confirmed voices chronologically with matching transcript colours", async () => {
+    Element.prototype.scrollTo = vi.fn();
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+            Response.json(
+                url.includes("/speakers")
+                    ? {
+                          transcriptionId: "tx-1",
+                          revision: 1,
+                          speakers: ["speaker_0", "speaker_1"].map((label) => ({
+                              label,
+                              personId: "person-1",
+                              personName: "Jan",
+                              status: "confirmed",
+                          })),
+                      }
+                    : { topics: null },
+            ),
+        ),
+    );
+    const onPlayFromTurn = vi.fn();
+    const mixedTurns = [
+        turns[0],
+        { ...turns[1], startMs: 5000, endMs: 6000 },
+        { ...turns[2], startMs: 3000, endMs: 4000 },
+    ];
+    try {
+        render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: "speaker_0: First.\nspeaker_1: Reply.\nspeaker_0: Again.",
+                        turns: mixedTurns,
+                        version: { transcriptionId: "tx-1", revision: 1 },
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                onPlayFromTurn={onPlayFromTurn}
+            />,
+        );
+        const play = await screen.findByRole("button", {
+            name: "Play the next turn of Jan",
+        });
+        expect(play.className).toContain("text-primary");
+        expect(document.querySelectorAll("[data-speaker]")).toHaveLength(1);
+        const renderedTurns = document.querySelectorAll("[data-turn-index]");
+        expect(renderedTurns).toHaveLength(3);
+        for (const turn of renderedTurns) {
+            expect(turn.getAttribute("data-accent")).toBe("0");
+            expect(turn.querySelector(".text-primary")).toBeTruthy();
+        }
+        for (const time of [1000, 3000, 5000, 1000]) {
+            fireEvent.click(play);
+            expect(onPlayFromTurn).toHaveBeenLastCalledWith(time);
+        }
+        fireEvent.click(screen.getByRole("button", { name: "Jan" }));
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Play the next turn of Speaker 1",
+            }),
+        );
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(5000);
+    } finally {
+        cleanup();
+        vi.unstubAllGlobals();
+    }
+});

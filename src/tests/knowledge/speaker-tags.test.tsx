@@ -6,6 +6,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { useCallback, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,10 @@ const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
 import { Markdown } from "@/components/markdown";
-import { SpeakerTags } from "@/components/people/speaker-tags";
+import {
+    type SpeakerResponseRow,
+    SpeakerTags,
+} from "@/components/people/speaker-tags";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 
 interface FetchScenario {
@@ -72,15 +76,17 @@ function SpeakerTagsHarness({
     onStale,
     onUnknownLabelsChange,
     readOnly,
+    view,
     speakers = [{ speaker: "speaker_0", label: "Speaker 0" }],
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
     onSeek?: (ms: number) => void;
-    onPlaySpeaker?: (speaker: string) => boolean;
+    onPlaySpeaker?: (speaker: string | readonly string[]) => boolean;
     shownVersion?: { transcriptionId: string; revision: number };
     onStale?: () => void;
     onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
     readOnly?: boolean;
+    view?: "private" | "org";
     speakers?: { speaker: string; label: string }[];
 }) {
     const [attributions, setAttributions] = useState<SpeakerAttributions>({});
@@ -105,6 +111,7 @@ function SpeakerTagsHarness({
             onStale={onStale}
             onUnknownLabelsChange={onUnknownLabelsChange}
             readOnly={readOnly}
+            view={view}
         />
     );
 }
@@ -703,5 +710,256 @@ describe("SpeakerTags", () => {
             ).toBeDefined();
         });
         expect(screen.queryByRole("link", { name: "Speaker 0" })).toBeNull();
+    });
+});
+
+describe("confirmed person speaker groups", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
+
+    const voices = [0, 1, 2].map((index) => ({
+        speaker: `speaker_${index}`,
+        label: `Speaker ${index}`,
+    }));
+    const linked = (
+        label: string,
+        personId = "person-1",
+    ): SpeakerResponseRow => ({
+        label,
+        personId,
+        personName: "Jan",
+        status: "confirmed",
+    });
+    function server(
+        initial = [linked("speaker_0"), linked("speaker_2")],
+        fails?: string,
+    ) {
+        let rows = initial;
+        const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+            if (url === "/api/people")
+                return response({
+                    people: [
+                        {
+                            id: "person-2",
+                            displayName: "Petra",
+                            primaryEmail: null,
+                            scope: "org",
+                        },
+                    ],
+                });
+            if (init?.method === "PUT") {
+                const body = JSON.parse(String(init.body)) as {
+                    label: string;
+                    personId?: string;
+                };
+                if (body.label === fails)
+                    return response({ error: "Save refused" }, 500);
+                rows = rows.filter((row) => row.label !== body.label);
+                if (body.personId)
+                    rows.push({
+                        ...linked(body.label, body.personId),
+                        personName: "Petra",
+                    });
+            }
+            return response({ ...VERSION, speakers: rows });
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        return fetchMock;
+    }
+    const chips = () =>
+        screen.getByRole("group", { name: "Transcript speakers" });
+
+    it("merges identities in earliest-voice colour, keeping names, suggestions and unlinked voices distinct", async () => {
+        server([
+            linked("speaker_0"),
+            linked("speaker_2"),
+            linked("speaker_1", "another-person"),
+            { ...linked("speaker_3"), status: "suggested" },
+            { ...linked("speaker_4"), status: "suggested" },
+        ]);
+        const onPlaySpeaker = vi.fn(() => true);
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                onPlaySpeaker={onPlaySpeaker}
+                speakers={[
+                    ...voices,
+                    ...[3, 4, 5].map((index) => ({
+                        speaker: `speaker_${index}`,
+                        label: `Speaker ${index}`,
+                    })),
+                ]}
+            />,
+        );
+        await waitFor(() =>
+            expect(
+                within(chips()).getAllByRole("button", { name: "Jan" }),
+            ).toHaveLength(2),
+        );
+        expect(chips().children).toHaveLength(5);
+        expect(
+            within(chips()).getAllByRole("button", { name: "Jan?" }),
+        ).toHaveLength(2);
+        const play = within(chips()).getAllByRole("button", {
+            name: "Play the next turn of Jan",
+        });
+        expect(play[0].className).toContain("text-primary");
+        expect(play[1].className).toContain("text-emerald-600");
+        fireEvent.click(play[0]);
+        expect(onPlaySpeaker).toHaveBeenLastCalledWith([
+            "speaker_0",
+            "speaker_2",
+        ]);
+        fireEvent.contextMenu(play[0]);
+        expect(onPlaySpeaker).toHaveBeenLastCalledWith([
+            "speaker_0",
+            "speaker_2",
+        ]);
+        expect(document.getElementById("speaker-2")).toBeTruthy();
+    });
+
+    it("unlinks every merged voice with separate versioned saves", async () => {
+        const fetchMock = server();
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                speakers={voices}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Unlink Jan from Speaker 0, Speaker 2",
+            }),
+        );
+        await screen.findByRole("button", { name: "Speaker 2" });
+        expect(
+            within(chips()).queryByRole("button", { name: "Jan" }),
+        ).toBeNull();
+        expect(
+            fetchMock.mock.calls
+                .filter(([, init]) => init?.method === "PUT")
+                .map(([, init]) => JSON.parse(String(init?.body))),
+        ).toEqual([
+            { ...VERSION, label: "speaker_0" },
+            { ...VERSION, label: "speaker_2" },
+        ]);
+    });
+
+    it("reloads the true partially unlinked state after a failed save", async () => {
+        toastError.mockClear();
+        const fetchMock = server(undefined, "speaker_2");
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                speakers={voices}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Unlink Jan from Speaker 0, Speaker 2",
+            }),
+        );
+        await waitFor(() =>
+            expect(
+                fetchMock.mock.calls.filter(([, init]) => !init?.method),
+            ).toHaveLength(2),
+        );
+        expect(toastError).toHaveBeenCalled();
+        expect(
+            within(chips()).getByRole("button", { name: "Speaker 0" }),
+        ).toBeTruthy();
+        expect(
+            within(chips()).getByRole("button", { name: "Jan" }),
+        ).toBeTruthy();
+        expect(chips().children).toHaveLength(3);
+    });
+
+    it.each([
+        "unlink",
+        "relink",
+    ])("lets the picker %s one voice and split the chip", async (action) => {
+        const fetchMock = server();
+        const onPlaySpeaker = vi.fn(() => true);
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                speakers={voices}
+                onPlaySpeaker={onPlaySpeaker}
+                view="org"
+            />,
+        );
+        fireEvent.click(await screen.findByRole("button", { name: "Jan" }));
+        const dialog = within(screen.getByRole("dialog"));
+        fireEvent.click(
+            dialog.getByRole("button", {
+                name: "Play the next turn of Speaker 2",
+            }),
+        );
+        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_2");
+        if (action === "unlink")
+            fireEvent.click(
+                dialog.getByRole("button", {
+                    name: "Unlink Jan from Speaker 2",
+                }),
+            );
+        else {
+            fireEvent.change(dialog.getByRole("combobox"), {
+                target: { value: "Discard this search" },
+            });
+            fireEvent.click(dialog.getByRole("button", { name: "Speaker 2" }));
+            expect(dialog.getByRole("combobox")).toHaveProperty("value", "");
+            fireEvent.click(
+                await dialog.findByRole("button", { name: "Petra" }),
+            );
+            fireEvent.click(dialog.getByRole("button", { name: "Select" }));
+        }
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(chips().children).toHaveLength(3);
+        expect(
+            within(chips()).getByRole("button", { name: "Jan" }),
+        ).toBeTruthy();
+        expect(
+            within(chips()).getByRole("button", {
+                name: action === "unlink" ? "Speaker 2" : "Petra",
+            }),
+        ).toBeTruthy();
+        const puts = fetchMock.mock.calls.filter(
+            ([, init]) => init?.method === "PUT",
+        );
+        expect(puts).toHaveLength(1);
+        expect(puts[0][0]).toContain("view=org");
+        expect(JSON.parse(String(puts[0][1]?.body))).toEqual({
+            ...VERSION,
+            label: "speaker_2",
+            ...(action === "relink" ? { personId: "person-2" } : {}),
+        });
+    });
+
+    it("merges read-only speakers without editing actions", async () => {
+        const fetchMock = server();
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                speakers={voices}
+                readOnly
+                view="org"
+            />,
+        );
+        expect(
+            (await screen.findByRole("link", { name: "Jan" })).getAttribute(
+                "href",
+            ),
+        ).toBe("/almanac/person-1");
+        expect(chips().children).toHaveLength(2);
+        expect(
+            within(chips()).queryByRole("button", { name: /Unlink/ }),
+        ).toBeNull();
+        expect(chips().querySelector('[aria-haspopup="dialog"]')).toBeNull();
+        expect(screen.getByText("Managed by the Organization")).toBeTruthy();
+        expect(
+            fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
+        ).toBe(false);
     });
 });

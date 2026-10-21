@@ -9,7 +9,9 @@ import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { useProductName } from "@/components/product-name-provider";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
+import { speakerGroups } from "@/lib/knowledge/speaker-groups";
 import {
+    resolveSpeakerAttribution,
     type SpeakerAttributions,
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
@@ -34,7 +36,7 @@ interface SpeakerTagsProps {
     /** Play the recording from a moment, to hear a suggestion's evidence. */
     onSeek?: (ms: number) => void;
     /** Play a speaker's next timed turn; false leaves the browser menu alone. */
-    onPlaySpeaker?: (speaker: string) => boolean;
+    onPlaySpeaker?: (speaker: string | readonly string[]) => boolean;
     /**
      * The version of the transcript on screen, from the page's data. Every
      * change names it; without it, the version the speakers were read at.
@@ -159,6 +161,8 @@ export function SpeakerTags({
         view,
     );
     const [openLabel, setOpenLabel] = useState<string | null>(null);
+    const [openVoices, setOpenVoices] = useState<string[]>([]);
+    const [unlinking, setUnlinking] = useState(false);
     const [savingLabel, setSavingLabel] = useState<string | null>(null);
     const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
         () => new Set(),
@@ -305,6 +309,27 @@ export function SpeakerTags({
         return true;
     }
 
+    async function unlinkGroup(labels: readonly string[]) {
+        setUnlinking(true);
+        try {
+            for (const label of labels) {
+                if (!mounted.current) break;
+                if (!(await attribute(label, null))) {
+                    await load();
+                    break;
+                }
+            }
+        } finally {
+            setUnlinking(false);
+        }
+    }
+
+    const groups = speakerGroups(
+        speakers.map(({ speaker }) => speaker),
+        attributions,
+    );
+    const playGroup = (labels: readonly string[]) =>
+        onPlaySpeaker?.(labels.length === 1 ? labels[0] : labels);
     if (speakers.length === 0) return null;
 
     const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
@@ -312,7 +337,10 @@ export function SpeakerTags({
         if (!(target instanceof Element)) return;
         const speaker =
             target.closest<HTMLElement>("[data-speaker]")?.dataset.speaker;
-        if (speaker && onPlaySpeaker?.(speaker)) event.preventDefault();
+        const group = groups.find(({ labels }) =>
+            labels.includes(speaker ?? ""),
+        );
+        if (group && playGroup(group.labels)) event.preventDefault();
     };
 
     const openSpeaker = speakers.find(
@@ -328,16 +356,33 @@ export function SpeakerTags({
                 aria-label={i18n("Transcript speakers")}
                 onContextMenu={handleContextMenu}
             >
-                {speakers.map((speaker, index) => {
-                    const attribution = attributions[speaker.speaker];
+                {groups.map(({ labels, position }) => {
+                    const speaker = speakers.find(
+                        (voice) => voice.speaker === labels[0],
+                    );
+                    if (!speaker) return null;
+                    const attribution = resolveSpeakerAttribution(
+                        attributions,
+                        speaker.speaker,
+                    );
                     const unknown = unknownLabels.has(speaker.speaker);
                     const suggestion =
                         attribution || unknown || readOnly
                             ? undefined
                             : suggestions[speaker.speaker];
-                    const saving = savingLabel === speaker.speaker;
-                    const accent = speakerAccent(index).text;
+                    const saving =
+                        unlinking ||
+                        (savingLabel !== null && labels.includes(savingLabel));
+                    const accent = speakerAccent(position).text;
                     const name = attribution?.name ?? speaker.label;
+                    const voiceNames = labels
+                        .map(
+                            (label) =>
+                                speakers.find(
+                                    (voice) => voice.speaker === label,
+                                )?.label ?? label,
+                        )
+                        .join(", ");
                     const evidenceMs = suggestion?.evidenceStartMs;
                     const canPlayEvidence = Boolean(
                         suggestion && onSeek && evidenceMs != null,
@@ -360,6 +405,9 @@ export function SpeakerTags({
                             data-speaker={speaker.speaker}
                             className={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
                         >
+                            {labels.slice(1).map((label) => (
+                                <span key={label} id={speakerAnchorId(label)} />
+                            ))}
                             <button
                                 type="button"
                                 className={`${segmentClass} shrink-0 ${accent}`}
@@ -379,7 +427,7 @@ export function SpeakerTags({
                                 onClick={() => {
                                     if (canPlayEvidence && evidenceMs != null) {
                                         onSeek?.(evidenceMs);
-                                    } else onPlaySpeaker?.(speaker.speaker);
+                                    } else playGroup(labels);
                                 }}
                             >
                                 <Play className="size-3 fill-current" />
@@ -403,9 +451,10 @@ export function SpeakerTags({
                                     className={`${segmentClass} min-w-0 break-words text-left`}
                                     disabled={saving}
                                     aria-haspopup="dialog"
-                                    onClick={() =>
-                                        setOpenLabel(speaker.speaker)
-                                    }
+                                    onClick={() => {
+                                        setOpenVoices(labels);
+                                        setOpenLabel(speaker.speaker);
+                                    }}
                                     title={
                                         suggestion
                                             ? i18n(
@@ -472,16 +521,14 @@ export function SpeakerTags({
                                     type="button"
                                     className={`${segmentClass} shrink-0 border-l border-primary/20 hover:bg-destructive/10 hover:text-destructive`}
                                     disabled={saving}
-                                    onClick={() =>
-                                        void attribute(speaker.speaker, null)
-                                    }
+                                    onClick={() => void unlinkGroup(labels)}
                                     aria-label={
                                         attribution
                                             ? i18n(
                                                   "Unlink {name} from {speaker}",
                                                   {
                                                       name: attribution.name,
-                                                      speaker: speaker.label,
+                                                      speaker: voiceNames,
                                                   },
                                               )
                                             : i18n(
@@ -516,7 +563,41 @@ export function SpeakerTags({
             {!readOnly && openSpeaker && (
                 <SpeakerPicker
                     label={openSpeaker.label}
-                    personId={attributions[openSpeaker.speaker]?.personId}
+                    personId={
+                        resolveSpeakerAttribution(
+                            attributions,
+                            openSpeaker.speaker,
+                        )?.personId
+                    }
+                    voices={
+                        openVoices.length > 1
+                            ? openVoices.flatMap((label) => {
+                                  const voice = speakers.find(
+                                      (speaker) => speaker.speaker === label,
+                                  );
+                                  if (!voice) return [];
+                                  const attribution = resolveSpeakerAttribution(
+                                      attributions,
+                                      label,
+                                  );
+                                  return [
+                                      {
+                                          ...voice,
+                                          name: attribution?.name,
+                                          linked: Boolean(attribution),
+                                      },
+                                  ];
+                              })
+                            : undefined
+                    }
+                    activeVoice={openSpeaker.speaker}
+                    onVoiceChange={setOpenLabel}
+                    onPlayVoice={
+                        onPlaySpeaker
+                            ? (label) => onPlaySpeaker(label)
+                            : undefined
+                    }
+                    onUnlinkVoice={(label) => attribute(label, null)}
                     organizationOnly={view === "org"}
                     onPick={(choice) => attribute(openSpeaker.speaker, choice)}
                     onMarkUnknown={() =>
