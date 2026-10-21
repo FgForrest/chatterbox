@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireApiSessionActor } from "@/lib/auth-server";
-import { actsForOrganization } from "@/lib/authz/curator";
-import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
 import { forgetDismissals } from "@/lib/learn/review";
-import {
-    requestedRecordingView,
-    requireRecordingView,
-} from "@/lib/sharing/access";
-import { assertMayChange } from "@/lib/sharing/writer";
+import { requireLearnAccess } from "@/lib/sharing/learn-access";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -18,19 +11,8 @@ type IdContext = { params: Promise<{ id: string }> };
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
-    const { session, actor } = await requireApiSessionActor(request);
-    const access = await requireRecordingView(
-        session.user.id,
-        id,
-        requestedRecordingView(request),
-        { kinds: ALL_ITEM_KINDS },
-    );
-    const curates = access.view === "org" && (await actsForOrganization(actor));
-    assertMayChange(access, session.user.id, curates);
+    const { access } = await requireLearnAccess(request, id);
     return NextResponse.json({
-        forgotten: await forgetDismissals({
-            ...access,
-            view: access.shared ? "org" : access.view,
-        }),
+        forgotten: await forgetDismissals(access),
     });
 });

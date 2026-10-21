@@ -8,7 +8,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "private",
                 isOwn: true,
-                shared: false,
                 isOrgAccount: false,
                 canCurate: false,
             },
@@ -19,7 +18,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "private",
                 isOwn: true,
-                shared: true,
                 isOrgAccount: false,
                 canCurate: false,
             },
@@ -30,7 +28,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "private",
                 isOwn: false,
-                shared: false,
                 isOrgAccount: false,
                 canCurate: true,
             },
@@ -41,7 +38,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "org",
                 isOwn: true,
-                shared: true,
                 isOrgAccount: false,
                 canCurate: false,
             },
@@ -52,7 +48,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "org",
                 isOwn: false,
-                shared: true,
                 isOrgAccount: true,
                 canCurate: false,
             },
@@ -63,7 +58,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "org",
                 isOwn: false,
-                shared: true,
                 isOrgAccount: false,
                 canCurate: true,
             },
@@ -74,7 +68,6 @@ describe("canChangeItem", () => {
             input: {
                 view: "org",
                 isOwn: false,
-                shared: true,
                 isOrgAccount: false,
                 canCurate: false,
             },

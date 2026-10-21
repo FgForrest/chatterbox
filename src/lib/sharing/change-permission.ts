@@ -1,7 +1,6 @@
 interface ItemChangePermission {
     view: "private" | "org";
     isOwn: boolean;
-    shared: boolean;
     isOrgAccount: boolean;
     canCurate: boolean;
 }

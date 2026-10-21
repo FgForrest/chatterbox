@@ -436,7 +436,6 @@ export function Workstation({
         ? !canChangeItem({
               view: currentIsOrgView ? "org" : "private",
               isOwn: selectedRecording.isOwn !== false,
-              shared: selectedShared,
               isOrgAccount,
               canCurate,
           })

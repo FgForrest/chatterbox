@@ -252,17 +252,21 @@ describe("transcription dialog", () => {
     });
 
     it.each([
-        true,
-        false,
-    ])("offers shared recording actions only to its owner (isOwn=%s)", (isOwn) => {
+        { view: "private", isOwn: true },
+        { view: "org", isOwn: true },
+        { view: "private", isOwn: false },
+        { view: "org", isOwn: false },
+    ] as const)("offers shared recording actions only to its owner (view=$view, isOwn=$isOwn)", ({
+        view,
+        isOwn,
+    }) => {
         const { rerender } = render(
             <TranscriptionPanel
-                recording={{ ...recording, view: "org", isOwn }}
+                recording={{ ...recording, view, isOwn }}
                 shared
                 readOnly={
                     !canChangeItem({
-                        view: "org",
-                        shared: true,
+                        view,
                         isOwn,
                         isOrgAccount: false,
                         canCurate: false,
@@ -278,12 +282,11 @@ describe("transcription dialog", () => {
         ).toBe(isOwn);
         rerender(
             <TranscriptionPanel
-                recording={{ ...recording, view: "org", isOwn }}
+                recording={{ ...recording, view, isOwn }}
                 shared
                 readOnly={
                     !canChangeItem({
-                        view: "org",
-                        shared: true,
+                        view,
                         isOwn,
                         isOrgAccount: false,
                         canCurate: false,
