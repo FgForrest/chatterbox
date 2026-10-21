@@ -1,11 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    asyncJobs,
-    chatterItems,
-    itemProcessing,
-    learnRuns,
-} from "@/db/schema";
+import { cancelActiveJobsInTx } from "@/db/queries/async-jobs";
+import { chatterItems, itemProcessing, learnRuns } from "@/db/schema";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
@@ -35,28 +31,14 @@ export async function cancelPrivateLearnAtShareInTx(
         )
         .returning({ id: learnRuns.id });
     if (cancelled.length === 0) return;
-    await tx
-        .update(asyncJobs)
-        .set({
-            status: "failed",
-            completedAt: now,
-            updatedAt: now,
-            claimToken: null,
-            heartbeatAt: null,
-            lastError: "Private Learn cancelled because the item was shared",
-        })
-        .where(
-            and(
-                eq(asyncJobs.userId, ownerUserId),
-                eq(asyncJobs.subjectId, itemId),
-                eq(asyncJobs.kind, "learn.run"),
-                inArray(asyncJobs.status, ["pending", "processing"]),
-                inArray(
-                    sql<string>`${asyncJobs.payload} ->> 'runId'`,
-                    cancelled.map((run) => run.id),
-                ),
-            ),
-        );
+    await cancelActiveJobsInTx(tx, {
+        userId: ownerUserId,
+        subjectId: itemId,
+        kind: "learn.run",
+        payloadValues: { key: "runId", values: cancelled.map((run) => run.id) },
+        message: "Private Learn cancelled because the item was shared",
+        now,
+    });
     const requested = await requestAdvanceInTx(tx, {
         itemId,
         userId: ownerUserId,

@@ -7,7 +7,7 @@
  * matches zero rows. See `asyncJobs.claimToken` in the schema.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { asyncJobStatusEnum, asyncJobs } from "@/db/schema";
 
@@ -504,6 +504,43 @@ export async function completeJob(input: {
         )
         .returning({ id: asyncJobs.id });
     return rows.length > 0;
+}
+
+/** Terminate matching active jobs in another transaction and revoke their claims. */
+export async function cancelActiveJobsInTx(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: {
+        userId: string;
+        kind: string;
+        subjectId: string;
+        payloadValues: { key: string; values: string[] };
+        message: string;
+        now?: Date;
+    },
+): Promise<void> {
+    const now = input.now ?? new Date();
+    await tx
+        .update(asyncJobs)
+        .set({
+            status: "failed",
+            completedAt: now,
+            updatedAt: now,
+            claimToken: null,
+            heartbeatAt: null,
+            lastError: input.message,
+        })
+        .where(
+            and(
+                eq(asyncJobs.userId, input.userId),
+                eq(asyncJobs.kind, input.kind),
+                eq(asyncJobs.subjectId, input.subjectId),
+                isActive(),
+                inArray(
+                    sql<string>`${asyncJobs.payload} ->> ${input.payloadValues.key}`,
+                    input.payloadValues.values,
+                ),
+            ),
+        );
 }
 
 export interface FailJobOutcome {
