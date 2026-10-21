@@ -18,7 +18,7 @@ import {
     saveSettings,
 } from "../lib/settings.js";
 
-import { createFolderCombobox } from "./folder-combobox.js";
+import { createFolderField, createRecordingFolder } from "./folder-combobox.js";
 
 const views = {
     connect: document.getElementById("view-connect"),
@@ -90,14 +90,16 @@ function dbToWidth(db) {
     return `${Math.round(((clamped + 60) / 60) * 100)}%`;
 }
 
-const folderCombobox = createFolderCombobox({
-    input: el("folder-picker"),
-    listbox: el("folder-listbox"),
-    panel: el("folder-results"),
-    status: el("folder-status"),
+const folderCombobox = createFolderField({
+    container: el("folder-row"),
     request: (params) => sendMessage({ type: "get-folders", ...params }),
     save: saveSettings,
     t,
+});
+const recordingFolder = createRecordingFolder({
+    container: el("recording-folder-row"), prefix: "recording-folder",
+    request: (params) => sendMessage({ type: "get-folders", ...params }),
+    send: sendMessage, t,
 });
 
 // ---- Unpaired: connect to the current site ------------------------------
@@ -139,9 +141,9 @@ async function renderIdle(version = renderVersion) {
     const hint = el("idle-hint");
     const autoHint = el("auto-hint");
     autoHint.hidden = true;
-    el("start").textContent = t("recordWithConsent");
+    el("start").textContent = t("recordTabWithConsent");
     el("notice-text").textContent = effectiveNoticeText(settings);
-    el("picker-hint").hidden = Boolean(currentPlatform);
+    el("picker-hint").hidden = false;
     folderCombobox.reset(settings);
 
     if (currentPlatform) {
@@ -157,15 +159,17 @@ async function renderIdle(version = renderVersion) {
     show("idle");
 }
 
-el("start").addEventListener("click", async () => {
-    const button = el("start");
-    button.disabled = true;
-    button.textContent = t(currentPlatform ? "startingCapture" : "openingPicker");
+async function startRecording(forceDesktop = false) {
+    const button = el(forceDesktop ? "start-desktop" : "start");
+    el("start").disabled = true;
+    el("start-desktop").disabled = true;
+    button.textContent = t(forceDesktop ? "openingPicker" : "startingCapture");
     try {
         await folderCombobox.saved();
         const response = await sendMessage({
             type: "start-recording",
             payload: {
+                forceDesktop,
                 tabId: currentTab?.id,
                 platformHint: currentPlatform?.id ?? undefined,
                 noticeAcknowledgedAt: new Date().toISOString(),
@@ -179,10 +183,13 @@ el("start").addEventListener("click", async () => {
         el("error-text").textContent = error?.message ?? String(error);
         show("error");
     } finally {
-        button.disabled = false;
-        button.textContent = t("recordWithConsent");
+        el("start").disabled = false;
+        el("start-desktop").disabled = false;
+        button.textContent = t(forceDesktop ? "recordAnotherSource" : "recordTabWithConsent");
     }
-});
+}
+el("start").addEventListener("click", () => startRecording());
+el("start-desktop").addEventListener("click", () => startRecording(true));
 
 // ---- Recording / finalizing / error --------------------------------------
 
@@ -262,6 +269,7 @@ async function render(state) {
                 break;
             }
             show("recording");
+            recordingFolder.render(state);
             const tick = () => {
                 el("elapsed").textContent = formatElapsed(state.startedAt);
             };
@@ -304,6 +312,7 @@ async function render(state) {
 }
 
 el("stop").addEventListener("click", async () => {
+    await recordingFolder.saved();
     await sendMessage({ type: "stop-recording", reason: "user" });
 });
 

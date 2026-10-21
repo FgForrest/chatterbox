@@ -1,7 +1,7 @@
 // Chatterbox Meeting Recorder service worker.
 //
-// Owns the recording lifecycle: starts capture (tab audio for a detected
-// meeting tab, screen picker otherwise), creates the server session, drives
+// Owns the recording lifecycle: starts capture (current tab from the popup
+// or a source chosen in Chrome’s picker), creates the server session, drives
 // the offscreen document, pumps buffered chunks to the server, and completes
 // the session. Also owns auto mode: detecting meeting tabs,
 // arming the toolbar icon for one-click start, nudging, and auto-stop.
@@ -51,6 +51,7 @@ import {
     unregisterPairingScripts,
 } from "./lib/pairing.js";
 import { queuePairing } from "./lib/pairing-request.js";
+import { pickerWindowBounds } from "./lib/picker-window.js";
 import { activeSetupFlow, resumeTypedSetupAfterLogin } from "./lib/setup-flow.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
 import { canPumpUploads } from "./lib/upload-state.js";
@@ -117,6 +118,9 @@ const IDLE_STATE = Object.freeze({
     sessionId: null,
     startedAt: null,
     platformHint: null,
+    folderId: null,
+    folderLabel: null,
+    recordingFolderOverride: false,
     tabId: null,
     autoStarted: false,
     chunkCount: 0,
@@ -141,7 +145,15 @@ async function getState() {
     return raw[STATE_KEY] ?? { ...IDLE_STATE };
 }
 
-async function setState(patch) {
+let stateUpdates = Promise.resolve();
+
+function setState(patch) {
+    const update = stateUpdates.catch(() => {}).then(() => writeState(patch));
+    stateUpdates = update;
+    return update;
+}
+
+async function writeState(patch) {
     const current = await getState();
     const next = { ...current, ...patch };
     await chrome.storage.session.set({ [STATE_KEY]: next });
@@ -151,6 +163,7 @@ async function setState(patch) {
 }
 
 async function resetState() {
+    await stateUpdates;
     const previous = await getState();
     await chrome.storage.session.remove(STATE_KEY);
     const next = await getState();
@@ -234,12 +247,14 @@ async function openDesktopRecorder(input) {
     try {
         const url = new URL(chrome.runtime.getURL("picker/picker.html"));
         url.searchParams.set("requestId", requestId);
+        const anchor = await chrome.windows
+            .getLastFocused({ windowTypes: ["normal"] })
+            .catch(() => null);
         const pickerWindow = await chrome.windows.create({
             url: url.href,
             type: "popup",
             focused: true,
-            width: 430,
-            height: 360,
+            ...pickerWindowBounds(anchor),
         });
         if (pickerWindow?.id == null) throw new Error(t("couldNotCapture"));
         await setState({ captureWindowId: pickerWindow.id });
@@ -350,6 +365,7 @@ async function startRecordingLocked({
     noticeAcknowledgedAt,
     withoutMicrophone = false,
     forceDesktop = false,
+    fromPopup = false,
 }, microphoneChecked) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
@@ -376,7 +392,7 @@ async function startRecordingLocked({
     await setState({ state: STATE.awaitingPicker, error: null, micWarning: null, withoutMicrophone });
 
     const useTab =
-        !forceDesktop && typeof tabId === "number" && Boolean(platformHint);
+        !forceDesktop && typeof tabId === "number" && (fromPopup || Boolean(platformHint));
     if (!useTab) {
         return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
     }
@@ -428,6 +444,8 @@ async function startCapturedRecording({
         folderId: settings.folderId ?? undefined,
     };
     let session;
+    let folderId = settings.folderId ?? null;
+    let folderLabel = settings.folderLabel ?? null;
     try {
         try {
             session = await createSession(auth, sessionBody);
@@ -437,7 +455,9 @@ async function startCapturedRecording({
                 error?.status === 400 &&
                 error?.field === "folderId"
             ) {
-                await saveSettings({ folderId: null, folderLabel: null });
+                folderId = null;
+                folderLabel = null;
+                await saveSettings({ folderId, folderLabel });
                 const fallbackBody = { ...sessionBody };
                 delete fallbackBody.folderId;
                 session = await createSession(auth, fallbackBody);
@@ -477,7 +497,15 @@ async function startCapturedRecording({
             }
         }
 
+        const folder = {
+            folderId,
+            folderLabel,
+            startFolderId: folderId,
+            startFolderLabel: folderLabel,
+            recordingFolderOverride: settings.serverDefaults?.recordingFolderOverride === true,
+        };
         await createLocalSession(session.id, {
+            ...folder,
             serverSessionId: session.id,
             clientRecordingId,
             serverUrl: settings.serverUrl,
@@ -488,6 +516,7 @@ async function startCapturedRecording({
         });
 
         await setState({
+            ...folder,
             state: STATE.recording,
             sessionId: session.id,
             bufferId: session.id,
@@ -594,6 +623,7 @@ async function startCapturedRecording({
 }
 
 async function stopRecording(reason = "user") {
+    await folderUpdates;
     const state = await getState();
     if (state.state !== STATE.recording) return;
     if (state.tabId != null) {
@@ -608,6 +638,57 @@ async function stopRecording(reason = "user") {
         await messageOffscreen("stop").catch(() => {});
     }
     // The capture host reports the final chunk count after its last write.
+}
+
+let metaUpdates = Promise.resolve();
+let folderUpdates = Promise.resolve();
+
+function updateLocalMeta(bufferId, patch) {
+    const update = metaUpdates.catch(() => {}).then(async () => {
+        const meta = await readLocalMeta(bufferId);
+        if (!meta) throw new Error(t("recoveryUnavailable"));
+        await createLocalSession(bufferId, { ...meta, ...patch });
+    });
+    metaUpdates = update;
+    return update;
+}
+
+async function applyRecordingFolder(state, folder) {
+    await updateLocalMeta(state.bufferId ?? state.sessionId, folder);
+    await setState(folder);
+    await saveSettings(folder);
+}
+
+function updateRecordingFolder(message, sender) {
+    const update = folderUpdates.catch(() => {}).then(async () => {
+        const state = await getState();
+        const popup = sender.url === chrome.runtime.getURL(POPUP_URL);
+        const pickerUrl = chrome.runtime.getURL("picker/picker.html");
+        const picker = Boolean(sender.url?.startsWith(`${pickerUrl}?`)) &&
+            state.pickerRequestId != null &&
+            new URL(sender.url).searchParams.get("requestId") === state.pickerRequestId &&
+            sender.tab?.windowId === state.captureWindowId;
+        if (!popup && !picker) throw new Error(t("unrecognizedSender"));
+        const settings = await getSettings();
+        if (state.sessionId !== message.sessionId || state.state !== STATE.recording ||
+            state.stopped || !state.recordingFolderOverride ||
+            settings.serverDefaults?.recordingFolderOverride !== true) {
+            throw new Error(t("folderChangeFailed"));
+        }
+        if (message.folderId !== null && (typeof message.folderId !== "string" ||
+            !message.folderId.trim() || message.folderId.length > 255)) {
+            throw new Error(t("folderChangeFailed"));
+        }
+        const folder = {
+            folderId: message.folderId,
+            folderLabel: message.folderId && typeof message.folderLabel === "string"
+                ? message.folderLabel : null,
+        };
+        await applyRecordingFolder(state, folder);
+        return { ok: true };
+    });
+    folderUpdates = update.catch(() => {});
+    return update;
 }
 
 // ---- Upload pump -------------------------------------------------------
@@ -672,8 +753,7 @@ async function pumpUploads() {
                         uploadNotice: null,
                     });
                     if (meta?.nextRetryAt) {
-                        await createLocalSession(bufferId, {
-                            ...meta,
+                        await updateLocalMeta(bufferId, {
                             retryAttempt: 0,
                             nextRetryAt: null,
                         });
@@ -723,6 +803,7 @@ function accessErrorMessage(error) {
 }
 
 async function finalize(truncatedAtChunk = null) {
+    await folderUpdates;
     const state = await getState();
     if (!state.sessionId || !state.stopped) return;
     if (state.state === STATE.finalizing && state.jobId) return;
@@ -734,12 +815,32 @@ async function finalize(truncatedAtChunk = null) {
     try {
         const settings = await getSettings();
         const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
-        const result = await completeSession(auth, state.sessionId, {
+        const body = {
             chunkCount: state.chunkCount,
             ...(truncatedAtChunk ? { truncatedAtChunk } : {}),
             endedAt: new Date().toISOString(),
             stopReason: state.stopReason,
-        });
+            ...(settings.serverDefaults?.recordingFolderOverride === true &&
+                state.recordingFolderOverride === true
+                ? { folderId: state.folderId ?? null }
+                : {}),
+        };
+        let result;
+        try {
+            result = await completeSession(auth, state.sessionId, body);
+        } catch (error) {
+            if ("folderId" in body && error?.status === 400 && error?.field === "folderId") {
+                const fallbackBody = { ...body };
+                delete fallbackBody.folderId;
+                result = await completeSession(auth, state.sessionId, fallbackBody);
+                await applyRecordingFolder(state, {
+                    folderId: state.startFolderId ?? null,
+                    folderLabel: state.startFolderLabel ?? null,
+                });
+            } else {
+                throw error;
+            }
+        }
         await setState({ jobId: result.job_id ?? null });
 
         await reconcileServerSession(state.sessionId, auth);
@@ -764,7 +865,7 @@ async function scheduleUploadRetry(sessionId, error) {
         backoffSeconds * (0.75 + Math.random() * 0.5),
     );
     const nextRetryAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
-    await createLocalSession(sessionId, { ...meta, retryAttempt: attempt, nextRetryAt });
+    await updateLocalMeta(sessionId, { retryAttempt: attempt, nextRetryAt });
     await chrome.alarms.create(ALARMS.uploadRetry, {
         when: Date.parse(nextRetryAt),
     });
@@ -1419,6 +1520,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 );
             return true;
 
+        case "set-recording-folder":
+            updateRecordingFolder(message, sender)
+                .then(sendResponse)
+                .catch((error) => sendResponse({ ok: false, error: error.message }));
+            return true;
+
         case "get-armed":
             getArmed().then((armed) => sendResponse({ armed }));
             return true;
@@ -1428,7 +1535,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse({ ok: false, error: t("unrecognizedSender") });
                 return false;
             }
-            startRecording(message.payload ?? {})
+            startRecording({ ...message.payload, fromPopup: true, auto: false })
                 .then((result) => sendResponse({ ok: true, ...result }))
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -1651,8 +1758,7 @@ async function retryUpload() {
         const bufferId = state.bufferId ?? state.sessionId;
         const meta = await readLocalMeta(bufferId);
         if (meta) {
-            await createLocalSession(bufferId, {
-                ...meta,
+            await updateLocalMeta(bufferId, {
                 serverSessionId: remote.id,
             });
         }
@@ -1668,8 +1774,7 @@ async function retryUpload() {
     const bufferId = state.bufferId ?? state.sessionId;
     const meta = await readLocalMeta(bufferId);
     if (meta) {
-        await createLocalSession(bufferId, {
-            ...meta,
+        await updateLocalMeta(bufferId, {
             retryAttempt: 0,
             nextRetryAt: null,
         });
@@ -1720,6 +1825,16 @@ async function discardBuffer(bufferId) {
 
 // ---- Startup ---------------------------------------------------------------
 
+function recordingFolderState(meta) {
+    return {
+        folderId: meta?.folderId ?? null,
+        folderLabel: meta?.folderLabel ?? null,
+        startFolderId: meta?.startFolderId ?? null,
+        startFolderLabel: meta?.startFolderLabel ?? null,
+        recordingFolderOverride: meta?.recordingFolderOverride === true,
+    };
+}
+
 async function reconcileOnStartup() {
     await unregisterPairingScripts();
     await ensureConfigAlarm();
@@ -1735,7 +1850,9 @@ async function reconcileOnStartup() {
     } catch (error) {
         const [bufferId] = await listLocalSessions();
         if (bufferId) {
+            const meta = await readLocalMeta(bufferId);
             await setState({
+                ...recordingFolderState(meta),
                 state: STATE.error,
                 sessionId: bufferId,
                 bufferId,
@@ -1773,6 +1890,7 @@ async function reconcileOnStartup() {
             session = await getSession(auth, serverSessionId);
         } catch (error) {
             await setState({
+                ...recordingFolderState(meta),
                 state: STATE.error,
                 sessionId: serverSessionId,
                 bufferId: sessionId,
@@ -1783,12 +1901,13 @@ async function reconcileOnStartup() {
             continue;
         }
         if (session.status === "completed") {
-            await setState({ sessionId: serverSessionId, bufferId: sessionId });
+            await setState({ ...recordingFolderState(meta), sessionId: serverSessionId, bufferId: sessionId });
             await reconcileServerSession(serverSessionId, auth);
             continue;
         }
         if (session.status === "completing") {
             await setState({
+                ...recordingFolderState(meta),
                 state: STATE.finalizing,
                 sessionId: serverSessionId,
                 bufferId: sessionId,
@@ -1802,12 +1921,12 @@ async function reconcileOnStartup() {
             try {
                 session = await recoverSession(auth, serverSessionId);
                 serverSessionId = session.id;
-                await createLocalSession(sessionId, {
-                    ...meta,
+                await updateLocalMeta(sessionId, {
                     serverSessionId,
                 });
             } catch (error) {
                 await setState({
+                    ...recordingFolderState(meta),
                     state: STATE.error,
                     sessionId: serverSessionId,
                     bufferId: sessionId,
@@ -1827,6 +1946,7 @@ async function reconcileOnStartup() {
         await chrome.storage.session.set({
             [STATE_KEY]: {
                 ...live,
+                ...recordingFolderState(meta),
                 state: STATE.recording,
                 sessionId: serverSessionId,
                 bufferId: sessionId,

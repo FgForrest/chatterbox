@@ -89,6 +89,7 @@ export function RecordingPlayerHeader({
             title={recording.filename}
             metadata={metaParts}
             view={recording.view}
+            shared={shared}
             isOwn={recording.isOwn}
             ownerName={recording.ownerName}
             readOnly={titleReadOnly ?? recording.isOwn === false}

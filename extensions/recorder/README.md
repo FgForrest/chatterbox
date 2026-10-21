@@ -15,15 +15,17 @@ system audio to extensions.
 ## How it works
 
 1. In the popup, read the short participant reminder and click
-   **Consent confirmed · Record**. This is the manual recording confirmation.
-2. On a detected meeting tab, Chrome captures that tab's audio directly. For
-   another browser tab, select it in Chrome's picker. For a desktop meeting
-   app, choose **Entire screen** and enable **Share system audio** if Chrome
-   offers it. The extension keeps only the audio. A small recorder window stays
-   open during desktop capture and shows microphone and meeting audio levels;
-   you can minimize it. Closing it stops the recording and uploads the saved
-   chunks. If Chrome says screen audio is unavailable, use the meeting's
-   browser version instead.
+   **Consent confirmed · Record this tab**. This records the current tab directly,
+   whether or not a meeting platform is detected.
+2. To choose a different source, click **Record another screen or app**. Chrome's
+   picker opens in a large window centered over the browser, then the window
+   narrows after you choose. For a desktop meeting app, choose **Entire screen**
+   and enable **Share system audio** if Chrome offers it. The extension keeps
+   only audio. The recorder window shows microphone and source levels; you can
+   minimize it. Closing it stops capture and uploads the saved chunks. If Chrome
+   cannot share screen audio, use the meeting's browser version. Starting from a
+   notification or the microphone permission window also uses the picker. If
+   Chrome refuses direct capture of a tab, the picker opens instead.
 3. Audio is encoded in 5-second slices, encrypted with a server-issued
    per-recording key before it is written to browser storage, and uploaded to
    Chatterbox as it is captured.
@@ -32,6 +34,12 @@ system audio to extensions.
    Chatterbox has saved the recording. It returns to the ready screen and opens
    the new recording in an existing Chatterbox tab, or a new tab if none is open.
    You can download a playable copy from that authenticated recording page.
+
+Choose **Target folder in Chatterbox** before starting, or change it while
+recording in the popup or recorder window. **File later** leaves it unfiled.
+The selected folder survives interrupted uploads and is remembered for the next
+recording. Older servers show the start folder read-only. If a changed folder
+is unavailable when saving, the server uses the start folder instead.
 
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
@@ -151,9 +159,9 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 
 | Permission | Why |
 | --- | --- |
-| `offscreen` | Keeps a detected meeting tab's capture running while the toolbar popup is closed. |
+| `offscreen` | Keeps the current tab's capture running while the toolbar popup is closed. |
 | `desktopCapture` | Opens the screen picker to capture system audio. |
-| `tabCapture` | Records a detected meeting tab's audio directly, without the screen picker. |
+| `tabCapture` | Records the current tab's audio directly, without the screen picker. |
 | `alarms` | Auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
 | `tabs` | Detects meeting URLs, finds marked recorder setup tabs and their titles for connection, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
@@ -167,6 +175,6 @@ Suggested Chrome Web Store explanations for every manifest permission are in
 ## Legal
 
 Recording people can require their consent, and the rules differ by country.
-Clicking **Consent confirmed · Record** records your acknowledgement; it does
+Clicking **Consent confirmed · Record this tab** records your acknowledgement; it does
 not obtain consent from other participants. You are responsible for complying
 with the laws and meeting-platform terms that apply to you.

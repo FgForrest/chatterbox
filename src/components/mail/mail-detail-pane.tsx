@@ -47,6 +47,7 @@ import type { Recording } from "@/types/recording";
 
 interface Props {
     mail: Recording;
+    itemLinkQuery?: string;
     /** The private item has been shared into the Organization. */
     shared?: boolean;
     dateTimeFormat: DateTimeFormat;
@@ -120,6 +121,7 @@ function evidenceRange(params: URLSearchParams) {
  */
 export function MailDetailPane({
     mail,
+    itemLinkQuery,
     shared = false,
     dateTimeFormat,
     onBackToList,
@@ -145,10 +147,13 @@ export function MailDetailPane({
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
     const [title, setTitle] = useState(mail.filename);
-    const highlight = useMemo(
-        () => evidenceRange(searchParams),
-        [searchParams],
-    );
+    const highlightQuery = itemLinkQuery ?? searchParams.toString();
+    const highlight = useMemo(() => {
+        const params = new URLSearchParams(highlightQuery);
+        return params.get("recording") === mail.id
+            ? evidenceRange(params)
+            : null;
+    }, [highlightQuery, mail.id]);
 
     useEffect(() => {
         setTitle(mail.filename);
@@ -311,6 +316,7 @@ export function MailDetailPane({
                 title={title || i18n("(no subject)")}
                 metadata={metadata}
                 view={mail.view}
+                shared={shared}
                 isOwn={isOwn}
                 ownerName={mail.ownerName}
                 readOnly={!canChange}

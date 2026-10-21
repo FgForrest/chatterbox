@@ -113,31 +113,34 @@ v Chromu.
 
 ## Nahrání schůzky
 
-1. Klikněte na ikonu rozšíření, přečtěte si stručné připomenutí pro účastníky a
-   zvolte **Souhlas potvrzen · Nahrávat**.
-2. Pokud se zobrazí výzva, povolte mikrofon nebo zvolte
-   **Nahrávat bez mého mikrofonu**. Pokud Chrome otevře výběr zvuku, vyberte
-   kartu se schůzkou a zapněte **Sdílet zvuk karty**, nebo vyberte obrazovku
-   podle popisu níže.
-3. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
-   klávesovou zkratkou (`Ctrl+Shift+U` ve výchozím nastavení).
+1. Klikněte na ikonu rozšíření, přečtěte si připomenutí pro účastníky a zvolte
+   **Souhlas potvrzen · Nahrávat tuto kartu**. S již povoleným mikrofonem se
+   nahraje zvuk aktuální karty, i když v ní nebyla rozpoznána schůzka.
+2. Pro jiný zdroj zvolte **Nahrávat jinou obrazovku nebo aplikaci**. V dialogu
+   Chromu vyberte kartu a zapněte **Sdílet zvuk karty**, nebo vyberte
+   **Celou obrazovku** a zapněte **Sdílet systémový zvuk**, pokud je dostupný.
+   Pro samostatnou aplikaci musí váš počítač sdílení systémového zvuku
+   podporovat. Jinak použijte webovou verzi schůzky. Na macOS může Chrome
+   poprvé požádat o oprávnění k záznamu obrazovky.
+3. Pokud se zobrazí výzva, povolte mikrofon nebo zvolte
+   **Nahrávat bez mého mikrofonu**. Spuštění z tohoto okna nebo z oznámení
+   otevře výběr zvuku v Chromu. Ten se otevře také tehdy, když Chrome přímé
+   nahrávání karty odmítne, například na stránce nastavení prohlížeče.
+4. Nahrávání zastavte ve vyskakovacím okně rozšíření nebo klávesovou zkratkou
+   (`Ctrl+Shift+U` ve výchozím nastavení). Ruční nahrávání karty pokračuje
+   během ticha i přechodu na jinou stránku; zavřením nahrávané karty skončí.
 
-Způsob zachycení zvuku schůzky závisí na tom, jak nahrávání spustíte:
+Výběr zvuku v Chromu se otevře ve velkém okně uprostřed okna prohlížeče.
+Po výběru se zmenší na okno nahrávání s ukazateli mikrofonu a zvuku zdroje.
+Můžete ho minimalizovat; zavřením zastavíte záznam a odešlete uložený zvuk.
 
-- **Schůzka v kartě prohlížeče** (Google Meet nebo webové verze Zoomu a Teams):
-  při spuštění z lišty s již povoleným mikrofonem lze zvuk karty nahrávat přímo.
-  Spuštění z oznámení nebo po výzvě k povolení mikrofonu otevře výběr zvuku
-  v Chromu. Vyberte kartu se schůzkou a zapněte **Sdílet zvuk karty**. Zvuky
-  ostatních aplikací se nezachytí.
-- **Jiná karta prohlížeče**: vyberte ji v dialogu Chromu a zapněte
-  **Sdílet zvuk karty**.
-- **Samostatná aplikace Zoom nebo Teams**: vyberte **Celou obrazovku** a zapněte
-  **Sdílet systémový zvuk**, pokud je tato možnost dostupná. Pokud Chrome
-  upozorní, že zvuk obrazovky nelze sdílet, použijte webovou verzi schůzky.
-  Na macOS může Chrome poprvé požádat o oprávnění k záznamu obrazovky. Otevře se
-  malé okno nahrávání s ukazateli mikrofonu a zvuku schůzky. Můžete ho
-  minimalizovat; zavřením zastavíte záznam a odešlete dosud uložený zvuk.
-  Stejné okno se otevře při výběru jiné karty v dialogu Chromu.
+Pole **Cílová složka v Klepně** můžete nastavit před spuštěním i během
+nahrávání ve vyskakovacím okně nebo v okně nahrávání. Pro hledání napište alespoň
+dva znaky; volba **Zařadit později** ponechá zařazení na vás v Klepně.
+Volba přežije přerušení odesílání i restart prohlížeče a zapamatuje se pro příští
+nahrávku. Starší servery ukazují počáteční složku pouze pro čtení s vysvětlením.
+Pokud změněná složka před uložením přestane být dostupná, nahrávka se uloží
+podle složky vybrané na začátku.
 
 Po zastavení se dokončí odesílání a server nahrávku sestaví a uloží.
 Po potvrzení uložení rozšíření otevře přehled Klepny s vybranou novou nahrávkou.

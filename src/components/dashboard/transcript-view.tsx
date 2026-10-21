@@ -27,7 +27,11 @@ import {
     useTranscriptFollow,
 } from "@/hooks/use-transcript-follow";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
-import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
+import { speakerPositions } from "@/lib/knowledge/speaker-groups";
+import {
+    labelsFromTurns,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import type { OverlayCorrection } from "@/lib/learn/render";
 import {
@@ -368,6 +372,8 @@ export function TranscriptView({
     }
 
     const order = speakerOrder(turns);
+    const labels = labelsFromTurns(turns);
+    const positions = speakerPositions(labels, speakerAttributions);
     // A lone speaker is named only while a review proposes a name for them.
     const loneKey = order.length === 1 ? speakerKey(order[0]) : null;
     const showSpeakers =
@@ -447,7 +453,8 @@ export function TranscriptView({
                 const opensTurn =
                     paragraphs[index - 1]?.turnIndex !== turnIndex;
                 const named = showSpeakers && turn.label !== "";
-                const position = order.indexOf(turn.speaker);
+                const position =
+                    positions.get(speakerKey(turn.speaker)) ?? labels.length;
                 const style = speakerAccent(position);
                 const key = speakerKey(turn.speaker);
                 const confirmedName = speakerAttributions[key]?.name;
