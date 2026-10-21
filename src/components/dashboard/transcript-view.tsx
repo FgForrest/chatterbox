@@ -372,10 +372,8 @@ export function TranscriptView({
     }
 
     const order = speakerOrder(turns);
-    const positions = speakerPositions(
-        labelsFromTurns(turns),
-        speakerAttributions,
-    );
+    const labels = labelsFromTurns(turns);
+    const positions = speakerPositions(labels, speakerAttributions);
     // A lone speaker is named only while a review proposes a name for them.
     const loneKey = order.length === 1 ? speakerKey(order[0]) : null;
     const showSpeakers =
@@ -455,7 +453,8 @@ export function TranscriptView({
                 const opensTurn =
                     paragraphs[index - 1]?.turnIndex !== turnIndex;
                 const named = showSpeakers && turn.label !== "";
-                const position = positions.get(speakerKey(turn.speaker)) ?? 0;
+                const position =
+                    positions.get(speakerKey(turn.speaker)) ?? labels.length;
                 const style = speakerAccent(position);
                 const key = speakerKey(turn.speaker);
                 const confirmedName = speakerAttributions[key]?.name;

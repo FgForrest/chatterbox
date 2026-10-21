@@ -937,6 +937,46 @@ describe("confirmed person speaker groups", () => {
         });
     });
 
+    it("keeps other chips usable while one chip unlinks", async () => {
+        let release: (() => void) | undefined;
+        const rows = [linked("speaker_0"), linked("speaker_1", "person-2")];
+        rows[1] = { ...rows[1], personName: "Petra" };
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (_url: string, init?: RequestInit) => {
+                if (init?.method === "PUT") {
+                    await new Promise<void>((resolve) => {
+                        release = resolve;
+                    });
+                    return response({ ...VERSION, speakers: [rows[1]] });
+                }
+                return response({ ...VERSION, speakers: rows });
+            }),
+        );
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                speakers={voices.slice(0, 2)}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Unlink Jan from Speaker 0",
+            }),
+        );
+        await waitFor(() => expect(release).toBeDefined());
+        expect(
+            within(chips()).getByRole("button", { name: "Petra" }),
+        ).toHaveProperty("disabled", false);
+        expect(
+            within(chips()).getByRole("button", {
+                name: "Unlink Petra from Speaker 1",
+            }),
+        ).toHaveProperty("disabled", false);
+        release?.();
+        await screen.findByRole("button", { name: "Speaker 0" });
+    });
+
     it("merges read-only speakers without editing actions", async () => {
         const fetchMock = server();
         render(

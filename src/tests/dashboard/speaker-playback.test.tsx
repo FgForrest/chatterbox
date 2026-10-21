@@ -215,6 +215,49 @@ describe("speaker playback navigation", () => {
     });
 });
 
+it("gives an unattributed placeholder turn its own colour", async () => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+            Response.json(
+                url.includes("/speakers")
+                    ? { transcriptionId: "tx-1", revision: 1, speakers: [] }
+                    : { topics: null },
+            ),
+        ),
+    );
+    const withPlaceholder = [
+        turns[0],
+        { speaker: "speaker", startMs: 2000, endMs: 2500, text: "Noise." },
+        turns[1],
+    ];
+    try {
+        render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: "speaker_0: First.\nspeaker: Noise.\nspeaker_1: Reply.",
+                        turns: withPlaceholder,
+                        version: { transcriptionId: "tx-1", revision: 1 },
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        await screen.findByRole("button", { name: "Speaker 0" });
+        const accents = [...document.querySelectorAll("[data-turn-index]")].map(
+            (turn) => turn.getAttribute("data-accent"),
+        );
+        expect(accents).toEqual(["0", "2", "1"]);
+    } finally {
+        cleanup();
+        vi.unstubAllGlobals();
+    }
+});
+
 it("cycles all confirmed voices chronologically with matching transcript colours", async () => {
     Element.prototype.scrollTo = vi.fn();
     vi.stubGlobal(

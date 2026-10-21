@@ -162,7 +162,9 @@ export function SpeakerTags({
     );
     const [openLabel, setOpenLabel] = useState<string | null>(null);
     const [openVoices, setOpenVoices] = useState<string[]>([]);
-    const [unlinking, setUnlinking] = useState(false);
+    const [unlinkingLabels, setUnlinkingLabels] = useState<readonly string[]>(
+        [],
+    );
     const [savingLabel, setSavingLabel] = useState<string | null>(null);
     const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
         () => new Set(),
@@ -310,7 +312,7 @@ export function SpeakerTags({
     }
 
     async function unlinkGroup(labels: readonly string[]) {
-        setUnlinking(true);
+        setUnlinkingLabels(labels);
         try {
             for (const label of labels) {
                 if (!mounted.current) break;
@@ -320,7 +322,7 @@ export function SpeakerTags({
                 }
             }
         } finally {
-            setUnlinking(false);
+            setUnlinkingLabels([]);
         }
     }
 
@@ -370,9 +372,11 @@ export function SpeakerTags({
                         attribution || unknown || readOnly
                             ? undefined
                             : suggestions[speaker.speaker];
-                    const saving =
-                        unlinking ||
-                        (savingLabel !== null && labels.includes(savingLabel));
+                    const saving = labels.some(
+                        (label) =>
+                            label === savingLabel ||
+                            unlinkingLabels.includes(label),
+                    );
                     const accent = speakerAccent(position).text;
                     const name = attribution?.name ?? speaker.label;
                     const voiceNames = labels
