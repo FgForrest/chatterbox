@@ -516,6 +516,29 @@ describe("evidence navigation", () => {
         expect(time.title).toBe("Send the sketch");
     });
 
+    it("shows a plain time for current-item evidence in review once its audio is gone", () => {
+        render(
+            <PlaybackProvider playback={null}>
+                <TaskEvidenceLink
+                    currentItemId="recording"
+                    quote="Send the sketch"
+                    evidence={{
+                        itemId: "recording",
+                        itemKind: "audio",
+                        audioAvailable: false,
+                        startMs: 9000,
+                        text: null,
+                    }}
+                />
+            </PlaybackProvider>,
+        );
+        expect(screen.queryByRole("button")).toBeNull();
+        expect(screen.queryByRole("link")).toBeNull();
+        const time = screen.getByText("00:09");
+        expect(time.className).toContain("tabular-nums");
+        expect(time.title).toBe("Send the sketch");
+    });
+
     it("labels off-item audio navigation when there is no time offset", () => {
         render(
             <TaskEvidenceLink

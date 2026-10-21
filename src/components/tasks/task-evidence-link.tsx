@@ -60,13 +60,25 @@ export function TaskEvidenceLink({
     let action: ReactNode;
 
     if (currentAudio) {
-        action =
-            evidence.startMs === null || !evidence.audioAvailable ? null : (
+        if (evidence.startMs === null) {
+            action = null;
+        } else if (evidence.audioAvailable) {
+            action = (
                 <PlayAtButton
                     ms={evidence.startMs}
                     title={quote ?? undefined}
                 />
             );
+        } else {
+            action = (
+                <span
+                    className="text-xs tabular-nums text-muted-foreground"
+                    title={quote ?? undefined}
+                >
+                    {time}
+                </span>
+            );
+        }
     } else {
         const query = new URLSearchParams({ recording: evidence.itemId });
         if (
