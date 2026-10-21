@@ -246,7 +246,6 @@ export function MailDetailPane({
     const canChange = canChangeItem({
         view: mail.view === "org" ? "org" : "private",
         isOwn,
-        shared,
         isOrgAccount,
         canCurate,
     });

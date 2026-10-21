@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
-import { requireApiSessionActor } from "@/lib/auth-server";
-import { actsForOrganization } from "@/lib/authz/curator";
-import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { decideReviewItem, requestedReviewSource } from "@/lib/learn/review";
-import {
-    requestedRecordingView,
-    requireRecordingView,
-} from "@/lib/sharing/access";
-import { assertMayChange } from "@/lib/sharing/writer";
+import { requireLearnAccess } from "@/lib/sharing/learn-access";
 
 type ItemContext = { params: Promise<{ id: string; itemId: string }> };
 
@@ -23,7 +16,7 @@ const MAX_DRAFT_BYTES = 16 * 1024;
  */
 export const PATCH = apiHandler<ItemContext>(async (request, context) => {
     const { id, itemId } = await (context as ItemContext).params;
-    const { access } = await authorizeLearn(request, id);
+    const { access } = await requireLearnAccess(request, id);
     const read = await readBoundedJson(request, MAX_DRAFT_BYTES);
     if (read.tooLarge) {
         throw new AppError(ErrorCode.INVALID_INPUT, "Request too large", 413);
@@ -63,27 +56,3 @@ export const PATCH = apiHandler<ItemContext>(async (request, context) => {
         ),
     );
 });
-
-/**
- * The owner, or an Organization curator while shared. Learn always follows
- * the item's current scope, including requests from the owner's private view.
- */
-async function authorizeLearn(request: Request, recordingId: string) {
-    const { session, actor } = await requireApiSessionActor(request);
-    const access = await requireRecordingView(
-        session.user.id,
-        recordingId,
-        requestedRecordingView(request),
-        { kinds: ALL_ITEM_KINDS },
-    );
-    const curates = access.view === "org" && (await actsForOrganization(actor));
-    assertMayChange(access, session.user.id, curates);
-    return {
-        access: {
-            ...access,
-            view: access.shared ? ("org" as const) : access.view,
-        },
-        actorUserId: session.user.id,
-        curates,
-    };
-}
