@@ -25,6 +25,7 @@ const task: TaskView = {
     status: "open",
     text: "Send the contract",
     assignee: null,
+    assigneeHasEmail: false,
     assigneeHint: "Ada",
     assigneeCheck: true,
     dueDate: null,
