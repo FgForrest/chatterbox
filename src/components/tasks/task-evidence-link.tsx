@@ -81,13 +81,11 @@ export function TaskEvidenceLink({
             query.set("evidenceStart", String(evidence.text.charStart));
             query.set("evidenceEnd", String(evidence.text.charEnd));
         }
-        const label =
-            evidence.itemKind === "mail"
-                ? i18n("Show evidence in mail")
-                : i18n("Show in recording");
-        let text = i18n("Show in recording");
+        let label = i18n("Show in recording");
+        let text = label;
         let icon = <ArrowUpRight className="size-3" aria-hidden="true" />;
         if (evidence.itemKind === "mail") {
+            label = i18n("Show evidence in mail");
             text = i18n("Show in mail");
             icon = <Mail className="size-3" aria-hidden="true" />;
         } else if (evidence.audioAvailable && time !== null) {

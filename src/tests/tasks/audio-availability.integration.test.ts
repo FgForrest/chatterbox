@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+    chatterItems,
     knowledgeFactEvidence,
     knowledgeFacts,
     people,
@@ -73,10 +74,8 @@ const viewer: TaskViewer = {
 describe.skipIf(!url)("task evidence audio availability", () => {
     let database: TestPostgresDatabase;
     beforeAll(async () => {
-        if (!url || new URL(url).port !== "55434")
-            throw new Error("Playback tests require port 55434");
         database = await createMigratedTestDatabase(
-            url,
+            url ?? "",
             "playback_availability",
         );
         databaseRef.current = database.db as unknown as Record<
@@ -147,6 +146,56 @@ describe.skipIf(!url)("task evidence audio availability", () => {
         for (const field of ["audioId", "audioReapedAt", "audioDeletedAt"]) {
             expect(mention).not.toHaveProperty(field);
         }
+    });
+
+    it("reports no audio for mail evidence", async () => {
+        await insertRecording(database.db, {
+            id: "mail-home",
+            userId: viewer.userId,
+        });
+        await database.db.insert(chatterItems).values({
+            id: "mail-source",
+            userId: viewer.userId,
+            kind: "mail",
+            title: encryptText("Delivery date"),
+            occurredAt: new Date(),
+        });
+        const [task] = await database.db
+            .insert(recordingTasks)
+            .values({
+                itemId: "mail-home",
+                userId: viewer.userId,
+                status: "open",
+                text: encryptText("Confirm the delivery date"),
+                source: "manual",
+            })
+            .returning({ id: recordingTasks.id });
+        if (!task) throw new Error("Task missing");
+        await database.db.insert(taskMentions).values({
+            taskId: task.id,
+            itemId: "mail-source",
+            userId: viewer.userId,
+            view: "private",
+            statementAt: new Date(),
+            matchDecision: "accepted",
+        });
+        const rows = await listTasks(viewer, {
+            tab: "tracked",
+            state: "all",
+            folderId: null,
+            due: null,
+            today: null,
+            sort: "created",
+        });
+        expect(rows.find((row) => row.id === task.id)).toMatchObject({
+            evidenceItemId: "mail-source",
+            evidenceAudioAvailable: false,
+            evidence: { id: "mail-source", audioAvailable: false },
+        });
+        const mention = (
+            await loadVisibleTaskMentions(viewer, [task.id])
+        ).latest.get(task.id);
+        expect(mention?.audioAvailable).toBe(false);
     });
 
     it.each([
