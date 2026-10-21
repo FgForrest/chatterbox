@@ -38,6 +38,7 @@ export function RecordingPlayerHeader({
     recording,
     action,
     onRenamed,
+    shared = false,
     titleReadOnly,
 }: RecordingPlayerHeaderProps) {
     const locale = useLocale();
