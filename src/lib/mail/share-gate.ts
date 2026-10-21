@@ -1,35 +1,23 @@
 import { and, eq } from "drizzle-orm";
 import type { db } from "@/db";
 import { mailPendingShares, recordingFolderAssignments } from "@/db/schema";
-import { AppError, ErrorCode } from "@/lib/errors";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { publishKnowledgeInTx } from "@/lib/knowledge/share-knowledge";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import { publishTaskAssigneesInTx } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
-import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * What keeps a mail out of the Organization: an undecided task proposal. Proposal-state filtering follows specification section 7.8;
- * Stage 4 narrows both share gates to `awaiting_source_review`.
+ * Mail sharing has no content-review prerequisites.
  */
 export async function mailShareProblems(
-    tx: Tx,
-    itemId: string,
-    ownerUserId: string,
+    _tx: Tx,
+    _itemId: string,
+    _ownerUserId: string,
 ): Promise<ShareGateProblem[]> {
-    const taskDecisions = await waitingTaskDecisions(tx, itemId, ownerUserId);
-    const problems: ShareGateProblem[] = [];
-    const waitingProposals = taskDecisions.total;
-    if (waitingProposals > 0) {
-        problems.push({
-            kind: "tasks_unreviewed",
-            proposals: waitingProposals,
-        });
-    }
-    return problems;
+    return [];
 }
 
 /**
@@ -53,17 +41,6 @@ export async function shareMailInTx(
         input.orgUserId,
         tx,
     );
-    const problems = wasShared
-        ? []
-        : await mailShareProblems(tx, input.itemId, input.ownerUserId);
-    if (problems.length > 0) {
-        throw new AppError(
-            ErrorCode.SHARE_REQUIREMENTS_UNMET,
-            "Finish the review before sharing",
-            409,
-            { problems },
-        );
-    }
     await tx
         .insert(recordingFolderAssignments)
         .values({

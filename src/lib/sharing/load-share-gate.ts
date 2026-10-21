@@ -6,7 +6,6 @@ import {
     evaluateShareGate,
     type ShareGateProblem,
 } from "@/lib/sharing/share-gate";
-import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 type Executor = Pick<typeof db, "select">;
 
@@ -14,8 +13,6 @@ type Executor = Pick<typeof db, "select">;
  * The share gate over a recording's transcripts, which its owner holds,
  * and their speaker rows: a shared recording is one recording, so these
  * are exactly what the Organization will read.
- * Proposal-state filtering follows specification section 7.8; Stage 4
- * narrows both share gates to `awaiting_source_review`.
  */
 export async function loadShareGate(
     executor: Executor,
@@ -56,11 +53,6 @@ export async function loadShareGate(
                       ),
                   )
             : [];
-    const taskDecisions = await waitingTaskDecisions(
-        executor,
-        recordingId,
-        ownerUserId,
-    );
     return evaluateShareGate({
         transcripts: transcripts.map((transcript) => ({
             id: transcript.id,
@@ -68,6 +60,5 @@ export async function loadShareGate(
             labels: transcriptSpeakerLabels(transcript),
         })),
         attributions,
-        waitingTaskProposals: taskDecisions.total,
     });
 }

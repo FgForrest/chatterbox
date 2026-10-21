@@ -393,7 +393,7 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
-    it("keeps automatic task review queued after Summary", () => {
+    it("omits task review after a fresh Summary", () => {
         const result = deriveWorkflowStatus(
             processing({
                 profile: {
@@ -418,8 +418,9 @@ describe("deriveWorkflowStatus", () => {
             "audio",
         );
 
-        expect(stateOf(result.steps, "taskReview")).toBe("queued");
-        expect(result.status?.message).toBe("taskReviewQueued");
+        expect(stateOf(result.steps, "taskReview")).toBeUndefined();
+        expect(result.status).toBeNull();
+        expect(result.visible).toBe(false);
     });
 
     it("keeps automatic Share queued after its gate is settled", () => {
@@ -957,20 +958,13 @@ describe("deriveWorkflowStatus", () => {
             deriveWorkflowStatus(processing(), "audio").steps.map(
                 (step) => step.id,
             ),
-        ).toEqual([
-            "record",
-            "categorize",
-            "transcribe",
-            "learn",
-            "summary",
-            "taskReview",
-        ]);
+        ).toEqual(["record", "categorize", "transcribe", "learn", "summary"]);
         expect(
             deriveWorkflowStatus(
                 processing({ kind: "mail" }),
                 "mail",
             ).steps.map((step) => step.id),
-        ).toEqual(["receive", "categorize", "learn", "summary", "taskReview"]);
+        ).toEqual(["receive", "categorize", "learn", "summary"]);
         expect(
             deriveWorkflowStatus(
                 processing({

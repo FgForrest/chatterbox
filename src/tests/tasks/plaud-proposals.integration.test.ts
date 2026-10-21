@@ -201,7 +201,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
             .where(eq(recordingTasks.itemId, ITEM_ID));
         expect(first).toHaveLength(2);
         expect(first.every((task) => task.source === "plaud")).toBe(true);
-        expect(first.every((task) => task.status === "proposed")).toBe(true);
+        expect(first.every((task) => task.status === "open")).toBe(true);
         expect(await db().select().from(taskUpdateProposals)).toHaveLength(0);
         const mentions = await db().select().from(taskMentions);
         expect(mentions).toHaveLength(2);
@@ -234,6 +234,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, ITEM_ID));
         expect(replaced.map((task) => task.text).sort()).toEqual([
+            "Draft the report",
             "Keep the signed decision",
             "Send the final report",
         ]);
@@ -255,7 +256,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
         expect(processingGeneration?.requestedGeneration).toBe(3);
     });
 
-    it("lets an AI summary replace untouched Plaud proposals", async () => {
+    it("keeps accepted Plaud tasks when an AI summary adds tasks", async () => {
         const items = ["Plaud-only suggestion"];
         await storePlaudSummary(items);
         const fingerprint = plaudActionItemsFingerprint(items);
@@ -302,9 +303,64 @@ describeWithDatabase("Plaud summary task proposals", () => {
             })
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, ITEM_ID));
-        expect(rows).toEqual([
-            { source: "riffado", text: "AI-validated task" },
+        expect(rows).toEqual(
+            expect.arrayContaining([
+                { source: "plaud", text: "Plaud-only suggestion" },
+                { source: "riffado", text: "AI-validated task" },
+            ]),
+        );
+    });
+
+    it("does not duplicate a task when Plaud and AI summary writers run concurrently", async () => {
+        const text = "Draft the concurrent report";
+        await storePlaudSummary([text]);
+        const fingerprint = plaudActionItemsFingerprint([text]);
+        await Promise.all([
+            applyPlaudActionItemProposals({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                view: "private",
+                expectedFingerprint: fingerprint,
+                record: phaseRecord(fingerprint),
+            }),
+            db().transaction((tx) =>
+                writeTaskProposalsInTx(tx, {
+                    recordingId: ITEM_ID,
+                    ownerUserId: USER_ID,
+                    actorUserId: USER_ID,
+                    proposals: {
+                        source: "riffado",
+                        tasks: [
+                            {
+                                text,
+                                fingerprint: taskFingerprint(text),
+                                assigneePersonId: null,
+                                assigneeHint: null,
+                                assigneeCheck: false,
+                                dueDate: null,
+                                duePhrase: null,
+                                quote: null,
+                                evidenceStartMs: null,
+                            },
+                        ],
+                        updates: [],
+                        reviewer,
+                        fingerprintOf: taskFingerprint,
+                    },
+                }),
+            ),
         ]);
+        const tasks = await db()
+            .select()
+            .from(recordingTasks)
+            .where(eq(recordingTasks.itemId, ITEM_ID));
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]).toMatchObject({
+            text,
+            status: "open",
+            acceptedByUserId: USER_ID,
+        });
+        expect(await db().select().from(taskMentions)).toHaveLength(1);
     });
 
     it("does not write or leave Task review waiting on a fingerprint mismatch", async () => {

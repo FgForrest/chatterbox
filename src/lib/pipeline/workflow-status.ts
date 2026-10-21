@@ -345,6 +345,7 @@ function inferUpcomingStates(
     if (!summarySettled) return;
 
     if (
+        data.taskReviewWaiting > 0 &&
         profile.automatic.taskReview === true &&
         state("taskReview") === "waiting" &&
         mayInferQueued(data.phases.taskReview)
@@ -354,6 +355,7 @@ function inferUpcomingStates(
     }
 
     const taskReviewSettled =
+        data.taskReviewWaiting === 0 ||
         settledState(state("taskReview")) ||
         profile.automatic.taskReview === false;
     const shareStartsByItself =
@@ -694,7 +696,7 @@ export function deriveWorkflowStatus(
         ...(kind === "audio" ? (["transcribe"] as const) : []),
         "learn",
         "summary",
-        "taskReview",
+        ...(data.taskReviewWaiting > 0 ? (["taskReview"] as const) : []),
         ...(data.intents.length > 0 ? (["share"] as const) : []),
     ];
     const steps = ids.map<WorkflowStep>((id) => ({

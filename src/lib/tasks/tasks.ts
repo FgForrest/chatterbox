@@ -2470,7 +2470,10 @@ async function requireTaskView(
  * Recordings with proposals or follow-ups waiting for the viewer's review,
  * newest first, with how many.
  */
-export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
+export async function recordingsAwaitingTaskReview(
+    viewer: TaskViewer,
+    { includeProposals = true }: { includeProposals?: boolean } = {},
+): Promise<
     {
         recordingId: string;
         kind: "audio" | "mail";
@@ -2479,21 +2482,23 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     }[]
 > {
     const [proposals, followUps, matches] = await Promise.all([
-        db
-            .select({
-                recordingId: recordingTasks.itemId,
-                taskId: recordingTasks.id,
-            })
-            .from(recordingTasks)
-            .where(
-                and(
-                    eq(recordingTasks.status, "proposed"),
-                    taskEditable(viewer, {
-                        id: recordingTasks.itemId,
-                        userId: recordingTasks.userId,
-                    }),
-                ),
-            ),
+        includeProposals
+            ? db
+                  .select({
+                      recordingId: recordingTasks.itemId,
+                      taskId: recordingTasks.id,
+                  })
+                  .from(recordingTasks)
+                  .where(
+                      and(
+                          eq(recordingTasks.status, "proposed"),
+                          taskEditable(viewer, {
+                              id: recordingTasks.itemId,
+                              userId: recordingTasks.userId,
+                          }),
+                      ),
+                  )
+            : Promise.resolve([]),
         db
             .select({
                 recordingId: taskUpdateProposals.itemId,

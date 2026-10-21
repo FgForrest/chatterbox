@@ -10,9 +10,7 @@ import type { AttributionStatus } from "@/lib/knowledge/attribution";
 
 export type ShareGateProblem =
     | { kind: "no_transcript" }
-    | { kind: "unresolved_speakers"; source: string; labels: string[] }
-    | { kind: "learn_unfinished"; runs: number }
-    | { kind: "tasks_unreviewed"; proposals: number };
+    | { kind: "unresolved_speakers"; source: string; labels: string[] };
 
 export interface ShareGateInput {
     transcripts: { id: string; source: string; labels: readonly string[] }[];
@@ -23,8 +21,6 @@ export interface ShareGateInput {
         personId: string | null;
         markedUnknown: boolean;
     }[];
-    /** Task proposals of the recording not yet accepted or rejected. */
-    waitingTaskProposals?: number;
 }
 
 /** What still stands between a recording and the Organization; empty when nothing does. */
@@ -55,12 +51,6 @@ export function evaluateShareGate(input: ShareGateInput): ShareGateProblem[] {
                 labels,
             });
         }
-    }
-    if ((input.waitingTaskProposals ?? 0) > 0) {
-        problems.push({
-            kind: "tasks_unreviewed",
-            proposals: input.waitingTaskProposals ?? 0,
-        });
     }
     return problems;
 }

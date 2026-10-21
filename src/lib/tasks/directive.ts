@@ -2,7 +2,7 @@ import { deploymentProductName } from "@/lib/deployment-brand";
 
 /**
  * What every summary prompt is told about action items, custom prompts
- * included: they come back as objects the task review can use, and the
+ * included: they come back as objects the task store can use, and the
  * reply may report on open tasks it was shown. Pure: the caller loads the
  * recording's date and the tasks.
  */
@@ -153,12 +153,12 @@ export function buildTasksContext(context: TasksContext): string {
               ];
         lines.push(
             "",
-            "Open tasks in this item's folder scope, from earlier items. Compare every commitment with them:",
+            "Open tasks in this item's folder scope, from this or earlier items. Compare every commitment with them:",
             '- When the same commitment is mentioned again, add {"ref": "T1", "kind": "match", "quote": string} to "taskUpdates" instead of listing it as new. This entry states identity only.',
             '- Partial progress adds only that "match" entry. It does not complete or otherwise change the task.',
             '- Add field changes as separate entries for the same ref: {"ref": "T1", "kind": "due", "due": {"phrase": string, "date": "YYYY-MM-DD"}, "quote": string} for a stated date; {"ref": "T1", "kind": "due_phrase", "due": {"phrase": string, "date": null}, "quote": string} for vague postponement; or {"ref": "T1", "kind": "done", "quote": string} for completion. Never invent a date for a vague phrase.',
             ...outcomeLines,
-            '- When a new-looking commitment could be several of these tasks, keep it in "actionItems" and put those references in its "candidates" list so the reviewer may keep it new.',
+            '- When a new-looking commitment could be several of these tasks, keep it in "actionItems" and put those references in its "candidates" list. Ambiguous commitments are excluded from automatic task creation.',
             ...context.open.map((task) => {
                 const who = task.speaker
                     ? ` (${task.speaker})`
