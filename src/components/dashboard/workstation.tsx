@@ -67,6 +67,18 @@ interface TranscriptionData {
 
 const EMPTY_RECORDINGS: Recording[] = [];
 
+function clearItemLinkContext(params: URLSearchParams) {
+    for (const key of [...params.keys()]) {
+        if (key === "playFrom" || key.startsWith("evidence"))
+            params.delete(key);
+    }
+}
+
+function dashboardLocation(params: URLSearchParams) {
+    const query = params.toString();
+    return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+}
+
 /** Shared recordings, read through their Organization view. */
 export interface OrganizationLibrary {
     recordings: Recording[];
@@ -158,6 +170,8 @@ export function Workstation({
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
         null,
     );
+    const selectedFolderIdRef = useRef(selectedFolderId);
+    selectedFolderIdRef.current = selectedFolderId;
     const [firstLevelFolderOpen, setFirstLevelFolderOpen] = useState(false);
     const [resetToRecentKey, setResetToRecentKey] = useState(0);
     const selectionRevisionRef = useRef(0);
@@ -165,18 +179,82 @@ export function Workstation({
     const [pendingUploadSelection, setPendingUploadSelection] = useState<{
         recordingId: string;
         selectionRevision: number;
+        historyMethod: "push" | "replace";
     } | null>(null);
 
     useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
     const locationQuery = useSearchParams().toString();
     const handledLocationQuery = useRef<string | null>(null);
-    const selectRecordingByUser = useCallback((recording: Recording) => {
-        selectionRevisionRef.current += 1;
-        setPendingUploadSelection(null);
-        setCurrentRecording(recording);
-        setMobileView("detail");
-    }, []);
+    const [itemLinkQuery, setItemLinkQuery] = useState("");
+    const writeSelection = useCallback(
+        (
+            recording: Recording | null,
+            folderId: string | null,
+            method: "push" | "replace" = "replace",
+        ) => {
+            const params = new URLSearchParams(window.location.search);
+            clearItemLinkContext(params);
+            params.delete("recording");
+            params.delete("folder");
+            params.delete("view");
+            if (folderId) {
+                params.set("folder", folderId);
+            } else if (recording) {
+                params.set("recording", recording.id);
+                if (recording.view === "org") params.set("view", "org");
+            }
+            handledLocationQuery.current = params.toString();
+            if (
+                params.toString() ===
+                new URLSearchParams(window.location.search).toString()
+            )
+                return;
+            window.history[method === "push" ? "pushState" : "replaceState"](
+                null,
+                "",
+                dashboardLocation(params),
+            );
+        },
+        [],
+    );
+    const selectRecording = useCallback(
+        (recording: Recording, method: "push" | "replace") => {
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
+            setItemLinkQuery("");
+            setCurrentRecording(recording);
+            setSelectedFolderId(null);
+            setMobileView("detail");
+            writeSelection(recording, null, method);
+        },
+        [writeSelection],
+    );
+    const selectRecordingByUser = useCallback(
+        (recording: Recording) => {
+            selectRecording(recording, "push");
+        },
+        [selectRecording],
+    );
+    const selectRecordingAutomatically = useCallback(
+        (recording: Recording) => {
+            selectRecording(recording, "replace");
+        },
+        [selectRecording],
+    );
+    const selectFolderByUser = useCallback(
+        (folder: RecordingFolder) => {
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
+            setItemLinkQuery("");
+            setLibraryMode("organize");
+            setSelectedFolderId(folder.id);
+            setCurrentRecording(null);
+            setMobileView("detail");
+            writeSelection(null, folder.id, "push");
+        },
+        [writeSelection],
+    );
     const openSearchHit = useCallback(
         (hit: ChatterSearchHit): boolean => {
             const organization =
@@ -196,42 +274,98 @@ export function Workstation({
         [orgRecordings, recordings, hiddenIds, selectRecordingByUser],
     );
 
-    useEffect(() => {
-        const query = locationQuery;
-        if (handledLocationQuery.current === query) return;
-        handledLocationQuery.current = query;
-        const params = new URLSearchParams(query);
-        const recordingId = params.get("recording");
-        if (recordingId) {
-            const linked = (
-                params.get("view") === "org" ? orgRecordings : recordings
-            ).find((recording) => recording.id === recordingId);
-            if (linked) {
-                selectRecordingByUser(linked);
-                setSelectedFolderId(null);
-                return;
-            }
-        }
-        const folderId = params.get("folder");
-        if (
-            folderId &&
-            initialFolderOrganization.folders.some(
-                (folder) => folder.id === folderId,
+    const readLocation = useCallback(
+        (traversing = false) => {
+            const params = new URLSearchParams(window.location.search);
+            if (
+                !traversing &&
+                handledLocationQuery.current === params.toString()
             )
-        ) {
+                return;
+            const firstLoad = handledLocationQuery.current === null;
+            if (traversing) clearItemLinkContext(params);
+            handledLocationQuery.current = params.toString();
+            if (traversing)
+                window.history.replaceState(
+                    null,
+                    "",
+                    dashboardLocation(params),
+                );
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
-            setLibraryMode("organize");
-            setSelectedFolderId(folderId);
-            setMobileView("detail");
-        }
-    }, [
-        locationQuery,
-        initialFolderOrganization.folders,
-        orgRecordings,
-        recordings,
-        selectRecordingByUser,
-    ]);
+            const recordingId = params.get("recording");
+            if (recordingId) {
+                const preferred =
+                    params.get("view") === "org" ? orgRecordings : recordings;
+                const fallback =
+                    params.get("view") === "org" ? recordings : orgRecordings;
+                const linked = hiddenIds.has(recordingId)
+                    ? undefined
+                    : (preferred.find(
+                          (recording) => recording.id === recordingId,
+                      ) ??
+                      fallback.find(
+                          (recording) => recording.id === recordingId,
+                      ));
+                setCurrentRecording(linked ?? null);
+                if (linked?.view === "org") params.set("view", "org");
+                else params.delete("view");
+                setItemLinkQuery(linked ? params.toString() : "");
+                setSelectedFolderId(null);
+                setMobileView("detail");
+                if (!linked) {
+                    toast.error(
+                        i18n(
+                            "This item is not available to you. It may belong to someone else, no longer be shared with your Organization, or have been deleted.",
+                        ),
+                    );
+                }
+                writeSelection(linked ?? null, null);
+                return;
+            }
+            setItemLinkQuery("");
+            const folderId = params.get("folder");
+            const folder = folderOrganization.folders.find(
+                (folder) => folder.id === folderId,
+            );
+            if (folder) {
+                setLibraryMode("organize");
+                setSelectedFolderId(folder.id);
+                setCurrentRecording(null);
+                setMobileView("detail");
+                writeSelection(null, folder.id);
+                return;
+            }
+            const initial = firstLoad ? (libraryRecordings[0] ?? null) : null;
+            setSelectedFolderId(null);
+            setCurrentRecording(initial);
+            if (!initial) setMobileView("list");
+            writeSelection(initial, null);
+        },
+        [
+            folderOrganization.folders,
+            hiddenIds,
+            i18n,
+            libraryRecordings,
+            orgRecordings,
+            recordings,
+            writeSelection,
+        ],
+    );
+
+    useEffect(() => {
+        if (
+            locationQuery ===
+            new URLSearchParams(window.location.search).toString()
+        )
+            readLocation();
+    }, [locationQuery, readLocation]);
+
+    useEffect(() => {
+        const onPopState = () => readLocation(true);
+        window.addEventListener("popstate", onPopState);
+        return () => window.removeEventListener("popstate", onPopState);
+    }, [readLocation]);
 
     useEffect(() => {
         setFolderOrganization(initialFolderOrganization);
@@ -312,13 +446,20 @@ export function Workstation({
     // after refresh()). If the previously-selected recording is no
     // longer present (e.g. just deleted), clear the selection.
     useEffect(() => {
-        setCurrentRecording((prev) => {
-            if (!prev) return prev;
+        const params = new URLSearchParams(window.location.search);
+        if (
+            currentRecording &&
+            params.get("recording") === currentRecording.id &&
+            (params.get("view") === "org") === (currentRecording.view === "org")
+        ) {
             const updated = (
-                prev.view === "org" ? orgRecordings : recordings
-            ).find((r) => r.id === prev.id);
-            return updated ?? null;
-        });
+                currentRecording.view === "org" ? orgRecordings : recordings
+            ).find((recording) => recording.id === currentRecording.id);
+            if (updated !== currentRecording) {
+                setCurrentRecording(updated ?? null);
+                if (!updated) writeSelection(null, selectedFolderId);
+            }
+        }
         // When server data comes back, clear any optimistic hides whose
         // rows no longer exist server-side (deletion confirmed).
         setHiddenIds((prev) => {
@@ -336,7 +477,14 @@ export function Workstation({
                 prev,
             ),
         );
-    }, [isOrgAccount, recordings, orgRecordings]);
+    }, [
+        isOrgAccount,
+        recordings,
+        orgRecordings,
+        currentRecording,
+        selectedFolderId,
+        writeSelection,
+    ]);
 
     useEffect(() => {
         if (!pendingUploadSelection) return;
@@ -351,10 +499,9 @@ export function Workstation({
             (recording) => recording.id === pendingUploadSelection.recordingId,
         );
         if (!uploaded) return;
-        setCurrentRecording(uploaded);
-        setMobileView("detail");
+        selectRecording(uploaded, pendingUploadSelection.historyMethod);
         setPendingUploadSelection(null);
-    }, [pendingUploadSelection, recordings]);
+    }, [pendingUploadSelection, recordings, selectRecording]);
 
     const handleUploadStarted = useCallback(
         ({ uploadId }: { uploadId: string }) => {
@@ -376,20 +523,27 @@ export function Workstation({
                 uploadSelectionRevisionsRef.current.get(uploadId);
             uploadSelectionRevisionsRef.current.delete(uploadId);
             refresh();
-            const selectUploadedRecording = (selectionRevision: number) => {
+            const selectUploadedRecording = (
+                selectionRevision: number,
+                historyMethod: "push" | "replace" = "replace",
+            ) => {
                 setLibraryMode("recent");
                 setSelectedFolderId(null);
                 setResetToRecentKey((key) => key + 1);
                 setPendingUploadSelection({
                     recordingId,
                     selectionRevision,
+                    historyMethod,
                 });
             };
             if (resumed) {
                 return {
                     label: i18n("Open"),
                     onClick: () => {
-                        selectUploadedRecording(selectionRevisionRef.current);
+                        selectUploadedRecording(
+                            selectionRevisionRef.current,
+                            "push",
+                        );
                     },
                 };
             }
@@ -585,6 +739,7 @@ export function Workstation({
                     visibleRecordings[idx - 1] ??
                     null;
                 setCurrentRecording(next);
+                writeSelection(next, null);
             }
             try {
                 const res = await fetch(
@@ -610,11 +765,14 @@ export function Workstation({
                     next.delete(id);
                     return next;
                 });
-                if (wasCurrent) setCurrentRecording(recording);
+                if (wasCurrent) {
+                    setCurrentRecording(recording);
+                    writeSelection(recording, null);
+                }
                 throw err;
             }
         },
-        [currentRecording, visibleRecordings, refresh, i18n],
+        [currentRecording, visibleRecordings, refresh, i18n, writeSelection],
     );
 
     const handleRenamed = useCallback(
@@ -834,17 +992,20 @@ export function Workstation({
             ) {
                 refresh();
             }
-            setSelectedFolderId((current) => {
-                if (!current || !deletedIds.has(current)) return current;
-                return (
+            const currentFolderId = selectedFolderIdRef.current;
+            if (currentFolderId && deletedIds.has(currentFolderId)) {
+                const nextFolderId =
                     folderOrganization.folders.find(
-                        (folder) => folder.kind === "private",
-                    )?.id ?? null
-                );
-            });
+                        (folder) =>
+                            folder.kind === "private" &&
+                            !deletedIds.has(folder.id),
+                    )?.id ?? null;
+                setSelectedFolderId(nextFolderId);
+                writeSelection(null, nextFolderId);
+            }
             toast.success(i18n("Folder deleted"));
         },
-        [folderOrganization.folders, i18n, refresh],
+        [folderOrganization.folders, i18n, refresh, writeSelection],
     );
 
     const handleFolderAssignment = useCallback(
@@ -1109,11 +1270,13 @@ export function Workstation({
                                             visibleRecordings[0] ?? null,
                                         );
                                         setMobileView("list");
+                                        writeSelection(
+                                            visibleRecordings[0] ?? null,
+                                            null,
+                                            "push",
+                                        );
                                     }}
-                                    onSelectFolder={(folder) => {
-                                        setSelectedFolderId(folder.id);
-                                        setMobileView("detail");
-                                    }}
+                                    onSelectFolder={selectFolderByUser}
                                     onCreateFolder={handleCreateFolder}
                                     onRenameFolder={handleRenameFolder}
                                     onMoveFolder={handleMoveFolder}
@@ -1179,6 +1342,7 @@ export function Workstation({
                         ) : selectedRecording?.kind === "mail" ? (
                             <MailDetailPane
                                 mail={selectedRecording}
+                                itemLinkQuery={itemLinkQuery}
                                 shared={selectedShared}
                                 dateTimeFormat={initialSettings.dateTimeFormat}
                                 onBackToList={() => setMobileView("list")}
@@ -1189,10 +1353,7 @@ export function Workstation({
                                 folderAssignments={
                                     folderOrganization.assignments
                                 }
-                                onSelectFolder={(folder) => {
-                                    setLibraryMode("organize");
-                                    setSelectedFolderId(folder.id);
-                                }}
+                                onSelectFolder={selectFolderByUser}
                                 onAddToFolder={(itemId, folderId) =>
                                     handleFolderAssignment(
                                         itemId,
@@ -1219,6 +1380,7 @@ export function Workstation({
                         ) : (
                             <WorkstationDetailPane
                                 currentRecording={selectedRecording}
+                                itemLinkQuery={itemLinkQuery}
                                 currentTranscription={currentTranscription}
                                 transcripts={currentTranscriptVariants}
                                 isCurrentTranscribing={isCurrentTranscribing}
@@ -1233,7 +1395,7 @@ export function Workstation({
                                 onFolderCreated={handleFolderCreated}
                                 transcriptReadOnly={selectedTranscriptReadOnly}
                                 recordingShared={selectedShared}
-                                onSelectRecording={selectRecordingByUser}
+                                onSelectRecording={selectRecordingAutomatically}
                                 onRenamed={handleRenamed}
                                 onDelete={handleDelete}
                                 onArtifactsChanged={refresh}
@@ -1251,10 +1413,7 @@ export function Workstation({
                                 folderAssignments={
                                     folderOrganization.assignments
                                 }
-                                onSelectFolder={(folder) => {
-                                    setLibraryMode("organize");
-                                    setSelectedFolderId(folder.id);
-                                }}
+                                onSelectFolder={selectFolderByUser}
                                 onAddToFolder={(recordingId, folderId) =>
                                     handleFolderAssignment(
                                         recordingId,

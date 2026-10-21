@@ -1,11 +1,19 @@
 "use client";
 
-import { Users } from "lucide-react";
+import { Link, Users } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { MetadataSeparator } from "@/components/items/metadata-separator";
 import { AiCostSummary } from "@/components/recordings/ai-cost-summary";
 import { RecordingTitle } from "@/components/recordings/recording-title";
+import { Button } from "@/components/ui/button";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { itemDetailHref } from "@/lib/item-detail";
 import type { RecordingView } from "@/lib/sharing/view";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +47,22 @@ export function ItemHeader({
 }: ItemHeaderProps) {
     const i18n = useExtracted();
     const organization = view === "org";
+    const copyLink = async () => {
+        try {
+            await navigator.clipboard.writeText(
+                window.location.origin + itemDetailHref(itemId, { view }),
+            );
+            toast.success(
+                organization
+                    ? i18n(
+                          "Link copied. Other members of your Organization can open it.",
+                      )
+                    : i18n("Link copied. Only you can open it."),
+            );
+        } catch {
+            toast.error(i18n("Could not copy the link. Try again."));
+        }
+    };
 
     return (
         <header
@@ -104,7 +128,25 @@ export function ItemHeader({
                     </p>
                 ))}
             </div>
-            {action && <div className="shrink-0">{action}</div>}
+            <div className="flex shrink-0 items-center gap-1">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={i18n("Copy link")}
+                            onClick={() => void copyLink()}
+                        >
+                            <Link className="size-4" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        {i18n("Copy link")}
+                    </TooltipContent>
+                </Tooltip>
+                {action}
+            </div>
         </header>
     );
 }
