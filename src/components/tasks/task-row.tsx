@@ -20,6 +20,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
+import { formatClock } from "@/lib/topics/timeline";
 import { cn } from "@/lib/utils";
 
 /**
@@ -194,14 +195,21 @@ export function TaskRow({
                         task.evidenceItemId === currentItemId &&
                         task.evidenceItemKind === "audio" &&
                         task.evidenceStartMs !== null &&
-                        task.evidenceAudioAvailable && (
+                        (task.evidenceAudioAvailable ? (
                             <PlayAtButton
                                 ms={task.evidenceStartMs}
                                 label={i18n("Where it was said")}
                                 playLabel={i18n("Play where it was said")}
                                 title={task.quote ?? undefined}
                             />
-                        )}
+                        ) : (
+                            <span
+                                className="tabular-nums"
+                                title={task.quote ?? undefined}
+                            >
+                                {formatClock(task.evidenceStartMs)}
+                            </span>
+                        ))}
                     {!evidence &&
                         (task.evidenceItemId !== currentItemId ||
                             task.evidenceItemKind === "mail") && (

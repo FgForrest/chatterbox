@@ -498,6 +498,24 @@ describe("evidence navigation", () => {
         expect(playback.play).not.toHaveBeenCalled();
     });
 
+    it("shows a plain time for the current recording's evidence once its audio is gone", () => {
+        render(
+            <PlaybackProvider playback={null}>
+                <TaskRow
+                    task={{ ...task, evidenceAudioAvailable: false }}
+                    currentItemId="recording"
+                    organizationOnly={false}
+                    onChange={vi.fn()}
+                />
+            </PlaybackProvider>,
+        );
+        expect(screen.queryByRole("button", { name: /Play|Pause/ })).toBeNull();
+        expect(screen.queryByRole("link")).toBeNull();
+        const time = screen.getByText("00:05");
+        expect(time.className).toContain("tabular-nums");
+        expect(time.title).toBe("Send the sketch");
+    });
+
     it("labels off-item audio navigation when there is no time offset", () => {
         render(
             <TaskEvidenceLink
