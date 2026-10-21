@@ -17,6 +17,7 @@ import {
     pruneRedundantAssignmentsInTx,
     scheduleFolderExportProjection,
 } from "@/lib/folders/folders";
+import { localeFromAcceptLanguage } from "@/lib/i18n/config";
 import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
 import {
@@ -80,7 +81,12 @@ async function usableExplicitProfile(input: {
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id: itemId } = await (context as IdContext).params;
-    const panel = await loadPrivateCategorizationPanel(session.user.id, itemId);
+    const panel = await loadPrivateCategorizationPanel(
+        session.user.id,
+        itemId,
+        session.user.id,
+        localeFromAcceptLanguage(request.headers.get("accept-language")),
+    );
     if (!panel) throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
     return NextResponse.json(panel, {
         headers: { "Cache-Control": "private, no-store" },

@@ -26,6 +26,7 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { lockOrgTree } from "@/lib/folders/folders";
+import { localeFromAcceptLanguage } from "@/lib/i18n/config";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
@@ -79,6 +80,9 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                 access.ownerUserId,
                 id,
                 session.user.id,
+                localeFromAcceptLanguage(
+                    request.headers.get("accept-language"),
+                ),
             ),
         });
     }

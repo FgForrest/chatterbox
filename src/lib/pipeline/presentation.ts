@@ -17,6 +17,9 @@ import {
     users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
+import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
+import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { getOrgUserId } from "@/lib/org/config";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import {
@@ -37,6 +40,7 @@ import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
+import type { FolderKind } from "@/types/folder";
 
 export interface ProcessingProfileSummary {
     id: string;
@@ -118,6 +122,7 @@ export interface ItemProcessingPresentation {
 }
 
 interface StoredFolder {
+    kind: FolderKind;
     id: string;
     userId: string;
     parentId: string | null;
@@ -215,6 +220,7 @@ async function folderPaths(
     ownerUserId: string,
     orgUserId: string | null,
     directFolders: StoredFolder[],
+    locale: AppLocale,
 ): Promise<Map<string, ProcessingFolderSummary>> {
     const rowsById = new Map(
         directFolders.map((folder) => [
@@ -239,6 +245,7 @@ async function folderPaths(
                 userId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
+                kind: recordingFolders.kind,
             })
             .from(recordingFolders)
             .where(
@@ -259,29 +266,32 @@ async function folderPaths(
         parentIds = [...new Set(parentIds)];
     }
 
+    const labels = {
+        private: translatedSourceMessage(locale, "Private"),
+        organization: translatedSourceMessage(locale, "Organization"),
+    };
+    const scope = (folder: StoredFolder) =>
+        orgUserId && folder.userId === orgUserId
+            ? ("org" as const)
+            : ("personal" as const);
+    const label = (folder: StoredFolder) =>
+        folderDisplayName({ ...folder, scope: scope(folder) }, labels);
     return new Map(
         directFolders.map((folder) => {
-            const parts: string[] = [];
-            let current = rowsById.get(folder.id);
-            const visited = new Set<string>();
-            while (current && !visited.has(current.id)) {
-                visited.add(current.id);
-                parts.unshift(current.name);
-                current = current.parentId
-                    ? rowsById.get(current.parentId)
-                    : undefined;
-            }
+            const displayFolder = { ...folder, name: decryptText(folder.name) };
             return [
                 folder.id,
                 {
                     id: folder.id,
                     parentId: folder.parentId,
-                    name: decryptText(folder.name),
-                    path: parts.join(" › "),
-                    scope:
-                        orgUserId && folder.userId === orgUserId
-                            ? ("org" as const)
-                            : ("personal" as const),
+                    name: label(displayFolder),
+                    path: folderDisplayPath(
+                        displayFolder,
+                        rowsById,
+                        label,
+                        " › ",
+                    ),
+                    scope: scope(folder),
                 },
             ];
         }),
@@ -293,6 +303,7 @@ export async function loadPrivateItemProcessing(
     ownerUserId: string,
     itemId: string,
     viewerUserId = ownerUserId,
+    fallbackLocale: AppLocale = "en",
 ): Promise<ItemProcessingPresentation | null> {
     const [item] = await db
         .select({
@@ -363,6 +374,7 @@ export async function loadPrivateItemProcessing(
                 userId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
+                kind: recordingFolders.kind,
             })
             .from(recordingFolderAssignments)
             .innerJoin(
@@ -381,6 +393,7 @@ export async function loadPrivateItemProcessing(
                 userId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
+                kind: recordingFolders.kind,
                 confirmedAt: mailPendingShares.confirmedAt,
             })
             .from(mailPendingShares)
@@ -559,10 +572,12 @@ export async function loadPrivateItemProcessing(
         ownerUserId,
         orgUserId,
     );
-    const folderSummaries = await folderPaths(ownerUserId, orgUserId, [
-        ...placementRows,
-        ...intentRows,
-    ]);
+    const folderSummaries = await folderPaths(
+        ownerUserId,
+        orgUserId,
+        [...placementRows, ...intentRows],
+        normalizeLocale(item.viewerLocale) ?? fallbackLocale,
+    );
     const placements = placementRows.flatMap((folder) => {
         const summary = folderSummaries.get(folder.id);
         return summary ? [summary] : [];

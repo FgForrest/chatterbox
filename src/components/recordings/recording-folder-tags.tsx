@@ -24,6 +24,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -93,10 +94,7 @@ export function RecordingFolderTags({
         withdrawing ? recordingId : null,
         isOwn ? "private" : "org",
     );
-    const label = (folder: RecordingFolder) =>
-        folder.parentId === null && folder.scope === "org"
-            ? i18n("Organization")
-            : folder.name;
+    const label = useFolderLabel();
     const assignedIds = new Set(
         assignments
             .filter((assignment) => assignment.recordingId === recordingId)

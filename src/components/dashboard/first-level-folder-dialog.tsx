@@ -12,6 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import type { RecordingFolder } from "@/types/folder";
 
 interface Props {
@@ -31,6 +32,7 @@ export function FirstLevelFolderDialog({
     onCreated,
 }: Props) {
     const i18n = useExtracted();
+    const folderLabel = useFolderLabel();
     const parents = folders
         .filter(
             (folder) =>
@@ -39,7 +41,7 @@ export function FirstLevelFolderDialog({
         )
         .map((folder) => ({
             id: folder.id,
-            path: folder.scope === "org" ? i18n("Organization") : folder.name,
+            path: folderLabel(folder),
         }));
 
     return (
