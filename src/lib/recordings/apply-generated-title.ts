@@ -47,6 +47,8 @@ export async function applyGeneratedTitle(input: {
         userId,
         input.view ?? "private",
         input.contentLanguage,
+        input.skipIfAutomaticTitleSettled === true ||
+            input.skipIfTitleStepDoneForFence === true,
     );
 
     // Not stored when a person has set a title, and then nothing below runs.

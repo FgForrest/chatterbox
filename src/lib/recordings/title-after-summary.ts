@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import {
     markAutomaticStepShared,
     markAutomaticTitleSkipped,
@@ -47,6 +48,8 @@ export async function updateTitleAfterSummary(input: {
         input.recordingId,
         "private",
         input.userId,
+        input.userId,
+        "title",
     );
     const title = profile.settings.steps.title;
     const summaryInputs = processing?.phases.summary?.inputs;
@@ -72,7 +75,7 @@ export async function updateTitleAfterSummary(input: {
             reason,
         });
     };
-    if (!title.automatic) {
+    if (effectiveManualOnly(processing) || !title.automatic) {
         await settleSkipped("first_summary_title_disabled");
         return;
     }

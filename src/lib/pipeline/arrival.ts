@@ -121,6 +121,7 @@ export async function requestArrivalInTx(
     await updatePhaseInTx(tx, input.itemId, view, input.userId, "categorize", {
         state: "done",
         reason: "categorized",
+        profileChoice: "placement",
         generation: advance.requestedGeneration,
         at: new Date().toISOString(),
     });

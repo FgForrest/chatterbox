@@ -758,6 +758,25 @@ function automaticTranscribePhase(
     };
 }
 
+function placementPreservesStartedPhase(
+    facts: PipelineFacts,
+    record: PhaseRecord | undefined,
+): boolean {
+    return Boolean(
+        facts.phases.categorize?.placementProfile &&
+            record &&
+            (record.state === "done" ||
+                record.state === "running" ||
+                record.state === "failed" ||
+                Object.values(record.steps ?? {}).some(
+                    (step) =>
+                        step.state === "done" ||
+                        step.state === "running" ||
+                        step.state === "pending",
+                )),
+    );
+}
+
 /** Decide the work due solely from durable item facts. */
 export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (facts.view === "org") return { actions: [] };
@@ -936,8 +955,24 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             );
         }
         if (facts.manualOnly) {
+            const transcribe = facts.phases.transcribe;
+            const failure = facts.transcription?.failed;
+            if (
+                transcribe?.state === "running" &&
+                failure &&
+                Date.parse(failure.completedAt) >= Date.parse(transcribe.at)
+            ) {
+                actions.push(
+                    automaticTranscribePhase(
+                        facts,
+                        "failed",
+                        failure.errorCode,
+                    ),
+                );
+            }
             for (const phase of ["transcribe", "learn", "summary"] as const) {
                 const current = facts.phases[phase];
+                if (placementPreservesStartedPhase(facts, current)) continue;
                 if (
                     current?.state === "skipped" &&
                     current.reason === "manual_only" &&
@@ -1070,24 +1105,6 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         };
     }
 
-    if (facts.manualOnly) {
-        for (const phase of ["learn", "summary"] as const) {
-            const current = facts.phases[phase];
-            if (current?.state === "outdated") continue;
-            if (
-                current?.state === "skipped" &&
-                current.reason === "manual_only" &&
-                (minimumGeneration === undefined ||
-                    current.generation >= minimumGeneration)
-            ) {
-                continue;
-            }
-            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
-        }
-        actions.push(...taskReviewActions(facts, true));
-        planShare(facts, actions);
-        return { actions };
-    }
     if (facts.item.kind === "mail") {
         if (
             !phaseMatches(
@@ -1121,6 +1138,93 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         }
     }
 
+    if (facts.manualOnly) {
+        const learn = facts.phases.learn;
+        if (
+            facts.summaryDueAt &&
+            Date.parse(facts.summaryDueAt) < Date.parse(facts.at)
+        ) {
+            actions.push({ type: "releaseLearnTimeout" });
+        } else if (facts.learnRunReadyForReview) {
+            const reason = facts.summaryDueAt
+                ? "review_pending"
+                : "manual_review_pending";
+            if (
+                !phaseMatches(
+                    learn,
+                    "waiting",
+                    reason,
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push({
+                    type: "markPhase",
+                    phase: "learn",
+                    record: {
+                        ...learn,
+                        state: "waiting",
+                        reason,
+                        generation: facts.generation,
+                        at: facts.at,
+                        inputs: input,
+                    },
+                });
+            }
+        } else if (
+            facts.summaryDueAt &&
+            !facts.learnRunInFlight &&
+            !facts.learnCorrectionInFlight
+        ) {
+            actions.push({ type: "releaseLearnHold" });
+        } else if (
+            learn?.state === "running" &&
+            !facts.learnRunOpen &&
+            !facts.learnCorrectionInFlight
+        ) {
+            actions.push({
+                type: "markPhase",
+                phase: "learn",
+                record: {
+                    ...learn,
+                    state: "done",
+                    reason: "review_finished",
+                    generation: facts.generation,
+                    at: facts.at,
+                    inputs: input,
+                },
+            });
+        }
+        for (const phase of ["learn", "summary"] as const) {
+            const current = facts.phases[phase];
+            if (
+                phase === "learn" &&
+                (facts.learnRunOpen ||
+                    facts.learnCorrectionInFlight ||
+                    facts.summaryDueAt ||
+                    actions.some(
+                        (action) =>
+                            action.type === "markPhase" &&
+                            action.phase === "learn",
+                    ))
+            )
+                continue;
+            if (placementPreservesStartedPhase(facts, current)) continue;
+            if (current?.state === "outdated") continue;
+            if (
+                current?.state === "skipped" &&
+                current.reason === "manual_only" &&
+                (minimumGeneration === undefined ||
+                    current.generation >= minimumGeneration)
+            ) {
+                continue;
+            }
+            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
+        }
+        actions.push(...taskReviewActions(facts, true));
+        planShare(facts, actions);
+        return { actions };
+    }
     const learn = facts.phases.learn;
     const timedOut =
         learn?.state === "waiting" &&

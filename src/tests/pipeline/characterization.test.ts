@@ -127,6 +127,7 @@ vi.mock("@/lib/learn/correction-pass-queue", () => ({
 }));
 
 vi.mock("@/lib/learn/learn-job", () => ({
+    LEARN_JOB_KIND: "learn.run",
     settleDeadLearnRuns: vi.fn(),
     startLearnRun: mocks.startLearnRun,
 }));
@@ -215,6 +216,7 @@ vi.mock("@/lib/summary/summary-job", () => ({
 }));
 
 vi.mock("@/lib/topics/topics-job", () => ({
+    TOPICS_JOB_KIND: "topics",
     queueAutoTopics: mocks.queueAutoTopics,
 }));
 

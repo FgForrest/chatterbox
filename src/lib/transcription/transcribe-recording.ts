@@ -557,6 +557,9 @@ async function transcribeRecordingInner(
             ctx.view,
             ctx.ownerUserId,
             ctx.actorUserId,
+            (opts.trigger ?? "manual") !== "manual" && opts.jobId
+                ? "transcribe"
+                : undefined,
         );
         const profileSettings = profile.settings as AudioProfileSettings;
         const transcribeStep = profileSettings.steps.transcribe;

@@ -23,6 +23,7 @@ import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
@@ -221,8 +222,13 @@ export async function generateSummaryForRecording(
     if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
-        (await readProcessing(recordingId, ctx.view, ctx.ownerUserId))
-            ?.profileRevisionId ?? null;
+        (
+            await readProcessing(
+                recordingId,
+                pipelineDriver(ctx.ownerUserId).view,
+                ctx.ownerUserId,
+            )
+        )?.profileRevisionId ?? null;
 
     const [recording] = await db
         .select(audioItemColumns)
@@ -290,6 +296,7 @@ export async function generateSummaryForRecording(
                 ctx.view,
                 ctx.ownerUserId,
                 ctx.actorUserId,
+                opts.trigger === "auto" ? "summary" : undefined,
             );
     const profileSettings = profile?.settings as
         | AudioProfileSettings

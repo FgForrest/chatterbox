@@ -5,17 +5,15 @@ import {
     listAutomaticTranscriptionRetryRows,
     listOrphanedPipelineStepRows,
     listStalledPipelineRows,
+    updateProcessingPhaseInTx,
 } from "@/db/queries/pipeline";
 import { asyncJobs, itemProcessing } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { isProviderBlockedReason } from "@/lib/pipeline/plan";
-import {
-    markSummaryStepFailedInTx,
-    updatePhaseInTx,
-} from "@/lib/pipeline/state";
+import { markStoredSummaryStepFailedInTx } from "@/lib/pipeline/state";
 import {
     PIPELINE_ADVANCE_JOB_KIND,
-    requestAdvanceInTx,
+    requestAdvanceForViewInTx,
 } from "@/lib/pipeline/trigger";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -100,7 +98,7 @@ export async function sweepAutomaticTranscriptionRetries(
             )
                 return false;
             const generation = current.generation + 1;
-            const marked = await updatePhaseInTx(
+            const marked = await updateProcessingPhaseInTx(
                 tx,
                 row.itemId,
                 row.view,
@@ -116,7 +114,7 @@ export async function sweepAutomaticTranscriptionRetries(
             );
             if (!marked) return false;
             return Boolean(
-                await requestAdvanceInTx(tx, {
+                await requestAdvanceForViewInTx(tx, {
                     itemId: row.itemId,
                     userId: row.userId,
                     view: row.view,
@@ -181,7 +179,7 @@ export async function sweepOrphanedPipelineSteps(
             if (active) return false;
 
             if (row.phase === "summary" && row.step) {
-                return markSummaryStepFailedInTx(tx, {
+                return markStoredSummaryStepFailedInTx(tx, {
                     itemId: row.itemId,
                     userId: row.userId,
                     view: row.view,
@@ -196,14 +194,14 @@ export async function sweepOrphanedPipelineSteps(
             ) {
                 return false;
             }
-            const advance = await requestAdvanceInTx(tx, {
+            const advance = await requestAdvanceForViewInTx(tx, {
                 itemId: row.itemId,
                 userId: row.userId,
                 view: row.view,
                 reason: "transcription-failed",
             });
             if (!advance) return false;
-            return updatePhaseInTx(
+            return updateProcessingPhaseInTx(
                 tx,
                 row.itemId,
                 row.view,

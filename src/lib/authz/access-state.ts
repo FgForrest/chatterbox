@@ -100,8 +100,9 @@ function capabilitiesOf(stored: unknown): Set<Capability> {
 
 async function providerIdentity(
     userId: string,
+    executor: Pick<typeof db, "select"> = db,
 ): Promise<{ issuer: string; subject: string } | null> {
-    const [account] = await db
+    const [account] = await executor
         .select({ issuer: accounts.issuer, subject: accounts.accountId })
         .from(accounts)
         .where(
@@ -125,9 +126,9 @@ async function providerIdentity(
  */
 export async function holderAccess(
     userId: string,
-    options: { readOnly?: boolean } = {},
+    options: { readOnly?: boolean; executor?: Pick<typeof db, "select"> } = {},
 ): Promise<HolderAccess> {
-    const [state] = await db
+    const [state] = await (options.executor ?? db)
         .select()
         .from(userAccessStates)
         .where(eq(userAccessStates.userId, userId))
@@ -142,7 +143,7 @@ export async function holderAccess(
     }
 
     const verifier = getAccessVerifier();
-    const identity = await providerIdentity(userId);
+    const identity = await providerIdentity(userId, options.executor);
     if (!verifier || !identity) return { ok: false, reason: "unverifiable" };
     let verdict: Awaited<ReturnType<typeof verifier.verify>>;
     try {
@@ -157,7 +158,10 @@ export async function holderAccess(
         throw error;
     }
     if (options.readOnly) {
-        const currentVersion = await accessStateVersion(userId);
+        const currentVersion = await accessStateVersion(
+            userId,
+            options.executor,
+        );
         if (currentVersion?.getTime() !== state?.updatedAt.getTime()) {
             return { ok: false, reason: "unavailable" };
         }

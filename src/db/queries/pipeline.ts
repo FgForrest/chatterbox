@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { itemProcessing } from "@/db/schema";
+import { effectiveManualOnlySql } from "@/lib/pipeline/effective-profile";
 import type {
     PhaseName,
     PhaseRecord,
@@ -458,7 +459,7 @@ export async function listProviderRecoveryRowsInTx(
             inner join chatter_items i on i.id = p.item_id and i.user_id = p.user_id
             where ${owners}
               and p.view = 'private'
-              and not p.manual_only
+              and not ${effectiveManualOnlySql(sql`p.manual_only`, sql`p.phases`)}
               and i.deleted_at is null
               and i.content_reaped_at is null
               and p.updated_at >= now() - interval '30 days'

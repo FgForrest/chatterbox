@@ -41,7 +41,6 @@ export interface ProposedTask {
     assigneePersonId: string | null;
     assigneeHint: string | null;
     assigneeCheck: boolean;
-    ticked?: boolean;
     dueDate: string | null;
     duePhrase: string | null;
     quote: string | null;
@@ -171,7 +170,6 @@ export async function writeTaskProposalsInTx(
             if (
                 !taskId ||
                 candidateTaskIds.length > 1 ||
-                task.ticked === false ||
                 task.evidenceProvenance
             ) {
                 return [];
@@ -320,6 +318,11 @@ export async function writeTaskProposalsInTx(
               ).map((row) => row.id)
             : [],
     );
+    const matchSharedTasksOnly = view === "org" || proposals.reviewer.isOrg;
+    const candidateScopeViewer = {
+        ...proposals.reviewer,
+        isOrg: matchSharedTasksOnly,
+    };
     const openTasks = new Map(
         targets.length > 0
             ? (
@@ -346,15 +349,7 @@ export async function writeTaskProposalsInTx(
                                   "dropped",
                               ]),
                               isNull(chatterItems.deletedAt),
-                              taskVisible(
-                                  {
-                                      ...proposals.reviewer,
-                                      isOrg:
-                                          view === "org" ||
-                                          proposals.reviewer.isOrg,
-                                  },
-                                  ANY_TASK_ITEM,
-                              ),
+                              taskVisible(candidateScopeViewer, ANY_TASK_ITEM),
                           ),
                       )
               ).map((row) => [row.id, row] as const)
@@ -416,7 +411,6 @@ export async function writeTaskProposalsInTx(
     for (const task of proposals.tasks) {
         const { fingerprint } = task;
         if (
-            task.ticked === false ||
             task.evidenceProvenance ||
             (task.candidateTaskIds?.length ?? 0) > 0 ||
             rejected.has(fingerprint) ||

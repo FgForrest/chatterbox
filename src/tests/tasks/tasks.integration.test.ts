@@ -653,7 +653,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         );
     });
 
-    it("does not create tasks or matches from unticked ambiguous proposals", async () => {
+    it("does not create tasks or matches from ambiguous proposals", async () => {
         const first = await addTask(alice, REC, {
             text: "Send the signed contract",
             status: "open",
@@ -666,7 +666,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             proposal("Send the contract", {
                 candidateTaskIds: [first.id, second.id],
             }),
-            proposal("Do not send", { ticked: false }),
         ]);
         expect(await review(alice, LATER)).toMatchObject({
             tasks: [],

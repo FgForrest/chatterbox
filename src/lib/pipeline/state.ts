@@ -5,20 +5,26 @@ import {
     updateProcessingPhaseInTx,
 } from "@/db/queries/pipeline";
 import {
+    asyncJobs,
     chatterItems,
     itemProcessing,
     mailContents,
     transcriptions,
 } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import { automaticTitleSettled } from "@/lib/pipeline/title-step";
-import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import {
+    requestAdvanceForViewInTx,
+    requestAdvanceInTx,
+} from "@/lib/pipeline/trigger";
 import type {
     ContentRevisionInput,
     PhaseName,
     PhaseRecord,
     PipelinePhases,
     PipelineView,
+    ProfileStepName,
     SummaryStepName,
 } from "@/lib/pipeline/types";
 
@@ -56,7 +62,7 @@ export async function readPrivateProcessingForItems(
 }
 
 /** Write one phase without replacing a record from a higher generation. */
-export function updatePhaseInTx(
+export async function updatePhaseInTx(
     tx: Tx,
     itemId: string,
     view: PipelineView,
@@ -64,7 +70,97 @@ export function updatePhaseInTx(
     phase: PhaseName,
     record: PhaseRecord,
 ): Promise<boolean> {
-    return updateProcessingPhaseInTx(tx, itemId, view, userId, phase, record);
+    view = pipelineDriver(userId).view;
+    if (phase === "categorize") {
+        const [current] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, userId),
+                    eq(itemProcessing.view, view),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        const previous = current?.phases.categorize;
+        record = {
+            profileChoice: previous?.profileChoice,
+            placementProfile: previous?.placementProfile,
+            heldProfiles: previous?.heldProfiles,
+            ...record,
+        };
+    }
+    const updated = await updateProcessingPhaseInTx(
+        tx,
+        itemId,
+        view,
+        userId,
+        phase,
+        record,
+    );
+    if (updated)
+        await pruneHeldProfilesInTx(
+            tx,
+            itemId,
+            view,
+            userId,
+            (phase === "transcribe" || phase === "learn") &&
+                ["done", "skipped", "failed"].includes(record.state)
+                ? phase
+                : undefined,
+        );
+    return updated;
+}
+
+async function pruneHeldProfilesInTx(
+    tx: Tx,
+    itemId: string,
+    view: PipelineView,
+    userId: string,
+    settledStep?: ProfileStepName,
+): Promise<void> {
+    const [processing] = await tx
+        .select({ phases: itemProcessing.phases })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, itemId),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, view),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    const categorize = processing?.phases.categorize;
+    const heldProfiles = { ...categorize?.heldProfiles };
+    const entries = Object.entries(heldProfiles);
+    if (!categorize || entries.length === 0) return;
+    const activeJobs = await tx
+        .select({ id: asyncJobs.id })
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.userId, userId),
+                inArray(
+                    asyncJobs.id,
+                    entries.map(([, held]) => held.jobId),
+                ),
+                inArray(asyncJobs.status, ["pending", "processing"]),
+            ),
+        );
+    const activeIds = new Set(activeJobs.map((job) => job.id));
+    const kept = Object.fromEntries(
+        entries.filter(
+            ([step, held]) => step !== settledStep && activeIds.has(held.jobId),
+        ),
+    );
+    if (Object.keys(kept).length === entries.length) return;
+    await updateProcessingPhaseInTx(tx, itemId, view, userId, "categorize", {
+        ...categorize,
+        heldProfiles: kept,
+    });
 }
 
 function stepUsesInput(
@@ -95,6 +191,7 @@ async function settleSummaryStepInTx(
     state: "done" | "skipped",
     reason: string,
 ): Promise<boolean> {
+    input = { ...input, ...pipelineDriver(input.userId) };
     const [processing] = await tx
         .select({ phases: itemProcessing.phases })
         .from(itemProcessing)
@@ -187,7 +284,7 @@ async function settleSummaryStepInTx(
             (candidate) =>
                 candidate?.state === "done" || candidate?.state === "skipped",
         );
-    return updatePhaseInTx(
+    const updated = await updatePhaseInTx(
         tx,
         input.itemId,
         input.view,
@@ -210,6 +307,15 @@ async function settleSummaryStepInTx(
             steps,
         },
     );
+    if (updated)
+        await pruneHeldProfilesInTx(
+            tx,
+            input.itemId,
+            input.view,
+            input.userId,
+            input.step,
+        );
+    return updated;
 }
 
 /** Mark a pipeline-queued Summary step done in its output transaction. */
@@ -287,6 +393,23 @@ export async function markSummaryStepFailedInTx(
         errorCode: string;
     },
 ): Promise<boolean> {
+    return markStoredSummaryStepFailedInTx(tx, {
+        ...input,
+        ...pipelineDriver(input.userId),
+    });
+}
+
+/** Settle a terminal job on the exact stored row selected by legacy maintenance. */
+export async function markStoredSummaryStepFailedInTx(
+    tx: Tx,
+    input: {
+        itemId: string;
+        userId: string;
+        view: PipelineView;
+        step: SummaryStepName;
+        errorCode: string;
+    },
+): Promise<boolean> {
     const [processing] = await tx
         .select({ phases: itemProcessing.phases })
         .from(itemProcessing)
@@ -311,7 +434,7 @@ export async function markSummaryStepFailedInTx(
     ) {
         return false;
     }
-    const advance = await requestAdvanceInTx(tx, {
+    const advance = await requestAdvanceForViewInTx(tx, {
         itemId: input.itemId,
         userId: input.userId,
         view: input.view,
@@ -319,7 +442,8 @@ export async function markSummaryStepFailedInTx(
     });
     if (!advance) return false;
     const now = new Date().toISOString();
-    return updatePhaseInTx(
+    await pruneHeldProfilesInTx(tx, input.itemId, input.view, input.userId);
+    return updateProcessingPhaseInTx(
         tx,
         input.itemId,
         input.view,
@@ -381,6 +505,7 @@ export async function markAutomaticStepShared(input: {
     view: PipelineView;
     step: "transcribe" | SummaryStepName;
 }): Promise<boolean> {
+    input = { ...input, ...pipelineDriver(input.userId) };
     const marked = await db.transaction(async (tx) => {
         const [processing] = await tx
             .select({ phases: itemProcessing.phases })

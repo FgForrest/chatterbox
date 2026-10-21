@@ -1,4 +1,13 @@
-import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import {
+    and,
+    count,
+    desc,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -22,6 +31,7 @@ import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { learnRunCurrentScope } from "@/lib/learn/learn-open";
 import { getOrgUserId } from "@/lib/org/config";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import {
     type ProcessingRequestOrigin,
@@ -332,14 +342,17 @@ export async function loadPrivateItemProcessing(
         )
         .leftJoin(
             processingProfiles,
-            eq(processingProfiles.id, itemProcessing.profileId),
+            eq(
+                processingProfiles.id,
+                sql<string>`coalesce(${itemProcessing.phases}->'categorize'->'placementProfile'->>'profileId', ${itemProcessing.profileId})`,
+            ),
         )
         .leftJoin(
             processingProfileRevisions,
             and(
                 eq(
                     processingProfileRevisions.id,
-                    itemProcessing.profileRevisionId,
+                    sql<string>`coalesce(${itemProcessing.phases}->'categorize'->'placementProfile'->>'profileRevisionId', ${itemProcessing.profileRevisionId})`,
                 ),
                 eq(processingProfileRevisions.profileId, processingProfiles.id),
             ),
@@ -591,7 +604,7 @@ export async function loadPrivateItemProcessing(
                       name: summary.name,
                       path: summary.path,
                       confirmationRequired:
-                          (item.manualOnly ?? false) &&
+                          effectiveManualOnly(item) &&
                           folder.confirmedAt === null,
                       confirmed: folder.confirmedAt !== null,
                   },
@@ -713,7 +726,7 @@ export async function loadPrivateItemProcessing(
     );
     const processAgain =
         !legacy &&
-        !(item.manualOnly ?? false) &&
+        !effectiveManualOnly(item) &&
         automatic !== null &&
         Object.values(automatic).some(Boolean) &&
         processAgainPending(item.phases ?? {});
@@ -728,7 +741,7 @@ export async function loadPrivateItemProcessing(
         itemId,
         kind: item.kind,
         legacy,
-        manualOnly: item.manualOnly ?? false,
+        manualOnly: effectiveManualOnly(item),
         phases,
         profile,
         placements,

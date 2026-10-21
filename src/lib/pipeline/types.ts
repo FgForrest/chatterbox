@@ -40,6 +40,14 @@ export interface PhaseStepRecord {
     inputFingerprint?: string | null;
 }
 
+export type ProfileStepName = "transcribe" | "learn" | SummaryStepName;
+
+export interface PlacementProfileBinding {
+    profileId: string;
+    profileRevisionId: string;
+    manualOnly: boolean;
+}
+
 export interface PhaseRecord {
     state: PhaseState;
     reason?: string;
@@ -52,6 +60,11 @@ export interface PhaseRecord {
     profileRevisionId?: string;
     staleFingerprint?: string;
     problems?: ShareGateProblem[];
+    profileChoice?: "manual" | "placement";
+    placementProfile?: PlacementProfileBinding;
+    heldProfiles?: Partial<
+        Record<ProfileStepName, { jobId: string; profileRevisionId: string }>
+    >;
 }
 
 export type PipelinePhases = Partial<Record<PhaseName, PhaseRecord>>;

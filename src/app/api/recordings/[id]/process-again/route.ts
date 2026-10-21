@@ -5,6 +5,7 @@ import { itemProcessing } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -47,7 +48,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             .limit(1);
         if (
             !processing ||
-            processing.manualOnly ||
+            effectiveManualOnly(processing) ||
             !processAgainPending(processing.phases)
         ) {
             throw new AppError(

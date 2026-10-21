@@ -20,9 +20,11 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import { pipelineDriver } from "@/lib/pipeline/driver";
+import { itemProfileFenceMatches } from "@/lib/pipeline/effective-profile";
 import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
-import type { PipelineView } from "@/lib/pipeline/types";
+import type { PipelinePhases, PipelineView } from "@/lib/pipeline/types";
 import {
     contentWriterRefusal,
     contentWriterScope,
@@ -205,6 +207,7 @@ interface CurrentFenceInput {
     contentSourceId: string;
     contentRevision: number;
     profileRevisionId: string | null;
+    phases?: PipelinePhases;
 }
 
 async function currentFenceInput(
@@ -212,13 +215,16 @@ async function currentFenceInput(
     args: UpsertEnhancementArgs,
 ): Promise<CurrentFenceInput | null> {
     const [processing] = await tx
-        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .select({
+            profileRevisionId: itemProcessing.profileRevisionId,
+            phases: itemProcessing.phases,
+        })
         .from(itemProcessing)
         .where(
             and(
                 eq(itemProcessing.itemId, args.recordingId),
                 eq(itemProcessing.userId, args.userId),
-                eq(itemProcessing.view, args.view ?? "private"),
+                eq(itemProcessing.view, pipelineDriver(args.userId).view),
             ),
         )
         .limit(1);
@@ -239,6 +245,7 @@ async function currentFenceInput(
                   contentSourceId: "mail",
                   contentRevision: content.revision,
                   profileRevisionId: processing?.profileRevisionId ?? null,
+                  phases: processing?.phases,
               }
             : null;
     }
@@ -263,6 +270,7 @@ async function currentFenceInput(
               contentSourceId: source,
               contentRevision: content.revision,
               profileRevisionId: processing?.profileRevisionId ?? null,
+              phases: processing?.phases,
           }
         : null;
 }
@@ -278,7 +286,7 @@ function fenceMatches(
         inputs.contentRevision === current.contentRevision;
     const sameProfile =
         !("itemProfileRevisionId" in inputs) ||
-        inputs.itemProfileRevisionId === current.profileRevisionId;
+        itemProfileFenceMatches(inputs.itemProfileRevisionId, current);
     return sameContent && sameProfile;
 }
 
@@ -616,8 +624,10 @@ export async function upsertEnhancement(
                     if (advance && current) {
                         const profileChanged =
                             "itemProfileRevisionId" in args.inputs &&
-                            args.inputs.itemProfileRevisionId !==
-                                current.profileRevisionId;
+                            !itemProfileFenceMatches(
+                                args.inputs.itemProfileRevisionId,
+                                current,
+                            );
                         await updatePhaseInTx(
                             tx,
                             recordingId,

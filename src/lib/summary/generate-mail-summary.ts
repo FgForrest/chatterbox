@@ -23,6 +23,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
@@ -87,8 +88,13 @@ export async function generateMailSummary(
     if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
-        (await readProcessing(itemId, ctx.view, ctx.ownerUserId))
-            ?.profileRevisionId ?? null;
+        (
+            await readProcessing(
+                itemId,
+                pipelineDriver(ctx.ownerUserId).view,
+                ctx.ownerUserId,
+            )
+        )?.profileRevisionId ?? null;
 
     const [mail] = await db
         .select({
@@ -155,6 +161,7 @@ export async function generateMailSummary(
                 ctx.view,
                 ctx.ownerUserId,
                 ctx.actorUserId,
+                opts.trigger === "auto" ? "summary" : undefined,
             );
     const profileSettings = profile?.settings as
         | MailProfileSettings

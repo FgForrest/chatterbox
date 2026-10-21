@@ -202,6 +202,7 @@ export async function generateTopicsForTranscript(
         ctx.view,
         ctx.ownerUserId,
         ctx.actorUserId,
+        opts.trigger === "auto" ? "topics" : undefined,
     );
     const settings = profile.settings as AudioProfileSettings;
     const [owner] = await db

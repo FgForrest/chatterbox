@@ -212,6 +212,7 @@ export async function executePipelineAction(
                 await updatePhaseInTx(tx, itemId, view, userId, "categorize", {
                     state: "done",
                     reason: "categorized",
+                    profileChoice: "placement",
                     generation: advance.requestedGeneration,
                     at: new Date().toISOString(),
                 });

@@ -755,7 +755,12 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 method: "DELETE",
             });
             const jobs = await db().select().from(asyncJobs);
-            expect(jobs).toHaveLength(4);
+            expect(jobs).toHaveLength(3);
+            expect(jobs.map((job) => job.kind).sort()).toEqual([
+                "pipeline.advance",
+                "summary",
+                "transcription",
+            ]);
             expect(jobs.every((job) => job.status === "failed")).toBe(true);
         });
 

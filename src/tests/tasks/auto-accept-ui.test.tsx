@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import { TaskRow } from "@/components/tasks/task-row";
@@ -15,7 +22,10 @@ vi.mock("next-intl", () => ({
     useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }));
 
-afterEach(cleanup);
+afterEach(async () => {
+    cleanup();
+    await act(async () => {});
+});
 
 const task: TaskView = {
     id: "task-1",
@@ -26,7 +36,7 @@ const task: TaskView = {
     text: "Send the contract",
     assignee: null,
     assigneeHasEmail: false,
-    assigneeHint: "Ada",
+    assigneeHint: "Zava",
     assigneeCheck: true,
     dueDate: null,
     duePhrase: null,
@@ -81,22 +91,23 @@ it("shows who is this beside the heard name and lets the owner choose a person",
     render(
         <TaskRow
             task={task}
-            speakers={[{ personId: "ada-full", name: "Ada Lovelace" }]}
+            speakers={[{ personId: "zava-full", name: "Zava Noren" }]}
             organizationOnly={false}
             onChange={onChange}
         />,
     );
     expect(screen.getByText("who is this?")).toBeTruthy();
-    const picker = screen.getByRole("button", { name: "Assigned to Ada" });
-    expect(picker.textContent).toContain("Ada");
+    const picker = screen.getByRole("button", { name: "Assigned to Zava" });
+    expect(picker.textContent).toContain("Zava");
     fireEvent.keyDown(picker, { key: "ArrowDown" });
     fireEvent.click(
-        await screen.findByRole("menuitem", { name: /Ada Lovelace/ }),
+        await screen.findByRole("menuitem", { name: /Zava Noren/ }),
     );
+    await waitFor(() => expect(document.activeElement).toBe(picker));
     expect(onChange).toHaveBeenCalledWith(
-        { assigneePersonId: "ada-full" },
+        { assigneePersonId: "zava-full" },
         {
-            assignee: { personId: "ada-full", name: "Ada Lovelace" },
+            assignee: { personId: "zava-full", name: "Zava Noren" },
             assigneeHint: null,
             assigneeCheck: false,
         },
