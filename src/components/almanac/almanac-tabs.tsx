@@ -38,7 +38,7 @@ export function AlmanacTabs() {
     return (
         <nav
             aria-label={i18n("Almanac")}
-            className="-mt-2 mb-6 flex gap-1 overflow-x-auto border-b"
+            className="-mt-2 mb-6 flex gap-1 overflow-x-auto shadow-[inset_0_-1px_0_var(--color-border)]"
         >
             {tabs.map((tab) => (
                 <Link
@@ -46,7 +46,7 @@ export function AlmanacTabs() {
                     href={tab.href}
                     aria-current={active === tab.key ? "page" : undefined}
                     className={cn(
-                        "-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         active === tab.key
                             ? "border-primary text-foreground"
                             : "border-transparent text-muted-foreground hover:text-foreground",
