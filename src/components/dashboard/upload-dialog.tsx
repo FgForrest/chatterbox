@@ -23,6 +23,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { folderDisplayPath } from "@/lib/folders/labels";
 import type { FolderScope, RecordingFolder } from "@/types/folder";
 
 const FILE_LATER = "__file_later__";
@@ -37,6 +38,7 @@ export interface UploadFolderOption {
 export function uploadFolderParents(
     folders: readonly RecordingFolder[],
     includeOrganization: boolean,
+    folderLabel: (folder: RecordingFolder) => string,
 ): NewFolderParent[] {
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     return folders
@@ -45,25 +47,17 @@ export function uploadFolderParents(
                 (folder.scope === "personal" && folder.parentId === null) ||
                 (folder.scope === "org" && includeOrganization),
         )
-        .map((folder) => {
-            const names = [folder.name];
-            const seen = new Set([folder.id]);
-            let parentId = folder.parentId;
-            while (parentId && !seen.has(parentId)) {
-                seen.add(parentId);
-                const parent = byId.get(parentId);
-                if (!parent) break;
-                names.unshift(parent.name);
-                parentId = parent.parentId;
-            }
-            return { id: folder.id, path: names.join(" / ") };
-        });
+        .map((folder) => ({
+            id: folder.id,
+            path: folderDisplayPath(folder, byId, folderLabel),
+        }));
 }
 
 /** Build non-root picker options with their full visible tree paths. */
 export function uploadFolderOptions(
     folders: readonly RecordingFolder[],
     includeOrganization: boolean,
+    folderLabel: (folder: RecordingFolder) => string,
 ): UploadFolderOption[] {
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     return folders
@@ -72,19 +66,10 @@ export function uploadFolderOptions(
                 folder.parentId !== null &&
                 (folder.scope === "personal" || includeOrganization),
         )
-        .map((folder) => {
-            const names = [folder.name];
-            const seen = new Set([folder.id]);
-            let parentId = folder.parentId;
-            while (parentId && !seen.has(parentId)) {
-                seen.add(parentId);
-                const parent = byId.get(parentId);
-                if (!parent) break;
-                names.unshift(parent.name);
-                parentId = parent.parentId;
-            }
-            return { ...folder, path: names.join(" / ") };
-        })
+        .map((folder) => ({
+            ...folder,
+            path: folderDisplayPath(folder, byId, folderLabel),
+        }))
         .sort(
             (left, right) =>
                 (left.scope === right.scope

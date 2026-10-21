@@ -19,6 +19,7 @@ import {
     recordingFolders,
     users,
 } from "@/db/schema";
+import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
@@ -77,6 +78,7 @@ vi.mock("@/lib/env", () => ({
         ORG_ACCOUNT_EMAIL: "categorize-org@example.test",
         ORG_ACCOUNT_PASSWORD: "password",
         DATABASE_URL: "postgres://unused",
+        BETTER_AUTH_SECRET: "folder-label-test-secret",
     },
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge }));
@@ -365,6 +367,136 @@ describeWithDatabase("categorize route", () => {
                     profileId: "org-audio",
                 },
             ]);
+    });
+
+    it.each([
+        {
+            locale: "en",
+            label: "Private",
+            organization: "Organization",
+            kind: "audio",
+        },
+        {
+            locale: "cs-CZ",
+            label: "Soukromé",
+            organization: "Organizace",
+            kind: "audio",
+        },
+        {
+            locale: "cs-CZ",
+            label: "Soukromé",
+            organization: "Organizace",
+            kind: "mail",
+        },
+        {
+            locale: null,
+            label: "Soukromé",
+            organization: "Organizace",
+            kind: "audio",
+        },
+    ] as const)("localizes $kind folder paths for the $locale viewer without renaming folders", async ({
+        locale,
+        label,
+        organization,
+        kind,
+    }) => {
+        await addItem(kind);
+        await db()
+            .update(users)
+            .set({ uiLocale: "en" })
+            .where(eq(users.id, OWNER));
+        await db()
+            .update(users)
+            .set({ uiLocale: locale })
+            .where(eq(users.id, OTHER));
+        await db()
+            .update(recordingFolders)
+            .set({ name: "Private" })
+            .where(
+                and(
+                    eq(recordingFolders.id, "personal-a"),
+                    eq(recordingFolders.userId, OWNER),
+                ),
+            );
+        await addFolder({
+            id: "nested",
+            userId: OWNER,
+            parentId: "personal-a",
+        });
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                { userId: OWNER, itemId: ITEM, folderId: "personal-root" },
+                { userId: OWNER, itemId: ITEM, folderId: "nested" },
+            ]);
+        await db()
+            .insert(mailPendingShares)
+            .values({ userId: OWNER, itemId: ITEM, folderId: "org-a" });
+
+        const panel = await loadPrivateCategorizationPanel(
+            OWNER,
+            ITEM,
+            OTHER,
+            "cs-CZ",
+        );
+        expect(panel?.folders).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "personal-root",
+                    name: label,
+                    path: label,
+                }),
+                expect.objectContaining({
+                    id: "nested",
+                    name: "nested",
+                    path: `${label} › Private › nested`,
+                }),
+                expect.objectContaining({
+                    id: "org-a",
+                    path: `${organization} › org-a`,
+                }),
+            ]),
+        );
+        const presentation = await loadPrivateItemProcessing(
+            OWNER,
+            ITEM,
+            OTHER,
+            "cs-CZ",
+        );
+        expect(presentation?.placements).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "personal-root",
+                    name: label,
+                    path: label,
+                }),
+                expect.objectContaining({
+                    id: "nested",
+                    name: "nested",
+                    path: `${label} › Private › nested`,
+                }),
+            ]),
+        );
+        expect(presentation?.intents).toEqual([
+            expect.objectContaining({
+                folderId: "org-a",
+                path: `${organization} › org-a`,
+            }),
+        ]);
+        expect(
+            await db()
+                .select({
+                    id: recordingFolders.id,
+                    name: recordingFolders.name,
+                })
+                .from(recordingFolders)
+                .where(eq(recordingFolders.userId, OWNER)),
+        ).toEqual(
+            expect.arrayContaining([
+                { id: "personal-root", name: "personal-root" },
+                { id: "personal-a", name: "Private" },
+            ]),
+        );
     });
 
     it("creates a personal placement and freezes the resolved profile revision", async () => {

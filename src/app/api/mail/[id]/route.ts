@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { localeFromAcceptLanguage } from "@/lib/i18n/config";
 import { resolveMailAccess } from "@/lib/mail/access";
 import { loadMailDetail } from "@/lib/mail/detail";
 import { deleteMail } from "@/lib/mail/manage";
@@ -18,7 +19,12 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
     const [detail, processing] = await Promise.all([
         loadMailDetail(session.user.id, id),
-        loadPrivateItemProcessing(access.ownerUserId, id, session.user.id),
+        loadPrivateItemProcessing(
+            access.ownerUserId,
+            id,
+            session.user.id,
+            localeFromAcceptLanguage(request.headers.get("accept-language")),
+        ),
     ]);
     if (!detail) {
         throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
