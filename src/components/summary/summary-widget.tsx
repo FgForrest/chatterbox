@@ -254,7 +254,6 @@ export function SummaryWidget({
           selectedProfileName ??
           (source === "plaud" ? "Plaud" : sourceLabel));
     const lineProps = {
-        id: widgetId,
         title: i18n("Summary"),
         facts: lineFacts,
         icon: <ListChecks className="size-4" />,
@@ -275,36 +274,34 @@ export function SummaryWidget({
         />
     );
 
-    if (summaryLine) {
-        const line =
-            summaryLoaded &&
-            canChange &&
-            !working &&
-            !hasSummary &&
-            source === "riffado" ? (
-                <WorkflowWidgetRunLine
-                    {...lineProps}
-                    runLabel={i18n("Summarize")}
-                    onRun={runSummary}
-                    disabled={summaryProfilesLoading || !canSummarize}
-                />
-            ) : (
-                <WorkflowWidgetLine
-                    {...lineProps}
-                    working={working}
-                    expanded={working ? undefined : false}
-                    onExpand={
-                        working ? undefined : () => setWorkflowExpanded(true)
-                    }
-                    expandLabel={working ? undefined : i18n("View summary")}
-                    onOpen={() => setWorkflowExpanded(true)}
-                />
-            );
-        return (
-            <>
-                {line}
-                {taskReview}
-            </>
+    const runsFromLine =
+        summaryLine &&
+        summaryLoaded &&
+        canChange &&
+        !working &&
+        !hasSummary &&
+        source === "riffado";
+    const runFromLineDisabled = summaryProfilesLoading || !canSummarize;
+    let line: ReactNode;
+    if (runsFromLine) {
+        line = (
+            <WorkflowWidgetRunLine
+                {...lineProps}
+                runLabel={i18n("Summarize")}
+                onRun={runSummary}
+                disabled={runFromLineDisabled}
+            />
+        );
+    } else if (summaryLine) {
+        line = (
+            <WorkflowWidgetLine
+                {...lineProps}
+                working={working}
+                expanded={working ? undefined : false}
+                onExpand={working ? undefined : () => setWorkflowExpanded(true)}
+                expandLabel={working ? undefined : i18n("View summary")}
+                onOpen={() => setWorkflowExpanded(true)}
+            />
         );
     }
 
@@ -432,111 +429,104 @@ export function SummaryWidget({
     } else if (hasSummary && summaryData) {
         summaryContent = (
             <div className="space-y-4">
-                {summaryOpen && (
-                    <section
-                        aria-label={i18n("Summary content")}
-                        className="max-h-96 space-y-4 overflow-y-auto pr-2"
-                    >
-                        <div className="rounded-lg bg-muted p-4 text-sm">
-                            <Markdown
-                                speakerAttributions={speakerAttributions}
-                                speakerNumberOffset={summarySpeakerNumberOffset}
-                            >
-                                {summaryData.summary ?? ""}
-                            </Markdown>
-                        </div>
-                        {(summaryData.keyPoints?.length ?? 0) > 0 && (
-                            <div>
-                                <h4 className="mb-2 text-sm font-medium">
-                                    {i18n("Key Points")}
-                                </h4>
-                                <ul className="space-y-1">
-                                    {summaryData.keyPoints?.map((point) => (
-                                        <li
-                                            key={`kp-${point.slice(0, 32)}`}
-                                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                <section
+                    aria-label={i18n("Summary content")}
+                    className="max-h-96 space-y-4 overflow-y-auto pr-2"
+                >
+                    <div className="rounded-lg bg-muted p-4 text-sm">
+                        <Markdown
+                            speakerAttributions={speakerAttributions}
+                            speakerNumberOffset={summarySpeakerNumberOffset}
+                        >
+                            {summaryData.summary ?? ""}
+                        </Markdown>
+                    </div>
+                    {(summaryData.keyPoints?.length ?? 0) > 0 && (
+                        <div>
+                            <h4 className="mb-2 text-sm font-medium">
+                                {i18n("Key Points")}
+                            </h4>
+                            <ul className="space-y-1">
+                                {summaryData.keyPoints?.map((point) => (
+                                    <li
+                                        key={`kp-${point.slice(0, 32)}`}
+                                        className="flex items-start gap-2 text-sm text-muted-foreground"
+                                    >
+                                        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                                        <Markdown
+                                            inline
+                                            speakerAttributions={
+                                                speakerAttributions
+                                            }
+                                            speakerNumberOffset={
+                                                summarySpeakerNumberOffset
+                                            }
                                         >
-                                            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-                                            <Markdown
-                                                inline
-                                                speakerAttributions={
-                                                    speakerAttributions
-                                                }
-                                                speakerNumberOffset={
-                                                    summarySpeakerNumberOffset
-                                                }
-                                            >
-                                                {point}
-                                            </Markdown>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
+                                            {point}
+                                        </Markdown>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-3 border-t pt-2 text-xs text-muted-foreground">
+                        {kind === "audio" && (
+                            <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                                {source === "plaud" ? "Plaud" : i18n("Custom")}
+                            </span>
                         )}
-                        <div className="flex flex-wrap items-center gap-3 border-t pt-2 text-xs text-muted-foreground">
-                            {kind === "audio" && (
-                                <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                                    {source === "plaud"
-                                        ? "Plaud"
-                                        : i18n("Custom")}
-                                </span>
-                            )}
-                            {summaryData.provider && (
-                                <span className="rounded bg-muted px-2 py-0.5">
-                                    {summaryData.provider}
-                                </span>
-                            )}
-                            {summaryData.model && (
-                                <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                                    {summaryData.model}
-                                </span>
-                            )}
-                            {multiPassBadge && (
-                                <span
-                                    className={
-                                        multiPassBadge.degraded
-                                            ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
-                                            : "rounded bg-muted px-2 py-0.5"
-                                    }
-                                    title={multiPassBadge.title}
-                                >
-                                    {multiPassBadge.label}
-                                </span>
-                            )}
-                            {contentNote && source === "riffado" && (
-                                <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                    {contentNote}
-                                    {canChange && (
-                                        <button
-                                            type="button"
-                                            className="font-medium underline-offset-2 hover:underline"
-                                            onClick={runSummary}
-                                        >
-                                            {i18n("Regenerate")}
-                                        </button>
-                                    )}
-                                </span>
-                            )}
-                            {summaryData.scopeChanged &&
-                                source === "riffado" && (
-                                    <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                        {i18n(
-                                            "Folders changed since this summary:",
-                                        )}
-                                        {canChange && (
-                                            <button
-                                                type="button"
-                                                className="font-medium underline-offset-2 hover:underline"
-                                                onClick={runSummary}
-                                            >
-                                                {i18n("Match tasks again")}
-                                            </button>
-                                        )}
-                                    </span>
+                        {summaryData.provider && (
+                            <span className="rounded bg-muted px-2 py-0.5">
+                                {summaryData.provider}
+                            </span>
+                        )}
+                        {summaryData.model && (
+                            <span className="rounded bg-muted px-2 py-0.5 font-mono">
+                                {summaryData.model}
+                            </span>
+                        )}
+                        {multiPassBadge && (
+                            <span
+                                className={
+                                    multiPassBadge.degraded
+                                        ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
+                                        : "rounded bg-muted px-2 py-0.5"
+                                }
+                                title={multiPassBadge.title}
+                            >
+                                {multiPassBadge.label}
+                            </span>
+                        )}
+                        {contentNote && source === "riffado" && (
+                            <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                {contentNote}
+                                {canChange && (
+                                    <button
+                                        type="button"
+                                        className="font-medium underline-offset-2 hover:underline"
+                                        onClick={runSummary}
+                                    >
+                                        {i18n("Regenerate")}
+                                    </button>
                                 )}
-                        </div>
-                    </section>
-                )}
+                            </span>
+                        )}
+                        {summaryData.scopeChanged && source === "riffado" && (
+                            <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                {i18n("Folders changed since this summary:")}
+                                {canChange && (
+                                    <button
+                                        type="button"
+                                        className="font-medium underline-offset-2 hover:underline"
+                                        onClick={runSummary}
+                                    >
+                                        {i18n("Match tasks again")}
+                                    </button>
+                                )}
+                            </span>
+                        )}
+                    </div>
+                </section>
             </div>
         );
     } else {
@@ -620,8 +610,13 @@ export function SummaryWidget({
             <WorkflowWidget
                 id={widgetId}
                 frame="inline"
+                collapsed={hasSummary && !summaryOpen}
+                inlineLine={line}
                 tone={tone}
                 onOpenChange={(next) => {
+                    if (next && runsFromLine && !runFromLineDisabled) {
+                        runSummary();
+                    }
                     if (workflowVisible) setWorkflowExpanded(next);
                     else setSummaryExpanded(next);
                 }}

@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { SummaryData } from "@/hooks/use-transcription-summary";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -283,6 +290,39 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.getByText("Customer follow-up")).toBeTruthy();
     });
 
+    it("hides tasks, summary and metadata until expanded", () => {
+        const rendered = renderWidget(kind);
+        const content = screen.getByRole("region", { name: "Summary content" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Collapse summary" }),
+        );
+        state.summaryExpanded = false;
+        rendered.rerender(getWidget(kind));
+        expect(
+            screen.getByRole("button", { name: "Expand summary" }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("region", { name: "Summary content" }),
+        ).toBeNull();
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeTruthy();
+        expect(
+            screen.getByText("Send the proposal").closest("[hidden]"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Expand summary" }));
+        state.summaryExpanded = true;
+        rendered.rerender(getWidget(kind));
+        expect(screen.getByRole("region", { name: "Summary content" })).toBe(
+            content,
+        );
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeNull();
+        expect(screen.getByText("Send the proposal")).toBeTruthy();
+        expect(screen.getByText("gpt-summary")).toBeTruthy();
+    });
+
     it("starts a first summary from the compact line in one click", () => {
         state.summaryData = null;
         renderWidget(kind, {
@@ -294,6 +334,36 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts a first summary when the processing strip opens the compact line", () => {
+        state.summaryData = null;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+    });
+
+    it("expands instead of starting while the compact line cannot run", () => {
+        state.summaryData = null;
+        state.summaryProfilesLoading = true;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        const heading = screen.getByRole("heading", { name: /^Summary/ });
+        expect(heading.closest("[hidden]")).toBeNull();
+        expect(heading.closest("[data-workflow-widget]")?.tagName).not.toBe(
+            "SPAN",
+        );
     });
 
     it("keeps a manually started summary inline while it runs", () => {
