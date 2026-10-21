@@ -189,6 +189,35 @@ it("renders a compact line with one accessible expand control", () => {
     expect(onExpand).toHaveBeenCalledOnce();
 });
 
+function CompactWidget() {
+    const [expanded, setExpanded] = useState(false);
+    return (
+        <WorkflowWidget
+            id="compact-widget"
+            frame="inline"
+            tone="quiet"
+            title="Compact title"
+            onOpenChange={setExpanded}
+            inlineLine={expanded ? undefined : <p>Compact line</p>}
+        >
+            <p>Compact body</p>
+        </WorkflowWidget>
+    );
+}
+
+it("leaves the compact line and focuses the visible heading through openWidget", async () => {
+    render(<CompactWidget />);
+    expect(screen.getByText("Compact line")).toBeTruthy();
+    openWidget("compact-widget");
+
+    const heading = await screen.findByRole("heading", {
+        name: "Compact title",
+    });
+    expect(heading.closest("[hidden]")).toBeNull();
+    expect(screen.queryByText("Compact line")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+});
+
 it("keeps body state mounted while collapsed or replaced by a compact line", () => {
     const contents = (collapsed: boolean, compact: boolean) => (
         <WorkflowWidget
