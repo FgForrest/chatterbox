@@ -7,10 +7,11 @@
  * create scratch databases on.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     chatterItems,
+    people,
     recordings,
     recordingTasks,
     taskMentions,
@@ -78,8 +79,10 @@ import { ensureOrgAccount } from "@/lib/org/account";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import {
     type CallerTaskQuery,
+    addTask as createTask,
     getCallerTask,
     listCallerTasks,
+    listRecordingTasks,
     listTasks,
     listTrackedAssignees,
     type TaskListQuery,
@@ -641,5 +644,58 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
                 { personId: droppedPerson, name: "Zeni Cloudfern" },
             ]),
         );
+    });
+
+    it("exposes only whether the assignee has an email, reflecting Almanac changes", async () => {
+        const recordingId = "assignee-email-recording";
+        await insertRecording(db(), { id: recordingId, userId: ALICE });
+        await shareRecording(db(), recordingId, orgUserId);
+        const assigneeAccount = {
+            id: "user-another-bob",
+            email: "another-bob@example.test",
+        };
+        await db().insert(users).values(assigneeAccount);
+        const assigneeViewer = await taskViewer(assigneeAccount);
+        const personId = await insertPerson(db(), orgUserId, "Bob B.");
+        const created = await createTask(viewer("alice"), recordingId, {
+            text: "Follow up with the right Bob",
+            assigneePersonId: personId,
+            status: "open",
+        });
+        expect(created.assigneeHasEmail).toBe(false);
+
+        for (const emailHash of [lookupHash(assigneeAccount.email), null]) {
+            await db()
+                .update(people)
+                .set({ primaryEmailHash: emailHash })
+                .where(
+                    and(eq(people.id, personId), eq(people.userId, orgUserId)),
+                );
+
+            const recording = await listRecordingTasks(
+                viewer("carol"),
+                recordingId,
+            );
+            const listed = (
+                await listTasks(viewer("org"), tab("tracked"))
+            ).find((row) => row.id === created.id);
+            for (const task of [recording?.tasks[0], listed]) {
+                expect(task).toMatchObject({
+                    id: created.id,
+                    assignee: { personId, name: "Bob B." },
+                    assigneeHasEmail: emailHash !== null,
+                });
+                expect(task).not.toHaveProperty("assigneeEmailHash");
+                expect(task).not.toHaveProperty("primaryEmailHash");
+                if (emailHash)
+                    expect(JSON.stringify(task)).not.toContain(emailHash);
+            }
+            expect(recording?.tasks[0]?.canClose).toBe(false);
+            expect(
+                (await listTasks(assigneeViewer, tab("mine"))).some(
+                    (row) => row.id === created.id,
+                ),
+            ).toBe(emailHash !== null);
+        }
     });
 });

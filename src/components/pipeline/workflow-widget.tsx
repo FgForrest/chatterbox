@@ -49,6 +49,7 @@ export interface WorkflowWidgetProps {
     id: string;
     frame: WorkflowWidgetFrame;
     tone: WorkflowWidgetTone;
+    collapsed?: boolean;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     title: ReactNode;
@@ -253,25 +254,33 @@ function WidgetFooter({
 function WidgetContents(props: WorkflowWidgetProps) {
     return (
         <>
-            <WidgetHeader {...props} />
-            {props.children && (
-                <div
-                    className={cn(
-                        "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6",
-                        props.bodyClassName,
-                    )}
-                    data-widget-body
-                >
-                    {props.children}
-                </div>
-            )}
-            {props.footer && (
-                <WidgetFooter
-                    footer={props.footer}
-                    closeLabel={props.closeLabel}
-                    frame={props.frame}
-                />
-            )}
+            <WidgetHeader
+                {...props}
+                description={props.collapsed ? undefined : props.description}
+            />
+            <div
+                hidden={props.collapsed}
+                className={props.collapsed ? "hidden" : "contents"}
+            >
+                {props.children && (
+                    <div
+                        className={cn(
+                            "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6",
+                            props.bodyClassName,
+                        )}
+                        data-widget-body
+                    >
+                        {props.children}
+                    </div>
+                )}
+                {props.footer && (
+                    <WidgetFooter
+                        footer={props.footer}
+                        closeLabel={props.closeLabel}
+                        frame={props.frame}
+                    />
+                )}
+            </div>
         </>
     );
 }
@@ -296,31 +305,31 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
     }, [id, open]);
 
     if (frame === "inline") {
-        if (inlineLine) {
-            return (
+        return (
+            <>
                 <span
-                    id={id}
+                    id={inlineLine ? id : undefined}
                     className="contents"
-                    data-workflow-widget
-                    data-tone={tone}
+                    data-workflow-widget={inlineLine ? true : undefined}
+                    data-tone={inlineLine ? tone : undefined}
                 >
                     {inlineLine}
                 </span>
-            );
-        }
-        return (
-            <Card
-                id={id}
-                hasNoPadding
-                className={cn(
-                    "gap-0 border-l-2 shadow-none",
-                    toneClasses[tone],
-                )}
-                data-workflow-widget
-                data-tone={tone}
-            >
-                <WidgetContents {...props} />
-            </Card>
+                <Card
+                    hidden={Boolean(inlineLine)}
+                    id={inlineLine ? undefined : id}
+                    hasNoPadding
+                    className={cn(
+                        "gap-0 border-l-2 shadow-none",
+                        toneClasses[tone],
+                        inlineLine && "hidden",
+                    )}
+                    data-workflow-widget
+                    data-tone={tone}
+                >
+                    <WidgetContents {...props} />
+                </Card>
+            </>
         );
     }
     return (

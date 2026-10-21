@@ -3,6 +3,7 @@
 import { Play, RotateCcw, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
+import { toast } from "sonner";
 import {
     AssigneePicker,
     type SpeakerChoice,
@@ -10,6 +11,12 @@ import {
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 
@@ -51,20 +58,65 @@ export function TaskRow({
     const done = task.status === "done";
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
+    let closeReason: string | null = null;
+    if (!task.canClose && !dropped) {
+        if (!task.assignee) {
+            closeReason = i18n(
+                "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
+            );
+        } else if (task.assigneeHasEmail) {
+            closeReason = i18n(
+                "Assigned to {name}. Only they, the recording's owner or a curator can mark it done.",
+                { name: task.assignee.name },
+            );
+        } else {
+            closeReason = i18n(
+                "Assigned to {name}, who has no email in the Almanac, so the task is on nobody's list.",
+                { name: task.assignee.name },
+            );
+        }
+    }
+    const checkbox = (
+        <input
+            type="checkbox"
+            className="mt-1 size-4 shrink-0 accent-primary aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            checked={done}
+            disabled={dropped}
+            aria-disabled={closeReason ? true : undefined}
+            onClick={() => {
+                if (closeReason) {
+                    toast.error(closeReason);
+                }
+            }}
+            onKeyDown={(event) => {
+                if (closeReason && event.key === " ") {
+                    event.preventDefault();
+                    toast.error(closeReason);
+                }
+            }}
+            onChange={(event) => {
+                if (!task.canClose || dropped) return;
+                const status = event.target.checked ? "done" : "open";
+                onChange({ status }, { status });
+            }}
+            aria-label={i18n("Done")}
+        />
+    );
 
     return (
         <li className="group flex items-start gap-3 p-3 text-sm">
-            <input
-                type="checkbox"
-                className="mt-1 size-4 shrink-0 accent-primary"
-                checked={done}
-                disabled={!task.canClose || dropped}
-                onChange={(event) => {
-                    const status = event.target.checked ? "done" : "open";
-                    onChange({ status }, { status });
-                }}
-                aria-label={i18n("Done")}
-            />
+            {closeReason ? (
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>{checkbox}</TooltipTrigger>
+                        <TooltipContent className="max-w-72">
+                            {closeReason}
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            ) : (
+                checkbox
+            )}
             <div className="min-w-0 flex-1 space-y-1.5">
                 {editable ? (
                     <TaskTextInput

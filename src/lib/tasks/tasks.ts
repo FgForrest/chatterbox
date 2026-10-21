@@ -89,6 +89,7 @@ export interface TaskView {
     status: TaskStatus;
     text: string;
     assignee: { personId: string; name: string } | null;
+    assigneeHasEmail: boolean;
     assigneeHint: string | null;
     assigneeCheck: boolean;
     dueDate: string | null;
@@ -252,6 +253,7 @@ const taskColumns = {
     text: recordingTasks.text,
     assigneePersonId: recordingTasks.assigneePersonId,
     assigneeName: people.displayName,
+    assigneeEmailHash: people.primaryEmailHash,
     assigneeHint: recordingTasks.assigneeHint,
     assigneeCheck: recordingTasks.assigneeCheck,
     dueDate: recordingTasks.dueDate,
@@ -300,6 +302,7 @@ function toView(
                       name: decryptText(row.assigneeName),
                   }
                 : null,
+        assigneeHasEmail: row.assigneeEmailHash !== null,
         assigneeHint: decryptOptional(row.assigneeHint),
         assigneeCheck: row.assigneeCheck === true,
         dueDate: row.dueDate,
