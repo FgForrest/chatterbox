@@ -5,11 +5,13 @@ import {
     itemProcessing,
     mailPendingShares,
     processingProfiles,
+    users,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { profileHistoryName } from "@/lib/profiles/history-name";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import {
@@ -112,16 +114,20 @@ export function serializeProcessingResolution(
 export async function loadPrivateCategorizationPanel(
     ownerUserId: string,
     itemId: string,
+    viewerUserId = ownerUserId,
 ): Promise<CategorizationPanelPresentation | null> {
     const [item] = await db
         .select({
             kind: chatterItems.kind,
             currentProfileId: itemProcessing.profileId,
             currentProfileName: processingProfiles.name,
+            profileDeletedAt: processingProfiles.deletedAt,
+            viewerLocale: users.uiLocale,
             currentProfileScope: processingProfiles.scope,
             currentManualOnly: itemProcessing.manualOnly,
         })
         .from(chatterItems)
+        .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
             and(
@@ -218,7 +224,11 @@ export async function loadPrivateCategorizationPanel(
         item.currentProfileScope
             ? {
                   id: item.currentProfileId,
-                  name: decryptText(item.currentProfileName),
+                  name: profileHistoryName(
+                      decryptText(item.currentProfileName),
+                      item.profileDeletedAt,
+                      item.viewerLocale,
+                  ),
                   scope: item.currentProfileScope,
               }
             : null;

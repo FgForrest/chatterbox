@@ -14,6 +14,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     transcriptions,
+    users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
@@ -27,6 +28,7 @@ import type {
     PipelinePhases,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
 import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -286,10 +288,11 @@ async function folderPaths(
     );
 }
 
-/** Build the owner-only private processing projection used by item headers. */
+/** Build the owner-scoped processing projection with labels localized for its viewer. */
 export async function loadPrivateItemProcessing(
     ownerUserId: string,
     itemId: string,
+    viewerUserId = ownerUserId,
 ): Promise<ItemProcessingPresentation | null> {
     const [item] = await db
         .select({
@@ -299,11 +302,14 @@ export async function loadPrivateItemProcessing(
             phases: itemProcessing.phases,
             profileId: processingProfiles.id,
             profileName: processingProfiles.name,
+            profileDeletedAt: processingProfiles.deletedAt,
+            viewerLocale: users.uiLocale,
             profileScope: processingProfiles.scope,
             profileRevisionId: processingProfileRevisions.id,
             profileSettings: processingProfileRevisions.settings,
         })
         .from(chatterItems)
+        .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
             and(
@@ -621,7 +627,11 @@ export async function loadPrivateItemProcessing(
         automatic
             ? {
                   id: item.profileId,
-                  name: decryptText(item.profileName),
+                  name: profileHistoryName(
+                      decryptText(item.profileName),
+                      item.profileDeletedAt,
+                      item.viewerLocale,
+                  ),
                   scope: item.profileScope,
                   revisionId: item.profileRevisionId,
                   automatic: {

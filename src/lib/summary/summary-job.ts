@@ -14,8 +14,10 @@
  */
 
 import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
+import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
+import { getOrgUserId } from "@/lib/org/config";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 
 export const SUMMARY_JOB_KIND = "summary";
@@ -144,32 +146,46 @@ export interface EnqueueSummaryInput {
 export async function enqueueSummaryJob(
     input: EnqueueSummaryInput,
 ): Promise<EnqueueJobResult> {
-    const enqueued = await enqueueJob({
-        ...(input.delayMs ? { delayMs: input.delayMs } : {}),
-        // A click starts what a rate limit put off, not wait for it.
-        ...(input.trigger === "manual" ? { takeOverDelayed: {} } : {}),
-        userId: input.userId,
-        kind: SUMMARY_JOB_KIND,
-        subjectId: recordingJobSubject(
-            input.recordingId,
-            input.view ?? "private",
-        ),
-        priority:
-            input.trigger === "manual"
-                ? SUMMARY_PRIORITY_MANUAL
-                : SUMMARY_PRIORITY_AUTO,
-        maxAttempts: SUMMARY_MAX_ATTEMPTS,
-        payload: {
-            recordingId: input.recordingId,
-            ...(input.presetId ? { presetId: input.presetId } : {}),
-            ...(input.profileRevisionId
-                ? { profileRevisionId: input.profileRevisionId }
-                : {}),
-            trigger: input.trigger,
-            ...(input.view === "org" ? { view: "org" } : {}),
-            ...(input.rateLimited ? { rateLimited: true } : {}),
-        },
-    });
+    const queue = (executor?: Parameters<typeof enqueueJob>[1]) => {
+        const request = {
+            ...(input.delayMs ? { delayMs: input.delayMs } : {}),
+            // A click starts what a rate limit put off, not wait for it.
+            ...(input.trigger === "manual" ? { takeOverDelayed: {} } : {}),
+            userId: input.userId,
+            kind: SUMMARY_JOB_KIND,
+            subjectId: recordingJobSubject(
+                input.recordingId,
+                input.view ?? "private",
+            ),
+            priority:
+                input.trigger === "manual"
+                    ? SUMMARY_PRIORITY_MANUAL
+                    : SUMMARY_PRIORITY_AUTO,
+            maxAttempts: SUMMARY_MAX_ATTEMPTS,
+            payload: {
+                recordingId: input.recordingId,
+                ...(input.presetId ? { presetId: input.presetId } : {}),
+                ...(input.profileRevisionId
+                    ? { profileRevisionId: input.profileRevisionId }
+                    : {}),
+                trigger: input.trigger,
+                ...(input.view === "org" ? { view: "org" } : {}),
+                ...(input.rateLimited ? { rateLimited: true } : {}),
+            },
+        };
+        return executor ? enqueueJob(request, executor) : enqueueJob(request);
+    };
+
+    const enqueued = input.profileRevisionId
+        ? await withProfileRevisionGuard(
+              {
+                  revisionId: input.profileRevisionId,
+                  actorUserId: input.userId,
+                  organizationUserId: await getOrgUserId(),
+              },
+              queue,
+          )
+        : await queue();
     // Start it now rather than at the next sweep, when this process is the
     // one that will run it. Costs nothing when it is not.
     if (enqueued.created) nudge();

@@ -39,7 +39,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const includeDeleteImpact =
         new URL(request.url).searchParams.get("deleteImpact") === "true";
     let deleteImpact:
-        | { disposition: "delete" | "archive" }
+        | { disposition: "delete" | "tombstone" }
         | { memberDefaultCount: number }
         | undefined;
     if (includeDeleteImpact && profile.scope === "personal") {

@@ -5,11 +5,13 @@ import {
     itemProcessing,
     processingProfileRevisions,
     processingProfiles,
+    users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { mayUseProfile } from "@/lib/profiles/access";
+import { profileHistoryName } from "@/lib/profiles/history-name";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import {
     type ProfileChannel,
@@ -114,6 +116,9 @@ async function readProfileRevision(input: {
                     : undefined,
                 input.allowArchived
                     ? undefined
+                    : isNull(processingProfiles.deletedAt),
+                input.allowArchived
+                    ? undefined
                     : isNull(processingProfiles.archivedAt),
             ),
         )
@@ -122,6 +127,18 @@ async function readProfileRevision(input: {
         return null;
     }
     const resolved = present(row.profile, row.settings);
+    if (row.profile.deletedAt) {
+        const [viewer] = await db
+            .select({ uiLocale: users.uiLocale })
+            .from(users)
+            .where(eq(users.id, input.actorUserId))
+            .limit(1);
+        resolved.profile.name = profileHistoryName(
+            resolved.profile.name,
+            row.profile.deletedAt,
+            viewer?.uiLocale,
+        );
+    }
     return { ...resolved, revisionId: row.revisionId };
 }
 

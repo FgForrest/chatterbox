@@ -75,7 +75,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             requestedRecordingView(request),
         );
         return NextResponse.json({
-            processing: await loadPrivateItemProcessing(access.ownerUserId, id),
+            processing: await loadPrivateItemProcessing(
+                access.ownerUserId,
+                id,
+                session.user.id,
+            ),
         });
     }
 

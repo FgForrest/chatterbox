@@ -11,6 +11,13 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("@/db/queries/async-jobs", () => ({ enqueueJob: vi.fn() }));
+vi.mock("@/db/queries/profile-revision-guard", () => ({
+    withProfileRevisionGuard: (
+        _input: unknown,
+        queue: () => Promise<unknown>,
+    ) => queue(),
+}));
+vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => null }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 
 import { enqueueJob } from "@/db/queries/async-jobs";

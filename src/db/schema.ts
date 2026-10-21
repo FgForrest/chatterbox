@@ -618,6 +618,7 @@ export const processingProfiles = pgTable(
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
         archivedAt: timestamp("archived_at"),
+        deletedAt: timestamp("deleted_at"),
     },
     (table) => ({
         ownerIdx: index("processing_profiles_owner_user_id_idx").on(
@@ -633,7 +634,9 @@ export const processingProfiles = pgTable(
             "processing_profiles_owner_channel_default_unique",
         )
             .on(table.ownerUserId, table.channel)
-            .where(sql`${table.isDefault} and ${table.archivedAt} is null`),
+            .where(
+                sql`${table.isDefault} and ${table.archivedAt} is null and ${table.deletedAt} is null`,
+            ),
         scopeCheck: check(
             "processing_profiles_scope_check",
             sql`${table.scope} in ('personal', 'organization')`,
