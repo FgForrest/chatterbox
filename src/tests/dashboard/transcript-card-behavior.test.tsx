@@ -32,8 +32,12 @@ const seek = vi.fn();
 const play = vi.fn();
 const fetchMock = vi.fn();
 
-function panel(hasTopics = true, readOnly = false) {
-    return render(
+function panelElement(
+    hasTopics = true,
+    readOnly = false,
+    isTranscribing = false,
+) {
+    return (
         <TranscriptionPanel
             recording={{
                 id: "rec-card",
@@ -57,12 +61,16 @@ function panel(hasTopics = true, readOnly = false) {
                 },
             ]}
             readOnly={readOnly}
-            isTranscribing={false}
+            isTranscribing={isTranscribing}
             onTranscribe={vi.fn()}
             onSeekToTurn={seek}
             onPlayFromTurn={play}
-        />,
+        />
     );
+}
+
+function panel(hasTopics = true, readOnly = false) {
+    return render(panelElement(hasTopics, readOnly));
 }
 
 function collapse() {
@@ -191,6 +199,18 @@ describe("transcript card behavior", () => {
         expect(
             screen.getByRole("button", { name: /3 \/ 3 Discussion/ }),
         ).toBeTruthy();
+    });
+
+    it("shows re-transcription progress on a collapsed card", () => {
+        const view = panel();
+        collapse();
+        expectCollapsed();
+        view.rerender(panelElement(true, false, true));
+        expect(
+            screen.getByText("Transcribing audio…").closest("[hidden]"),
+        ).toBeNull();
+        view.rerender(panelElement());
+        expectCollapsed();
     });
 
     it("runs re-detection after expanding the card", async () => {

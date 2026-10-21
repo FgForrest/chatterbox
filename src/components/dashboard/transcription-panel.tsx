@@ -725,7 +725,9 @@ export function TranscriptionPanel({
                     id={transcriptWidgetId}
                     frame="inline"
                     collapsed={
-                        Boolean(activeTranscript?.text) && !transcriptOpen
+                        Boolean(activeTranscript?.text) &&
+                        !transcriptOpen &&
+                        !transcriptionRunning
                     }
                     onOpenChange={(next) => {
                         if (widgets?.workflowVisible)
