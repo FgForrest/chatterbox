@@ -2,6 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
 import {
+    markAutomaticStepShared,
     markAutomaticTitleSkipped,
     readProcessing,
 } from "@/lib/pipeline/state";
@@ -9,6 +10,7 @@ import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
+import { contentWriterRefusalNow } from "@/lib/sharing/writer";
 import { emitEvent } from "@/lib/webhooks/emit";
 
 /** Generate the one automatic title from an item's first completed summary. */
@@ -25,6 +27,22 @@ export async function updateTitleAfterSummary(input: {
         input.userId,
     );
     if (processing && automaticTitleSettled(processing.phases)) return;
+    const skipIfShared = async () => {
+        const refusal = await contentWriterRefusalNow({
+            recordingId: input.recordingId,
+            ownerUserId: input.userId,
+            actorUserId: input.userId,
+        });
+        if (refusal !== "shared") return false;
+        await markAutomaticStepShared({
+            itemId: input.recordingId,
+            userId: input.userId,
+            view: "private",
+            step: "title",
+        });
+        return true;
+    };
+    if (await skipIfShared()) return;
     const profile = await resolveItemProfile(
         input.recordingId,
         "private",
@@ -115,6 +133,7 @@ export async function updateTitleAfterSummary(input: {
     if (retitled) {
         await emitEvent("recording.updated", input.userId, input.recordingId);
     } else {
+        if (await skipIfShared()) return;
         await settleSkipped("first_summary_title_failed");
     }
 }

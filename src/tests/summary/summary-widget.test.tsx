@@ -5,7 +5,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { SummaryData } from "@/hooks/use-transcription-summary";
-import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import {
+    deriveWorkflowWidgets,
+    type WorkflowWidgetState,
+} from "@/lib/pipeline/workflow-widgets";
 
 const mocks = vi.hoisted(() => ({
     copy: vi.fn(),
@@ -220,6 +225,54 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
+    it("shows a settled shared step without a generating state", () => {
+        state.summaryData = null;
+        const data: ItemProcessingPresentation = {
+            itemId: `${kind}-1`,
+            kind,
+            legacy: false,
+            manualOnly: false,
+            phases: {
+                categorize: { state: "done", generation: 1, at: "2026-10-01" },
+                learn: { state: "done", generation: 1, at: "2026-10-01" },
+                summary: {
+                    state: "skipped",
+                    reason: "shared",
+                    generation: 1,
+                    at: "2026-10-01",
+                },
+                taskReview: { state: "done", generation: 1, at: "2026-10-01" },
+            },
+            profile: null,
+            placements: [],
+            intents: [],
+            outputs: { transcript: true, learn: true, summary: false },
+            processAgain: false,
+            processAgainReason: null,
+            learnFindingsWaiting: 0,
+            taskReviewWaiting: 0,
+            jobs: { transcription: null, summary: null },
+            failures: [],
+        };
+        const workflow = deriveWorkflowStatus(data, kind);
+        const widgets = deriveWorkflowWidgets(data);
+        expect(workflow.visible).toBe(true);
+        expect(
+            workflow.steps.find((step) => step.id === "summary"),
+        ).toMatchObject({ state: "skipped", reason: "shared" });
+        expect(workflow.status).toBeNull();
+        expect(widgets.summary.tone).toBe("quiet");
+        renderWidget(kind, {
+            canChange: false,
+            workflowVisible: widgets.workflowVisible,
+            widget: widgets.summary,
+        });
+        fireEvent.click(screen.getByRole("button", { name: "View summary" }));
+        expect(screen.getByText("No summary yet.")).toBeTruthy();
+        expect(screen.queryByText(/Generating/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Summarize" })).toBeNull();
+    });
+
     it("shows the profile name on the collapsed workflow line", () => {
         renderWidget(kind, {
             profileName: "Customer follow-up",

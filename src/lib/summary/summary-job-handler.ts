@@ -22,7 +22,10 @@ import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
-import { markSummaryStepFailed } from "@/lib/pipeline/state";
+import {
+    markAutomaticStepShared,
+    markSummaryStepFailed,
+} from "@/lib/pipeline/state";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
@@ -172,6 +175,12 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                 error.code === ErrorCode.RECORDING_SHARED &&
                 payload.trigger !== "manual"
             ) {
+                await markAutomaticStepShared({
+                    itemId: payload.recordingId,
+                    userId,
+                    view: payload.view ?? "private",
+                    step: "summary",
+                });
                 return { skipped: "shared" };
             }
             // Emit only when this failure is final. A `summary.failed` per

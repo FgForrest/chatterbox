@@ -499,7 +499,7 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.userId, ownerUserId),
                     eq(learnRuns.view, "private"),
                     eq(learnRuns.status, "ready"),
-                    eq(learnReviewItems.userId, ownerUserId),
+                    eq(learnReviewItems.userId, learnRuns.scopeUserId),
                 ),
             ),
         item.kind === "audio"
