@@ -31,6 +31,7 @@ import type { LearnBridgeChat } from "@/lib/learn/run-bridge";
 import {
     DATA_RULE,
     type LearnChat,
+    NAME_SPELLING_RULE,
     renderLearnTranscript,
     windowsOf,
 } from "@/lib/learn/run-fallback";
@@ -151,6 +152,8 @@ const TASK = [
     "You proofread an automatic speech-to-text transcript of a meeting, with the Almanac: the people and things the team talks about.",
     DATA_RULE,
     "Find the words the transcription misheard, and say what was said: a name or term of the Almanac misheard or misspelled (also inflected: keep the grammatical form the sentence needs), and any other word or short phrase that is clearly misheard (a similar-sounding wrong word that makes no sense there, where the intended word is clear from the context).",
+    NAME_SPELLING_RULE,
+    "For Almanac names, use the record's spelling and its heardAs forms, including inflected occurrences of those forms. A restored diacritic must follow the Almanac name when it identifies that record.",
     "Never rephrase. Never fix grammar, word order, fillers, repetitions, false starts or the style of spoken language, never translate, and never change what someone said: only how the transcription heard it. When unsure, leave it.",
     'Each fix: turn is the T number of the line; heard is the words exactly as written in that line (at most 6 words); replacement is what those words should read (at most 6 words, in the transcript\'s language); context is empty when heard occurs once in that line, else a longer exact quote of the line containing it once; target is the Almanac record the replacement names ({"personId"} or {"entityId"}), else null.',
     "Give each misheard place once; a thing's name misheard the same way everywhere needs one fix. Leave out the places listed under ALREADY CORRECTED.",

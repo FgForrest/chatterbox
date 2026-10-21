@@ -187,8 +187,33 @@ function endingOf(word: string, part: string): string | null {
 }
 
 /** Whether a transcript word is `part` (one word of a name), inflected. */
-export function isNameWord(word: string, part: string): boolean {
-    return endingOf(word, part) !== null;
+export function isNameWord(
+    word: string,
+    part: string,
+    acronym = false,
+): boolean {
+    if (endingOf(word, part) !== null) return true;
+    if (!acronym || !word.startsWith(part)) return false;
+    const suffix = word.slice(part.length);
+    return (
+        ENDINGS.has(suffix) ||
+        /^c?k(?:o|a|u|em|y|ach|um|ove|ova|ovy|ovou|oveho|ovemu|ovych|ovymi)$/.test(
+            suffix,
+        )
+    );
+}
+
+/** All-capital acronym parts of a name, folded as `nameWords` gives them. */
+export function acronymParts(name: string): ReadonlySet<string> {
+    return new Set(
+        (name.match(/[\p{L}\p{N}\p{M}]+/gu) ?? [])
+            .filter((word) =>
+                /^(?=.*\p{Lu})[\p{Lu}\p{N}]{2,16}$/u.test(
+                    word.normalize("NFC"),
+                ),
+            )
+            .map((word) => nameWords(word).join("")),
+    );
 }
 
 /**
@@ -198,10 +223,17 @@ export function isNameWord(word: string, part: string): boolean {
 export function heardIsTheName(heard: string, name: string): boolean {
     const words = nameWords(heard);
     const parts = nameParts(name);
+    const acronyms = acronymParts(name);
     return (
         parts.length > 0 &&
         words.length === parts.length &&
-        words.every((word, index) => isNameWord(word, parts[index] ?? ""))
+        words.every((word, index) =>
+            isNameWord(
+                word,
+                parts[index] ?? "",
+                acronyms.has(parts[index] ?? ""),
+            ),
+        )
     );
 }
 

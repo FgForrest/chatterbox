@@ -17,7 +17,8 @@
  * - A record a person rejected before is not proposed again, on any
  *   recording of the scope (`["new", kind, type, name]`, dismissed
  *   scope-wide), and nothing refers to it.
- * - At most `MAX_NEW_RECORDS`; a person named by a first name alone is
+ * - At most `MAX_NEW_RECORDS`, anchored mishearings first, then names with
+ *   the most occurrences; a person named by a first name alone is
  *   marked so, for the reviewer. None is pre-ticked.
  */
 
@@ -29,7 +30,12 @@ import {
 } from "@/lib/knowledge/name-match";
 import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
-import { isNameWord, nameParts, nameWords } from "@/lib/learn/name-match";
+import {
+    acronymParts,
+    isNameWord,
+    nameParts,
+    nameWords,
+} from "@/lib/learn/name-match";
 import { type RecordTarget, recordNameKey } from "@/lib/learn/new-refs";
 import type { LearnCorrection, LearnNewRecord } from "@/lib/learn/output";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -169,6 +175,7 @@ export function close(a: string, b: string, shortened = true): boolean {
 export function nameSaidIn(name: string, texts: readonly string[]): boolean {
     const words = texts.flatMap((text) => nameWords(text));
     const parts = nameParts(name);
+    const acronyms = acronymParts(name);
     if (parts.length === 0) {
         // One letter, or only a title: the words as they stand.
         const wanted = nameWords(name).join(" ");
@@ -179,7 +186,37 @@ export function nameSaidIn(name: string, texts: readonly string[]): boolean {
             )
         );
     }
-    return parts.every((part) => words.some((word) => isNameWord(word, part)));
+    return parts.every((part) =>
+        words.some((word) => isNameWord(word, part, acronyms.has(part))),
+    );
+}
+
+function mentionsOf(
+    names: readonly string[],
+    wordsByTurn: readonly string[][],
+): number {
+    const forms = names
+        .map((name) => ({
+            parts: nameParts(name),
+            acronyms: acronymParts(name),
+        }))
+        .filter(({ parts }) => parts.length > 0);
+    let total = 0;
+    for (const words of wordsByTurn) {
+        for (let index = 0; index < words.length; index++) {
+            const said = forms.some(({ parts, acronyms }) =>
+                parts.every((part, offset) =>
+                    isNameWord(
+                        words[index + offset] ?? "",
+                        part,
+                        acronyms.has(part),
+                    ),
+                ),
+            );
+            if (said) total++;
+        }
+    }
+    return total;
 }
 
 export function validateNewRecords(
@@ -353,8 +390,40 @@ export function validateNewRecords(
         );
         definitions.set(record.ref, held);
     }
+    const correctionEvidence = new Map(
+        records.map((record) => [
+            record,
+            corrections.filter(
+                (correction) =>
+                    "newRef" in correction.target &&
+                    correction.target.newRef === record.ref &&
+                    correction.kind === "correct" &&
+                    correction.replacement !== null &&
+                    nameSaidIn(record.name, [correction.replacement]) &&
+                    anchorMatches(correction, turns),
+            ),
+        ]),
+    );
+    const wordsByTurn = turns.map((turn) => nameWords(turn.text));
+    const ranked = records
+        .map((record) => {
+            const evidence = correctionEvidence.get(record) ?? [];
+            return {
+                record,
+                misheard: evidence.length > 0,
+                mentions: mentionsOf(
+                    [record.name, ...evidence.map((one) => one.heard)],
+                    wordsByTurn,
+                ),
+            };
+        })
+        .sort(
+            (a, b) =>
+                Number(b.misheard) - Number(a.misheard) ||
+                b.mentions - a.mentions,
+        );
     const seen = new Set<string>();
-    for (const record of records) {
+    for (const { record } of ranked) {
         // Defined again the same way: once is enough.
         if (seen.has(record.ref)) continue;
         seen.add(record.ref);
@@ -453,16 +522,7 @@ export function validateNewRecords(
                 near.add(index);
             }
         }
-        const misheardAt = corrections.some(
-            (correction) =>
-                "newRef" in correction.target &&
-                correction.target.newRef === record.ref &&
-                correction.kind === "correct" &&
-                correction.replacement !== null &&
-                // In the form the sentence needs: "Veltrixem" for Veltrix.
-                nameSaidIn(record.name, [correction.replacement]) &&
-                anchorMatches(correction, turns),
-        );
+        const misheardAt = (correctionEvidence.get(record)?.length ?? 0) > 0;
         if (
             !misheardAt &&
             !nameSaidIn(
