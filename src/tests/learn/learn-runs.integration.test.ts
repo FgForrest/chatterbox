@@ -8,7 +8,7 @@
  */
 
 import type { Readable } from "node:stream";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import unzipper from "unzipper";
 import {
     afterAll,
@@ -20,9 +20,16 @@ import {
     vi,
 } from "vitest";
 import {
+    claimDueJobs,
+    completeJob,
+    heartbeatJob,
+} from "@/db/queries/async-jobs";
+import {
     apiCredentials,
     asyncJobs,
+    itemProcessing,
     knowledgeAliases,
+    knowledgeFacts,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -33,6 +40,10 @@ import {
     transcriptSpeakers,
     users,
 } from "@/db/schema";
+import {
+    releaseAutoLearnHold,
+    startAutomaticLearn,
+} from "@/lib/learn/auto-learn";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -214,6 +225,9 @@ import {
 import { finishReview } from "@/lib/learn/review";
 import { newRecordFingerprint } from "@/lib/learn/validate-new-records";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { deletePersonalProfile, updateProfile } from "@/lib/profiles/store";
@@ -339,24 +353,28 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
 
     async function setAutomaticSummary({
         correctAfterLearn,
+        automaticLearn,
+        ownerUserId = OWNER,
     }: {
         correctAfterLearn?: boolean;
+        automaticLearn?: boolean;
+        ownerUserId?: string;
     } = {}): Promise<void> {
-        await seedExistingPersonalProfiles(OWNER, mockEnv);
-        const resolved = await resolveDefaultProfile(OWNER, "audio");
+        await seedExistingPersonalProfiles(ownerUserId, mockEnv);
+        const resolved = await resolveDefaultProfile(ownerUserId, "audio");
         const settings = resolved.settings;
         if (!("transcribe" in settings.steps)) {
             throw new Error("audio profile");
         }
         await updateProfile({
-            ownerUserId: OWNER,
+            ownerUserId,
             profileId: resolved.profile.id,
             actor: {
                 kind: "user",
-                actorId: OWNER,
+                actorId: ownerUserId,
                 issuer: null,
                 subject: null,
-                capabilities: new Set(["use"]),
+                capabilities: new Set(["use", "org.curate"]),
                 clientId: null,
                 clientPermissions: new Set(),
                 verifiedAt: null,
@@ -372,6 +390,9 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     },
                     learn: {
                         ...settings.steps.learn,
+                        ...(automaticLearn === undefined
+                            ? {}
+                            : { automatic: automaticLearn }),
                         ...(correctAfterLearn === undefined
                             ? {}
                             : { correctAfterLearn }),
@@ -514,6 +535,95 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             recordingId: REC,
             folderId: root?.id ?? "",
         });
+    }
+
+    async function prepareAutomaticLearn() {
+        await setAutomaticSummary({ automaticLearn: true });
+        await setAutomaticSummary({
+            automaticLearn: true,
+            ownerUserId: orgUserId,
+        });
+        await db().insert(recordingFolders).values({
+            id: "learn-private-root",
+            userId: OWNER,
+            name: "Private",
+            nameHash: "learn-private-root-hash",
+            kind: "private",
+        });
+        await db().insert(recordingFolders).values({
+            id: "learn-private-folder",
+            userId: OWNER,
+            parentId: "learn-private-root",
+            name: "Learn",
+            nameHash: "learn-private-folder-hash",
+            kind: "custom",
+        });
+        await db().insert(recordingFolderAssignments).values({
+            userId: OWNER,
+            itemId: REC,
+            folderId: "learn-private-folder",
+        });
+    }
+
+    async function advance() {
+        const profile = await resolveDefaultProfile(OWNER, "audio");
+        await db()
+            .update(itemProcessing)
+            .set({
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, REC),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        const [processing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, REC),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, REC, "private", OWNER, "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.requestedGeneration ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
+        let processed = 0;
+        for (let iteration = 0; iteration < 10; iteration++) {
+            const [job] = await claimDueJobs("pipeline.advance", 1);
+            if (!job) {
+                expect(processed).toBeGreaterThan(0);
+                return;
+            }
+            const result = await pipelineAdvanceJobHandler.run({
+                userId: job.userId,
+                jobId: job.id,
+                payload: pipelineAdvanceJobHandler.parsePayload(job.payload),
+                attempt: job.attempts,
+                maxAttempts: job.maxAttempts,
+                signal: new AbortController().signal,
+                reportProgress: () => {},
+            });
+            expect(
+                await completeJob({
+                    jobId: job.id,
+                    claimToken: job.claimToken,
+                    result: result ?? null,
+                }),
+            ).toBe(true);
+            processed++;
+        }
+        throw new Error("pipeline did not settle");
     }
 
     it("starts a run for its owner, with their chat provider, and joins it when asked again", async () => {
@@ -715,6 +825,88 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         expect(finding).toMatchObject({ runId: privateRunId, userId: OWNER });
     });
 
+    it.each([
+        false,
+        true,
+    ])("uses live sharing for a pending scope restart (re-share before advance: %s)", async (reshareBeforeAdvance) => {
+        await provider(OWNER);
+        await prepareAutomaticLearn();
+        expect(
+            await startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).toEqual({ status: "started" });
+        const [original] = await db().select().from(learnRuns);
+        await share();
+        await unshareRecording(OWNER, REC, { withdraw: true });
+        const [pending] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.view, "private"));
+        expect(pending?.phases.learn?.reason).toBe("scope_changed");
+        if (reshareBeforeAdvance) await share();
+        await advance();
+
+        const expectedView = reshareBeforeAdvance ? "org" : "private";
+        const runs = await db().select().from(learnRuns);
+        expect(runs).toHaveLength(2);
+        expect(runs.find((row) => row.id === original?.id)?.status).toBe(
+            "cancelled",
+        );
+        expect(runs.find((row) => row.id !== original?.id)).toMatchObject({
+            view: expectedView,
+            scopeUserId: reshareBeforeAdvance ? orgUserId : OWNER,
+            status: "queued",
+            trigger: "auto",
+        });
+        await requestAdvance({
+            itemId: REC,
+            userId: OWNER,
+            view: "private",
+            reason: "learn-settled",
+        });
+        await advance();
+        expect(await db().select().from(learnRuns)).toHaveLength(2);
+
+        if (!reshareBeforeAdvance) {
+            await share();
+            await advance();
+            await requestAdvance({
+                itemId: REC,
+                userId: OWNER,
+                view: "private",
+                reason: "learn-settled",
+            });
+            await advance();
+            const afterReshare = await db().select().from(learnRuns);
+            expect(
+                afterReshare
+                    .filter((row) => row.view === "private")
+                    .map((row) => row.status),
+            ).toEqual(["cancelled", "cancelled"]);
+            expect(
+                afterReshare.filter((row) => row.view === "org"),
+            ).toMatchObject([
+                {
+                    scopeUserId: orgUserId,
+                    status: "queued",
+                    trigger: "auto",
+                },
+            ]);
+        }
+        expect(
+            (
+                await db()
+                    .select()
+                    .from(itemProcessing)
+                    .where(eq(itemProcessing.view, "private"))
+            )[0]?.phases.learn,
+        ).toMatchObject({ state: "running", reason: "started" });
+    });
+
     describe("running", () => {
         const reply = (content: object | string) =>
             createCompletion.mockResolvedValueOnce({
@@ -768,6 +960,139 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     ]),
                 })
                 .where(eq(transcriptions.id, transcriptId));
+        });
+
+        it("discards a claimed private handler's output when sharing commits during its model call and restarts once", async () => {
+            await prepareAutomaticLearn();
+            const entity = await createEntity(OWNER, {
+                typeKey: "organization",
+                name: "Tavesi",
+            });
+            expect(
+                await startAutomaticLearn({
+                    userId: OWNER,
+                    itemId: REC,
+                    source: "riffado",
+                    timed: true,
+                }),
+            ).toEqual({ status: "started" });
+            const [job] = await claimDueJobs("learn.run", 1);
+            if (!job) throw new Error("Learn job missing");
+            const payload = learnJobHandler.parsePayload(job.payload);
+            let entered = () => {};
+            let release = () => {};
+            const atModel = new Promise<void>((resolve) => {
+                entered = resolve;
+            });
+            const modelReleased = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            createCompletion.mockImplementationOnce(async () => {
+                entered();
+                await modelReleased;
+                return {
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    speakers: [],
+                                    corrections: [
+                                        {
+                                            turnIndex: 0,
+                                            charStart: 19,
+                                            charEnd: 25,
+                                            heard: "Tavesy",
+                                            kind: "correct",
+                                            target: { entityId: entity.id },
+                                            replacement: "Tavesi",
+                                        },
+                                    ],
+                                    facts: [],
+                                    relationPhrases: [],
+                                }),
+                            },
+                        },
+                    ],
+                };
+            });
+            const executing = learnJobHandler.run({
+                payload,
+                userId: job.userId,
+                jobId: job.id,
+                attempt: job.attempts,
+                maxAttempts: job.maxAttempts,
+                signal: new AbortController().signal,
+                reportProgress: () => {},
+            });
+            try {
+                await Promise.race([
+                    atModel,
+                    executing.then(() => {
+                        throw new Error("handler ended before model call");
+                    }),
+                ]);
+                expect(await statusOf(payload.runId)).toBe("running");
+                await share();
+                expect(await statusOf(payload.runId)).toBe("cancelled");
+                const [cancelledJob] = await db()
+                    .select()
+                    .from(asyncJobs)
+                    .where(eq(asyncJobs.id, job.id));
+                expect(cancelledJob).toMatchObject({
+                    status: "failed",
+                    claimToken: null,
+                    heartbeatAt: null,
+                    lastError:
+                        "Private Learn cancelled because the item was shared",
+                });
+                expect(cancelledJob?.completedAt).toBeInstanceOf(Date);
+            } finally {
+                release();
+                await executing;
+            }
+            expect(await executing).toEqual({ status: "cancelled", items: 0 });
+            expect(await statusOf(payload.runId)).toBe("cancelled");
+            expect(await db().select().from(learnReviewItems)).toEqual([]);
+            expect(await db().select().from(transcriptCorrections)).toEqual([]);
+            expect(await db().select().from(knowledgeFacts)).toEqual([]);
+            expect(await heartbeatJob(job.id, job.claimToken)).toBe(false);
+            expect(
+                await completeJob({
+                    jobId: job.id,
+                    claimToken: job.claimToken,
+                }),
+            ).toBe(false);
+            expect(await releaseAutoLearnHold(REC)).toBe(false);
+            await advance();
+            await requestAdvance({
+                itemId: REC,
+                userId: OWNER,
+                view: "private",
+                reason: "learn-settled",
+            });
+            await advance();
+            const runs = await db().select().from(learnRuns);
+            expect(runs).toHaveLength(2);
+            expect(runs.find((row) => row.view === "org")).toMatchObject({
+                scopeUserId: orgUserId,
+                trigger: "auto",
+                status: "queued",
+            });
+            const orgJobs = await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.kind, "learn.run"),
+                        eq(asyncJobs.status, "pending"),
+                    ),
+                );
+            expect(orgJobs).toHaveLength(1);
+            expect(orgJobs[0]?.payload.runId).toBe(
+                runs.find((row) => row.view === "org")?.id,
+            );
+            expect(await db().select().from(learnReviewItems)).toEqual([]);
         });
 
         it("takes the bridge path for a bridge provider: one call, this run's token and the schema, validated the same", async () => {
