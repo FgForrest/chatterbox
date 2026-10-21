@@ -876,6 +876,42 @@ describe("Workstation selection history", () => {
         vi.unstubAllGlobals();
     });
 
+    it("drops a deep link's context when Recent or a delete re-selects an item", async () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&playFrom=165980&evidenceStart=4",
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response("{}")),
+        );
+        render(<Workstation {...props} />);
+        expect(screen.getByTestId("item-link-query").textContent).toContain(
+            "playFrom=165980",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
+        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(screen.getByTestId("item-link-query").textContent).toBe("");
+
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=first&evidenceStart=4",
+        );
+        act(() => {
+            window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Delete selected" }),
+        );
+        await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(screen.getByTestId("item-link-query").textContent).toBe("");
+        vi.unstubAllGlobals();
+    });
+
     it("pushes a folder and restores it with Back", async () => {
         render(<Workstation {...props} />);
         fireEvent.click(screen.getByRole("button", { name: "Organize" }));

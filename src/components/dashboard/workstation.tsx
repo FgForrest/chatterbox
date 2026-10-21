@@ -738,6 +738,7 @@ export function Workstation({
                     visibleRecordings[idx + 1] ??
                     visibleRecordings[idx - 1] ??
                     null;
+                setItemLinkQuery("");
                 setCurrentRecording(next);
                 writeSelection(next, null);
             }
@@ -1266,6 +1267,7 @@ export function Workstation({
                                         setSelectedFolderId(null);
                                         selectionRevisionRef.current += 1;
                                         setPendingUploadSelection(null);
+                                        setItemLinkQuery("");
                                         setCurrentRecording(
                                             visibleRecordings[0] ?? null,
                                         );
