@@ -639,7 +639,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
     });
 
-    it("waits for Task review and blocks sharing when Plaud proposals are valid", async () => {
+    it("accepts Plaud tasks and reaches sharing without Task review", async () => {
         await seedPlaudTaskPipeline(["Draft the final report"]);
 
         await expect(
@@ -647,13 +647,10 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         ).resolves.toMatchObject({ processedGeneration: 2 });
 
         expect((await processing())?.phases).toMatchObject({
-            taskReview: { state: "waiting", reason: "needs_review" },
+            taskReview: { state: "done", reason: "reviewed" },
             share: {
                 state: "waiting",
-                reason: "gate_blocked",
-                problems: [
-                    expect.objectContaining({ kind: "tasks_unreviewed" }),
-                ],
+                reason: "org_unavailable",
             },
         });
     });

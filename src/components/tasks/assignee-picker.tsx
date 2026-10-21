@@ -25,7 +25,7 @@ interface AssigneePickerProps {
     value: { personId: string; name: string } | null;
     /** A name heard with no person of the Almanac matching it. */
     hint?: string | null;
-    /** Matched on a first name alone: worth a look before accepting. */
+    /** The heard name still needs a person chosen. */
     check?: boolean;
     speakers: readonly SpeakerChoice[];
     /** On a shared recording only the Organization's people are offered. */
@@ -108,7 +108,8 @@ export function AssigneePicker({
         if (person?.personId !== value?.personId) onChange(person);
     };
 
-    const label = value?.name ?? (hint ? `${hint}?` : i18n("Nobody"));
+    const label =
+        value?.name ?? (hint ? `${hint}${check ? "" : "?"}` : i18n("Nobody"));
     return (
         <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger
@@ -132,6 +133,7 @@ export function AssigneePicker({
             >
                 <UserRound className="size-3 shrink-0" />
                 <span className="truncate">{label}</span>
+                {check && !value && <span>{i18n("who is this?")}</span>}
                 {!disabled && <ChevronDown className="size-3 shrink-0" />}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">

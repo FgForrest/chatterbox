@@ -595,7 +595,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         });
     });
 
-    it("keeps a blocked mail intent, then shares it exactly once", async () => {
+    it("shares mail exactly once even with a legacy proposed task", async () => {
         const itemId = "mail-intent";
         await insertMail(itemId);
         await recordIntent(itemId);
@@ -610,11 +610,9 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
             })
             .returning({ id: recordingTasks.id });
 
-        expect(await executeIntendedShares(ALICE, itemId)).toEqual([
-            { kind: "tasks_unreviewed", proposals: 1 },
-        ]);
-        expect(await assignments(itemId)).toEqual([]);
-        expect(await intents(itemId)).toEqual([orgFolderId]);
+        expect(await executeIntendedShares(ALICE, itemId)).toEqual([]);
+        expect(await assignments(itemId)).toEqual([orgFolderId]);
+        expect(await intents(itemId)).toEqual([]);
 
         await db()
             .update(recordingTasks)
@@ -746,7 +744,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         ).rejects.toMatchObject({ statusCode: 404 });
     });
 
-    it("counts pending follow-up proposals in the mail share gate", async () => {
+    it("allows mail sharing while follow-up proposals still wait for review", async () => {
         const mailId = "mail-follow-up";
         const targetId = "follow-up-target";
         await insertMail(mailId);
@@ -784,7 +782,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         const problems = await appDb.transaction((tx) =>
             mailShareProblems(tx, mailId, ALICE),
         );
-        expect(problems).toEqual([{ kind: "tasks_unreviewed", proposals: 1 }]);
+        expect(problems).toEqual([]);
 
         for (const state of [
             "awaiting_share",
