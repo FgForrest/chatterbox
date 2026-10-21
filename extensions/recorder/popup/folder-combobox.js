@@ -10,6 +10,8 @@ export function createFolderCombobox({
     save,
     t,
 }) {
+    let readOnly = false;
+    const optionPrefix = listbox.id === "folder-listbox" ? "folder-option" : `${listbox.id}-option`;
     let remembered = null;
     let results = [];
     let options = [];
@@ -54,12 +56,12 @@ export function createFolderCombobox({
         if (active >= options.length) active = -1;
         input.setAttribute(
             "aria-activedescendant",
-            open && active >= 0 ? `folder-option-${active}` : "",
+            open && active >= 0 ? `${optionPrefix}-${active}` : "",
         );
         listbox.replaceChildren(
             ...options.map((option, index) => {
                 const node = document.createElement("div");
-                node.id = `folder-option-${index}`;
+                node.id = `${optionPrefix}-${index}`;
                 node.className = "folder-option";
                 node.setAttribute("role", "option");
                 node.setAttribute(
@@ -106,7 +108,7 @@ export function createFolderCombobox({
     function pick(option) {
         remembered = option.id ? option : null;
         selectionVersion += 1;
-        void persist();
+        void persist().catch(() => {});
         close();
     }
 
@@ -121,10 +123,10 @@ export function createFolderCombobox({
                 if (job.selection !== selectionVersion) return;
                 if (response?.ok && response.folders?.[0]) {
                     remembered = response.folders[0];
-                    await persist();
+                    await persist().catch(() => {});
                 } else if (response?.status === 404) {
                     remembered = null;
-                    await persist();
+                    await persist().catch(() => {});
                 }
                 if (!open) showSelection();
             } else if (job.version === version) {
@@ -145,6 +147,7 @@ export function createFolderCombobox({
     }
 
     input.addEventListener("focus", () => {
+        if (readOnly) return;
         open = true;
         query = "";
         active = -1;
@@ -153,6 +156,7 @@ export function createFolderCombobox({
         render();
     });
     input.addEventListener("click", () => {
+        if (readOnly) return;
         if (!open) {
             open = true;
             input.select();
@@ -161,6 +165,7 @@ export function createFolderCombobox({
     });
     input.addEventListener("blur", close);
     input.addEventListener("input", () => {
+        if (readOnly) return;
         cancelSearch();
         open = true;
         query = input.value.replaceAll(LRM, "").trim();
@@ -178,6 +183,7 @@ export function createFolderCombobox({
         render();
     });
     input.addEventListener("keydown", (event) => {
+        if (readOnly) return;
         if (event.key === "Escape") {
             event.preventDefault();
             close();
@@ -196,7 +202,10 @@ export function createFolderCombobox({
     });
 
     return {
-        reset(settings) {
+        reset(settings, options = {}) {
+            readOnly = options.readOnly === true;
+            input.readOnly = readOnly;
+            input.setAttribute("aria-readonly", String(readOnly));
             cancelSearch();
             selectionVersion += 1;
             remembered = settings.folderId
@@ -206,7 +215,7 @@ export function createFolderCombobox({
                   }
                 : null;
             close();
-            if (remembered) {
+            if (remembered && !readOnly && options.refresh !== false) {
                 pending = {
                     params: { id: remembered.id },
                     selection: selectionVersion,
@@ -215,5 +224,73 @@ export function createFolderCombobox({
             }
         },
         saved: () => saving,
+    };
+}
+
+/** Mount the shared folder field in an idle or recording view. */
+export function createFolderField({ container, prefix = "folder", request, save, t }) {
+    container.innerHTML = `
+        <label id="${prefix}-label" for="${prefix}-picker"></label>
+        <input id="${prefix}-picker" class="folder-picker" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${prefix}-listbox" aria-activedescendant="" aria-describedby="${prefix}-hint" autocomplete="off" />
+        <span id="${prefix}-hint" class="hint"></span>
+        <div id="${prefix}-results" class="folder-results" hidden>
+            <div id="${prefix}-listbox" class="folder-listbox" role="listbox" aria-labelledby="${prefix}-label"></div>
+            <p id="${prefix}-status" class="folder-status hint" role="status" aria-live="polite"></p>
+        </div>
+        <p id="${prefix}-error" class="error hint" role="status" hidden></p>`;
+    const el = (suffix) => document.getElementById(`${prefix}-${suffix}`);
+    el("label").textContent = t("folder");
+    const combobox = createFolderCombobox({
+        input: el("picker"), listbox: el("listbox"), panel: el("results"),
+        status: el("status"), request,
+        save: async (settings) => {
+            try {
+                await save(settings);
+                el("error").hidden = true;
+            } catch (error) {
+                el("error").textContent = error?.message || t("folderChangeFailed");
+                el("error").hidden = false;
+                throw error;
+            }
+        },
+        t,
+    });
+    return {
+        reset(settings, options = {}) {
+            el("hint").textContent = t(options.readOnly ? "folderFixedAtStart" : "folderSearchHint");
+            combobox.reset(settings, options);
+        },
+        saved: combobox.saved,
+    };
+}
+
+/** Bind a shared folder field to the current recording's target. */
+export function createRecordingFolder({ container, prefix, request, send, t }) {
+    let current = null;
+    let signature = "";
+    let field;
+    return {
+        render(state) {
+            container.hidden = state.state !== "recording" || state.stopped;
+            if (container.hidden) return;
+            field ??= createFolderField({
+                container, prefix, request, t,
+                save: async (folder) => {
+                    try {
+                        const response = await send({ type: "set-recording-folder", sessionId: current.sessionId, ...folder });
+                        if (!response?.ok) throw new Error(response?.error || t("folderChangeFailed"));
+                    } catch (error) {
+                        field.reset(current, { readOnly: current.recordingFolderOverride !== true, refresh: false });
+                        throw error;
+                    }
+                },
+            });
+            current = state;
+            const next = JSON.stringify([state.sessionId, state.folderId, state.folderLabel, state.recordingFolderOverride]);
+            if (signature === next) return;
+            signature = next;
+            field.reset(state, { readOnly: state.recordingFolderOverride !== true });
+        },
+        saved: () => field?.saved().catch(() => {}) ?? Promise.resolve(),
     };
 }

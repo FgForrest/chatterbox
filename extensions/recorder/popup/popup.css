@@ -319,7 +319,7 @@ input[type="checkbox"] {
     }
 }
 
-#folder-picker,
+.folder-picker,
 .folder-option {
     box-sizing: border-box;
     min-width: 0;
@@ -329,7 +329,7 @@ input[type="checkbox"] {
     text-align: left;
 }
 
-#folder-picker:focus {
+.folder-picker:focus {
     direction: ltr;
 }
 
@@ -337,14 +337,14 @@ input[type="checkbox"] {
     content: "\200E";
 }
 
-#folder-results {
+.folder-results {
     border: 1px solid var(--border);
     border-radius: 7px;
     background: var(--surface);
     overflow: hidden;
 }
 
-#folder-listbox {
+.folder-listbox {
     max-height: 150px;
     overflow-y: auto;
 }
@@ -362,11 +362,20 @@ input[type="checkbox"] {
     outline-offset: -1px;
 }
 
-#folder-status {
+.folder-status {
     margin: 0;
     padding: 7px 8px;
 }
 
-#folder-status:empty {
+.folder-status:empty {
+    display: none;
+}
+
+#start-desktop {
+    width: 100%;
+    margin-top: 8px;
+}
+
+.field[hidden] {
     display: none;
 }

@@ -30,6 +30,7 @@ export interface CreateRecordingSessionInput {
 }
 
 export interface CompleteRecordingSessionInput {
+    folderId?: string | null;
     chunkCount: number;
     truncatedAtChunk: number | null;
     endedAt: Date;
@@ -64,6 +65,13 @@ function parseDate(value: unknown, field: string, required: boolean) {
     return date;
 }
 
+function parseFolderId(value: unknown): string | null {
+    if (typeof value === "string" && value.trim() === "") {
+        throw invalid("folderId must be a non-empty string", "folderId");
+    }
+    return parseOptionalString(value, "folderId", 255) ?? null;
+}
+
 function parseOptionalString(
     value: unknown,
     field: string,
@@ -92,13 +100,6 @@ export function parseCreateRecordingSessionBody(
     body: unknown,
 ): CreateRecordingSessionInput {
     const raw = (body ?? {}) as Record<string, unknown>;
-
-    if (
-        raw.folderId === "" ||
-        (typeof raw.folderId === "string" && raw.folderId.trim() === "")
-    ) {
-        throw invalid("folderId must be a non-empty string", "folderId");
-    }
 
     if (
         typeof raw.clientRecordingId !== "string" ||
@@ -194,7 +195,7 @@ export function parseCreateRecordingSessionBody(
             "noticeAcknowledgedAt",
             false,
         ),
-        folderId: parseOptionalString(raw.folderId, "folderId", 255) ?? null,
+        folderId: parseFolderId(raw.folderId),
     };
 }
 
@@ -247,6 +248,9 @@ export function parseCompleteRecordingSessionBody(
     }
 
     return {
+        ...(raw.folderId !== undefined
+            ? { folderId: parseFolderId(raw.folderId) }
+            : {}),
         chunkCount,
         truncatedAtChunk,
         endedAt: parseDate(raw.endedAt, "endedAt", false) ?? new Date(),

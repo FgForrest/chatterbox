@@ -7,7 +7,10 @@ import {
     mapRecorderFolders,
     searchRecorderFolders,
 } from "../../../extensions/recorder/lib/api.js";
-import { createFolderCombobox } from "../../../extensions/recorder/popup/folder-combobox.js";
+import {
+    createFolderField,
+    createRecordingFolder,
+} from "../../../extensions/recorder/popup/folder-combobox.js";
 
 const popupHtml = readFileSync("extensions/recorder/popup/popup.html", "utf8");
 const saved = { id: "saved", label: "Private / Calls" };
@@ -32,20 +35,17 @@ function setup(
     request = vi.fn(async () => ({ ok: true, folders: [] })),
 ) {
     document.body.innerHTML = popupHtml;
-    const input = document.getElementById("folder-picker");
-    const listbox = document.getElementById("folder-listbox");
-    const status = document.getElementById("folder-status");
-    const panel = document.getElementById("folder-results");
     const save = vi.fn(async () => {});
-    const controller = createFolderCombobox({
-        input,
-        listbox,
-        panel,
-        status,
+    const controller = createFolderField({
+        container: document.getElementById("folder-row"),
         request,
         save,
         t: (key) => key,
     });
+    const input = document.getElementById("folder-picker");
+    const listbox = document.getElementById("folder-listbox");
+    const status = document.getElementById("folder-status");
+    const panel = document.getElementById("folder-results");
     controller.reset(settings);
     return {
         input,
@@ -344,12 +344,12 @@ describe("recorder folder combobox", () => {
     });
     it("ends the closed path with a left-to-right mark and searches without it", async () => {
         const ui = setup(
-            { folderId: saved.id, folderLabel: "Clients / ACME s.r.o." },
+            { folderId: saved.id, folderLabel: "Clients / Example project" },
             vi.fn(async () => ({ ok: true, folders: [] })),
         );
-        expect(ui.input.value).toBe(shown("Clients / ACME s.r.o."));
+        expect(ui.input.value).toBe(shown("Clients / Example project"));
         ui.input.focus();
-        expect(ui.input.value).toBe("Clients / ACME s.r.o.");
+        expect(ui.input.value).toBe("Clients / Example project");
         ui.input.blur();
         ui.input.focus();
         ui.listbox.children[0].click();
@@ -367,5 +367,88 @@ describe("recorder folder combobox", () => {
         expect(ui.status.textContent).toBe("folderSearchFailed");
         ui.input.blur();
         expect(ui.save).not.toHaveBeenCalled();
+    });
+});
+
+describe("recording folder field", () => {
+    function recordingField(supported) {
+        document.body.innerHTML = '<div id="target" class="field"></div>';
+        const request = vi.fn(async () => ({ ok: true, folders: [] }));
+        const send = vi.fn(async () => ({ ok: true }));
+        const container = document.getElementById("target");
+        const field = createRecordingFolder({
+            container,
+            prefix: "target",
+            request,
+            send,
+            t: (key) => key,
+        });
+        const state = {
+            state: "recording",
+            sessionId: "recording-1",
+            folderId: "start",
+            folderLabel: "Private / Calls",
+            recordingFolderOverride: supported,
+        };
+        field.render(state);
+        return {
+            field,
+            state,
+            request,
+            send,
+            container,
+            input: document.getElementById("target-picker"),
+        };
+    }
+
+    it("shows the start folder read-only on an older server without searching or saving", async () => {
+        const ui = recordingField(false);
+        expect(ui.input.readOnly).toBe(true);
+        expect(ui.input.value).toBe(shown("Private / Calls"));
+        expect(document.getElementById("target-hint").textContent).toBe(
+            "folderFixedAtStart",
+        );
+        ui.input.focus();
+        ui.input.click();
+        ui.input.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "ArrowDown" }),
+        );
+        await vi.advanceTimersByTimeAsync(300);
+        expect(ui.input.getAttribute("aria-expanded")).toBe("false");
+        expect(ui.request).not.toHaveBeenCalled();
+        expect(ui.send).not.toHaveBeenCalled();
+    });
+
+    it("changes the current recording and keeps a search open through meter updates", async () => {
+        const ui = recordingField(true);
+        await vi.advanceTimersByTimeAsync(0);
+        ui.send.mockClear();
+        ui.input.focus();
+        ui.input.value = "project";
+        ui.input.dispatchEvent(new Event("input"));
+        ui.field.render({ ...ui.state, levels: { micDb: -10 } });
+        expect(ui.input.value).toBe("project");
+        document.getElementById("target-listbox").children[0].click();
+        await ui.field.saved();
+        expect(ui.send).toHaveBeenCalledExactlyOnceWith({
+            type: "set-recording-folder",
+            sessionId: "recording-1",
+            folderId: null,
+            folderLabel: null,
+        });
+        ui.field.render({ ...ui.state, stopped: true });
+        expect(ui.container.hidden).toBe(true);
+    });
+
+    it("reports a failed save without stopping the recording", async () => {
+        const ui = recordingField(true);
+        await vi.advanceTimersByTimeAsync(0);
+        ui.send.mockResolvedValue({ ok: false, error: "folderChangeFailed" });
+        ui.input.focus();
+        document.getElementById("target-listbox").children[0].click();
+        await ui.field.saved();
+        expect(ui.input.value).toBe(shown("Private / Calls"));
+        expect(document.getElementById("target-error").hidden).toBe(false);
+        expect(ui.container.hidden).toBe(false);
     });
 });

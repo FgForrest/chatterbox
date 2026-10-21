@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { assertCategorizableFolderInput } from "@/lib/folders/folders";
 import { readProcessing } from "@/lib/pipeline/state";
 import { enqueueRecordingSessionFinalize } from "@/lib/recording-sessions/finalize-job";
 import { parseCompleteRecordingSessionBody } from "@/lib/recording-sessions/metadata";
@@ -59,6 +60,20 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
+    if (typeof input.folderId === "string") {
+        try {
+            await assertCategorizableFolderInput(authn.user.id, input.folderId);
+        } catch (error) {
+            if (error instanceof AppError && error.statusCode === 400) {
+                throw new AppError(error.code, error.message, 400, {
+                    ...error.details,
+                    field: "folderId",
+                });
+            }
+            throw error;
+        }
+    }
+
     const allChunks = await listRecordingSessionChunks(session.id);
     const expectedCount = input.truncatedAtChunk ?? input.chunkCount;
     const chunks = allChunks.filter((chunk) => chunk.index < expectedCount);
@@ -85,6 +100,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     }
 
     const completing = await markRecordingSessionCompleting({
+        folderId: input.folderId,
         sessionId: session.id,
         userId: authn.user.id,
         endedAt: input.endedAt,
@@ -118,7 +134,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         userId: authn.user.id,
         sessionId: session.id,
     });
-    await setRecordingSessionJob(session.id, enqueued.job.id);
+    await setRecordingSessionJob(session.id, authn.user.id, enqueued.job.id);
 
     return NextResponse.json(
         serializeRecordingSession(
