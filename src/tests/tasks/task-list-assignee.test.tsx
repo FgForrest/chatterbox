@@ -95,6 +95,7 @@ const task: TaskListItem = {
     status: "open",
     text: "Send the draft",
     assignee: firstPerson,
+    assigneeHasEmail: true,
     assigneeHint: null,
     assigneeCheck: false,
     dueDate: null,

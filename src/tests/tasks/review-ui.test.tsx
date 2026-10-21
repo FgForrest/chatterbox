@@ -42,6 +42,7 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         status: "proposed",
         text: "Send the revised contract",
         assignee: { personId: "person-1", name: "Ada" },
+        assigneeHasEmail: true,
         assigneeHint: null,
         assigneeCheck: false,
         dueDate: "2026-10-22",
@@ -439,10 +440,9 @@ describe("task review rows", () => {
             />,
         );
 
-        expect(screen.getByRole("checkbox", { name: "Done" })).toHaveProperty(
-            "disabled",
-            true,
-        );
+        const checkbox = screen.getByRole("checkbox", { name: "Done" });
+        expect(checkbox).toHaveProperty("disabled", false);
+        expect(checkbox.getAttribute("aria-disabled")).toBe("true");
         expect(
             screen.getByRole("button", { name: "Assigned to Ada" }),
         ).toHaveProperty("disabled", true);

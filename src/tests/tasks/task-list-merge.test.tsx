@@ -72,6 +72,7 @@ it("links and labels a task with its evidence item metadata", () => {
         status: "open",
         text: "Follow up",
         assignee: null,
+        assigneeHasEmail: false,
         assigneeHint: null,
         assigneeCheck: false,
         dueDate: null,
