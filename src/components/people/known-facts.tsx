@@ -76,8 +76,6 @@ export interface FactEditing {
     subject: { kind: "person" | "entity"; id: string; typeKey: string };
     relations: readonly FactRelation[];
     typeLabels: Record<string, string>;
-    /** The scope of the viewer's own facts: the Organization's for its account. */
-    ownScope: "personal" | "org";
     canCurateOrganization?: boolean;
 }
 
@@ -217,7 +215,7 @@ export function KnownFacts({
                         {group.facts.map((fact) => {
                             const own =
                                 editing !== undefined &&
-                                (fact.scope === editing.ownScope ||
+                                (fact.scope === "personal" ||
                                     (fact.scope === "org" &&
                                         editing.canCurateOrganization));
                             const relationKey = group.key.split("|")[0] ?? "";
@@ -403,8 +401,6 @@ export function OtherNames({
     names: OtherName[];
     editing?: {
         target: { personId: string } | { entityId: string };
-        /** The scope of the viewer's own names. */
-        ownScope: "personal" | "org";
         canCurateOrganization?: boolean;
     };
 }) {
@@ -471,7 +467,7 @@ export function OtherNames({
                 {aliases.map((name) =>
                     editing &&
                     name.id &&
-                    (name.scope === editing.ownScope ||
+                    (name.scope === "personal" ||
                         (name.scope === "org" &&
                             editing.canCurateOrganization)) ? (
                         <span

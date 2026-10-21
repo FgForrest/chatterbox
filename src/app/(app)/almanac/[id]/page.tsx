@@ -113,7 +113,6 @@ export default async function PersonPage({ params }: Params) {
                     },
                     relations: almanac.relations,
                     typeLabels: almanac.typeLabels,
-                    ownScope: "personal",
                     canCurateOrganization: organization,
                 }}
                 appearances={appearances

@@ -75,7 +75,6 @@ export default async function EntityPage({ params }: Params) {
                     },
                     relations: almanac.relations,
                     typeLabels: almanac.typeLabels,
-                    ownScope: "personal",
                     canCurateOrganization: organization,
                 }}
             />

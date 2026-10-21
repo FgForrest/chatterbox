@@ -13,7 +13,11 @@ import EntityPage from "@/app/(app)/almanac/things/[id]/page";
 import ThingsPage from "@/app/(app)/almanac/things/page";
 import VocabularyPage from "@/app/(app)/almanac/vocabulary/page";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
+import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
+import type { PageRelation } from "@/lib/knowledge/fact-page";
 import { listOwnTypes } from "@/lib/knowledge/vocabulary";
+
+const viewer = vi.hoisted(() => ({ id: "curator" }));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -23,7 +27,11 @@ vi.mock("next/navigation", () => ({
     redirect: vi.fn(),
 }));
 vi.mock("next-intl", () => ({
-    useExtracted: () => (message: string) => message,
+    useExtracted: () => (message: string, values?: Record<string, string>) =>
+        Object.entries(values ?? {}).reduce(
+            (text, [key, value]) => text.replace(`{${key}}`, value),
+            message,
+        ),
     useLocale: () => "en",
 }));
 vi.mock("next-intl/server", () => ({
@@ -31,7 +39,7 @@ vi.mock("next-intl/server", () => ({
 }));
 vi.mock("@/lib/auth-server", () => ({
     requireAuth: async () => ({
-        user: { id: "curator", email: "curator@example.test" },
+        user: { id: viewer.id, email: `${viewer.id}@example.test` },
     }),
 }));
 vi.mock("@/lib/authz/curator", () => ({ userCuratesOrganizationNow: vi.fn() }));
@@ -72,10 +80,39 @@ vi.mock("@/lib/knowledge/entities", () => ({
     }),
 }));
 vi.mock("@/lib/knowledge/aliases", () => ({
-    listAliases: async () => [],
+    listAliases: async (_userId: string, target: KnowledgeTarget) =>
+        (["org", "personal"] as const)
+            .filter((scope) => viewer.id !== "org" || scope === "org")
+            .map((scope) => ({
+                id: `${scope}-alias`,
+                text: `${scope} nickname`,
+                kind: "alias" as const,
+                scope,
+                language: null,
+                provider: null,
+                personId: "personId" in target ? target.personId : null,
+                entityId: "entityId" in target ? target.entityId : null,
+            })),
     aliasTextsVisibleTo: async () => new Map(),
 }));
-vi.mock("@/lib/knowledge/fact-page", () => ({ factsForPage: async () => [] }));
+vi.mock("@/lib/knowledge/fact-page", () => ({
+    factsForPage: async (): Promise<PageRelation[]> => [
+        {
+            key: "described_as",
+            label: "described as",
+            facts: (["org", "personal"] as const)
+                .filter((scope) => viewer.id !== "org" || scope === "org")
+                .map((scope) => ({
+                    id: `${scope}-fact`,
+                    direction: "subject",
+                    other: { kind: "literal", text: `${scope} fact` },
+                    scope,
+                    origin: "manual",
+                    evidence: [],
+                })),
+        },
+    ],
+}));
 vi.mock("@/lib/knowledge/vocabulary", () => ({
     listOwnTypes: vi.fn(async () => [
         {
@@ -115,6 +152,7 @@ vi.mock("@/lib/knowledge/vocabulary-labels-server", () => ({
 
 describe("curator Almanac pages", () => {
     beforeEach(() => {
+        viewer.id = "curator";
         vi.mocked(userCuratesOrganizationNow).mockResolvedValue(true);
     });
     afterEach(() => {
@@ -151,6 +189,59 @@ describe("curator Almanac pages", () => {
         for (const name of ["Merge into…", "Edit", "Change type", "Erase"]) {
             expect(screen.queryByRole("button", { name })).toBeNull();
         }
+    });
+
+    describe.each([
+        ["person", PersonPage],
+        ["thing", EntityPage],
+    ] as const)("%s facts and nicknames", (id, page) => {
+        it.each([
+            ["curator", true],
+            ["member", false],
+        ] as const)("keeps personal controls and checks Organization controls for a %s", async (userId, canCurate) => {
+            viewer.id = userId;
+            vi.mocked(userCuratesOrganizationNow).mockResolvedValue(canCurate);
+            render(await page({ params: Promise.resolve({ id }) }));
+
+            for (const scope of ["org", "personal"] as const) {
+                const fact = screen.getByText(`${scope} fact`).closest("li");
+                expect(fact).not.toBeNull();
+                if (!fact) throw new Error("Missing fact row");
+                for (const name of ["Change fact", "Erase fact"]) {
+                    const control = within(fact).queryByRole("button", {
+                        name,
+                    });
+                    if (scope === "personal" || canCurate) {
+                        expect(control).not.toBeNull();
+                    } else {
+                        expect(control).toBeNull();
+                    }
+                }
+                expect(screen.getByText(`${scope} nickname`)).toBeTruthy();
+                const remove = screen.queryByRole("button", {
+                    name: `Remove ${scope} nickname`,
+                });
+                if (scope === "personal" || canCurate) {
+                    expect(remove).not.toBeNull();
+                } else {
+                    expect(remove).toBeNull();
+                }
+            }
+            expect(userCuratesOrganizationNow).toHaveBeenCalledWith(userId);
+        });
+
+        it("keeps Organization controls for the local Organization account", async () => {
+            viewer.id = "org";
+            render(await page({ params: Promise.resolve({ id }) }));
+            for (const name of [
+                "Change fact",
+                "Erase fact",
+                "Remove org nickname",
+            ]) {
+                expect(screen.getByRole("button", { name })).toBeTruthy();
+            }
+            expect(userCuratesOrganizationNow).toHaveBeenCalledWith("org");
+        });
     });
 
     it("opens the Organization vocabulary for its curator", async () => {

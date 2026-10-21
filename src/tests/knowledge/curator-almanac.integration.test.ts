@@ -444,6 +444,69 @@ describeWithDatabase("Organization curators manage the Almanac", () => {
         expect(await db().select().from(knowledgeEntities)).toEqual([]);
     });
 
+    it("refuses a curator access to another member's private things and Organization merges into private things", async () => {
+        const shared = await createEntity("org", {
+            typeKey: "project",
+            name: "Orion",
+        });
+        const other = await createEntity("other", {
+            typeKey: "project",
+            name: "Private Orion",
+        });
+        const own = await createEntity("curator", {
+            typeKey: "project",
+            name: "My Orion",
+        });
+        for (const [handler, method, body] of [
+            [renameEntity, "PATCH", { name: "Changed" }],
+            [mergeEntity, "POST", { mergeIntoId: shared.id }],
+            [eraseEntity, "DELETE", undefined],
+        ] as const) {
+            expect(
+                (
+                    await call(handler, "curator", method, body, {
+                        id: other.id,
+                    })
+                ).status,
+            ).toBe(404);
+        }
+        expect(await getEntity("other", other.id)).toMatchObject({
+            name: "Private Orion",
+            mergedIntoId: null,
+            scope: "personal",
+        });
+        expect(
+            (
+                await call(
+                    mergeEntity,
+                    "curator",
+                    "POST",
+                    { mergeIntoId: own.id },
+                    { id: shared.id },
+                )
+            ).status,
+        ).toBe(403);
+        expect(await getEntity("member", shared.id)).toMatchObject({
+            name: "Orion",
+            mergedIntoId: null,
+            scope: "org",
+        });
+        expect(
+            (
+                await call(
+                    mergeEntity,
+                    "curator",
+                    "POST",
+                    { mergeIntoId: shared.id },
+                    { id: own.id },
+                )
+            ).status,
+        ).toBe(200);
+        expect(await getEntity("curator", own.id)).toMatchObject({
+            mergedIntoId: shared.id,
+        });
+    });
+
     it("adds a private thing with nicknames using the curator's private vocabulary", async () => {
         const typeKey = await createPrivateType("curator", {
             kind: "entity",

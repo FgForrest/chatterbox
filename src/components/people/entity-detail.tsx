@@ -96,7 +96,6 @@ export function EntityDetail({
                 editing={
                     editing && {
                         target: { entityId: entity.id },
-                        ownScope: editing.ownScope,
                         canCurateOrganization: editing.canCurateOrganization,
                     }
                 }
