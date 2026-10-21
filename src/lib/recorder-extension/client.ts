@@ -27,6 +27,7 @@ export type RecorderExtensionState =
           installationId?: string;
           version?: string;
           micPermission?: MicrophonePermission;
+          setupPending?: boolean;
       }
     | {
           kind: "reachable";
@@ -37,6 +38,7 @@ export type RecorderExtensionState =
           installationId?: string;
           version?: string;
           micPermission?: MicrophonePermission;
+          setupPending?: boolean;
       };
 
 export interface PairResult {
@@ -58,6 +60,7 @@ interface PresenceReply {
     installationId?: string;
     unreachable?: boolean;
     micPermission?: MicrophonePermission;
+    setupPending?: boolean;
 }
 
 type ExternalSendMessage = (
@@ -110,6 +113,7 @@ function toState(
             version,
             installationId,
             ...(micPermission ? { micPermission } : {}),
+            ...(reply.setupPending === true ? { setupPending: true } : {}),
         };
     }
     return {
@@ -119,6 +123,7 @@ function toState(
         version,
         installationId,
         ...(micPermission ? { micPermission } : {}),
+        ...(reply.setupPending === true ? { setupPending: true } : {}),
     };
 }
 

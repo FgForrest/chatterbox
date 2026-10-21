@@ -216,7 +216,7 @@ import { newRecordFingerprint } from "@/lib/learn/validate-new-records";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
-import { updateProfile } from "@/lib/profiles/store";
+import { deletePersonalProfile, updateProfile } from "@/lib/profiles/store";
 import { requireRecordingView } from "@/lib/sharing/access";
 import type { StorageProvider } from "@/lib/storage/types";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
@@ -1700,6 +1700,56 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 await runJob(runId);
                 return { runId, tavesi };
             }
+
+            it("finishes a ready review after its personal profile is permanently deleted", async () => {
+                await setAutomaticSummary({ correctAfterLearn: false });
+                const { runId } = await readyRun();
+                const original = await resolveDefaultProfile(OWNER, "audio");
+                await expect(
+                    deletePersonalProfile({
+                        ownerUserId: OWNER,
+                        profileId: original.profile.id,
+                        actor: {
+                            kind: "user",
+                            actorId: OWNER,
+                            issuer: null,
+                            subject: null,
+                            capabilities: new Set(["use"]),
+                            clientId: null,
+                            clientPermissions: new Set(),
+                            verifiedAt: null,
+                        },
+                    }),
+                ).resolves.toEqual({ disposition: "tombstone" });
+                const response = await route(getReviewRoute, OWNER, "review");
+                const review = (await response.json()) as {
+                    items: { id: string; version: number }[];
+                };
+                const finished = await route(
+                    postFinishRoute,
+                    OWNER,
+                    "review/finish",
+                    {
+                        method: "POST",
+                        body: {
+                            versions: Object.fromEntries(
+                                review.items.map((item) => [
+                                    item.id,
+                                    item.version,
+                                ]),
+                            ),
+                        },
+                    },
+                );
+                expect(finished.status).toBe(200);
+                expect((await finished.json()).status).toBe("finished");
+                expect(await statusOf(runId)).toBe("finished");
+                const [retained] = await db()
+                    .select()
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, runId));
+                expect(retained?.profileRevisionId).toBe(original.revisionId);
+            });
 
             it("shows its items to the owner with the names they refer to, and to nobody else", async () => {
                 const { tavesi } = await readyRun();

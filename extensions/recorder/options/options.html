@@ -10,18 +10,83 @@
         <main>
             <h1><img src="../icons/icon-48.png" alt="" width="36" height="36" /><span data-i18n="extensionName">Chatterbox Meeting Recorder</span></h1>
 
-            <section id="data-use-section">
-                <h2 data-i18n="dataUseTitle">Before you connect or record</h2>
-                <p data-i18n="dataUseDisclosure">When you record, this extension captures your microphone and meeting audio, encrypts temporary audio chunks in this browser, and uploads them to the Chatterbox server you choose. That server decrypts them for storage and processing. Download a playable copy from your Chatterbox account after upload. The recorder key is encrypted in this browser. Your server operator controls data after upload. You must inform participants and obtain any required consent.</p>
-                <p><a href="https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="privacyPolicy">Read the extension privacy policy</a></p>
-                <p id="setup-origin"></p>
-                <label id="data-use-label" class="check">
-                    <input id="data-use-check" type="checkbox" />
-                    <span data-i18n="dataUseAgree">I understand and agree to this data handling.</span>
-                </label>
-                <button id="accept-data-use" class="primary" type="button" data-i18n="dataUseAccept">Agree and continue</button>
-                <button id="setup-connect" type="button" hidden data-i18n="setupConnect"></button>
-                <p id="data-use-status" class="status"></p>
+            <section id="setup-section" aria-labelledby="setup-title">
+                <h2 id="setup-title" data-i18n="setupTitle"></h2>
+                <p class="hint" data-i18n="setupIntro"></p>
+                <ol class="steps">
+                    <li id="step-consent" class="step">
+                        <span id="mark-consent" class="mark" aria-hidden="true">1</span>
+                        <div><h3 data-i18n="dataUseTitle"></h3><p id="consent-summary" class="sum" hidden></p></div>
+                        <div id="consent-body" class="step-body">
+                            <ul class="facts">
+                                <li data-i18n="dataUseCapture"></li>
+                                <li data-i18n="dataUseProcessing"></li>
+                                <li data-i18n="dataUseParticipants"></li>
+                            </ul>
+                            <details>
+                                <summary data-i18n="dataUseFull"></summary>
+                                <p class="hint" data-i18n="dataUseDisclosure"></p>
+                                <p><a href="https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="privacyPolicy"></a></p>
+                            </details>
+                            <button id="accept-data-use" class="primary" type="button" data-i18n="dataUseAccept"></button>
+                            <p id="data-use-status" class="status" role="status"></p>
+                        </div>
+                    </li>
+                    <li id="step-microphone" class="step">
+                        <span id="mark-microphone" class="mark" aria-hidden="true">2</span>
+                        <div><h3 data-i18n="microphone"></h3><p id="microphone-summary" class="sum" hidden></p></div>
+                        <div id="microphone-body" class="step-body" hidden>
+                            <p id="setup-mic-intro"></p>
+                            <div id="mic-dialog-example" class="mini">
+                                <div data-i18n="micPromptTitle"></div>
+                                <div class="hint" data-i18n="micPromptUse"></div>
+                                <div id="mic-permanent" class="prompt-choice pick-this"></div>
+                                <div id="mic-once" class="prompt-choice"></div>
+                                <div id="mic-never" class="prompt-choice"></div>
+                            </div>
+                            <p id="setup-mic-hint" class="hint"></p>
+                            <p id="setup-mic-status" class="status" role="status"></p>
+                            <p id="mic-managed-hint" class="hint" hidden></p>
+                            <div class="row">
+                                <button id="setup-grant-mic" class="primary" type="button" data-i18n="setupGrantMic"></button>
+                                <button id="open-mic-settings" type="button" hidden data-i18n="openMicSettings"></button>
+                                <button id="skip-mic" class="link" type="button" data-i18n="notNow"></button>
+                            </div>
+                        </div>
+                    </li>
+                    <li id="step-connect" class="step">
+                        <span id="mark-connect" class="mark" aria-hidden="true">3</span>
+                        <div><h3 data-i18n="setupConnectionTitle"></h3><p id="connect-summary" class="sum" hidden></p></div>
+                        <div id="connect-body" class="step-body" hidden>
+                            <p id="setup-origin"></p>
+                            <div id="setup-tab-choices" class="picks"></div>
+                            <div id="setup-address-field" hidden>
+                                <label for="setup-address" data-i18n="setupAddress"></label>
+                                <input id="setup-address" type="text" inputmode="url" autocomplete="url" placeholder="klepna.example.com" />
+                                <p class="hint" data-i18n="setupAddressHint"></p>
+                            </div>
+                            <p id="site-access-hint" class="hint"></p>
+                            <button id="setup-connect" class="primary" type="button" data-i18n="connect"></button>
+                            <p id="setup-connection-status" class="status" role="status"></p>
+                            <div id="setup-fallback" hidden>
+                                <p id="setup-fallback-text"></p>
+                                <button id="setup-focus" type="button" data-i18n="setupFocus"></button>
+                            </div>
+                        </div>
+                    </li>
+                </ol>
+            </section>
+            <section id="setup-ready" class="ready" hidden aria-live="polite">
+                <span class="mark" aria-hidden="true">✓</span>
+                <div>
+                    <h2 data-i18n="setupReady"></h2>
+                    <p id="setup-ready-summary" class="hint"></p>
+                    <p class="hint" data-i18n="setupReadyHint"></p>
+                    <div class="row">
+                        <button id="setup-return" class="primary" type="button" hidden data-i18n="setupReturn"></button>
+                        <button id="ready-grant-mic" type="button" hidden data-i18n="setupGrantMic"></button>
+                    </div>
+                </div>
             </section>
 
             <section id="pending-pair" hidden>
@@ -36,29 +101,24 @@
                 <p id="pending-status" class="status"></p>
             </section>
 
-            <section>
-                <h2 data-i18n="connection">Connection</h2>
-                <p class="hint" data-i18n="optionsIntro">Open your Chatterbox instance, go to Settings → Meeting Recorder, and click Set up recorder. Or enter the details here.</p>
+            <details id="manual-connection">
+                <summary data-i18n="setupManual"></summary>
                 <label for="server-url" data-i18n="serverUrl">Server URL</label>
-                <input id="server-url" type="url" placeholder="https://example.com" />
+                <input id="server-url" type="url" placeholder="https://klepna.example.com" />
                 <label for="api-key" data-i18n="recorderKey">Recorder key</label>
                 <input id="api-key" type="password" placeholder="op_…" />
-                <div class="row">
-                    <button id="save-connection" class="primary" type="button" data-i18n="saveGrant">Save and grant access</button>
-                    <button id="refresh-config" type="button" data-i18n="refreshDefaults">Refresh server defaults</button>
-                    <button id="disconnect" type="button" data-i18n="disconnect">Disconnect</button>
-                </div>
-                <p id="connection-status" class="status"></p>
-                <p id="server-defaults" class="hint"></p>
-            </section>
-
+                <label id="manual-recovery-label" class="check" hidden>
+                    <input id="allow-pending-recovery" type="checkbox" />
+                    <span data-i18n="pendingRecoveryRebind"></span>
+                </label>
+                <button id="save-connection" type="button" data-i18n="saveGrant"></button>
+                <p id="connection-status" class="status" role="status"></p>
+            </details>
+            <p id="setup-later" class="hint later" data-i18n="setupLater"></p>
+            <div id="recorder-settings" hidden>
             <section id="pending-buffers" hidden>
                 <h2 data-i18n="pendingBuffers">Pending encrypted recordings</h2>
                 <p class="hint" data-i18n="pendingBuffersHint">Finish uploading or discard these recordings before changing the connection. Discarding permanently deletes the encrypted browser buffer.</p>
-                <label class="check">
-                    <input id="allow-pending-recovery" type="checkbox" />
-                    <span data-i18n="pendingRecoveryRebind">My old recorder token is unavailable. I will authorize these recordings for a new token in Chatterbox settings.</span>
-                </label>
                 <ul id="pending-buffer-list"></ul>
             </section>
 
@@ -94,14 +154,14 @@
 
             <section id="mic-section">
                 <h2 data-i18n="microphone">Microphone</h2>
-                <p class="hint" data-i18n="micIntro">Grant microphone access once.</p>
+
                 <button id="grant-mic" type="button" data-i18n="grantMic">Grant microphone access</button>
                 <p id="mic-status" class="status" role="status"></p>
                 <label class="check">
                     <input id="mic-reminder" type="checkbox" />
                     <span data-i18n="micReminder"></span>
                 </label>
-                <button id="setup-return" type="button" hidden data-i18n="setupReturn"></button>
+
                 <label for="mic-device" data-i18n="inputDevice">Input device (override)</label>
                 <select id="mic-device"><option value="" data-i18n="defaultRecommended">Default (recommended)</option></select>
             </section>
@@ -122,8 +182,18 @@
                 <textarea id="notice-text" rows="3"></textarea>
             </section>
 
+            <section>
+                <h2 data-i18n="connection"></h2>
+                <p id="paired-origin" class="status ok"></p>
+                <div class="row">
+                    <button id="refresh-config" type="button" data-i18n="refreshDefaults"></button>
+                    <button id="disconnect" type="button" data-i18n="disconnect"></button>
+                </div>
+                <p id="server-defaults" class="hint"></p>
+            </section>
             <button id="save-all" class="primary" type="button" data-i18n="saveSettings">Save settings</button>
             <p id="save-status" class="status"></p>
+            </div>
         </main>
         <script type="module" src="options.js"></script>
     </body>

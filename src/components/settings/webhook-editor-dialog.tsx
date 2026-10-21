@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clipboard } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -172,7 +172,7 @@ export function WebhookEditorDialog({
                                 className="flex-1"
                                 onClick={copySecret}
                             >
-                                <Clipboard className="size-4" /> {i18n("Copy")}
+                                <Copy className="size-4" /> {i18n("Copy")}
                             </Button>
                             <Button
                                 type="button"

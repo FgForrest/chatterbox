@@ -21,6 +21,7 @@ import {
     parseLearnOutput,
 } from "@/lib/learn/output";
 import { learnReviewLanguageRule } from "@/lib/learn/review-language";
+import { repairLearnReviewProse } from "@/lib/learn/review-prose";
 import {
     anchorCorrections,
     type FallbackResult,
@@ -74,6 +75,7 @@ const BRIDGE_SYSTEM = [
     "You get a meeting transcript, the relation types and entity types you may use, and the speaker labels nobody has named yet.",
     DATA_RULE,
     "Look things up with the knowledge base tools: find_entities for words that may name a person, organization, project, product or term (as written, misheard or not), get_entity and find_facts for what a record says. Use only ids the tools returned. Before proposing a new record, look its name up again in its base form (the nominative, spelled right where it sounds misheard) and, for a nickname or short form, by the full name it stands for (Honza: Jan); only a name none of these finds may be a new record.",
+    "Use find_entities for every distinct named thing, acronym, abbreviation and specialist term in the transcript, including possible mishearings. Empty lookup results identify names to offer in newRecords. Do not stop after finding people or after the first few things: check the remaining transcript names too. No facts or speaker identity are needed to offer an unknown thing.",
     "For each unnamed speaker label, inspect adjacent address-and-reply turns and call find_entities for the spoken name or nickname and its base form. Check every returned person with that name before deciding whether the label is identifiable.",
     "Propose only what the transcript itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
     SPEAKER_RULE,
@@ -123,7 +125,7 @@ export async function runBridgePass(
     };
     const languageRule = learnReviewLanguageRule(input.reviewLocale);
     let reply = await input.chat.complete({
-        system: `${BRIDGE_SYSTEM} ${languageRule}`,
+        system: `${languageRule} ${BRIDGE_SYSTEM}`,
         user,
         schema,
         mcp: {
@@ -150,7 +152,15 @@ export async function runBridgePass(
             throw new LearnOutputUnusable(answer.error);
         }
     }
-    const output: LearnOutput = answer.output;
+    const output: LearnOutput = await repairLearnReviewProse(
+        answer.output,
+        input.reviewLocale,
+        (request) => {
+            result.calls++;
+            result.repairs++;
+            return input.chat.complete({ ...request, mcp: null });
+        },
+    );
     result.output = {
         ...output,
         corrections: anchorCorrections(output.corrections, input.turns),

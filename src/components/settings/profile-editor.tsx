@@ -665,9 +665,12 @@ export function ProfileEditor({
     };
 
     const readOnly = profile?.canEdit === false;
-    const dialogTitle = profile
-        ? i18n("Edit {name}", { name: profile.name })
-        : i18n("Profile editor");
+    let dialogTitle = i18n("Profile editor");
+    if (profile && readOnly) {
+        dialogTitle = i18n("View {name}", { name: profile.name });
+    } else if (profile) {
+        dialogTitle = i18n("Edit {name}", { name: profile.name });
+    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>

@@ -10,8 +10,10 @@ import {
 } from "vitest";
 import {
     asyncJobs,
+    chatterItems,
     processingProfileRevisions,
     processingProfiles,
+    transcriptions,
     userSettings,
     users,
 } from "@/db/schema";
@@ -59,7 +61,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
-import { decryptText } from "@/lib/encryption/fields";
+import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 import {
@@ -67,16 +69,20 @@ import {
     createProfile,
     DefaultProfileArchiveError,
     deletePersonalProfile,
+    deleteProfile,
     duplicateProfile,
     getDefaultProfile,
     getProfile,
+    listActorProfileSections,
     listProfiles,
     ProfilePermissionError,
     ProfileVersionConflictError,
     profileDeleteDisposition,
+    restoreProfile,
     setDefaultProfile,
     updateProfile,
 } from "@/lib/profiles/store";
+import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -156,6 +162,7 @@ describeWithDatabase("profile store", () => {
         mockEnv.ORG_ACCOUNT_EMAIL = undefined;
         mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
         await db().delete(asyncJobs);
+        await db().delete(chatterItems).where(eq(chatterItems.userId, ALICE));
         await db()
             .delete(processingProfiles)
             .where(
@@ -489,7 +496,7 @@ describeWithDatabase("profile store", () => {
             ownerUserId: ALICE,
             scope: "personal",
             channel: "audio",
-            name: "Calls copy",
+            name: "Calls (copy)",
             isDefault: false,
             settings: original.settings,
         });
@@ -536,7 +543,7 @@ describeWithDatabase("profile store", () => {
         });
     });
 
-    it("refuses to delete the current default without an Organization fallback", async () => {
+    it("refuses to delete an unused current default without an Organization fallback", async () => {
         await ensureProfiles(ALICE);
         const [current] = await db()
             .select({ id: processingProfiles.id })
@@ -557,9 +564,16 @@ describeWithDatabase("profile store", () => {
                 actor: actor(ALICE),
             }),
         ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
+        await expect(
+            getDefaultProfile(ALICE, "audio", ALICE),
+        ).resolves.toMatchObject({
+            id: current?.id,
+            isDefault: true,
+            deletedAt: null,
+        });
     });
 
-    it("deletes a concurrently assigned default and follows the Organization fallback", async () => {
+    it("deletes a concurrently assigned pointer and follows the Organization default", async () => {
         await ensureProfiles(ALICE);
         const target = await createProfile({
             ownerUserId: ALICE,
@@ -641,10 +655,10 @@ describeWithDatabase("profile store", () => {
         expect(settings?.defaultAudioProfileId).toBe(target.id);
         await expect(
             getProfile(ALICE, target.id, ALICE),
-        ).resolves.toMatchObject({ id: target.id, archivedAt: null });
+        ).resolves.toMatchObject({ id: target.id, deletedAt: null });
     });
 
-    it("archives a profile referenced by another owner's queued job payload", async () => {
+    it("tombstones a profile referenced by another owner's queued job payload", async () => {
         const created = await createProfile({
             ownerUserId: ALICE,
             actor: actor(ALICE),
@@ -673,7 +687,7 @@ describeWithDatabase("profile store", () => {
             });
 
         await expect(profileDeleteDisposition(ALICE, created.id)).resolves.toBe(
-            "archive",
+            "tombstone",
         );
         await expect(
             deletePersonalProfile({
@@ -681,7 +695,7 @@ describeWithDatabase("profile store", () => {
                 profileId: created.id,
                 actor: actor(ALICE),
             }),
-        ).resolves.toEqual({ disposition: "archive" });
+        ).resolves.toEqual({ disposition: "tombstone" });
         const [revision] = await db()
             .select({ id: processingProfileRevisions.id })
             .from(processingProfileRevisions)
@@ -694,7 +708,7 @@ describeWithDatabase("profile store", () => {
         expect(revision?.id).toBe(created.currentRevisionId);
     });
 
-    it("serializes deletion so parallel requests cannot remove the last two profiles", async () => {
+    it("deletes the last two unused profiles without retaining unused history", async () => {
         const first = await createProfile({
             ownerUserId: ALICE,
             actor: actor(ALICE),
@@ -726,14 +740,14 @@ describeWithDatabase("profile store", () => {
         ]);
 
         expect(results.map((result) => result?.disposition).sort()).toEqual([
-            "archive",
+            "delete",
             "delete",
         ]);
         const remaining = await db()
             .select({ id: processingProfiles.id })
             .from(processingProfiles)
             .where(eq(processingProfiles.ownerUserId, ALICE));
-        expect(remaining).toHaveLength(1);
+        expect(remaining).toHaveLength(0);
     });
 
     it("searches decrypted names before paginating and filters channel and scope", async () => {
@@ -765,6 +779,37 @@ describeWithDatabase("profile store", () => {
         expect(result.items.map(({ name }) => name)).toEqual([
             "Weekly interview",
         ]);
+    });
+
+    it("seeds live defaults when the owner has only tombstones", async () => {
+        await ensureProfiles(ALICE);
+        const previous = await db()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, ALICE));
+        await db()
+            .update(processingProfiles)
+            .set({ deletedAt: new Date() })
+            .where(eq(processingProfiles.ownerUserId, ALICE));
+        await Promise.all([ensureProfiles(ALICE), ensureProfiles(ALICE)]);
+        const profiles = await db()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, ALICE));
+        const live = profiles.filter((profile) => profile.deletedAt === null);
+        expect(live).toHaveLength(previous.length);
+        expect(
+            live
+                .filter((profile) => profile.isDefault)
+                .map((profile) => profile.channel)
+                .sort(),
+        ).toEqual(["audio", "mail"]);
+        expect(profiles.filter((profile) => profile.deletedAt)).toHaveLength(
+            previous.length,
+        );
+        await expect(
+            getDefaultProfile(ALICE, "audio", ALICE),
+        ).resolves.toMatchObject({ channel: "audio", deletedAt: null });
     });
 
     it("serializes parallel seeding into exactly one complete set", async () => {
@@ -806,5 +851,290 @@ describeWithDatabase("profile store", () => {
             ),
         ).toHaveLength(3);
         expect(profiles.filter(({ isDefault }) => isDefault)).toHaveLength(2);
+    });
+    it.each([
+        "en",
+        "cs-CZ",
+    ] as const)("copies the current revision into Organization with a localized %s name", async (locale) => {
+        mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.ORG_ACCOUNT_EMAIL = "profiles-organization@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "test-password";
+        const orgActor: ActorContext = {
+            ...actor(ORGANIZATION),
+            kind: "local-org",
+        };
+        const source = await createProfile({
+            ownerUserId: ORGANIZATION,
+            actor: orgActor,
+            scope: "organization",
+            channel: "audio",
+            name: "Meetings",
+            settings: defaultProfileSettings("audio"),
+            isDefault: true,
+        });
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.focus = "Current revision";
+        settings.steps.tasks.enabled = false;
+        await updateProfile({
+            ownerUserId: ORGANIZATION,
+            profileId: source.id,
+            actor: orgActor,
+            expectedVersion: source.version,
+            settings,
+        });
+        const copy = await duplicateProfile({
+            sourceOwnerUserId: ORGANIZATION,
+            profileId: source.id,
+            actor: orgActor,
+            scope: "organization",
+            locale,
+        });
+        expect(copy).toMatchObject({
+            ownerUserId: ORGANIZATION,
+            scope: "organization",
+            name: `Meetings (${locale === "cs-CZ" ? "kopie" : "copy"})`,
+            isDefault: false,
+            settings,
+        });
+        expect(copy.currentRevisionId).not.toBe(source.currentRevisionId);
+    });
+
+    it("hides a tombstone and refuses every lifecycle mutation while retaining revisions", async () => {
+        const source = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "History",
+            settings: defaultProfileSettings("audio"),
+        });
+        await db()
+            .insert(asyncJobs)
+            .values({
+                id: "tombstone-history",
+                userId: BOB,
+                kind: "summary",
+                subjectId: "item-history",
+                status: "pending",
+                payload: { profileRevisionId: source.currentRevisionId },
+            });
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: source.id,
+                actor: actor(ALICE),
+            }),
+        ).resolves.toEqual({ disposition: "tombstone" });
+        const [stored] = await db()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, source.id));
+        expect(stored?.deletedAt).toBeInstanceOf(Date);
+        expect(
+            await getProfile(ALICE, source.id, ALICE, {
+                includeArchived: true,
+            }),
+        ).toBeNull();
+        expect(
+            (
+                await listProfiles({
+                    ownerUserId: ALICE,
+                    actorUserId: ALICE,
+                    includeArchived: true,
+                })
+            ).items,
+        ).toEqual([]);
+        const input = {
+            ownerUserId: ALICE,
+            profileId: source.id,
+            actor: actor(ALICE),
+        };
+        await expect(restoreProfile(input)).resolves.toBe(false);
+        await expect(archiveProfile(input)).resolves.toBe(false);
+        await expect(
+            updateProfile({ ...input, expectedVersion: 2, name: "Revive" }),
+        ).resolves.toBeNull();
+        await expect(setDefaultProfile(input)).rejects.toBeInstanceOf(
+            ProfilePermissionError,
+        );
+        await expect(
+            duplicateProfile({
+                sourceOwnerUserId: ALICE,
+                profileId: source.id,
+                actor: actor(ALICE),
+            }),
+        ).rejects.toBeInstanceOf(ProfilePermissionError);
+        expect(
+            await db()
+                .select()
+                .from(processingProfileRevisions)
+                .where(eq(processingProfileRevisions.profileId, source.id)),
+        ).toHaveLength(1);
+    });
+
+    it("paginates filtered sections independently and clamps an empty last page", async () => {
+        for (let i = 0; i < 4; i++)
+            await createProfile({
+                ownerUserId: ALICE,
+                actor: actor(ALICE),
+                scope: "personal",
+                channel: "audio",
+                name: `Meeting ${i}`,
+                settings: defaultProfileSettings("audio"),
+            });
+        const sections = await listActorProfileSections({
+            actor: actor(ALICE),
+            search: "Meeting",
+            channel: "audio",
+            pages: { organization: 1, personal: 2, archived: 8 },
+            limit: 2,
+        });
+        expect(sections.personal.total).toBe(4);
+        expect(sections.personal.items.map((p) => p.name)).toEqual([
+            "Meeting 2",
+            "Meeting 3",
+        ]);
+        expect(sections.archived).toMatchObject({
+            items: [],
+            total: 0,
+            offset: 0,
+        });
+    });
+
+    it("requires an archived non-default Organization profile for permanent deletion", async () => {
+        mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.ORG_ACCOUNT_EMAIL = "profiles-organization@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "test-password";
+        const orgActor: ActorContext = {
+            ...actor(ORGANIZATION),
+            kind: "local-org",
+        };
+        const source = await createProfile({
+            ownerUserId: ORGANIZATION,
+            actor: orgActor,
+            scope: "organization",
+            channel: "audio",
+            name: "Org",
+            settings: defaultProfileSettings("audio"),
+        });
+        const input = {
+            ownerUserId: ORGANIZATION,
+            profileId: source.id,
+            actor: orgActor,
+        };
+        await expect(deleteProfile(input)).rejects.toThrow("Only archived");
+        await archiveProfile(input);
+        await expect(deleteProfile(input)).resolves.toEqual({
+            disposition: "delete",
+        });
+    });
+    it.each([
+        "topics",
+        "inputs",
+    ])("retains revisions referenced only in %s metadata", async (reference) => {
+        const source = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Metadata history",
+            settings: defaultProfileSettings("audio"),
+        });
+        await insertRecordings(db(), {
+            id: "metadata-recording",
+            userId: ALICE,
+            deviceSn: "SN",
+            plaudFileId: "metadata",
+            filename: "encrypted",
+            duration: 1000,
+            startTime: new Date(),
+            endTime: new Date(),
+            filesize: 0,
+            fileMd5: "0".repeat(32),
+            storageType: "local",
+            storagePath: "metadata.mp3",
+            plaudVersion: "1",
+        });
+        await db()
+            .insert(transcriptions)
+            .values({
+                userId: ALICE,
+                recordingId: "metadata-recording",
+                text: "encrypted",
+                source: "riffado",
+                provider: "openai",
+                model: "test",
+                topics:
+                    reference === "topics"
+                        ? encryptJsonField({
+                              profileRevisionId: source.currentRevisionId,
+                          })
+                        : null,
+                inputs:
+                    reference === "inputs"
+                        ? { itemProfileRevisionId: source.currentRevisionId }
+                        : null,
+            });
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: source.id,
+                actor: actor(ALICE),
+            }),
+        ).resolves.toEqual({ disposition: "tombstone" });
+    });
+    it("serializes restoring an Organization archive with permanent deletion", async () => {
+        mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.ORG_ACCOUNT_EMAIL = "profiles-organization@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "test-password";
+        const orgActor: ActorContext = {
+            ...actor(ORGANIZATION),
+            kind: "local-org",
+        };
+        const source = await createProfile({
+            ownerUserId: ORGANIZATION,
+            actor: orgActor,
+            scope: "organization",
+            channel: "audio",
+            name: "Restore race",
+            settings: defaultProfileSettings("audio"),
+        });
+        const input = {
+            ownerUserId: ORGANIZATION,
+            profileId: source.id,
+            actor: orgActor,
+        };
+        await db()
+            .insert(asyncJobs)
+            .values({
+                id: "restore-history",
+                userId: ALICE,
+                kind: "summary",
+                subjectId: "item",
+                payload: { profileRevisionId: source.currentRevisionId },
+            });
+        await archiveProfile(input);
+        const [deletion, restoration] = await Promise.allSettled([
+            deleteProfile(input),
+            restoreProfile(input),
+        ]);
+        const [stored] = await db()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, source.id));
+        if (deletion.status === "fulfilled") {
+            expect(deletion.value).toEqual({ disposition: "tombstone" });
+            expect(restoration).toMatchObject({
+                status: "fulfilled",
+                value: false,
+            });
+            expect(stored?.deletedAt).toBeInstanceOf(Date);
+        } else {
+            expect(restoration).toMatchObject({
+                status: "fulfilled",
+                value: true,
+            });
+            expect(stored).toMatchObject({ archivedAt: null, deletedAt: null });
+        }
     });
 });

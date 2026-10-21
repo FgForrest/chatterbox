@@ -11,7 +11,7 @@
  * Organization's aliases are everyone's.
  */
 
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     knowledgeAliases,
@@ -23,12 +23,14 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { entitiesVisibleTo } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { matchNames } from "@/lib/knowledge/name-match";
 import {
     lockOrgPeopleShared,
     visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = Pick<typeof db, "select">;
@@ -287,6 +289,8 @@ export async function aliasTextsVisibleTo(
  * private recording, the organization account on a shared one). The next
  * run may then pre-tick the same correction. Only a person's confirmation
  * teaches: callers skip pre-ticked corrections, and bump `scopeUserId`.
+ * Inflected forms already covered by a heard-as name in the same language
+ * and provider are omitted.
  */
 export async function teachHeardAsInTx(
     tx: Tx,
@@ -306,16 +310,48 @@ export async function teachHeardAsInTx(
         correctionId: string;
     },
 ): Promise<void> {
+    const clean = cleanText(heard);
+    const languageCode = language?.slice(0, 16) ?? null;
+    const providerName = provider?.slice(0, 64) ?? null;
+    const existing = await tx
+        .select({ text: knowledgeAliases.text })
+        .from(knowledgeAliases)
+        .where(
+            and(
+                eq(knowledgeAliases.userId, scopeUserId),
+                targetCondition(target),
+                eq(knowledgeAliases.kind, "heard_as"),
+                languageCode === null
+                    ? isNull(knowledgeAliases.language)
+                    : eq(knowledgeAliases.language, languageCode),
+                providerName === null
+                    ? isNull(knowledgeAliases.provider)
+                    : eq(knowledgeAliases.provider, providerName),
+            ),
+        );
+    const key = stemmingLanguage(languageCode);
+    if (
+        matchNames(
+            clean,
+            existing.map((row, index) => ({
+                id: String(index),
+                names: [decryptText(row.text)],
+            })),
+            key ? { key, stem: (word) => stemVariants(word, key) } : undefined,
+        ).some((match) => match.reason === "exact" || match.reason === "stem")
+    ) {
+        return;
+    }
     await tx
         .insert(knowledgeAliases)
         .values({
             userId: scopeUserId,
             ...targetColumns(target),
             kind: "heard_as",
-            text: encryptText(heard),
-            textHmac: domainLookupHash(TEXT_DOMAIN, heard),
-            language: language?.slice(0, 16) ?? null,
-            provider: provider?.slice(0, 64) ?? null,
+            text: encryptText(clean),
+            textHmac: domainLookupHash(TEXT_DOMAIN, clean),
+            language: languageCode,
+            provider: providerName,
             correctionId,
             createdByUserId: scopeUserId,
         })

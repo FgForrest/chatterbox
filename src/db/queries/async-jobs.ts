@@ -80,6 +80,8 @@ function rowsOf<T>(result: unknown): T[] {
     return ((result as { rows?: T[] })?.rows ?? []) as T[];
 }
 
+type EnqueueExecutor = Pick<typeof db, "select" | "insert" | "update">;
+
 export interface EnqueueJobInput {
     userId: string;
     kind: string;
@@ -156,6 +158,7 @@ export async function enqueueJobInTx(
 
 export async function enqueueJob(
     input: EnqueueJobInput,
+    executor: EnqueueExecutor = db,
 ): Promise<EnqueueJobResult> {
     const values = {
         userId: input.userId,
@@ -168,7 +171,7 @@ export async function enqueueJob(
     };
 
     for (let attempt = 0; attempt < ENQUEUE_ATTEMPTS; attempt++) {
-        const [row] = await db
+        const [row] = await executor
             .insert(asyncJobs)
             .values(values)
             .onConflictDoNothing({
@@ -180,7 +183,7 @@ export async function enqueueJob(
         // Only a subject can conflict: NULLs are distinct in the index.
         if (!input.subjectId) break;
         if (input.takeOverDelayed) {
-            const [taken] = await db
+            const [taken] = await executor
                 .update(asyncJobs)
                 .set({ ...values, nextAttemptAt: new Date() })
                 .where(
@@ -189,7 +192,7 @@ export async function enqueueJob(
                         eq(asyncJobs.subjectId, input.subjectId),
                         eq(asyncJobs.status, "pending"),
                         eq(asyncJobs.attempts, 0),
-                        sql`${asyncJobs.nextAttemptAt} > now()`,
+                        sql`${asyncJobs.nextAttemptAt} > clock_timestamp()`,
                         ...Object.entries(
                             input.takeOverDelayed.payload ?? {},
                         ).map(
@@ -201,7 +204,11 @@ export async function enqueueJob(
                 .returning();
             if (taken) return { job: taken as AsyncJobRow, created: true };
         }
-        const active = await getActiveJob(input.kind, input.subjectId);
+        const active = await getActiveJob(
+            input.kind,
+            input.subjectId,
+            executor,
+        );
         if (active) return { job: active, created: false };
     }
     throw new Error(
@@ -257,8 +264,9 @@ export function delayBehindBacklog(input: {
 export async function getActiveJob(
     kind: string,
     subjectId: string,
+    executor: Pick<typeof db, "select"> = db,
 ): Promise<AsyncJobRow | null> {
-    const [row] = await db
+    const [row] = await executor
         .select()
         .from(asyncJobs)
         .where(

@@ -147,6 +147,7 @@ export async function generateTitleFromTranscription(
                     },
                 ],
                 temperature: 0.7,
+                maxOutputTokens: credentials.maxOutputTokens,
                 maxTokens: 50, // Titles should be short
             }),
         );

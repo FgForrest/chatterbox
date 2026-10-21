@@ -9,7 +9,11 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { AiCostPayer, recordingAiCost } from "@/lib/ai/usage-cost";
+import type {
+    AiCostPayer,
+    AiOperation,
+    recordingAiCost,
+} from "@/lib/ai/usage-cost";
 
 type CostSummary = Awaited<ReturnType<typeof recordingAiCost>>;
 
@@ -31,6 +35,18 @@ export function AiCostSummary({
     view?: "private" | "org";
 }) {
     const i18n = useExtracted();
+    const operations: Record<AiOperation, string> = {
+        transcription: i18n("Transcription"),
+        summary: i18n("Summary"),
+        title: i18n("Title"),
+        topics: i18n("Topics"),
+        learn: i18n("Learn"),
+        correction: i18n("Correction pass"),
+    };
+    const operationLabel = (operation: string) =>
+        Object.hasOwn(operations, operation)
+            ? operations[operation as AiOperation]
+            : i18n("Estimated AI spend");
     const [summary, setSummary] = useState<CostSummary | null>(null);
 
     useEffect(() => {
@@ -139,7 +155,7 @@ export function AiCostSummary({
                                     className="flex justify-between gap-4"
                                 >
                                     <span className="capitalize">
-                                        {operation}
+                                        {operationLabel(operation)}
                                         {payerSuffix(
                                             payer,
                                             "ml-1 normal-case opacity-70",

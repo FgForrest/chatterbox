@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 
 interface MergeCandidate {
     id: string;
@@ -97,11 +97,13 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                 body: JSON.stringify({ displayName, primaryEmail }),
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not save this person"),
-                    ),
+                    error.details?.reason === "internal_mail_address"
+                        ? i18n(
+                              "An inbound mail address cannot be used as a person's email address.",
+                          )
+                        : error.error || i18n("Could not save this person"),
                 );
                 return;
             }

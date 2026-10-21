@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { participantProposals } from "@/lib/learn/mail-candidates";
+
+vi.mock("@/lib/env", () => ({ env: { MAIL_DOMAIN: undefined } }));
 
 describe.each([
     "cs-CZ",

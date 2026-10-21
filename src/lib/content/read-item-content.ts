@@ -13,6 +13,7 @@ import {
 } from "@/lib/content/mail-content";
 import type { ItemContent } from "@/lib/content/types";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import {
     getPreferredTranscriptSource,
     resolvePrimaryTranscript,
@@ -99,16 +100,22 @@ async function readMailContent(
         segments:
             decryptJsonField<MailContentSource["segments"]>(content.segments) ??
             [],
-        participants: participants.map((participant) => ({
-            ref: participant.ref,
-            roles: participant.roles,
-            name: participant.name ? decryptText(participant.name) : null,
-            address: participant.address
+        participants: participants.map((participant) => {
+            const address = participant.address
                 ? decryptText(participant.address)
-                : null,
-            authenticated: participant.authenticated,
-            personId: participant.personId,
-        })),
+                : null;
+            return {
+                ref: participant.ref,
+                roles: participant.roles,
+                name: participant.name ? decryptText(participant.name) : null,
+                address,
+                authenticated: participant.authenticated,
+                personId:
+                    address && isInternalMailAddress(address)
+                        ? null
+                        : participant.personId,
+            };
+        }),
     });
 }
 

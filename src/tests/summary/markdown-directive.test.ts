@@ -13,6 +13,7 @@
  * and a prompt the user wrote themselves (which cannot be edited to say so).
  */
 
+import type * as OpenAIModule from "openai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     aiEnhancements,
@@ -29,6 +30,7 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
 } from "@/lib/ai/summary-presets";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
+import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
@@ -94,7 +96,7 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 }));
 
 vi.mock("openai", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("openai")>();
+    const actual = await importOriginal<typeof OpenAIModule>();
     return {
         ...actual,
         OpenAI: class {
@@ -218,9 +220,6 @@ async function summarize(
         choices: [{ message: { content: REPLY } }],
     });
 
-    const { generateSummaryForRecording } = await import(
-        "@/lib/summary/generate-summary"
-    );
     return generateSummaryForRecording("user-1", "rec-1", {
         trigger,
         presetId,
@@ -465,19 +464,13 @@ describe("output language under auto", () => {
         }
     });
 
-    it("adds Czech headings to the shared meeting prompt under auto", async () => {
+    it("uses thematic Czech minutes for the legacy meeting prompt under auto", async () => {
         await summarize({ detectedLanguage: "cs-CZ" }, "meeting-notes");
         expect(systemMessages()[0]).toContain("output in Czech");
-        expect(userMessages()[0]).toContain(
-            "Účastníci, Účel, Diskuse, Otevřené otázky",
-        );
-        expect(userMessages()[0]).toContain("Summarize this meeting recording");
-        expect(userMessages()[0]).toContain(
-            "Name each heading in the output language",
-        );
-        expect(userMessages()[0]).not.toContain(
-            "Attendees, Purpose, Discussion, Open questions",
-        );
+        expect(userMessages()[0]).toContain("Nejprve z této schůzky");
+        expect(userMessages()[0]).toContain("350–700");
+        expect(userMessages()[0]).not.toContain("Účastníci, Účel, Diskuse");
+        expect(userMessages()[0]).toContain("skutečně probíraných témat");
     });
 
     it("uses the transcription language setting when the provider returned none", async () => {
@@ -485,7 +478,7 @@ describe("output language under auto", () => {
             { defaultTranscriptionLanguage: "cs" },
             "meeting-notes",
         );
-        expect(userMessages()[0]).toContain("Účastníci, Účel, Diskuse");
+        expect(userMessages()[0]).toContain("skutečně probíraných témat");
     });
 
     it("uses the account language for a profile run when detection returned none", async () => {
@@ -493,12 +486,14 @@ describe("output language under auto", () => {
         expect(systemMessages()[0]).toContain(
             "Write all natural-language output in Czech",
         );
-        expect(userMessages()[0]).toContain("Shrňte tento zvukový přepis");
+        expect(userMessages()[0]).toContain(
+            "Nejprve z tohoto zvukového přepisu",
+        );
     });
 
     it("recognizes a provider's language name", async () => {
         await summarize({ detectedLanguage: "Czech" }, "meeting-notes");
-        expect(userMessages()[0]).toContain("Účastníci, Účel, Diskuse");
+        expect(userMessages()[0]).toContain("skutečně probíraných témat");
     });
 
     it("lets an explicit output language override the detected language", async () => {
@@ -508,7 +503,7 @@ describe("output language under auto", () => {
         );
         expect(systemMessages()[0]).toContain("output in English");
         expect(userMessages()[0]).toContain(
-            "Name each heading in the output language",
+            "named after the actual topics in the output language",
         );
     });
 

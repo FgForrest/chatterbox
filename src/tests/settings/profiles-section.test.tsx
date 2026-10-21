@@ -6,17 +6,20 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
+import { ProfileRowActions } from "@/components/settings/profile-row-actions";
 import { ProfilesSection } from "@/components/settings-sections/profiles-section";
 import {
     type AudioProfileSettings,
     defaultProfileSettings,
 } from "@/lib/profiles/settings";
 
-const { toastError, translate } = vi.hoisted(() => ({
+const { toastError, toastSuccess, translate } = vi.hoisted(() => ({
     toastError: vi.fn(),
+    toastSuccess: vi.fn(),
     translate: (text: string, values?: Record<string, unknown>) =>
         Object.entries(values ?? {}).reduce(
             (result, [key, value]) => result.replace(`{${key}}`, String(value)),
@@ -29,7 +32,7 @@ vi.mock("next-intl", () => ({
     useLocale: () => "en",
 }));
 vi.mock("sonner", () => ({
-    toast: { error: toastError, success: vi.fn() },
+    toast: { error: toastError, success: toastSuccess },
 }));
 
 type FetchCall = { url: string; method: string; body: unknown };
@@ -50,7 +53,7 @@ const profiles = [
         isDefault: true,
         isYourDefault: false,
         isOrganizationDefault: false,
-        deleteDisposition: "archive" as const,
+        deleteDisposition: "tombstone" as const,
         version: 2,
         canEdit: true,
         archivedAt: null,
@@ -95,7 +98,7 @@ const profiles = [
         isDefault: false,
         isYourDefault: false,
         isOrganizationDefault: false,
-        deleteDisposition: "archive" as const,
+        deleteDisposition: "tombstone" as const,
         version: 1,
         canEdit: true,
         archivedAt: null,
@@ -168,14 +171,23 @@ describe("Settings Profiles", () => {
     let calls: FetchCall[];
     let conflict = false;
     let canCreateOrganization = false;
+    let canCreatePersonal = true;
     let badRequest = false;
+    let extraProfiles: typeof profiles = [];
+    let emptyScopes: string[] = [];
+    let holdRestore: Promise<void> | null = null;
 
     beforeEach(() => {
         calls = [];
         conflict = false;
         canCreateOrganization = false;
+        canCreatePersonal = true;
         badRequest = false;
+        extraProfiles = [];
+        emptyScopes = [];
+        holdRestore = null;
         toastError.mockClear();
+        toastSuccess.mockClear();
         vi.stubGlobal(
             "fetch",
             vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -275,12 +287,68 @@ describe("Settings Profiles", () => {
                         },
                     });
                 }
+                if (url.endsWith("/duplicate") && method === "POST") {
+                    return Response.json({
+                        profile: {
+                            name:
+                                body.scope === "organization"
+                                    ? "Organization copy"
+                                    : "Personal copy",
+                        },
+                    });
+                }
                 if (url.startsWith("/api/settings/profiles?")) {
-                    const listedProfiles = url.includes("archived=true")
-                        ? [archivedProfile]
-                        : profiles;
+                    const params = new URL(url, "https://example.test")
+                        .searchParams;
+                    const liveProfiles = [...profiles, ...extraProfiles].map(
+                        (profile) => ({
+                            ...profile,
+                            canEdit:
+                                profile.scope === "organization"
+                                    ? canCreateOrganization
+                                    : profile.canEdit,
+                        }),
+                    );
+                    const archivedOrganization = {
+                        ...archivedProfile,
+                        id: "archived-organization",
+                        name: "Archived Organization",
+                        scope: "organization" as const,
+                    };
+                    const archives = [
+                        archivedProfile,
+                        ...(canCreateOrganization
+                            ? [archivedOrganization]
+                            : []),
+                    ];
+                    const listedProfiles =
+                        params.get("archived") === "true"
+                            ? archives
+                            : liveProfiles;
+                    function section(key: string) {
+                        const rows = emptyScopes.includes(key)
+                            ? []
+                            : key === "archived"
+                              ? archives
+                              : liveProfiles.filter((p) => p.scope === key);
+                        const page = Number(params.get(`${key}Page`) ?? 1);
+                        return {
+                            profiles: rows.slice((page - 1) * 10, page * 10),
+                            pagination: {
+                                page,
+                                pageSize: 10,
+                                total: rows.length,
+                                totalPages: Math.ceil(rows.length / 10),
+                            },
+                        };
+                    }
                     return Response.json({
                         profiles: listedProfiles,
+                        sections: {
+                            organization: section("organization"),
+                            personal: section("personal"),
+                            archived: section("archived"),
+                        },
                         defaults: {
                             audio: {
                                 selected: "organization_default",
@@ -302,7 +370,10 @@ describe("Settings Profiles", () => {
                                 scope: profile.scope,
                             })),
                         },
-                        permissions: { canCreateOrganization },
+                        permissions: {
+                            canCreateOrganization,
+                            canCreatePersonal,
+                        },
                         pagination: {
                             page: 1,
                             pageSize: 10,
@@ -311,6 +382,7 @@ describe("Settings Profiles", () => {
                         },
                     });
                 }
+                if (url.endsWith("/restore") && holdRestore) await holdRestore;
                 return Response.json({ success: true });
             }),
         );
@@ -321,13 +393,13 @@ describe("Settings Profiles", () => {
         vi.unstubAllGlobals();
     });
 
-    async function renderList() {
+    async function renderList(waitForButton = "Edit Default Profile") {
         render(
             <ConfirmDialogProvider>
                 <ProfilesSection />
             </ConfirmDialogProvider>,
         );
-        await screen.findByRole("button", { name: "Edit Default Profile" });
+        await screen.findByRole("button", { name: waitForButton });
     }
 
     async function edit(name: string) {
@@ -348,16 +420,13 @@ describe("Settings Profiles", () => {
         fireEvent.change(screen.getByRole("combobox", { name: "Channel" }), {
             target: { value: "mail" },
         });
-        fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), {
-            target: { value: "organization" },
-        });
 
         await waitFor(() =>
             expect(
                 calls.some(
                     (call) =>
                         call.url ===
-                        "/api/settings/profiles?q=meeting&channel=mail&scope=organization&page=1&pageSize=10",
+                        "/api/settings/profiles?q=meeting&channel=mail&sectioned=true&organizationPage=1&personalPage=1&archivedPage=1&pageSize=10",
                 ),
             ).toBe(true),
         );
@@ -369,8 +438,14 @@ describe("Settings Profiles", () => {
                 name: "Duplicate to personal Org Profile",
             }),
         ).toBeTruthy();
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "More actions: Default Profile",
+            }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
         expect(
-            screen.getByRole("button", { name: "Delete Default Profile" }),
+            await screen.findByRole("menuitem", { name: "Delete…" }),
         ).toBeTruthy();
     });
 
@@ -568,6 +643,12 @@ describe("Settings Profiles", () => {
         );
 
         expect(
+            await screen.findByRole("dialog", { name: "View Org Profile" }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("dialog", { name: "Edit Org Profile" }),
+        ).toBeNull();
+        expect(
             (
                 await screen.findByRole("combobox", {
                     name: "AI for transcription",
@@ -666,14 +747,26 @@ describe("Settings Profiles", () => {
             description:
                 "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
         },
-    ])("Delete confirmation for $name", ({ id, name, description }) => {
-        it("explains the server-selected disposition before deleting", async () => {
+    ])("Delete confirmation for $name", ({ id, name }) => {
+        it("explains permanent deletion before deleting", async () => {
             await renderList();
-            fireEvent.click(
-                screen.getByRole("button", { name: `Delete ${name}` }),
+            fireEvent.pointerDown(
+                screen.getByRole("button", { name: `More actions: ${name}` }),
+                { button: 0, ctrlKey: false, pointerType: "mouse" },
             );
-            expect(await screen.findByText(`Delete “${name}”?`)).toBeTruthy();
-            expect(await screen.findByText(description)).toBeTruthy();
+            fireEvent.click(
+                await screen.findByRole("menuitem", { name: "Delete…" }),
+            );
+            expect(
+                await screen.findByText(
+                    `Delete profile “${name}” permanently?`,
+                ),
+            ).toBeTruthy();
+            expect(
+                await screen.findByText(
+                    "The profile disappears and cannot be restored. Recordings, summaries and tasks made with it stay.",
+                ),
+            ).toBeTruthy();
             expect(
                 calls.some(
                     (call) =>
@@ -681,7 +774,9 @@ describe("Settings Profiles", () => {
                         call.method === "DELETE",
                 ),
             ).toBe(false);
-            fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+            fireEvent.click(
+                screen.getByRole("button", { name: "Delete permanently" }),
+            );
             await waitFor(() =>
                 expect(
                     calls.some(
@@ -694,12 +789,76 @@ describe("Settings Profiles", () => {
         });
     });
 
-    it("restores profiles from the archived filter", async () => {
+    it("disables deleting the effective personal default without an Organization fallback", async () => {
         await renderList();
-        fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), {
-            target: { value: "archived" },
-        });
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "More actions: Mail Profile" }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const remove = await screen.findByRole("menuitem", { name: "Delete…" });
+        expect(remove.getAttribute("aria-disabled")).toBe("true");
+        const reason = screen.getByText(
+            "Choose another default for mail before deleting this profile. There is no Organization default to take over.",
+        );
+        expect(remove.getAttribute("aria-describedby")).toBe(reason.id);
+        expect(remove.getAttribute("data-variant")).not.toBe("destructive");
+        fireEvent.click(remove);
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+        expect(
+            calls.some(
+                (call) =>
+                    call.url.endsWith("/mail-profile") &&
+                    call.method === "DELETE",
+            ),
+        ).toBe(false);
+    });
+
+    it("allows deleting an effective personal default when an Organization default can take over", async () => {
+        const personal = profiles[0];
+        if (!personal) throw new Error("Missing personal fixture");
+        extraProfiles = [
+            {
+                ...personal,
+                id: "personal-effective",
+                name: "Personal Effective",
+                isYourDefault: true,
+            },
+        ];
+        await renderList();
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "More actions: Personal Effective",
+            }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const remove = await screen.findByRole("menuitem", { name: "Delete…" });
+        expect(remove.getAttribute("aria-disabled")).not.toBe("true");
+        fireEvent.click(remove);
+        expect(
+            await screen.findByRole("alertdialog", {
+                name: "Delete profile “Personal Effective” permanently?",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("restores profiles from the collapsible Archived section", async () => {
+        await renderList();
+        fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+        expect(screen.queryByText("Archived Profile")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Show" }));
         await screen.findByText("Archived Profile");
+        const row = screen.getByText("Archived Profile").closest("li");
+        expect(row?.classList.contains("bg-muted/60")).toBe(true);
+        expect(
+            screen
+                .getByText("Archived Profile")
+                .classList.contains("text-muted-foreground"),
+        ).toBe(true);
+        const date = screen.getByText("Archived Oct 15, 2026");
+        expect(date.closest("p")?.textContent).toContain("for recordings");
+        expect(date.closest("p")?.textContent).toContain("Personal");
+        expect(date.tagName).toBe("TIME");
+        expect(date.getAttribute("datetime")).toBe(archivedProfile.archivedAt);
         fireEvent.click(
             screen.getByRole("button", { name: "Restore Archived Profile" }),
         );
@@ -755,5 +914,427 @@ describe("Settings Profiles", () => {
             ).value,
         ).toBe("Server focus");
         expect(toastError).toHaveBeenCalled();
+    });
+    it("groups profiles with counts and hides archived Organization rows from members", async () => {
+        await renderList();
+        expect(
+            screen.getByRole("heading", { name: "Organization" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "Personal" })).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "Archived" })).toBeTruthy();
+        expect(screen.queryByRole("combobox", { name: "Scope" })).toBeNull();
+        expect(screen.queryByText("Archived Organization")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "More actions: Org Profile" }),
+        ).toBeNull();
+        expect(
+            screen.getByRole("button", {
+                name: "Duplicate to personal Org Profile",
+            }).textContent,
+        ).toContain("Duplicate to personal profiles");
+    });
+
+    it.each([
+        "Org Profile",
+        "Default Profile",
+    ])("offers a curator both duplicate destinations for %s", async (name) => {
+        canCreateOrganization = true;
+        await renderList();
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: `Duplicate ${name}` }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const menu = await screen.findByRole("menu");
+        expect(
+            menu.classList.contains("max-w-[min(20rem,calc(100vw-1.5rem))]"),
+        ).toBe(true);
+        fireEvent.click(
+            await screen.findByRole("menuitem", {
+                name: /To the Organization/,
+            }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (c) =>
+                        c.url.endsWith(
+                            `/${name === "Org Profile" ? "org-readonly" : "personal-default"}/duplicate`,
+                        ) &&
+                        (c.body as { scope?: string })?.scope ===
+                            "organization",
+                ),
+            ).toBe(true),
+        );
+        await waitFor(() =>
+            expect(toastSuccess).toHaveBeenCalledWith(
+                "Copied to the Organization as “Organization copy”.",
+            ),
+        );
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: `Duplicate ${name}` }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        fireEvent.click(
+            await screen.findByRole("menuitem", {
+                name: /To personal profiles/,
+            }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (c) =>
+                        c.url.endsWith("/duplicate") &&
+                        (c.body as { scope?: string })?.scope === "personal",
+                ),
+            ).toBe(true),
+        );
+        await waitFor(() =>
+            expect(toastSuccess).toHaveBeenCalledWith(
+                "Copied to personal profiles as “Personal copy”.",
+            ),
+        );
+    });
+
+    it("shows a disabled archive action with the channel-specific reason on the Organization default", async () => {
+        canCreateOrganization = true;
+        await renderList();
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "More actions: Org Profile" }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const archive = await screen.findByRole("menuitem", {
+            name: /^Archive…/,
+        });
+        expect(archive.getAttribute("data-variant")).not.toBe("destructive");
+        expect(
+            screen.queryByText(
+                "Disappears from profile choices. Can be restored.",
+            ),
+        ).toBeNull();
+        expect(archive.getAttribute("aria-disabled")).toBe("true");
+        expect(
+            screen.getByText(
+                "The Organization default cannot be archived. First make another profile the default for recordings.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("menuitem", {
+                name: "Make Organization default",
+            }),
+        ).toBeNull();
+        fireEvent.click(archive);
+        expect(
+            calls.some(
+                (c) => c.url.endsWith("/org-readonly") && c.method === "DELETE",
+            ),
+        ).toBe(false);
+    });
+
+    it("confirms permanent deletion for an archived Organization profile before calling its endpoint", async () => {
+        canCreateOrganization = true;
+        await renderList();
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "More actions: Archived Organization",
+            }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const remove = await screen.findByRole("menuitem", {
+            name: /^Delete permanently…/,
+        });
+        expect(remove.getAttribute("data-variant")).not.toBe("destructive");
+        expect(
+            screen.getByText("Archived profiles only. Cannot be undone."),
+        ).toBeTruthy();
+        fireEvent.click(remove);
+        const dialog = await screen.findByRole("alertdialog", {
+            name: "Delete profile “Archived Organization” permanently?",
+        });
+        expect(dialog.textContent).toContain(
+            "The profile disappears and cannot be restored.",
+        );
+        expect(calls.some((c) => c.url.endsWith("/permanent"))).toBe(false);
+        fireEvent.click(
+            within(dialog).getByRole("button", { name: "Delete permanently" }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (c) =>
+                        c.url.endsWith("/archived-organization/permanent") &&
+                        c.method === "DELETE",
+                ),
+            ).toBe(true),
+        );
+    });
+
+    it("paginates sections independently and resets pages when the channel changes", async () => {
+        const personal = profiles[0];
+        if (!personal) throw new Error("Missing personal fixture");
+        extraProfiles = Array.from({ length: 12 }, (_, index) => ({
+            ...personal,
+            id: `extra-${index}`,
+            name: `Extra ${index}`,
+        }));
+        await renderList();
+        const navigation = screen.getByRole("navigation", {
+            name: "Personal profile pages",
+        });
+        fireEvent.click(
+            within(navigation).getByRole("button", { name: "Next page" }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some((c) =>
+                    c.url.includes(
+                        "organizationPage=1&personalPage=2&archivedPage=1",
+                    ),
+                ),
+            ).toBe(true),
+        );
+        expect(
+            await screen.findByRole("button", { name: "View Org Profile" }),
+        ).toBeTruthy();
+        fireEvent.change(screen.getByRole("combobox", { name: "Channel" }), {
+            target: { value: "mail" },
+        });
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (c) =>
+                        c.url.includes("channel=mail") &&
+                        c.url.includes("personalPage=1"),
+                ),
+            ).toBe(true),
+        );
+    });
+    it("does not offer a personal copy to the local Organization account", async () => {
+        canCreateOrganization = true;
+        canCreatePersonal = false;
+        await renderList();
+        expect(
+            screen.queryByRole("combobox", { name: "New profile scope" }),
+        ).toBeNull();
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "Duplicate Org Profile" }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        expect(
+            await screen.findByRole("menuitem", {
+                name: /To the Organization/,
+            }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("menuitem", { name: /To personal profiles/ }),
+        ).toBeNull();
+    });
+    it.each([
+        true,
+        false,
+    ])("disables the %s Edit/View control while its row mutates", (canEdit) => {
+        const fixture = profiles[0];
+        if (!fixture) throw new Error("Missing fixture");
+        const onEdit = vi.fn();
+        render(
+            <ProfileRowActions
+                profile={{ ...fixture, canEdit }}
+                canCreateOrganization={false}
+                disabled
+                onEdit={onEdit}
+                onAction={vi.fn()}
+            />,
+        );
+        const button = screen.getByRole("button", {
+            name: `${canEdit ? "Edit" : "View"} ${fixture.name}`,
+        });
+        expect(button.hasAttribute("disabled")).toBe(true);
+        fireEvent.click(button);
+        expect(onEdit).not.toHaveBeenCalled();
+    });
+
+    it("keeps phone row actions on a full-width line and badges unbroken", async () => {
+        await renderList();
+        const button = screen.getByRole("button", { name: "View Org Profile" });
+        const row = button.closest("li");
+        expect(row?.classList.contains("@container")).toBe(true);
+        expect(button.parentElement?.classList.contains("w-full")).toBe(true);
+        expect(
+            button.parentElement?.classList.contains("@min-[560px]:w-auto"),
+        ).toBe(true);
+        const name = row && within(row).getByText("Org Profile");
+        expect(
+            name?.parentElement?.parentElement?.classList.contains(
+                "basis-full",
+            ),
+        ).toBe(true);
+        expect(
+            screen
+                .getByText("Organization default")
+                .classList.contains("whitespace-nowrap"),
+        ).toBe(true);
+    });
+
+    it("lets the profile header wrap controls and stacks both default labels", async () => {
+        canCreateOrganization = true;
+        await renderList();
+        const scope = screen.getByRole("combobox", {
+            name: "New profile scope",
+        });
+        expect(
+            scope.parentElement?.parentElement?.classList.contains("flex-wrap"),
+        ).toBe(true);
+        const header = screen.getByRole("heading", { name: "Profiles" })
+            .parentElement?.parentElement;
+        expect(header?.classList.contains("flex-wrap")).toBe(true);
+        expect(
+            header?.classList.contains("[&>div:last-child]:max-w-full"),
+        ).toBe(true);
+        for (const label of ["Default for recordings", "Default for mail"]) {
+            expect(
+                screen
+                    .getByText(label, { selector: "label" })
+                    .classList.contains("block"),
+            ).toBe(true);
+        }
+    });
+
+    it("shows neutral lock and people icons in the Organization row metadata", async () => {
+        await renderList();
+        expect(
+            screen.getByText("Read-only").querySelector("svg.lucide-lock"),
+        ).toBeTruthy();
+        const row = screen
+            .getByRole("button", { name: "View Org Profile" })
+            .closest("li");
+        expect(row?.querySelector("p svg.lucide-users")).toBeTruthy();
+        expect(
+            row
+                ?.querySelector("p")
+                ?.classList.contains("text-muted-foreground"),
+        ).toBe(true);
+    });
+
+    it.each([
+        ["personal", "No personal profiles yet.", "View Org Profile"],
+        [
+            "organization",
+            "No Organization profiles yet.",
+            "Edit Default Profile",
+        ],
+    ])("shows a first-use %s section message until filters are active", async (scope, emptyMessage, waitForButton) => {
+        emptyScopes = [scope];
+        await renderList(waitForButton);
+        expect(screen.getByText(emptyMessage)).toBeTruthy();
+        expect(
+            screen.queryByText("No profiles match these filters."),
+        ).toBeNull();
+        fireEvent.change(
+            screen.getByRole("searchbox", { name: "Search profiles" }),
+            { target: { value: "absent" } },
+        );
+        expect(
+            await screen.findByText("No profiles match these filters."),
+        ).toBeTruthy();
+        expect(screen.queryByText(emptyMessage)).toBeNull();
+        fireEvent.change(
+            screen.getByRole("searchbox", { name: "Search profiles" }),
+            { target: { value: "" } },
+        );
+        expect(await screen.findByText(emptyMessage)).toBeTruthy();
+        fireEvent.change(screen.getByRole("combobox", { name: "Channel" }), {
+            target: { value: "mail" },
+        });
+        expect(
+            await screen.findByText("No profiles match these filters."),
+        ).toBeTruthy();
+    });
+
+    it("shows the normal archive subtext only for a non-default Organization profile", async () => {
+        canCreateOrganization = true;
+        const fixture = profiles[1];
+        if (!fixture) throw new Error("Missing Organization fixture");
+        extraProfiles = [
+            {
+                ...fixture,
+                id: "org-other",
+                name: "Other Organization",
+                isOrganizationDefault: false,
+            },
+        ];
+        await renderList();
+        fireEvent.pointerDown(
+            screen.getByRole("button", {
+                name: "More actions: Other Organization",
+            }),
+            { button: 0, ctrlKey: false, pointerType: "mouse" },
+        );
+        const archive = await screen.findByRole("menuitem", {
+            name: /^Archive…/,
+        });
+        expect(archive.getAttribute("aria-disabled")).not.toBe("true");
+        expect(
+            within(archive).getByText(
+                "Disappears from profile choices. Can be restored.",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("keeps an empty Archived section visible while a filter is active", async () => {
+        emptyScopes = ["archived"];
+        await renderList();
+        expect(screen.queryByRole("heading", { name: "Archived" })).toBeNull();
+        fireEvent.change(screen.getByRole("combobox", { name: "Channel" }), {
+            target: { value: "mail" },
+        });
+        expect(
+            await screen.findByRole("heading", { name: "Archived" }),
+        ).toBeTruthy();
+        expect(
+            screen.getAllByText("No profiles match these filters.").length,
+        ).toBeGreaterThan(0);
+    });
+
+    it("disables other rows and pagination until a mutation settles", async () => {
+        const personal = profiles[0];
+        if (!personal) throw new Error("Missing personal fixture");
+        extraProfiles = Array.from({ length: 12 }, (_, index) => ({
+            ...personal,
+            id: `extra-${index}`,
+            name: `Extra ${index}`,
+        }));
+        let release = () => {};
+        holdRestore = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await renderList();
+        const nextPage = () =>
+            within(
+                screen.getByRole("navigation", {
+                    name: "Personal profile pages",
+                }),
+            ).getByRole("button", { name: "Next page" });
+        const otherRow = () =>
+            screen.getByRole("button", { name: "Edit Default Profile" });
+        expect(nextPage().hasAttribute("disabled")).toBe(false);
+        expect(otherRow().hasAttribute("disabled")).toBe(false);
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Restore Archived Profile" }),
+        );
+        await waitFor(() =>
+            expect(otherRow().hasAttribute("disabled")).toBe(true),
+        );
+        expect(
+            screen
+                .getByRole("button", { name: "Duplicate Default Profile" })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+        expect(nextPage().hasAttribute("disabled")).toBe(true);
+
+        release();
+        await waitFor(() =>
+            expect(otherRow().hasAttribute("disabled")).toBe(false),
+        );
+        expect(nextPage().hasAttribute("disabled")).toBe(false);
     });
 });

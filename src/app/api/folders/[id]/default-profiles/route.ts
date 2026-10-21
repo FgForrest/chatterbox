@@ -1,8 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { folderDefaultProfiles, recordingFolders } from "@/db/schema";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
+import {
+    folderDefaultProfiles,
+    processingProfiles,
+    recordingFolders,
+} from "@/db/schema";
 import { requireApiSessionActor } from "@/lib/auth-server";
 import { holderAccess } from "@/lib/authz/access-state";
 import { actsForOrganization } from "@/lib/authz/curator";
@@ -285,27 +290,52 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     }
     const { channel, profileId, manualOnly } = parsed.data;
     if (profileId) {
-        await selectedProfile({
+        const selected = await selectedProfile({
             folder,
             actorUserId: session.user.id,
             profileId,
             channel,
         });
-        await db
-            .insert(folderDefaultProfiles)
-            .values({
-                folderId: folder.id,
-                channel,
-                profileId,
-                manualOnly: false,
-            })
-            .onConflictDoUpdate({
-                target: [
-                    folderDefaultProfiles.folderId,
-                    folderDefaultProfiles.channel,
-                ],
-                set: { profileId, manualOnly: false },
-            });
+        await db.transaction(async (tx) => {
+            await lockProfileMutation(tx, selected.ownerUserId);
+            const [live] = await tx
+                .select({ id: processingProfiles.id })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.id, selected.id),
+                        eq(
+                            processingProfiles.ownerUserId,
+                            selected.ownerUserId,
+                        ),
+                        isNull(processingProfiles.archivedAt),
+                        isNull(processingProfiles.deletedAt),
+                    ),
+                )
+                .for("share")
+                .limit(1);
+            if (!live)
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "This profile is no longer available",
+                    409,
+                );
+            await tx
+                .insert(folderDefaultProfiles)
+                .values({
+                    folderId: folder.id,
+                    channel,
+                    profileId,
+                    manualOnly: false,
+                })
+                .onConflictDoUpdate({
+                    target: [
+                        folderDefaultProfiles.folderId,
+                        folderDefaultProfiles.channel,
+                    ],
+                    set: { profileId, manualOnly: false },
+                });
+        });
     } else if (manualOnly) {
         await db
             .insert(folderDefaultProfiles)

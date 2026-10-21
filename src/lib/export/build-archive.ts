@@ -1001,13 +1001,12 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
-    // Prices the user set on their provider cards. The cards themselves
-    // stay behind (their keys are secrets), so each rate names the card
-    // by what a restore would re-add: provider, model, endpoint.
+    // API keys stay out of the archive.
     const priced = await db
         .select({
             provider: apiCredentials.provider,
             model: apiCredentials.defaultModel,
+            maxOutputTokens: apiCredentials.maxOutputTokens,
             baseUrl: apiCredentials.baseUrl,
             inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
             outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
@@ -1020,6 +1019,7 @@ export async function buildAndUploadExportArchive(input: {
                 or(
                     isNotNull(apiCredentials.inputUsdPerMillion),
                     isNotNull(apiCredentials.audioUsdPerHour),
+                    isNotNull(apiCredentials.maxOutputTokens),
                 ),
             ),
         );
@@ -1900,6 +1900,7 @@ interface ArchivedProfiles {
         createdAt: string;
         updatedAt: string;
         archivedAt: string | null;
+        deletedAt: string | null;
     }[];
     revisions: {
         id: string;
@@ -1935,6 +1936,7 @@ async function collectProfiles(
             createdAt: processingProfiles.createdAt,
             updatedAt: processingProfiles.updatedAt,
             archivedAt: processingProfiles.archivedAt,
+            deletedAt: processingProfiles.deletedAt,
         })
         .from(processingProfiles)
         .where(archivedProfileCondition(scope));
@@ -1966,7 +1968,13 @@ async function collectProfiles(
                   )
                   .where(
                       and(
-                          inArray(processingProfileRevisions.id, revisionIds),
+                          or(
+                              inArray(
+                                  processingProfileRevisions.id,
+                                  revisionIds,
+                              ),
+                              isNotNull(processingProfiles.deletedAt),
+                          ),
                           archivedProfileCondition(scope),
                       ),
                   )
@@ -1984,6 +1992,7 @@ async function collectProfiles(
             createdAt: profile.createdAt.toISOString(),
             updatedAt: profile.updatedAt.toISOString(),
             archivedAt: profile.archivedAt?.toISOString() ?? null,
+            deletedAt: profile.deletedAt?.toISOString() ?? null,
         })),
         revisions: revisionRows.map((revision) => ({
             ...revision,

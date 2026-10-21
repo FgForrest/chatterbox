@@ -26,6 +26,7 @@ import {
     mailContents,
     mailMessages,
     mailParticipants,
+    people,
     personEmails,
     recordingFolderAssignments,
     recordingFolders,
@@ -799,14 +800,19 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 label: null,
             });
             searchToken = secret.localPart;
-            secretPerson = (
-                await createPerson({
+            const [legacySecretPerson] = await db()
+                .insert(people)
+                .values({
                     userId: READER,
-                    displayName: "Secret Person",
-                    primaryEmail: `${searchToken}@klepna.example`,
+                    displayName: encryptText("Secret Person"),
+                    primaryEmail: encryptText(`${searchToken}@klepna.example`),
+                    primaryEmailHash: lookupHash(
+                        `${searchToken}@klepna.example`,
+                    ),
                     createdByUserId: READER,
                 })
-            ).id;
+                .returning({ id: people.id });
+            secretPerson = legacySecretPerson?.id ?? "";
             await seedMail("search-private", OWNER);
             await seedMail("search-own", READER);
             await seedMail("search-shared", OWNER, {
@@ -1538,6 +1544,58 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                     })
                 ).results,
             ).toEqual([]);
+        });
+
+        it("searches a reply's quote when an old secret link excludes its shared original from the person filter", async () => {
+            const original = "search-internal-original";
+            const reply = "search-internal-reply";
+            const query = "Quartzneedle";
+            await seedMail(original, OWNER, {
+                shared: true,
+                segments: [body("Original text")],
+                participants: [
+                    {
+                        ref: "p1",
+                        displayName: "Luma Veln",
+                        roles: ["to"],
+                        address: `${searchToken}@klepna.example`,
+                        personId: orgPerson,
+                    },
+                ],
+            });
+            await seedMail(reply, OWNER, {
+                shared: true,
+                segments: [
+                    body(
+                        `${query} ${searchToken}@klepna.example`,
+                        "quoted",
+                        original,
+                    ),
+                ],
+                participants: [
+                    {
+                        ref: "p1",
+                        displayName: "Luma Veln",
+                        roles: ["from"],
+                        address: "luma@example.test",
+                        personId: orgPerson,
+                    },
+                ],
+            });
+            for (const caller of [
+                reader(),
+                owner(),
+                serviceCaller(orgUserId, ["mail:read", "knowledge:read"]),
+            ]) {
+                const result = await search(caller, {
+                    query,
+                    person: orgPerson,
+                });
+                expect(ids(result)).toEqual([reply]);
+                expect(result.results[0]?.snippets[0]?.part).toBe("quoted");
+                expect(JSON.stringify(result)).not.toContain(searchToken);
+                expect(JSON.stringify(result)).not.toContain(original);
+            }
         });
 
         it("masks subject, sender, quoted author and text before matching, for owners too", async () => {

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -10,7 +10,11 @@ import {
 } from "vitest";
 import {
     apiCredentials,
+    asyncJobs,
+    folderDefaultProfiles,
+    processingProfileRevisions,
     processingProfiles,
+    recordingFolders,
     userSettings,
     users,
 } from "@/db/schema";
@@ -49,6 +53,7 @@ const { dbProxy, dbRef, state } = vi.hoisted(() => {
             capabilities: new Set<"use" | "org.curate">(["use"]),
             usableUsers: new Set(["profile-owner", "profile-other", "curator"]),
             mynahConfigured: false,
+            uiLocale: "en",
         },
     };
 });
@@ -114,6 +119,7 @@ vi.mock("@/lib/auth-server", () => ({
             session: {
                 user: {
                     id: state.actorId,
+                    uiLocale: state.uiLocale,
                     email: `${state.actorId}@example.test`,
                 },
                 session: { id: `session-${state.actorId}` },
@@ -124,8 +130,10 @@ vi.mock("@/lib/auth-server", () => ({
     },
 }));
 
+import { PUT as setFolderDefault } from "@/app/api/folders/[id]/default-profiles/route";
 import { POST as setDefaultProfile } from "@/app/api/settings/profiles/[id]/default/route";
 import { POST as duplicateProfile } from "@/app/api/settings/profiles/[id]/duplicate/route";
+import { DELETE as permanentlyDeleteProfile } from "@/app/api/settings/profiles/[id]/permanent/route";
 import { POST as restoreProfile } from "@/app/api/settings/profiles/[id]/restore/route";
 import {
     DELETE as deleteProfile,
@@ -200,6 +208,9 @@ describeWithDatabase("profile settings routes", () => {
             "curator",
         ]);
         state.mynahConfigured = false;
+        state.uiLocale = "en";
+        await databaseClient().delete(asyncJobs);
+        await databaseClient().delete(recordingFolders);
         await databaseClient().delete(apiCredentials);
         await databaseClient().delete(processingProfiles);
         await databaseClient().delete(userSettings);
@@ -607,46 +618,14 @@ describeWithDatabase("profile settings routes", () => {
         ).toBe(400);
     });
 
-    it("deletes unused personal profiles and archives the last default before restoring it", async () => {
+    it("refuses to delete a personal default without an Organization fallback, but deletes unused non-defaults", async () => {
+        state.orgEnabled = false;
         const created = await create({
             name: "Source",
             channel: "audio",
             scope: "personal",
         });
         const id = created.body.profile.id as string;
-        const duplicate = await duplicateProfile(
-            request("POST", `/${id}/duplicate`),
-            context(id),
-        );
-        expect(duplicate.status).toBe(201);
-        const duplicated = (await duplicate.json()).profile;
-        expect(duplicated.scope).toBe("personal");
-
-        const deleted = await deleteProfile(
-            request("DELETE", `/${duplicated.id}`),
-            context(duplicated.id),
-        );
-        expect(deleted.status).toBe(200);
-        await expect(deleted.json()).resolves.toMatchObject({
-            disposition: "delete",
-        });
-        const archived = await listProfiles(
-            request("GET", "?archived=true&page=1&pageSize=20"),
-        );
-        expect(
-            (await archived.json()).profiles.map(
-                (profile: { id: string }) => profile.id,
-            ),
-        ).not.toContain(duplicated.id);
-        expect(
-            (
-                await restoreProfile(
-                    request("POST", `/${duplicated.id}/restore`),
-                    context(duplicated.id),
-                )
-            ).status,
-        ).toBe(404);
-
         expect(
             (
                 await setDefaultProfile(
@@ -655,49 +634,485 @@ describeWithDatabase("profile settings routes", () => {
                 )
             ).status,
         ).toBe(200);
-        const removedDefault = await deleteProfile(
-            request("DELETE", `/${id}`),
+        expect(
+            (await deleteProfile(request("DELETE", `/${id}`), context(id)))
+                .status,
+        ).toBe(409);
+        const retained = await getProfile(
+            request("GET", `/${id}`),
             context(id),
         );
-        expect(removedDefault.status).toBe(200);
-        await expect(removedDefault.json()).resolves.toMatchObject({
-            disposition: "archive",
+        expect(retained.status).toBe(200);
+        expect((await retained.json()).profile).toMatchObject({
+            id,
+            isDefault: true,
         });
-
-        const defaults = await databaseClient()
-            .select({ id: processingProfiles.id })
-            .from(processingProfiles)
-            .where(
-                and(
-                    eq(processingProfiles.ownerUserId, "profile-owner"),
-                    eq(processingProfiles.channel, "audio"),
-                    eq(processingProfiles.isDefault, true),
-                ),
-            );
-        expect(defaults).toEqual([]);
-        const archivedDefault = await listProfiles(
-            request("GET", "?archived=true&page=1&pageSize=20"),
+        const unused = await create({
+            name: "Unused",
+            channel: "audio",
+            scope: "personal",
+        });
+        const unusedId = unused.body.profile.id as string;
+        const removed = await deleteProfile(
+            request("DELETE", `/${unusedId}`),
+            context(unusedId),
         );
-        expect(
-            (await archivedDefault.json()).profiles.map(
-                (profile: { id: string }) => profile.id,
-            ),
-        ).toContain(id);
+        expect(removed.status).toBe(200);
+        expect(await removed.json()).toMatchObject({ disposition: "delete" });
         expect(
             (
-                await restoreProfile(
-                    request("POST", `/${id}/restore`),
+                await getProfile(
+                    request("GET", `/${unusedId}`),
+                    context(unusedId),
+                )
+            ).status,
+        ).toBe(404);
+    });
+
+    it.each([
+        "personal",
+        "organization",
+    ] as const)("lets a curator duplicate a %s profile into either scope with the current settings", async (scope) => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        state.uiLocale = "cs-CZ";
+        const created = await create({
+            name: "Porady",
+            channel: "audio",
+            scope,
+        });
+        const id = created.body.profile.id as string;
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.focus = "Current settings";
+        await updateProfile(
+            request("PUT", `/${id}`, { expectedVersion: 1, settings }),
+            context(id),
+        );
+        for (const destination of ["personal", "organization"]) {
+            const response = await duplicateProfile(
+                request("POST", `/${id}/duplicate`, { scope: destination }),
+                context(id),
+            );
+            expect(response.status).toBe(201);
+            expect((await response.json()).profile).toMatchObject({
+                name: "Porady (kopie)",
+                scope: destination,
+                isDefault: false,
+                settings,
+            });
+        }
+    });
+
+    it("rejects duplicate into Organization for members, outsiders, and disabled scope", async () => {
+        const created = await create({ name: "Source", channel: "audio" });
+        const id = created.body.profile.id as string;
+        expect(
+            (
+                await duplicateProfile(
+                    request("POST", `/${id}/duplicate`, {
+                        scope: "organization",
+                    }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(403);
+        const personal = await duplicateProfile(
+            request("POST", `/${id}/duplicate`),
+            context(id),
+        );
+        expect((await personal.json()).profile).toMatchObject({
+            name: "Source (copy)",
+            scope: "personal",
+        });
+        state.actorId = "outsider";
+        expect(
+            (
+                await duplicateProfile(
+                    request("POST", `/${id}/duplicate`, {
+                        scope: "organization",
+                    }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(404);
+        state.actorId = "profile-owner";
+        state.capabilities = new Set(["use", "org.curate"]);
+        state.orgEnabled = false;
+        expect(
+            (
+                await duplicateProfile(
+                    request("POST", `/${id}/duplicate`, {
+                        scope: "organization",
+                    }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(403);
+    });
+
+    it("allows the local Organization actor to copy into Organization but not personal scope", async () => {
+        state.idp = false;
+        state.actorId = "profile-org";
+        const created = await create({
+            name: "Local",
+            channel: "mail",
+            scope: "organization",
+        });
+        const id = created.body.profile.id as string;
+        expect(
+            (
+                await setDefaultProfile(
+                    request("POST", `/${id}/default`),
                     context(id),
                 )
             ).status,
         ).toBe(200);
-        const [restored] = await databaseClient()
-            .select({
-                archivedAt: processingProfiles.archivedAt,
-                isDefault: processingProfiles.isDefault,
-            })
+        expect(
+            (
+                await duplicateProfile(
+                    request("POST", `/${id}/duplicate`, {
+                        scope: "organization",
+                    }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(201);
+        expect(
+            (
+                await duplicateProfile(
+                    request("POST", `/${id}/duplicate`, { scope: "personal" }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(403);
+    });
+
+    it("validates pins for the destination without changing or dropping source settings", async () => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        await databaseClient().insert(apiCredentials).values({
+            id: "curator-provider",
+            userId: "curator",
+            provider: "OpenAI",
+            apiKey: "encrypted",
+        });
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.provider = {
+            credentialId: "curator-provider",
+            scope: "personal",
+        };
+        const created = await create({
+            name: "Pinned",
+            channel: "audio",
+            settings,
+        });
+        const id = created.body.profile.id as string;
+        const denied = await duplicateProfile(
+            request("POST", `/${id}/duplicate`, { scope: "organization" }),
+            context(id),
+        );
+        expect(denied.status).toBe(400);
+        expect((await denied.json()).error).toContain(
+            "Organization profiles may only pin Organization providers",
+        );
+        const ownCopy = await duplicateProfile(
+            request("POST", `/${id}/duplicate`, { scope: "personal" }),
+            context(id),
+        );
+        expect(ownCopy.status).toBe(201);
+        expect((await ownCopy.json()).profile.settings).toEqual(settings);
+    });
+
+    it("refuses to archive the Organization default, and only permanently deletes archived profiles", async () => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        const created = await create({
+            name: "Organization default",
+            channel: "audio",
+            scope: "organization",
+        });
+        const id = created.body.profile.id as string;
+        expect(
+            (
+                await setDefaultProfile(
+                    request("POST", `/${id}/default`),
+                    context(id),
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            (await deleteProfile(request("DELETE", `/${id}`), context(id)))
+                .status,
+        ).toBe(409);
+        expect(
+            (
+                await permanentlyDeleteProfile(
+                    request("DELETE", `/${id}/permanent`),
+                    context(id),
+                )
+            ).status,
+        ).toBe(404);
+        const other = await create({
+            name: "Nondefault",
+            channel: "audio",
+            scope: "organization",
+        });
+        const otherId = other.body.profile.id as string;
+        expect(
+            (
+                await permanentlyDeleteProfile(
+                    request("DELETE", `/${otherId}/permanent`),
+                    context(otherId),
+                )
+            ).status,
+        ).toBe(404);
+        expect(
+            (
+                await deleteProfile(
+                    request("DELETE", `/${otherId}`),
+                    context(otherId),
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            (
+                await restoreProfile(
+                    request("POST", `/${otherId}/restore`),
+                    context(otherId),
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            (
+                await deleteProfile(
+                    request("DELETE", `/${otherId}`),
+                    context(otherId),
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            (
+                await permanentlyDeleteProfile(
+                    request("DELETE", `/${otherId}/permanent`),
+                    context(otherId),
+                )
+            ).status,
+        ).toBe(200);
+    });
+
+    it("hides archived Organization profiles from members and tombstones from everyone, clearing all pointers", async () => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        const created = await create({
+            name: "Historical Organization",
+            channel: "audio",
+            scope: "organization",
+        });
+        const id = created.body.profile.id as string;
+        const [stored] = await databaseClient()
+            .select()
             .from(processingProfiles)
             .where(eq(processingProfiles.id, id));
-        expect(restored).toEqual({ archivedAt: null, isDefault: false });
+        await databaseClient()
+            .insert(asyncJobs)
+            .values({
+                id: "keep-revision",
+                userId: "profile-owner",
+                kind: "summary",
+                subjectId: "item",
+                status: "pending",
+                payload: { profileRevisionId: stored?.currentRevisionId },
+            });
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "profile-owner",
+                defaultAudioProfileId: id,
+                defaultMailProfileId: id,
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultAudioProfileId: id, defaultMailProfileId: id },
+            });
+        await databaseClient().insert(recordingFolders).values({
+            id: "pinned-folder",
+            userId: "profile-owner",
+            name: "encrypted",
+            nameHash: "pin",
+        });
+        await databaseClient().insert(folderDefaultProfiles).values({
+            folderId: "pinned-folder",
+            channel: "audio",
+            profileId: id,
+        });
+        expect(
+            (await deleteProfile(request("DELETE", `/${id}`), context(id)))
+                .status,
+        ).toBe(200);
+        state.actorId = "profile-owner";
+        state.capabilities = new Set(["use"]);
+        expect(
+            (
+                await permanentlyDeleteProfile(
+                    request("DELETE", `/${id}/permanent`),
+                    context(id),
+                )
+            ).status,
+        ).toBe(403);
+        const memberList = await listProfiles(request("GET", "?archived=true"));
+        expect(
+            (await memberList.json()).profiles.map((p: { id: string }) => p.id),
+        ).not.toContain(id);
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        const deleted = await permanentlyDeleteProfile(
+            request("DELETE", `/${id}/permanent`),
+            context(id),
+        );
+        expect(await deleted.json()).toMatchObject({
+            disposition: "tombstone",
+        });
+        const [profile] = await databaseClient()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, id));
+        expect(profile?.deletedAt).toBeInstanceOf(Date);
+        expect(
+            await databaseClient()
+                .select()
+                .from(processingProfileRevisions)
+                .where(eq(processingProfileRevisions.profileId, id)),
+        ).toHaveLength(1);
+        const [member] = await databaseClient()
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.userId, "profile-owner"));
+        expect(member).toMatchObject({
+            defaultAudioProfileId: null,
+            defaultMailProfileId: null,
+        });
+        expect(
+            (await databaseClient().select().from(folderDefaultProfiles))[0],
+        ).toMatchObject({ profileId: null, manualOnly: false });
+        for (const actorId of ["curator", "profile-owner"]) {
+            state.actorId = actorId;
+            for (const query of [
+                "?sectioned=true",
+                "?archived=true",
+                "?q=Historical",
+                "?scope=organization",
+            ]) {
+                const response = await listProfiles(request("GET", query));
+                expect(JSON.stringify(await response.json())).not.toContain(id);
+            }
+            expect(
+                (await getProfile(request("GET", `/${id}`), context(id)))
+                    .status,
+            ).toBe(404);
+            expect(
+                (
+                    await duplicateProfile(
+                        request("POST", `/${id}/duplicate`),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(404);
+            expect(
+                (
+                    await updateProfile(
+                        request("PUT", `/${id}`, {
+                            expectedVersion: 1,
+                            name: "Revive",
+                        }),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(404);
+            expect(
+                (
+                    await restoreProfile(
+                        request("POST", `/${id}/restore`),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(404);
+            expect(
+                (
+                    await setDefaultProfile(
+                        request("POST", `/${id}/default`),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(404);
+        }
+    });
+    it("cannot leave a folder pinned to a concurrently deleted personal profile", async () => {
+        const source = await create({
+            name: "Concurrent pin",
+            channel: "audio",
+        });
+        const id = source.body.profile.id as string;
+        const [profile] = await databaseClient()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, id));
+        await databaseClient()
+            .insert(asyncJobs)
+            .values({
+                id: "pin-race-history",
+                userId: "profile-owner",
+                kind: "summary",
+                subjectId: "item",
+                payload: { profileRevisionId: profile?.currentRevisionId },
+            });
+        await databaseClient()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "race-root",
+                    userId: "profile-owner",
+                    name: "encrypted-root",
+                    nameHash: "race-root",
+                },
+                {
+                    id: "race-child",
+                    parentId: "race-root",
+                    userId: "profile-owner",
+                    name: "encrypted-child",
+                    nameHash: "race-child",
+                },
+            ]);
+        const [deletion, pin] = await Promise.all([
+            deleteProfile(request("DELETE", `/${id}`), context(id)),
+            setFolderDefault(
+                new Request(
+                    "https://app.example.test/api/folders/race-child/default-profiles",
+                    {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            channel: "audio",
+                            profileId: id,
+                        }),
+                    },
+                ),
+                context("race-child"),
+            ),
+        ]);
+        expect(deletion.status).toBe(200);
+        expect(await deletion.json()).toMatchObject({
+            disposition: "tombstone",
+        });
+        const [retained] = await databaseClient()
+            .select()
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, id));
+        expect(retained?.deletedAt).toBeInstanceOf(Date);
+        expect([200, 400, 409]).toContain(pin.status);
+        const pins = await databaseClient()
+            .select()
+            .from(folderDefaultProfiles)
+            .where(eq(folderDefaultProfiles.folderId, "race-child"));
+        expect(pins.every((row) => row.profileId === null)).toBe(true);
     });
 });

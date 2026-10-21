@@ -13,6 +13,7 @@
  */
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as EncryptionFields from "@/lib/encryption/fields";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/lib/profiles/resolve", () => ({
@@ -37,9 +38,9 @@ vi.mock("@/lib/encryption", () => ({
 }));
 
 vi.mock("@/lib/encryption/fields", async () => {
-    const actual = await vi.importActual<
-        typeof import("@/lib/encryption/fields")
-    >("@/lib/encryption/fields");
+    const actual = await vi.importActual<typeof EncryptionFields>(
+        "@/lib/encryption/fields",
+    );
     return {
         ...actual,
         decryptText: vi.fn((value: string) => value),
@@ -135,13 +136,17 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
         });
     });
 
-    it("routes OpenRouter credentials through chat.completions and never hits /audio/transcriptions", async () => {
+    it.each([
+        "stop",
+        "length",
+    ] as const)("transcribes on OpenRouter without answer caps and rejects truncated output (%s)", async (finishReason) => {
         chatCreate.mockResolvedValue({
             choices: [
                 {
                     message: {
                         content: "this is the transcript from openrouter",
                     },
+                    finish_reason: finishReason,
                 },
             ],
         });
@@ -186,6 +191,7 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
                                 apiKey: "encrypted-key",
                                 baseUrl: "https://openrouter.ai/api/v1",
                                 defaultModel: "google/gemini-2.5-flash-lite",
+                                maxOutputTokens: 4096,
                                 isDefaultTranscription: true,
                                 isDefaultEnhancement: false,
                                 isDefaultLearn: false,
@@ -254,6 +260,22 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
         );
 
         const result = await transcribeRecording(userId, recordingId);
+
+        const request = chatCreate.mock.calls[0]?.[0];
+        expect(request).not.toHaveProperty("max_tokens");
+        expect(request).not.toHaveProperty("max_completion_tokens");
+        if (finishReason === "length") {
+            expect(result).toMatchObject({
+                success: false,
+                errorCode: "TRANSCRIPTION_FAILED",
+                error: expect.stringContaining(
+                    "No partial transcript was saved",
+                ),
+            });
+            expect(db.transaction).not.toHaveBeenCalled();
+            expect(tx.insert).not.toHaveBeenCalled();
+            return;
+        }
 
         expect(result.success).toBe(true);
         expect(audioCreate).not.toHaveBeenCalled();
@@ -328,6 +350,7 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
                                 apiKey: "encrypted-key",
                                 baseUrl: "https://openrouter.ai/api/v1",
                                 defaultModel: "google/gemini-2.5-flash-lite",
+                                maxOutputTokens: 4096,
                                 isDefaultTranscription: true,
                                 isDefaultEnhancement: false,
                                 isDefaultLearn: false,

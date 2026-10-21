@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { lockProfileSeedOwner } from "@/db/queries/profiles";
@@ -378,7 +378,12 @@ export async function ensureProfiles(userId: string): Promise<void> {
     const existing = await db
         .select({ id: processingProfiles.id })
         .from(processingProfiles)
-        .where(eq(processingProfiles.ownerUserId, userId))
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, userId),
+                isNull(processingProfiles.deletedAt),
+            ),
+        )
         .limit(1);
     if (existing.length > 0) return;
 
@@ -396,7 +401,12 @@ export async function ensureProfiles(userId: string): Promise<void> {
         const existing = await tx
             .select({ id: processingProfiles.id })
             .from(processingProfiles)
-            .where(eq(processingProfiles.ownerUserId, userId))
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, userId),
+                    isNull(processingProfiles.deletedAt),
+                ),
+            )
             .limit(1);
         if (existing.length > 0) return;
 

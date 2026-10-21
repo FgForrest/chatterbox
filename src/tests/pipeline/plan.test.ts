@@ -1224,6 +1224,7 @@ describe("planAdvance audio", () => {
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
+                            state: "pending",
                         },
                         topics: {
                             contentId: "transcription-1",
@@ -1231,6 +1232,7 @@ describe("planAdvance audio", () => {
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
+                            state: "pending",
                         },
                         summary: {
                             contentId: "transcription-1",
@@ -1238,6 +1240,7 @@ describe("planAdvance audio", () => {
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
+                            state: "pending",
                         },
                     },
                 }),

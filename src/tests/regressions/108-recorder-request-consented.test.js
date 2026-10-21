@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
+    fitWindowToContent: () => {},
+}));
+
 const h = vi.hoisted(() => {
     const handlers = {};
     const nodes = new Map();

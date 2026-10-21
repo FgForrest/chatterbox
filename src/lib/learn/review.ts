@@ -88,6 +88,11 @@ import type {
     MailReviewCandidate,
     MailTextAnchor,
 } from "@/lib/learn/mail-candidates";
+import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
+import {
+    keepsWordCount,
+    renamedRecordPlaces,
+} from "@/lib/learn/new-record-rename";
 import {
     type RecordTarget,
     recordNameKey,
@@ -96,6 +101,7 @@ import {
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -829,22 +835,17 @@ async function transcriptSourceInTx(
     latest: RecordingRun,
     writer: ReviewWriter,
 ): Promise<ReviewSourceInTx> {
-    const { revision, turns, scopeUserId } = await lockTranscriptForChange(
-        tx,
-        { userId: latest.userId, transcriptionId: latest.transcriptionId },
-        writer,
-    );
+    const { revision, turns, scopeUserId, language } =
+        await lockTranscriptForChange(
+            tx,
+            { userId: latest.userId, transcriptionId: latest.transcriptionId },
+            writer,
+        );
     return {
         revision,
         scopeUserId,
         turns,
-        language: async () =>
-            (
-                await tx
-                    .select({ language: transcriptions.detectedLanguage })
-                    .from(transcriptions)
-                    .where(eq(transcriptions.id, latest.transcriptionId))
-            )[0]?.language ?? null,
+        language: async () => language,
         speakerPerson: async (label) => {
             const [row] = await tx
                 .select({ personId: transcriptSpeakers.personId })
@@ -933,7 +934,10 @@ async function mailSourceInTx(
         language: async () => content.language,
         speakerPerson: async (label) => {
             const [row] = await tx
-                .select({ personId: mailParticipants.personId })
+                .select({
+                    personId: mailParticipants.personId,
+                    address: mailParticipants.address,
+                })
                 .from(mailParticipants)
                 .where(
                     and(
@@ -943,7 +947,10 @@ async function mailSourceInTx(
                     ),
                 )
                 .limit(1);
-            return row?.personId ?? null;
+            return row?.address &&
+                isInternalMailAddress(decryptText(row.address))
+                ? null
+                : (row?.personId ?? null);
         },
         confirm: async (sp, args) => {
             if (!args.place.text) throw recordMissing();
@@ -976,23 +983,46 @@ async function linkParticipantInTx(
     tx: Tx,
     run: LatestRun,
     writerUserId: string,
+    readScopes: readonly string[],
     link: { ref: string; personId: string; address: string | null },
 ): Promise<void> {
     const [participant] = await tx
-        .update(mailParticipants)
-        .set({ personId: link.personId })
+        .select({
+            address: mailParticipants.address,
+            personId: mailParticipants.personId,
+        })
+        .from(mailParticipants)
         .where(
             and(
                 eq(mailParticipants.itemId, run.itemId),
                 eq(mailParticipants.userId, run.userId),
                 eq(mailParticipants.ref, link.ref),
-                isNull(mailParticipants.personId),
             ),
         )
-        .returning({ address: mailParticipants.address });
+        .for("update");
+    const address = participant?.address
+        ? decryptText(participant.address)
+        : null;
+    if (
+        (address && isInternalMailAddress(address)) ||
+        (link.address && isInternalMailAddress(link.address))
+    )
+        return;
+    if (participant && participant.personId === null) {
+        await tx
+            .update(mailParticipants)
+            .set({ personId: link.personId })
+            .where(
+                and(
+                    eq(mailParticipants.itemId, run.itemId),
+                    eq(mailParticipants.userId, run.userId),
+                    eq(mailParticipants.ref, link.ref),
+                    isNull(mailParticipants.personId),
+                ),
+            );
+    }
     const email =
-        link.address ??
-        (participant?.address ? decryptText(participant.address) : null);
+        link.address ?? (participant?.personId === null ? address : null);
     if (!email) return;
     const hash = lookupHash(email);
     try {
@@ -1003,7 +1033,12 @@ async function linkParticipantInTx(
                     primaryEmailHash: people.primaryEmailHash,
                 })
                 .from(people)
-                .where(eq(people.id, link.personId))
+                .where(
+                    and(
+                        eq(people.id, link.personId),
+                        inArray(people.userId, [...readScopes]),
+                    ),
+                )
                 .limit(1);
             if (!person || person.primaryEmailHash === hash) return;
             if (
@@ -1016,7 +1051,12 @@ async function linkParticipantInTx(
                         primaryEmail: encryptText(email),
                         primaryEmailHash: hash,
                     })
-                    .where(eq(people.id, link.personId));
+                    .where(
+                        and(
+                            eq(people.id, link.personId),
+                            eq(people.userId, writerUserId),
+                        ),
+                    );
                 return;
             }
             // Another address of theirs: what their next mail is known by.
@@ -1318,6 +1358,139 @@ function finishInTx(
                 if (entry) entry.code = "already_exists";
             }
         }
+        const renamedRefs = new Map<string, Set<string>>();
+        const anchorKey = (anchor: {
+            turnIndex: number;
+            charStart: number;
+            charEnd: number;
+        }) => `${anchor.turnIndex}:${anchor.charStart}:${anchor.charEnd}`;
+        if (turns && isRecordingRun(latest)) {
+            for (const item of records) {
+                const payload = item.payload as NewRecordPayload;
+                const target = refs.get(payload.ref);
+                const choice = item.choice;
+                if (
+                    !target ||
+                    !choice ||
+                    !("name" in choice) ||
+                    !keepsWordCount(payload.name, choice.name) ||
+                    choice.name.normalize("NFC") ===
+                        payload.name.normalize("NFC")
+                ) {
+                    continue;
+                }
+                const written = new Set<string>();
+                renamedRefs.set(payload.ref, written);
+                const places = renamedRecordPlaces(
+                    payload.name,
+                    choice.name,
+                    payload.kind === "person"
+                        ? turns.map((turn) =>
+                              payload.evidenceMs.includes(turn.startMs)
+                                  ? turn
+                                  : { ...turn, text: "" },
+                          )
+                        : turns,
+                );
+                const declinedAnchors: {
+                    turnIndex: number;
+                    charStart: number;
+                    charEnd: number;
+                }[] = [];
+                for (const candidate of items) {
+                    if (candidate.kind !== "correction") continue;
+                    const correction = candidate.payload as Extract<
+                        ReviewCandidate,
+                        { kind: "correction" }
+                    >["payload"];
+                    if (
+                        !("newRef" in correction.target) ||
+                        correction.target.newRef !== payload.ref
+                    )
+                        continue;
+                    if (!candidate.accepted) {
+                        declinedAnchors.push(...correction.anchors);
+                        continue;
+                    }
+                    if (!correction.replacement) continue;
+                    const [renamed] = renamedRecordPlaces(
+                        payload.name,
+                        choice.name,
+                        [
+                            {
+                                speaker: "",
+                                startMs: 0,
+                                endMs: 0,
+                                text: correction.replacement,
+                            },
+                        ],
+                    );
+                    if (
+                        !renamed ||
+                        renamed.charStart !== 0 ||
+                        renamed.charEnd !== correction.replacement.length
+                    )
+                        continue;
+                    for (const anchor of correction.anchors) {
+                        const heard = wordsAt(
+                            turns[anchor.turnIndex]?.text,
+                            anchor.charStart,
+                            anchor.charEnd,
+                            correction.heard,
+                        );
+                        if (
+                            heard &&
+                            heard.normalize("NFC") !==
+                                renamed.replacement.normalize("NFC")
+                        )
+                            places.push({
+                                ...anchor,
+                                heard,
+                                replacement: renamed.replacement,
+                            });
+                    }
+                }
+                for (const place of places.sort(
+                    (a, b) => a.heard.length - b.heard.length,
+                )) {
+                    if (
+                        declinedAnchors.some(
+                            (anchor) =>
+                                anchor.turnIndex === place.turnIndex &&
+                                anchor.charStart < place.charEnd &&
+                                place.charStart < anchor.charEnd,
+                        )
+                    )
+                        continue;
+                    if (
+                        payload.kind === "person" &&
+                        heardIsFirstNameOnly(place.heard, { name: choice.name })
+                    )
+                        continue;
+                    try {
+                        await tx.transaction((sp) =>
+                            acceptCorrectionInTx(sp as Tx, {
+                                ...writer,
+                                userId: run.userId,
+                                transcriptionId: latest.transcriptionId,
+                                revision,
+                                anchor: place,
+                                kind: "correct",
+                                target,
+                                replacement: place.replacement,
+                            }),
+                        );
+                        written.add(anchorKey(place));
+                    } catch (error) {
+                        if (
+                            !(error instanceof AppError) ||
+                            error.code !== ErrorCode.CONFLICT
+                        )
+                            throw error;
+                    }
+                }
+            }
+        }
         // On a mail, a person added for a participant (or found as them)
         // is that participant from now on, their address their email.
         if (!isRecordingRun(latest)) {
@@ -1331,7 +1504,7 @@ function finishInTx(
                 ) {
                     continue;
                 }
-                await linkParticipantInTx(tx, latest, scopeUserId, {
+                await linkParticipantInTx(tx, latest, scopeUserId, readScopes, {
                     ref: payload.speakerLabel,
                     personId: target.personId,
                     address: payload.address ?? null,
@@ -1431,6 +1604,30 @@ function finishInTx(
 
         for (const item of items) {
             if (item.kind !== "correction" || !item.accepted || !transcript) {
+                continue;
+            }
+            const proposed = item.payload as Extract<
+                ReviewCandidate,
+                { kind: "correction" }
+            >["payload"];
+            const renamed =
+                proposed.kind === "correct" && "newRef" in proposed.target
+                    ? renamedRefs.get(proposed.target.newRef)
+                    : undefined;
+            if (renamed) {
+                if (
+                    proposed.anchors.every((anchor) =>
+                        renamed.has(anchorKey(anchor)),
+                    )
+                ) {
+                    applied++;
+                } else {
+                    skip(
+                        item.id,
+                        "changed",
+                        "The record was renamed; remaining places need the correction pass",
+                    );
+                }
                 continue;
             }
             const payload = onRecords(

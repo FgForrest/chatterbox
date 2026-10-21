@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     buildSettingsNav,
     SETTINGS_STORAGE_KEY,
@@ -35,9 +35,24 @@ export function useSettingsNav(
             }),
         [isHosted, isOrgAccount, mailEnabled, accessManagement],
     );
-    const [activeSection, setActiveSection] =
-        useState<SettingsSection>("providers");
+    const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
+        if (typeof window === "undefined") return "providers";
+        const requested =
+            new URLSearchParams(window.location.search).get("section") ||
+            window.location.hash.slice(1);
+        return (
+            settingsNav.find((item) => item.id === requested)?.id ??
+            settingsNav.find(
+                (item) =>
+                    item.id === localStorage.getItem(SETTINGS_STORAGE_KEY),
+            )?.id ??
+            settingsNav[0].id
+        );
+    });
     const [keyboardSelectedIndex, setKeyboardSelectedIndex] = useState(0);
+    const lastLocationRef = useRef<{ section: string; hash: string } | null>(
+        null,
+    );
     const visibleActiveSection = settingsNav.some(
         (item) => item.id === activeSection,
     )
@@ -56,7 +71,7 @@ export function useSettingsNav(
     // the grace-state banner "Export my data" button) navigate the
     // settings dialog without a full reload.
     useEffect(() => {
-        if (typeof window === "undefined") return;
+        if (!open || typeof window === "undefined") return;
 
         const applyHash = (): boolean => {
             const hash = window.location.hash.slice(1);
@@ -71,7 +86,16 @@ export function useSettingsNav(
             return true;
         };
 
-        if (!applyHash()) {
+        const section = new URLSearchParams(window.location.search).get(
+            "section",
+        );
+        const requested = settingsNav.find((item) => item.id === section)?.id;
+        const changedHash =
+            lastLocationRef.current?.section === section &&
+            lastLocationRef.current.hash !== window.location.hash;
+        if (requested && !changedHash) {
+            setActiveSection(requested);
+        } else if (!applyHash()) {
             const lastSection = localStorage.getItem(SETTINGS_STORAGE_KEY);
             if (lastSection) {
                 const validLastSection = settingsNav.find(
@@ -93,14 +117,21 @@ export function useSettingsNav(
         };
         window.addEventListener("hashchange", onHashChange);
         return () => window.removeEventListener("hashchange", onHashChange);
-    }, [settingsNav]);
+    }, [settingsNav, open]);
 
     // Persist active section to URL hash + localStorage so deep links
     // round-trip and reopening the dialog lands on the last-visited
     // section.
     useEffect(() => {
         if (!open || typeof window === "undefined") return;
-        window.location.hash = visibleActiveSection;
+        const url = new URL(window.location.href);
+        url.hash = visibleActiveSection;
+        url.searchParams.set("section", visibleActiveSection);
+        window.history.replaceState(window.history.state, "", url);
+        lastLocationRef.current = {
+            section: visibleActiveSection,
+            hash: url.hash,
+        };
         localStorage.setItem(SETTINGS_STORAGE_KEY, visibleActiveSection);
     }, [visibleActiveSection, open]);
 

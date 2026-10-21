@@ -11,6 +11,7 @@ import {
 import {
     createProfile,
     getDefaultProfileState,
+    listActorProfileSections,
     listActorProfiles,
 } from "@/lib/profiles/store";
 import {
@@ -29,6 +30,10 @@ const querySchema = z.object({
     scope: profileScopeSchema.optional(),
     q: z.string().max(200).optional(),
     archived: z.literal("true").optional(),
+    sectioned: z.literal("true").optional(),
+    organizationPage: z.coerce.number().int().min(1).default(1),
+    personalPage: z.coerce.number().int().min(1).default(1),
+    archivedPage: z.coerce.number().int().min(1).default(1),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -52,20 +57,52 @@ export const GET = apiHandler(async (request: Request) => {
         scope: url.searchParams.get("scope") || undefined,
         q: url.searchParams.get("q") || undefined,
         archived: url.searchParams.get("archived") || undefined,
+        sectioned: url.searchParams.get("sectioned") || undefined,
+        organizationPage: url.searchParams.get("organizationPage") || undefined,
+        personalPage: url.searchParams.get("personalPage") || undefined,
+        archivedPage: url.searchParams.get("archivedPage") || undefined,
         page: url.searchParams.get("page") || undefined,
         pageSize: url.searchParams.get("pageSize") || undefined,
     });
     if (!parsed.success) throw validationError(parsed.error);
-    const { page, pageSize, q, channel, scope, archived } = parsed.data;
-    const result = await listActorProfiles({
-        actor: routeActor.actor,
-        search: q,
+    const {
+        page,
+        pageSize,
+        q,
         channel,
         scope,
-        archivedOnly: archived === "true",
-        offset: (page - 1) * pageSize,
-        limit: pageSize,
-    });
+        archived,
+        sectioned,
+        organizationPage,
+        personalPage,
+        archivedPage,
+    } = parsed.data;
+    const [result, sections] = await Promise.all([
+        sectioned
+            ? null
+            : listActorProfiles({
+                  actor: routeActor.actor,
+                  search: q,
+                  channel,
+                  scope,
+                  archivedOnly: archived === "true",
+                  offset: (page - 1) * pageSize,
+                  limit: pageSize,
+              }),
+        sectioned
+            ? listActorProfileSections({
+                  actor: routeActor.actor,
+                  search: q,
+                  channel,
+                  pages: {
+                      organization: organizationPage,
+                      personal: personalPage,
+                      archived: archivedPage,
+                  },
+                  limit: pageSize,
+              })
+            : null,
+    ]);
     const orgUserId = await getOrgUserId();
     const [audioDefault, mailDefault, defaultOptions] = await Promise.all([
         getDefaultProfileState(routeActor.userId, "audio"),
@@ -83,20 +120,51 @@ export const GET = apiHandler(async (request: Request) => {
           })
         : false;
     const states = { audio: audioDefault, mail: mailDefault };
-    const profiles = await Promise.all(
-        result.items.map(async (profile) => {
-            const summary = await profileSummary(profile, routeActor.actor);
-            const state = states[profile.channel];
-            return {
-                ...summary,
-                isYourDefault: state.effective?.id === profile.id,
-                isOrganizationDefault:
-                    state.organizationDefault?.id === profile.id,
-            };
-        }),
-    );
+    async function summarize(
+        profile: Awaited<ReturnType<typeof listActorProfiles>>["items"][number],
+    ) {
+        const summary = await profileSummary(profile, routeActor.actor);
+        const state = states[profile.channel];
+        return {
+            ...summary,
+            isYourDefault: state.effective?.id === profile.id,
+            isOrganizationDefault: state.organizationDefault?.id === profile.id,
+        };
+    }
+    async function presentSection(
+        section: Awaited<ReturnType<typeof listActorProfiles>>,
+    ) {
+        return {
+            profiles: await Promise.all(section.items.map(summarize)),
+            pagination: {
+                page: section.offset / section.limit + 1,
+                pageSize: section.limit,
+                total: section.total,
+                totalPages: Math.ceil(section.total / section.limit),
+            },
+        };
+    }
+    const [organization, personal, archivedSection] = sections
+        ? await Promise.all([
+              presentSection(sections.organization),
+              presentSection(sections.personal),
+              presentSection(sections.archived),
+          ])
+        : [null, null, null];
+    const profiles = result
+        ? await Promise.all(result.items.map(summarize))
+        : [];
     return NextResponse.json({
         profiles,
+        ...(sections
+            ? {
+                  sections: {
+                      organization,
+                      personal,
+                      archived: archivedSection,
+                  },
+              }
+            : {}),
         defaults: {
             audio: {
                 selected:
@@ -140,10 +208,13 @@ export const GET = apiHandler(async (request: Request) => {
         pagination: {
             page,
             pageSize,
-            total: result.total,
-            totalPages: Math.ceil(result.total / pageSize),
+            total: result?.total ?? 0,
+            totalPages: Math.ceil((result?.total ?? 0) / pageSize),
         },
-        permissions: { canCreateOrganization },
+        permissions: {
+            canCreateOrganization,
+            canCreatePersonal: routeActor.actor.kind === "user",
+        },
     });
 });
 

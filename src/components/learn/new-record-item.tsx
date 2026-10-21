@@ -172,7 +172,9 @@ export function NewRecordItem({
             onCheckedChange={(checked) =>
                 void onDecide(
                     checked ? "accepted" : null,
-                    (choice as NewRecordChoice | null) ?? null,
+                    linked
+                        ? ((choice as NewRecordChoice | null) ?? null)
+                        : { name: name.trim() || current.name, typeKey },
                 )
             }
         >

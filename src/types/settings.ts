@@ -36,7 +36,7 @@ export interface SettingsProfileSummary {
     isDefault: boolean;
     isYourDefault?: boolean;
     isOrganizationDefault?: boolean;
-    deleteDisposition?: "delete" | "archive" | null;
+    deleteDisposition?: "delete" | "tombstone" | null;
     version: number;
     canEdit: boolean;
     archivedAt: string | null;
@@ -47,7 +47,20 @@ export interface SettingsProfileDetail extends SettingsProfileSummary {
     settings: ProfileSettings;
 }
 
+export type SettingsProfileSection = "organization" | "personal" | "archived";
+
+export interface SettingsProfileSectionPage {
+    profiles: SettingsProfileSummary[];
+    pagination: {
+        page: number;
+        pageSize: number;
+        total: number;
+        totalPages: number;
+    };
+}
+
 export interface SettingsProfilesPage {
+    sections?: Record<SettingsProfileSection, SettingsProfileSectionPage>;
     profiles: SettingsProfileSummary[];
     defaults?: {
         audio: SettingsProfileDefault;
@@ -56,6 +69,7 @@ export interface SettingsProfilesPage {
     };
     permissions: {
         canCreateOrganization: boolean;
+        canCreatePersonal?: boolean;
     };
     pagination: {
         page: number;

@@ -5,6 +5,7 @@ import type { ContentSegment } from "@/lib/content/types";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { messageIdHash } from "@/lib/mail/hash";
+import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { getOrgUserId } from "@/lib/org/config";
 
 /**
@@ -79,9 +80,13 @@ export async function peopleByAddress(
         await getOrgUserId(),
     );
     const byHash = new Map(
-        [...new Set(addresses.map((address) => address.toLowerCase()))].map(
-            (address) => [lookupHash(address), address] as const,
-        ),
+        [
+            ...new Set(
+                addresses
+                    .filter((address) => !isInternalMailAddress(address))
+                    .map((address) => address.toLowerCase()),
+            ),
+        ].map((address) => [lookupHash(address), address] as const),
     );
     const found = new Map<string, string>();
     if (byHash.size === 0) return found;

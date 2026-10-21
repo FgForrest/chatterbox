@@ -32,6 +32,7 @@ export interface ProviderCardItem {
     provider: string;
     baseUrl: string | null;
     defaultModel: string | null;
+    maxOutputTokens?: number | null;
     rate?: AiRate | null;
     disabledAt?: Date | string | null;
     isDefaultTranscription?: boolean;

@@ -18,7 +18,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
     const [detail, processing] = await Promise.all([
         loadMailDetail(session.user.id, id),
-        loadPrivateItemProcessing(access.ownerUserId, id),
+        loadPrivateItemProcessing(access.ownerUserId, id, session.user.id),
     ]);
     if (!detail) {
         throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);

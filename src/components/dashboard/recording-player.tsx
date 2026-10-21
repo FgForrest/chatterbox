@@ -1,7 +1,7 @@
 "use client";
 
 import type * as React from "react";
-import { type RefObject, useEffect, useImperativeHandle, useRef } from "react";
+import { type RefObject, useImperativeHandle } from "react";
 import { RecordingPlayerControls } from "@/components/dashboard/recording-player-controls";
 import { RecordingWaveformStatus } from "@/components/dashboard/recording-player-header";
 import { DownloadAudioButton } from "@/components/recordings/download-audio-button";
@@ -41,16 +41,6 @@ export interface RecordingPlayerHandle {
     subscribe: (listener: (state: PlaybackState) => void) => () => void;
 }
 
-const POSITION_EVENTS = [
-    "timeupdate",
-    "seeking",
-    "seeked",
-    "play",
-    "pause",
-    "ended",
-    "loadedmetadata",
-] as const;
-
 interface PlaybackOwner {
     id: string | null;
     pending: boolean;
@@ -82,6 +72,7 @@ export function transcriptPlayback(
             owner.id = nextOwner ?? null;
             owner.pending = owner.id !== null;
             ref.current?.playFrom(ms / 1000);
+            owner.pending = false;
         },
         pause: () => {
             owner.id = null;
@@ -120,6 +111,7 @@ export function RecordingPlayer({
 }: RecordingPlayerProps & { ref?: React.Ref<RecordingPlayerHandle> }) {
     const {
         audioRef,
+        subscribe,
         isPlaying,
         currentTime,
         duration,
@@ -127,6 +119,8 @@ export function RecordingPlayer({
         setVolume,
         playbackSpeed,
         togglePlayPause,
+        playFrom,
+        pause,
         seekToRatio,
         seekToTime,
         seekRelative,
@@ -140,50 +134,16 @@ export function RecordingPlayer({
         initialAutoPlayNext,
     });
 
-    // Where playback started with an end pauses; any pause forgets it.
-    const stopAt = useRef<number | null>(null);
-    useEffect(() => {
-        if (!isPlaying) {
-            stopAt.current = null;
-        } else if (stopAt.current !== null && currentTime >= stopAt.current) {
-            stopAt.current = null;
-            togglePlayPause();
-        }
-    }, [isPlaying, currentTime, togglePlayPause]);
-
     useImperativeHandle(
         ref,
         () => ({
             seekTo: seekToTime,
-            playFrom: (seconds, untilSeconds) => {
-                seekToTime(seconds);
-                stopAt.current = untilSeconds ?? null;
-                if (!isPlaying) togglePlayPause();
-            },
+            playFrom,
             getCurrentTime: () => audioRef.current?.currentTime ?? 0,
-            pause: () => {
-                if (isPlaying) togglePlayPause();
-            },
-            subscribe: (listener) => {
-                const audio = audioRef.current;
-                if (!audio) return () => {};
-                const emit = () =>
-                    listener({
-                        ms: audio.currentTime * 1000,
-                        playing: !audio.paused && !audio.ended,
-                    });
-                for (const type of POSITION_EVENTS) {
-                    audio.addEventListener(type, emit);
-                }
-                emit();
-                return () => {
-                    for (const type of POSITION_EVENTS) {
-                        audio.removeEventListener(type, emit);
-                    }
-                };
-            },
+            pause,
+            subscribe,
         }),
-        [seekToTime, togglePlayPause, isPlaying, audioRef],
+        [seekToTime, playFrom, pause, audioRef, subscribe],
     );
 
     usePlaybackKeyboard({
@@ -240,12 +200,7 @@ export function RecordingPlayer({
                     onDecodeWaveform={triggerWaveformDecode}
                 />
 
-                <audio
-                    ref={audioRef}
-                    src={`/api/recordings/${recording.id}/audio`}
-                    preload="metadata"
-                    className="hidden"
-                >
+                <audio ref={audioRef} preload="metadata" className="hidden">
                     <track kind="captions" />
                 </audio>
             </CardContent>

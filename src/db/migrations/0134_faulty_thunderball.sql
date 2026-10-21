@@ -1,0 +1,3 @@
+DROP INDEX "processing_profiles_owner_channel_default_unique";--> statement-breakpoint
+ALTER TABLE "processing_profiles" ADD COLUMN "deleted_at" timestamp;--> statement-breakpoint
+CREATE UNIQUE INDEX "processing_profiles_owner_channel_default_unique" ON "processing_profiles" USING btree ("owner_user_id","channel") WHERE "processing_profiles"."is_default" and "processing_profiles"."archived_at" is null and "processing_profiles"."deleted_at" is null;

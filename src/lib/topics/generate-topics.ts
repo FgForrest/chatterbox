@@ -314,6 +314,7 @@ export async function generateTopicsForTranscript(
                 view: ctx.view,
                 step: "topics",
                 content: stepContent,
+                inputFingerprint: input.fingerprint,
             });
             return { stored, advance };
         });
@@ -365,6 +366,7 @@ export async function generateTopicsForTranscript(
                             { role: "user", content: prompt },
                         ],
                         temperature: 0.3,
+                        maxOutputTokens: credentials.maxOutputTokens,
                         maxTokens: 2000,
                     }),
                 );
@@ -471,6 +473,7 @@ export async function generateTopicsForTranscript(
                       view: ctx.view,
                       step: "topics",
                       content: stepContent,
+                      inputFingerprint: input.fingerprint,
                   })
                 : false;
         return { written, advance };

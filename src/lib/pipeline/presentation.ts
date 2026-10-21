@@ -14,6 +14,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     transcriptions,
+    users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
@@ -27,7 +28,9 @@ import type {
     PipelinePhases,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -107,6 +110,8 @@ export interface ItemProcessingPresentation {
     jobs: {
         transcription: ProcessingJobState | null;
         summary: ProcessingJobState | null;
+        topics?: ProcessingJobState | null;
+        title?: ProcessingJobState | null;
     };
     startedBy?: ProcessingRequestOrigin;
     failures: ProcessingPhaseFailure[];
@@ -283,10 +288,11 @@ async function folderPaths(
     );
 }
 
-/** Build the owner-only private processing projection used by item headers. */
+/** Build the owner-scoped processing projection with labels localized for its viewer. */
 export async function loadPrivateItemProcessing(
     ownerUserId: string,
     itemId: string,
+    viewerUserId = ownerUserId,
 ): Promise<ItemProcessingPresentation | null> {
     const [item] = await db
         .select({
@@ -296,11 +302,14 @@ export async function loadPrivateItemProcessing(
             phases: itemProcessing.phases,
             profileId: processingProfiles.id,
             profileName: processingProfiles.name,
+            profileDeletedAt: processingProfiles.deletedAt,
+            viewerLocale: users.uiLocale,
             profileScope: processingProfiles.scope,
             profileRevisionId: processingProfileRevisions.id,
             profileSettings: processingProfileRevisions.settings,
         })
         .from(chatterItems)
+        .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
             and(
@@ -399,6 +408,7 @@ export async function loadPrivateItemProcessing(
                         TRANSCRIPTION_JOB_KIND,
                         SUMMARY_JOB_KIND,
                         TOPICS_JOB_KIND,
+                        TITLE_JOB_KIND,
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
@@ -617,7 +627,11 @@ export async function loadPrivateItemProcessing(
         automatic
             ? {
                   id: item.profileId,
-                  name: decryptText(item.profileName),
+                  name: profileHistoryName(
+                      decryptText(item.profileName),
+                      item.profileDeletedAt,
+                      item.viewerLocale,
+                  ),
                   scope: item.profileScope,
                   revisionId: item.profileRevisionId,
                   automatic: {
@@ -691,8 +705,8 @@ export async function loadPrivateItemProcessing(
     const transcriptionJobs = activeJobs.filter(
         (job) => job.kind === TRANSCRIPTION_JOB_KIND,
     );
-    const summaryJobs = activeJobs.filter((job) =>
-        [SUMMARY_JOB_KIND, TOPICS_JOB_KIND].includes(job.kind),
+    const summaryJobs = activeJobs.filter(
+        (job) => job.kind === SUMMARY_JOB_KIND,
     );
 
     return {
@@ -725,6 +739,12 @@ export async function loadPrivateItemProcessing(
         jobs: {
             transcription: processingJobState(transcriptionJobs),
             summary: processingJobState(summaryJobs),
+            topics: processingJobState(
+                activeJobs.filter((job) => job.kind === TOPICS_JOB_KIND),
+            ),
+            title: processingJobState(
+                activeJobs.filter((job) => job.kind === TITLE_JOB_KIND),
+            ),
         },
         startedBy: processingStartedBy(
             [
