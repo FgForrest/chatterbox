@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { SummaryData } from "@/hooks/use-transcription-summary";
 import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
@@ -274,6 +281,36 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts a first summary when the processing strip opens the compact line", () => {
+        state.summaryData = null;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+    });
+
+    it("expands instead of starting while the compact line cannot run", () => {
+        state.summaryData = null;
+        state.summaryProfilesLoading = true;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        const heading = screen.getByRole("heading", { name: /^Summary/ });
+        expect(heading.closest("[hidden]")).toBeNull();
+        expect(heading.closest("[data-workflow-widget]")?.tagName).not.toBe(
+            "SPAN",
+        );
     });
 
     it("keeps a manually started summary inline while it runs", () => {

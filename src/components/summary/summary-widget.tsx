@@ -274,20 +274,22 @@ export function SummaryWidget({
         />
     );
 
-    const canRunFromLine =
+    const runsFromLine =
+        summaryLine &&
         summaryLoaded &&
         canChange &&
         !working &&
         !hasSummary &&
         source === "riffado";
+    const runFromLineDisabled = summaryProfilesLoading || !canSummarize;
     let line: ReactNode;
-    if (summaryLine && canRunFromLine) {
+    if (runsFromLine) {
         line = (
             <WorkflowWidgetRunLine
                 {...lineProps}
                 runLabel={i18n("Summarize")}
                 onRun={runSummary}
-                disabled={summaryProfilesLoading || !canSummarize}
+                disabled={runFromLineDisabled}
             />
         );
     } else if (summaryLine) {
@@ -602,6 +604,9 @@ export function SummaryWidget({
                 inlineLine={line}
                 tone={tone}
                 onOpenChange={(next) => {
+                    if (next && runsFromLine && !runFromLineDisabled) {
+                        runSummary();
+                    }
                     if (workflowVisible) setWorkflowExpanded(next);
                     else setSummaryExpanded(next);
                 }}
