@@ -10,6 +10,9 @@ import {
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { listFolderOrganization } from "@/lib/folders/folders";
+import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
+import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
+import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
@@ -69,21 +72,6 @@ function profileSummary(profile: ProfileRecord): ProcessingProfileSummary {
     return { id: profile.id, name: profile.name, scope: profile.scope };
 }
 
-function folderPath(
-    folder: RecordingFolder,
-    byId: Map<string, RecordingFolder>,
-): string {
-    const parts = [folder.name];
-    let parentId = folder.parentId;
-    while (parentId) {
-        const parent = byId.get(parentId);
-        if (!parent) break;
-        parts.unshift(parent.name);
-        parentId = parent.parentId;
-    }
-    return parts.join(" › ");
-}
-
 /** Serialize profile resolution without profile settings or encrypted fields. */
 export function serializeProcessingResolution(
     resolution: Awaited<ReturnType<typeof resolveProfileForPlacements>>,
@@ -115,6 +103,7 @@ export async function loadPrivateCategorizationPanel(
     ownerUserId: string,
     itemId: string,
     viewerUserId = ownerUserId,
+    fallbackLocale: AppLocale = "en",
 ): Promise<CategorizationPanelPresentation | null> {
     const [item] = await db
         .select({
@@ -198,13 +187,20 @@ export async function loadPrivateCategorizationPanel(
     const byId = new Map(
         folderOrganization.folders.map((folder) => [folder.id, folder]),
     );
+    const locale = normalizeLocale(item.viewerLocale) ?? fallbackLocale;
+    const labels = {
+        private: translatedSourceMessage(locale, "Private"),
+        organization: translatedSourceMessage(locale, "Organization"),
+    };
+    const label = (folder: RecordingFolder) =>
+        folderDisplayName(folder, labels);
     const folders = folderOrganization.folders
         .filter((folder) => folder.scope === "personal" || isOrgScopeEnabled())
         .map((folder) => ({
             id: folder.id,
             parentId: folder.parentId,
-            name: folder.name,
-            path: folderPath(folder, byId),
+            name: label(folder),
+            path: folderDisplayPath(folder, byId, label, " › "),
             scope: folder.scope,
         }));
     const selectableFolderIds = new Set(

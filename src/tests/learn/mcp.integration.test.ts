@@ -239,6 +239,21 @@ describeWithDatabase("the Learn MCP endpoint (PostgreSQL)", () => {
         expect((await mcp(list)).status).toBe(401);
     });
 
+    it("marks every tool read-only, so a CLI that never asks may call it", async () => {
+        const listed = (await (
+            await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" })
+        ).json()) as { result: { tools: { annotations?: unknown }[] } };
+        expect(listed.result.tools).toHaveLength(3);
+        for (const tool of listed.result.tools) {
+            expect(tool.annotations).toEqual({
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            });
+        }
+    });
+
     it("answers the handshake, and a notification with nothing", async () => {
         const initialized = await mcp({
             jsonrpc: "2.0",

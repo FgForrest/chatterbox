@@ -26,6 +26,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useGoogleConnection } from "@/hooks/use-google-connection";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type {
@@ -108,6 +109,7 @@ export function FolderExportActions({
     privateTree,
 }: FolderExportActionsProps) {
     const i18n = useExtracted();
+    const folderLabel = useFolderLabel();
     const name = useProductName();
     const [open, setOpen] = useState(false);
     const [configurations, setConfigurations] = useState<
@@ -378,7 +380,8 @@ export function FolderExportActions({
                             />
                         </DialogTitle>
                         <DialogDescription>
-                            {i18n("Exports configured on")} {folder.name}{" "}
+                            {i18n("Exports configured on")}{" "}
+                            {folderLabel(folder)}{" "}
                             {i18n("apply to its complete subtree.")}
                         </DialogDescription>
                     </DialogHeader>

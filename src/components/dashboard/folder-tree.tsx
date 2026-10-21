@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import { effectiveRecordingCounts } from "@/lib/folders/hierarchy";
 import { cn } from "@/lib/utils";
 import type {
@@ -88,15 +89,6 @@ interface FolderTreeProps {
     mailEnabled?: boolean;
     onNewFolder?: () => void;
     canCurate?: boolean;
-}
-
-/** Display name of a folder; roots are labelled by what they are. */
-export function useFolderLabel() {
-    const i18n = useExtracted();
-    return (folder: RecordingFolder) =>
-        folder.parentId === null && folder.scope === "org"
-            ? i18n("Organization")
-            : folder.name;
 }
 
 export function FolderTree({
@@ -171,7 +163,8 @@ export function FolderTree({
         const byId = new Map(folders.map((folder) => [folder.id, folder]));
         const result = new Set<string>();
         for (const folder of folders) {
-            if (!folder.name.toLowerCase().includes(normalized)) continue;
+            if (!folderLabel(folder).toLowerCase().includes(normalized))
+                continue;
             let current: RecordingFolder | undefined = folder;
             while (current) {
                 result.add(current.id);
@@ -181,7 +174,7 @@ export function FolderTree({
             }
         }
         return result;
-    }, [folders, query]);
+    }, [folderLabel, folders, query]);
 
     const descendantsOfAction = useMemo(() => {
         if (action?.kind !== "move") return new Set<string>();

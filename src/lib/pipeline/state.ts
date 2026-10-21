@@ -90,6 +90,7 @@ async function settleSummaryStepInTx(
         content: ContentRevisionInput;
         generation?: number;
         inputFingerprint?: string | null;
+        currentInputsVerified?: boolean;
     },
     state: "done" | "skipped",
     reason: string,
@@ -115,27 +116,34 @@ async function settleSummaryStepInTx(
         at: new Date().toISOString(),
     };
     const step = summary?.steps?.[input.step];
+    const recoveringProfileChange =
+        input.currentInputsVerified === true &&
+        input.step === "summary" &&
+        summary.state === "outdated" &&
+        summary.reason === "profile_changed";
     const currentReading =
         summary.staleFingerprint !== undefined &&
         summary.staleFingerprint === input.inputFingerprint;
     if (
-        (summary.state === "outdated" &&
+        !recoveringProfileChange &&
+        ((summary.state === "outdated" &&
             !(summary.reason === "learn_changed" && currentReading)) ||
-        (input.step !== "title" &&
-            (step
-                ? !stepUsesInput(step, summary, input.content) ||
-                  (step.state === "outdated" &&
-                      !(step.reason === "learn_changed" && currentReading))
-                : summary.inputs !== undefined &&
-                  (summary.inputs.contentId !== input.content.contentId ||
-                      summary.inputs.contentSourceId !==
-                          input.content.contentSourceId ||
-                      summary.inputs.contentRevision !==
-                          input.content.contentRevision)))
+            (input.step !== "title" &&
+                (step
+                    ? !stepUsesInput(step, summary, input.content) ||
+                      (step.state === "outdated" &&
+                          !(step.reason === "learn_changed" && currentReading))
+                    : summary.inputs !== undefined &&
+                      (summary.inputs.contentId !== input.content.contentId ||
+                          summary.inputs.contentSourceId !==
+                              input.content.contentSourceId ||
+                          summary.inputs.contentRevision !==
+                              input.content.contentRevision))))
     ) {
         return false;
     }
     if (
+        !recoveringProfileChange &&
         stepUsesInput(step, summary, input.content) &&
         step?.state === state &&
         (input.inputFingerprint === undefined ||
@@ -188,10 +196,14 @@ async function settleSummaryStepInTx(
         {
             ...summary,
             state: done ? "done" : "pending",
-            reason: done ? "completed" : summary.reason,
+            reason: done
+                ? "completed"
+                : recoveringProfileChange
+                  ? "step-completed"
+                  : summary.reason,
             generation,
             inputs:
-                input.step === "title"
+                input.step === "title" || recoveringProfileChange
                     ? input.content
                     : (summary.inputs ?? input.content),
             at: new Date().toISOString(),
@@ -211,6 +223,8 @@ export function markSummaryStepDoneInTx(
         content: ContentRevisionInput;
         generation?: number;
         inputFingerprint?: string | null;
+        /** The summary commit verified both current content and item profile. */
+        currentInputsVerified?: boolean;
     },
 ): Promise<boolean> {
     return settleSummaryStepInTx(tx, input, "done", "generated");

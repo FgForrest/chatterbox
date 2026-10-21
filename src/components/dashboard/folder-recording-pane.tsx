@@ -18,10 +18,7 @@ import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
-import {
-    RECORDING_SOURCE_FOLDER_DRAG_TYPE,
-    useFolderLabel,
-} from "@/components/dashboard/folder-tree";
+import { RECORDING_SOURCE_FOLDER_DRAG_TYPE } from "@/components/dashboard/folder-tree";
 import {
     FolderDeletionAddresses,
     FolderMailAddresses,
@@ -48,6 +45,7 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { recordingIdsVisibleInFolder } from "@/lib/folders/hierarchy";
 import { formatBytes } from "@/lib/format-bytes";
@@ -458,9 +456,9 @@ export function FolderRecordingPane({
                                                             }
                                                             className="rounded-full border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] font-normal leading-none text-muted-foreground"
                                                         >
-                                                            {
-                                                                assignedFolder.name
-                                                            }
+                                                            {folderLabel(
+                                                                assignedFolder,
+                                                            )}
                                                         </span>
                                                     ))}
                                             </span>

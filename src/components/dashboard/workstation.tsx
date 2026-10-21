@@ -27,6 +27,7 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import { useMailRefresh } from "@/hooks/use-mail-refresh";
 import { useOrgEvents } from "@/hooks/use-org-events";
@@ -113,6 +114,7 @@ export function Workstation({
     canCurate = false,
 }: WorkstationProps) {
     const i18n = useExtracted();
+    const folderLabel = useFolderLabel();
     const shareRefusal = useShareRefusal();
     const { refresh } = useRouter();
     // A stable empty list: a fresh `[]` per render would re-run every effect
@@ -452,12 +454,18 @@ export function Workstation({
             uploadFolderOptions(
                 folderOrganization.folders,
                 organizationLibrary !== null,
+                folderLabel,
             ),
-        [folderOrganization.folders, organizationLibrary],
+        [folderLabel, folderOrganization.folders, organizationLibrary],
     );
     const uploadFolderParentOptions = useMemo(
-        () => uploadFolderParents(folderOrganization.folders, canCurate),
-        [canCurate, folderOrganization.folders],
+        () =>
+            uploadFolderParents(
+                folderOrganization.folders,
+                canCurate,
+                folderLabel,
+            ),
+        [canCurate, folderLabel, folderOrganization.folders],
     );
     const hasFilingFolder = uploadFolders.length > 0;
 

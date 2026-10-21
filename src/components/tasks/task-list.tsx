@@ -21,6 +21,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import type {
     TaskAssignee,
@@ -120,6 +121,7 @@ function flattenFolders(
  */
 export function TaskList({ organization }: { organization: boolean }) {
     const i18n = useExtracted();
+    const folderLabel = useFolderLabel();
     const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname();
@@ -457,12 +459,7 @@ export function TaskList({ organization }: { organization: boolean }) {
                                             paddingLeft: `${depth * 12}px`,
                                         }}
                                     >
-                                        {entry.kind === "private"
-                                            ? i18n("Private")
-                                            : entry.scope === "org" &&
-                                                entry.parentId === null
-                                              ? i18n("Organization")
-                                              : entry.name}
+                                        {folderLabel(entry)}
                                     </span>
                                 </SelectItem>
                             ),
