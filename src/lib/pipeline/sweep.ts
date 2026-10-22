@@ -130,7 +130,7 @@ export async function sweepAutomaticTranscriptionRetries(
     return requested;
 }
 
-/** Settle pipeline steps whose final job died outside the worker failure path. */
+/** Settle pipeline steps whose final job ended without recording its outcome. */
 export async function sweepOrphanedPipelineSteps(
     limit = ORPHANED_STEP_SWEEP_LIMIT,
 ): Promise<number> {
@@ -150,7 +150,11 @@ export async function sweepOrphanedPipelineSteps(
                 )
                 .for("update")
                 .limit(1);
-            if (!processing) return false;
+            if (
+                !processing ||
+                processing.phases[row.phase]?.generation !== row.phaseGeneration
+            )
+                return false;
             const jobKind =
                 row.phase === "transcribe"
                     ? TRANSCRIPTION_JOB_KIND

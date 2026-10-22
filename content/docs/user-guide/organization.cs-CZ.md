@@ -11,7 +11,7 @@ Jakmile to Váš administrátor nastaví, všichni v instanci sdílejí **Organi
 
 Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Zařadit e-mail**. Po zařazení můžete přidat další umístění v Organizaci pomocí **Přidat do složky** v řádku složek. Položku lze také přetáhnout na složku.
 
-![Řádek složek a nabídka Přidat do složky se složkami Organizace](images/add-to-folder.png)
+![Řádek složek a výběr Přidat do složky se složkami Organizace](images/add-to-folder.png)
 
 Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Klepna ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
 

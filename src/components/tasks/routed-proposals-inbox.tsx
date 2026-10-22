@@ -218,6 +218,8 @@ export function RoutedProposalsInbox() {
                                     evidence={{
                                         itemId: row.sourceItem.id,
                                         itemKind: row.sourceItem.kind,
+                                        audioAvailable:
+                                            row.sourceItem.audioAvailable,
                                         startMs: row.evidenceStartMs,
                                         text: row.evidenceText,
                                     }}

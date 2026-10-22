@@ -52,8 +52,11 @@ export function descendantFolderIds(
 export function ancestorFolderIds(
     folders: ReadonlyArray<Pick<RecordingFolder, "id" | "parentId">>,
     folderId: string,
+    byId: ReadonlyMap<
+        string,
+        Pick<RecordingFolder, "id" | "parentId">
+    > = new Map(folders.map((folder) => [folder.id, folder])),
 ): Set<string> {
-    const byId = new Map(folders.map((folder) => [folder.id, folder]));
     const result = new Set<string>();
     let current = byId.get(folderId);
     while (current) {
@@ -92,19 +95,36 @@ export function effectiveRecordingCounts(
 ): Map<string, number> {
     const recordingIds = new Set(allRecordingIds);
     const privateIds = new Set(privateRecordingIds);
-    return new Map(
-        folders.map((folder) => [
-            folder.id,
-            recordingIdsVisibleInFolder(
-                folders,
-                assignments.filter((assignment) =>
-                    recordingIds.has(assignment.recordingId),
-                ),
-                folder,
-                privateIds,
-            ).size,
-        ]),
-    );
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    const countByFolder = new Map(folders.map((folder) => [folder.id, 0]));
+    const assignmentsByRecording = new Map<string, string[]>();
+    for (const assignment of assignments) {
+        if (!recordingIds.has(assignment.recordingId)) continue;
+        const placed = assignmentsByRecording.get(assignment.recordingId) ?? [];
+        placed.push(assignment.folderId);
+        assignmentsByRecording.set(assignment.recordingId, placed);
+    }
+    for (const placed of assignmentsByRecording.values()) {
+        const counted = new Set<string>();
+        for (const folderId of placed) {
+            let current = byId.get(folderId);
+            while (current && !counted.has(current.id)) {
+                counted.add(current.id);
+                countByFolder.set(
+                    current.id,
+                    (countByFolder.get(current.id) ?? 0) + 1,
+                );
+                current = current.parentId
+                    ? byId.get(current.parentId)
+                    : undefined;
+            }
+        }
+    }
+    for (const folder of folders) {
+        if (folder.kind === "private")
+            countByFolder.set(folder.id, privateIds.size);
+    }
+    return countByFolder;
 }
 
 export function canonicalFolderIds(

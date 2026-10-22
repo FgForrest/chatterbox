@@ -96,9 +96,17 @@ describe("manual recorder start", () => {
             "detected meeting",
             "https://meet.google.com/abc-defg-hij",
             "google-meet",
-            true,
+            false,
         ],
         ["other tab", "https://example.com", undefined, false],
+        [
+            "other screen or app",
+            "https://example.com",
+            undefined,
+            false,
+            true,
+            true,
+        ],
         [
             "server tab before consent",
             "https://example.com",
@@ -106,7 +114,7 @@ describe("manual recorder start", () => {
             false,
             false,
         ],
-    ])("starts recording or setup from one confirmation click on a %s", async (_, url, platformHint, pickerHidden, consented = true) => {
+    ])("starts recording or setup from one confirmation click on a %s", async (_, url, platformHint, pickerHidden, consented = true, forceDesktop = false) => {
         const { node, sendMessage, close } = setupPopup(url);
         if (!consented) chrome.storage.local.get = async () => ({});
         await import("../../../extensions/recorder/popup/popup.js");
@@ -124,7 +132,7 @@ describe("manual recorder start", () => {
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
 
         expect(node("picker-hint").hidden).toBe(pickerHidden);
-        await node("start").click();
+        await node(forceDesktop ? "start-desktop" : "start").click();
 
         const startCalls = sendMessage.mock.calls.filter(
             ([message]) => message.type === "start-recording",
@@ -132,6 +140,7 @@ describe("manual recorder start", () => {
         expect(startCalls).toHaveLength(1);
         expect(startCalls[0][0].payload).toMatchObject({
             tabId: 42,
+            forceDesktop,
             platformHint,
             noticeAcknowledgedAt: expect.any(String),
         });
@@ -143,7 +152,10 @@ describe("manual recorder start", () => {
         expect(close).toHaveBeenCalledOnce();
     });
 
-    it("shows progress while Chrome handles the capture request", async () => {
+    it.each([
+        false,
+        true,
+    ])("shows progress for desktop=%s while Chrome handles the capture request", async (desktop) => {
         const { node, sendMessage, close } = setupPopup("https://example.com");
         let finishStart;
         sendMessage.mockImplementation((message) =>
@@ -158,9 +170,13 @@ describe("manual recorder start", () => {
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
 
-        const start = node("start").click();
+        const button = node(desktop ? "start-desktop" : "start");
+        const start = button.click();
         expect(node("start").disabled).toBe(true);
-        expect(node("start").textContent).toBe("openingPicker");
+        expect(node("start-desktop").disabled).toBe(true);
+        expect(button.textContent).toBe(
+            desktop ? "openingPicker" : "startingCapture",
+        );
         expect(close).not.toHaveBeenCalled();
 
         await vi.waitFor(() => expect(finishStart).toBeTypeOf("function"));
@@ -188,7 +204,7 @@ describe("manual recorder start", () => {
 
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
-        expect(node("start").textContent).toBe("recordWithConsent");
+        expect(node("start").textContent).toBe("recordTabWithConsent");
         expect(finishFolders).toBeTypeOf("function");
 
         finishFolders({

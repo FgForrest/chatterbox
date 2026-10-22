@@ -464,6 +464,7 @@ export async function markRecordingSessionCompleting(input: {
     endedAt: Date;
     stopReason: string;
     expectedChunkCount: number;
+    folderId?: string | null;
     truncatedAtChunk: number | null;
 }): Promise<RecordingSessionRow | null> {
     return db.transaction(async (tx) => {
@@ -502,6 +503,9 @@ export async function markRecordingSessionCompleting(input: {
         const [row] = await tx
             .update(recordingSessions)
             .set({
+                ...(input.folderId !== undefined
+                    ? { folderId: input.folderId }
+                    : {}),
                 status: "completing",
                 endedAt: input.endedAt,
                 stopReason: input.stopReason,
@@ -525,12 +529,18 @@ export async function markRecordingSessionCompleting(input: {
 
 export async function setRecordingSessionJob(
     sessionId: string,
+    userId: string,
     jobId: string,
 ): Promise<void> {
     await db
         .update(recordingSessions)
         .set({ jobId, updatedAt: new Date() })
-        .where(eq(recordingSessions.id, sessionId));
+        .where(
+            and(
+                eq(recordingSessions.id, sessionId),
+                eq(recordingSessions.userId, userId),
+            ),
+        );
 }
 
 export async function markRecordingSessionCompleted(

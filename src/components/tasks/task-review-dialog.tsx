@@ -16,6 +16,7 @@ import {
     WorkflowWidget,
     WorkflowWidgetLine,
 } from "@/components/pipeline/workflow-widget";
+import { usePlayback } from "@/components/playback/playback-context";
 import {
     AssigneePicker,
     type SpeakerChoice,
@@ -28,7 +29,6 @@ import type {
     TaskRowChange,
 } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
-import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type {
     TaskMatchView,
@@ -66,8 +66,6 @@ export function TaskReviewLink({
     speakers,
     organizationOnly,
     allowAdd = true,
-    onPlay,
-    playback,
     frame = "dialog",
     widgetId,
     showTrigger = true,
@@ -79,8 +77,6 @@ export function TaskReviewLink({
     organizationOnly: boolean;
     /** Offer adding tasks by hand; not without a summary they would die with. */
     allowAdd?: boolean;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     frame?: WorkflowWidgetFrame;
     widgetId?: string;
     showTrigger?: boolean;
@@ -334,8 +330,6 @@ export function TaskReviewLink({
                                                 ) ?? []
                                             }
                                             itemId={state.itemId}
-                                            onPlay={onPlay}
-                                            playback={playback}
                                             onNavigate={() => setOpen(false)}
                                             onToggle={(ticked) => {
                                                 state.tickMatch(match, ticked);
@@ -378,8 +372,6 @@ export function TaskReviewLink({
                                             matches={group.matches}
                                             proposal={group.proposal}
                                             itemId={state.itemId}
-                                            onPlay={onPlay}
-                                            playback={playback}
                                             onNavigate={() => setOpen(false)}
                                             updatesByTaskId={updatesByTaskId}
                                             onChoose={(selected) => {
@@ -492,8 +484,6 @@ export function TaskReviewLink({
                                         task={task}
                                         speakers={speakers}
                                         organizationOnly={organizationOnly}
-                                        onPlay={onPlay}
-                                        playback={playback}
                                         onNavigate={() => setOpen(false)}
                                         onMerge={(targetTaskId) =>
                                             state.mergeInto(
@@ -545,8 +535,6 @@ export function TaskReviewLink({
                                                 key={update.id}
                                                 update={update}
                                                 itemId={state.itemId}
-                                                onPlay={onPlay}
-                                                playback={playback}
                                                 onNavigate={() =>
                                                     setOpen(false)
                                                 }
@@ -585,8 +573,6 @@ function ProposalRow({
     task,
     speakers,
     organizationOnly,
-    onPlay,
-    playback,
     onNavigate,
     selection,
     onChange,
@@ -595,8 +581,6 @@ function ProposalRow({
     task: TaskView;
     speakers: readonly SpeakerChoice[];
     organizationOnly: boolean;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     onNavigate: () => void;
     selection: { selected: boolean; onToggle: () => void } | null;
     onChange: TaskRowChange;
@@ -683,13 +667,12 @@ function ProposalRow({
                         evidence={{
                             itemId: task.evidenceItemId,
                             itemKind: task.evidenceItemKind,
+                            audioAvailable: task.evidenceAudioAvailable,
                             startMs: task.evidenceStartMs,
                             text: task.evidenceText,
                         }}
                         quote={task.quote}
-                        onPlay={onPlay}
                         currentItemId={task.recordingId}
-                        playback={playback}
                         onNavigate={onNavigate}
                     />
                     {task.quote &&
@@ -766,30 +749,26 @@ function CandidateDetails({ match }: { match: TaskMatchView }) {
 function MatchEvidence({
     match,
     itemId,
-    onPlay,
-    playback,
     onNavigate,
     showQuote = false,
 }: {
     match: TaskMatchView;
     itemId: string;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     onNavigate?: () => void;
     showQuote?: boolean;
 }) {
+    const playback = usePlayback();
     return (
         <TaskEvidenceLink
             evidence={{
                 itemId,
                 itemKind: match.evidenceText ? "mail" : "audio",
+                audioAvailable: playback !== null,
                 startMs: match.evidenceStartMs,
                 text: match.evidenceText,
             }}
             quote={match.quote}
-            onPlay={onPlay}
             currentItemId={itemId}
-            playback={playback}
             onNavigate={onNavigate}
             showQuote={showQuote}
         />
@@ -800,8 +779,6 @@ function SuggestedMatchRow({
     match,
     updates,
     itemId,
-    onPlay,
-    playback,
     onNavigate,
     onToggle,
     onToggleUpdate,
@@ -809,8 +786,6 @@ function SuggestedMatchRow({
     match: TaskMatchView;
     updates: readonly TaskUpdateView[];
     itemId: string;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
     onToggleUpdate: (update: TaskUpdateView, ticked: boolean) => void;
@@ -857,6 +832,8 @@ function SuggestedMatchRow({
                         evidence={{
                             itemId: match.candidate.homeItem.id,
                             itemKind: match.candidate.homeItem.kind,
+                            audioAvailable:
+                                match.candidate.homeItem.audioAvailable,
                             startMs: match.candidate.evidenceStartMs,
                             text: match.candidate.evidenceText,
                         }}
@@ -872,8 +849,6 @@ function SuggestedMatchRow({
                     <MatchEvidence
                         match={match}
                         itemId={itemId}
-                        onPlay={onPlay}
-                        playback={playback}
                         onNavigate={onNavigate}
                         showQuote
                     />
@@ -886,8 +861,6 @@ function SuggestedMatchRow({
                             key={update.id}
                             update={update}
                             itemId={itemId}
-                            onPlay={onPlay}
-                            playback={playback}
                             onNavigate={onNavigate}
                             onToggle={(ticked) =>
                                 onToggleUpdate(update, ticked)
@@ -904,8 +877,6 @@ function AmbiguousMatchRow({
     matches,
     proposal,
     itemId,
-    onPlay,
-    playback,
     onNavigate,
     updatesByTaskId,
     onChoose,
@@ -915,8 +886,6 @@ function AmbiguousMatchRow({
     matches: readonly TaskMatchView[];
     proposal: TaskView | null;
     itemId: string;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     onNavigate: () => void;
     updatesByTaskId: ReadonlyMap<string, readonly TaskUpdateView[]>;
     onChoose: (selected: string | "new") => void;
@@ -966,8 +935,6 @@ function AmbiguousMatchRow({
                                             key={update.id}
                                             update={update}
                                             itemId={itemId}
-                                            onPlay={onPlay}
-                                            playback={playback}
                                             onNavigate={onNavigate}
                                             onToggle={(ticked) =>
                                                 onToggleUpdate(
@@ -1000,8 +967,6 @@ function AmbiguousMatchRow({
                     <MatchEvidence
                         match={matches[0]}
                         itemId={itemId}
-                        onPlay={onPlay}
-                        playback={playback}
                         onNavigate={onNavigate}
                         showQuote
                     />
@@ -1025,31 +990,27 @@ function AmbiguousMatchRow({
 function UpdateRow({
     update,
     itemId,
-    onPlay,
-    playback,
     onNavigate,
     onToggle,
 }: {
     update: TaskUpdateView;
     itemId: string;
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
 }) {
     const i18n = useExtracted();
+    const playback = usePlayback();
     const evidence = (
         <TaskEvidenceLink
             evidence={{
                 itemId,
                 itemKind: update.evidenceText ? "mail" : "audio",
+                audioAvailable: playback !== null,
                 startMs: update.evidenceStartMs,
                 text: update.evidenceText,
             }}
             quote={update.quote}
-            onPlay={onPlay}
             currentItemId={itemId}
-            playback={playback}
             onNavigate={onNavigate}
         />
     );

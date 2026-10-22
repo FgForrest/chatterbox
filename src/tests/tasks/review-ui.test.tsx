@@ -12,6 +12,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { openWidget } from "@/components/pipeline/workflow-widget";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import { RecordingTasks as RecordingTasksList } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
@@ -39,9 +40,11 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         recordingId: "source-item",
         evidenceItemId: "source-item",
         evidenceItemKind: "audio",
+        evidenceAudioAvailable: true,
         status: "proposed",
         text: "Send the revised contract",
         assignee: { personId: "person-1", name: "Ada" },
+        assigneeHasEmail: true,
         assigneeHint: null,
         assigneeCheck: false,
         dueDate: "2026-10-22",
@@ -84,6 +87,7 @@ function match(overrides: Partial<TaskMatchView> = {}): TaskMatchView {
                 id: "earlier-item",
                 kind: "audio",
                 title: "Contract planning",
+                audioAvailable: true,
             },
             quote: "I will send the contract",
             evidenceStartMs: 3_000,
@@ -439,10 +443,9 @@ describe("task review rows", () => {
             />,
         );
 
-        expect(screen.getByRole("checkbox", { name: "Done" })).toHaveProperty(
-            "disabled",
-            true,
-        );
+        const checkbox = screen.getByRole("checkbox", { name: "Done" });
+        expect(checkbox).toHaveProperty("disabled", false);
+        expect(checkbox.getAttribute("aria-disabled")).toBe("true");
         expect(
             screen.getByRole("button", { name: "Assigned to Ada" }),
         ).toHaveProperty("disabled", true);
@@ -490,7 +493,6 @@ describe("task review rows", () => {
     });
 
     it("compares an unticked suggested match and toggles its timed evidence", async () => {
-        const onPlay = vi.fn();
         const listeners = new Set<
             (state: {
                 ms: number;
@@ -543,13 +545,13 @@ describe("task review rows", () => {
             matches: [match()],
         });
         render(
-            <TaskReviewLink
-                state={current}
-                speakers={[]}
-                organizationOnly={false}
-                onPlay={onPlay}
-                playback={playback}
-            />,
+            <PlaybackProvider playback={playback}>
+                <TaskReviewLink
+                    state={current}
+                    speakers={[]}
+                    organizationOnly={false}
+                />
+            </PlaybackProvider>,
         );
         fireEvent.click(screen.getByRole("button", { name: /Review tasks/ }));
 
@@ -570,7 +572,7 @@ describe("task review rows", () => {
         ).toBeTruthy();
         expect(
             screen
-                .getByRole("link", { name: "Play evidence at 00:03" })
+                .getByRole("link", { name: "Show in recording" })
                 .getAttribute("href"),
         ).toBe("/dashboard?recording=earlier-item&playFrom=3000");
         expect(
@@ -579,42 +581,44 @@ describe("task review rows", () => {
             }),
         ).toHaveProperty("checked", false);
         fireEvent.click(
-            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+            screen.getByRole("button", { name: "Play from 00:12" }),
         );
-        expect(playback.play).toHaveBeenCalledWith(12_500, expect.any(String));
+        expect(playback.play).toHaveBeenCalledWith(
+            12_500,
+            expect.any(String),
+            undefined,
+        );
         await screen.findByRole("button", {
-            name: "Pause evidence at 00:12",
+            name: "Pause at 00:12",
         });
         expect(
-            screen.getAllByRole("button", { name: /Pause evidence/ }),
+            screen.getAllByRole("button", { name: /Pause at/ }),
         ).toHaveLength(1);
 
         fireEvent.click(
-            screen.getByRole("button", { name: "Play evidence at 00:25" }),
+            screen.getByRole("button", { name: "Play from 00:25" }),
         );
         expect(
-            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+            screen.getByRole("button", { name: "Play from 00:12" }),
         ).toBeTruthy();
         const pause = await screen.findByRole("button", {
-            name: "Pause evidence at 00:25",
+            name: "Pause at 00:25",
         });
         expect(
-            screen.getAllByRole("button", { name: /Pause evidence/ }),
+            screen.getAllByRole("button", { name: /Pause at/ }),
         ).toHaveLength(1);
         expect(pause.getAttribute("aria-pressed")).toBe("true");
         fireEvent.click(pause);
         expect(playback.pause).toHaveBeenCalledTimes(1);
-        expect(
-            screen.queryByRole("button", { name: /Pause evidence/ }),
-        ).toBeNull();
+        expect(screen.queryByRole("button", { name: /Pause at/ })).toBeNull();
 
         fireEvent.click(
-            screen.getByRole("button", { name: "Play evidence at 00:12" }),
+            screen.getByRole("button", { name: "Play from 00:12" }),
         );
         playback.play(40_000);
         await waitFor(() =>
             expect(
-                screen.queryByRole("button", { name: /Pause evidence/ }),
+                screen.queryByRole("button", { name: /Pause at/ }),
             ).toBeNull(),
         );
     });
@@ -837,6 +841,7 @@ describe("task review rows", () => {
                             id: "earlier-item",
                             kind: "audio",
                             title: "Contract planning",
+                            audioAvailable: true,
                         },
                     },
                 ],
@@ -880,6 +885,7 @@ describe("task review rows", () => {
                 id: "earlier-item",
                 kind: "audio" as const,
                 title: "Contract planning",
+                audioAvailable: true,
             },
         };
         const second = { ...first, id: "target-21", text: "Exact result" };

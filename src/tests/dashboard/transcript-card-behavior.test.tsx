@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 vi.mock("@/components/summary/summary-widget", () => ({
     SummaryWidget: () => null,
@@ -32,39 +34,70 @@ const seek = vi.fn();
 const play = vi.fn();
 const fetchMock = vi.fn();
 
-function panel(hasTopics = true) {
-    return render(
-        <TranscriptionPanel
-            recording={{
-                id: "rec-card",
-                filename: "Meeting",
-                duration: 60000,
-                filesize: 100,
-                startTime: new Date(0).toISOString(),
-                deviceSn: "local",
-            }}
-            transcripts={[
-                {
-                    source: "riffado",
-                    text: turns
-                        .map((turn) => `${turn.speaker}: ${turn.text}`)
-                        .join("\n"),
-                    turns,
-                    topics: hasTopics ? topics : null,
-                },
-            ]}
-            isTranscribing={false}
-            onTranscribe={vi.fn()}
-            onSeekToTurn={seek}
-            onPlayFromTurn={play}
-        />,
+function panelElement(
+    hasTopics = true,
+    readOnly = false,
+    isTranscribing = false,
+) {
+    return (
+        <PlaybackProvider
+            playback={createTestPlayback({ seek, play }).playback}
+        >
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-card",
+                    filename: "Meeting",
+                    duration: 60000,
+                    filesize: 100,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: turns
+                            .map((turn) => `${turn.speaker}: ${turn.text}`)
+                            .join("\n"),
+                        language: "cs",
+                        provider: "Test provider",
+                        model: "Test model",
+                        turns,
+                        topics: hasTopics ? topics : null,
+                    },
+                ]}
+                readOnly={readOnly}
+                isTranscribing={isTranscribing}
+                onTranscribe={vi.fn()}
+            />
+        </PlaybackProvider>
     );
+}
+
+function panel(hasTopics = true, readOnly = false) {
+    return render(panelElement(hasTopics, readOnly));
 }
 
 function collapse() {
     fireEvent.click(
         screen.getByRole("button", { name: "Collapse transcript" }),
     );
+}
+
+function expand() {
+    fireEvent.click(screen.getByRole("button", { name: "Expand transcript" }));
+}
+
+function expectCollapsed() {
+    expect(
+        screen.queryByRole("region", { name: "Transcript content" }),
+    ).toBeNull();
+    expect(
+        screen.queryByRole("group", { name: "Transcript speakers" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /1 \/ 3 Opening/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Detect topics" })).toBeNull();
+    const card = document.getElementById("recording-transcription-rec-card");
+    expect(card?.querySelector("footer")?.closest("[hidden]")).toBeTruthy();
 }
 
 function openTopics() {
@@ -125,13 +158,22 @@ describe("transcript card behavior", () => {
         vi.unstubAllGlobals();
     });
 
-    it("keeps collapsed topics and re-detection, then seeks and expands a short topic below the bar", () => {
+    it("hides the collapsed body and footer, then navigates topics after expanding", () => {
         panel();
+        const turn = document.querySelector("[data-turn-index]");
+        const boxBeforeCollapse = screen.getByRole("region", {
+            name: "Transcript content",
+        });
         collapse();
-        expect(document.querySelector("[data-turn-index]")).toBeNull();
+        expectCollapsed();
+        expect(document.querySelector("[data-turn-index]")).toBe(turn);
+        expand();
+        expect(screen.getByRole("region", { name: "Transcript content" })).toBe(
+            boxBeforeCollapse,
+        );
         expect(
             document.querySelector("[data-chapter-bar]")?.className,
-        ).not.toContain("sticky");
+        ).toContain("sticky");
         openTopics();
         expect(
             screen.getByRole("menuitem", { name: "Re-detect topics" }),
@@ -151,6 +193,11 @@ describe("transcript card behavior", () => {
         expect(
             screen.getByRole("button", { name: /2 \/ 3 Brief/ }),
         ).toBeTruthy();
+        collapse();
+        expand();
+        expect(
+            screen.getByRole("button", { name: /2 \/ 3 Brief/ }),
+        ).toBeTruthy();
         fireEvent.wheel(box);
         fireEvent.scroll(box);
         expect(
@@ -158,9 +205,23 @@ describe("transcript card behavior", () => {
         ).toBeTruthy();
     });
 
-    it("runs re-detection from the collapsed card", async () => {
+    it("shows re-transcription progress on a collapsed card", () => {
+        const view = panel();
+        collapse();
+        expectCollapsed();
+        view.rerender(panelElement(true, false, true));
+        expect(
+            screen.getByText("Transcribing audio…").closest("[hidden]"),
+        ).toBeNull();
+        view.rerender(panelElement());
+        expectCollapsed();
+    });
+
+    it("runs re-detection after expanding the card", async () => {
         panel();
         collapse();
+        expectCollapsed();
+        expand();
         openTopics();
         fireEvent.click(
             screen.getByRole("menuitem", { name: "Re-detect topics" }),
@@ -173,9 +234,11 @@ describe("transcript card behavior", () => {
         );
     });
 
-    it("offers detection while collapsed without topics", async () => {
+    it("offers detection after expanding without topics", async () => {
         panel(false);
         collapse();
+        expectCollapsed();
+        expand();
         fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
@@ -185,7 +248,7 @@ describe("transcript card behavior", () => {
         );
     });
 
-    it("keeps the Learn hold note while collapsed", async () => {
+    it("hides the Learn hold note until expanded", async () => {
         fetchMock.mockImplementation(async (url: string) =>
             Response.json(
                 url.includes("/follow-ups")
@@ -194,7 +257,15 @@ describe("transcript card behavior", () => {
             ),
         );
         panel(false);
+        await screen.findByText("Topics follow the Learn review");
         collapse();
+        expectCollapsed();
+        expect(
+            screen
+                .getByText("Topics follow the Learn review")
+                .closest("[hidden]"),
+        ).toBeTruthy();
+        expand();
         expect(
             await screen.findByText("Topics follow the Learn review"),
         ).toBeTruthy();
@@ -203,19 +274,93 @@ describe("transcript card behavior", () => {
         ).toBeNull();
     });
 
-    it("subtracts the bar height from a speaker jump and expands the card", () => {
+    it("restores speaker playback and metadata after expanding", () => {
         panel();
         collapse();
+        expectCollapsed();
+        expand();
+        expect(
+            screen.getByText("Test provider").closest("[hidden]"),
+        ).toBeNull();
+        expect(screen.getByText("Test model")).toBeTruthy();
+        expect(
+            screen.getByText("Language:", { exact: false }).textContent,
+        ).toContain("cs");
+        expect(screen.getByText("words", { exact: false })).toBeTruthy();
+        expect(screen.getByText("characters", { exact: false })).toBeTruthy();
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Play the next turn of Speaker 1",
             }),
         );
-        expect(play).toHaveBeenCalledWith(10000);
+        expect(play).toHaveBeenCalledWith(10000, expect.any(String), undefined);
         expect(HTMLElement.prototype.scrollTo).toHaveBeenLastCalledWith({
             top: 504,
             behavior: "smooth",
         });
+    });
+
+    it("hides the Organization note with read-only chips", async () => {
+        panel(true, true);
+        expect(screen.getByText("Managed by the Organization")).toBeTruthy();
+        collapse();
+        expectCollapsed();
+        expect(
+            screen.getByText("Managed by the Organization").closest("[hidden]"),
+        ).toBeTruthy();
+        expand();
+        expect(
+            screen.getByText("Managed by the Organization").closest("[hidden]"),
+        ).toBeNull();
+    });
+
+    it("applies an in-flight speaker answer while the card is collapsed", async () => {
+        let finishSave: (response: Response) => void = () => {};
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) => {
+                if (init?.method === "PUT") {
+                    return new Promise<Response>((resolve) => {
+                        finishSave = resolve;
+                    });
+                }
+                return Response.json({
+                    transcriptionId: "transcript-1",
+                    revision: 1,
+                    speakers: [
+                        {
+                            label: "speaker_0",
+                            personId: "person-jan",
+                            personName: "Jan",
+                            status: "confirmed",
+                        },
+                    ],
+                });
+            },
+        );
+        panel();
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Unlink Jan from Speaker 0",
+            }),
+        );
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/rec-card/speakers?source=riffado",
+                expect.objectContaining({ method: "PUT" }),
+            ),
+        );
+        collapse();
+        finishSave(
+            Response.json({
+                transcriptionId: "transcript-1",
+                revision: 1,
+                speakers: [],
+            }),
+        );
+        await waitFor(() => expect(screen.queryByText("Jan")).toBeNull());
+        expand();
+        expect(screen.queryByRole("button", { name: "Jan" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Speaker 0" })).toBeTruthy();
     });
 
     it("opens a confirmed speaker's picker with an Almanac link", async () => {
@@ -264,6 +409,6 @@ describe("transcript card behavior", () => {
         });
         expect(button).toHaveProperty("disabled", false);
         fireEvent.click(button);
-        expect(play).toHaveBeenCalledWith(10000);
+        expect(play).toHaveBeenCalledWith(10000, expect.any(String), undefined);
     });
 });

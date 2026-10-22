@@ -30,7 +30,6 @@ const EDITING = {
         },
     ],
     typeLabels: { project: "Project" },
-    ownScope: "personal" as const,
 };
 
 function respond(status = 200, body: unknown = {}) {
@@ -54,6 +53,7 @@ const relations: PageRelation[] = [
                     {
                         recordingId: "rec-2",
                         kind: "audio",
+                        audioAvailable: true,
                         title: "June sync",
                         recordedAt: "2026-06-14T09:00:00.000Z",
                         startMs: 125_000,
@@ -63,6 +63,7 @@ const relations: PageRelation[] = [
                     {
                         recordingId: "rec-1",
                         kind: "audio",
+                        audioAvailable: true,
                         title: "Weekly",
                         recordedAt: "2026-03-03T12:04:00.000Z",
                         startMs: 724_000,
@@ -140,6 +141,7 @@ describe("KnownFacts", () => {
                                     {
                                         recordingId: "mail-1",
                                         kind: "mail",
+                                        audioAvailable: false,
                                         title: "Re: Budget",
                                         recordedAt: "2026-06-20T08:00:00.000Z",
                                         startMs: null,
@@ -149,6 +151,7 @@ describe("KnownFacts", () => {
                                     {
                                         recordingId: "rec-1",
                                         kind: "audio",
+                                        audioAvailable: true,
                                         title: "Weekly",
                                         recordedAt: "2026-03-03T12:04:00.000Z",
                                         startMs: 724_000,
@@ -253,7 +256,7 @@ describe("editing what is known", () => {
                     },
                     { id: "a-org", text: "JN", kind: "alias", scope: "org" },
                 ]}
-                editing={{ target: { personId: "jan" }, ownScope: "personal" }}
+                editing={{ target: { personId: "jan" } }}
             />,
         );
         expect(

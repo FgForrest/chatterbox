@@ -714,6 +714,9 @@ export function deriveWorkflowStatus(
     const visible =
         !data.legacy &&
         (learnBlockedByProvider(data) ||
+            steps.some(
+                (step) => step.state === "skipped" && step.reason === "shared",
+            ) ||
             steps.some((step) =>
                 step.reason === "erased"
                     ? step.state === "manual"

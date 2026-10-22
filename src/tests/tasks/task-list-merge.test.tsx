@@ -69,9 +69,11 @@ it("links and labels a task with its evidence item metadata", () => {
         recordingId: "home-item",
         evidenceItemId: "evidence-item",
         evidenceItemKind: "audio",
+        evidenceAudioAvailable: true,
         status: "open",
         text: "Follow up",
         assignee: null,
+        assigneeHasEmail: false,
         assigneeHint: null,
         assigneeCheck: false,
         dueDate: null,
@@ -98,6 +100,7 @@ it("links and labels a task with its evidence item metadata", () => {
         kind: "audio",
     };
     const evidence: TaskListItem["evidence"] = {
+        audioAvailable: true,
         id: "evidence-item",
         title: "Latest evidence",
         startTime: "2026-10-15T00:00:00.000Z",

@@ -3,8 +3,8 @@
  * documents people talk about, beside the people in `people.ts`.
  *
  * Two layers, as for people: a user's own entities, and the Organization's,
- * owned by the organization account, which everyone sees and only it
- * changes. A member's description of an Organization entity is theirs
+ * owned by the organization account, which everyone sees and curators
+ * change. A member's description of an Organization entity is theirs
  * alone (`knowledge_entity_notes`), as a note on an Organization person is.
  *
  * Organization entities are serialized by the Organization-people lock
@@ -24,8 +24,10 @@ import {
     transcriptCorrections,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertAlmanacOwner } from "@/lib/knowledge/almanac-access";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { relationFits } from "@/lib/knowledge/fact-rules";
@@ -104,7 +106,7 @@ function entityNotFound(): AppError {
 function curatorOnly(): AppError {
     return new AppError(
         ErrorCode.FORBIDDEN,
-        "Only the organization account can change an Organization entity",
+        "Only an Organization curator can change an Organization entity",
         403,
     );
 }
@@ -183,11 +185,6 @@ async function viewerNotesFor(
     return new Map(rows.map((row) => [row.entityId, row.notes]));
 }
 
-/**
- * An entity `actorId` may change: their own, which for the organization
- * account are the Organization's. An Organization entity is seen by all
- * and changed by it alone (403); anyone else's answers as missing.
- */
 async function requireManageable(
     executor: Executor,
     actorId: string,
@@ -195,9 +192,8 @@ async function requireManageable(
 ): Promise<EntityRow> {
     const row = await readEntityRow(executor, entityId);
     if (!row) throw entityNotFound();
-    if (row.userId === actorId) return row;
-    if (row.ownerRole === "org") throw curatorOnly();
-    throw entityNotFound();
+    await assertAlmanacOwner(actorId, row.userId, entityNotFound());
+    return row;
 }
 
 /** The one live entity of that name and type in an owner's scope, if any. */
@@ -424,7 +420,7 @@ export async function retypeEntity(
  * Change an entity's name, type and description at once, all or nothing:
  * `renameEntity`, `retypeEntity` and `describeEntity` in one transaction.
  * A member's description of an Organization entity is their private
- * notes; a name or type there is the organization account's (403).
+ * notes; curators may change the Organization's name, type and description.
  */
 export async function updateEntity(
     actorUserId: string,
@@ -461,7 +457,7 @@ export async function updateEntity(
                 tx,
                 entityId,
                 typeKey,
-                actorUserId,
+                row.userId,
             );
             if (misfit) {
                 throw new AppError(
@@ -503,8 +499,13 @@ export async function updateEntity(
             }
         }
         if (cleanText !== undefined) {
-            await describeEntityInTx(tx, actorUserId, row, cleanText);
-            scopes.add(actorUserId);
+            const descriptionScope =
+                row.ownerRole === "org" &&
+                (await userCuratesOrganizationNow(actorUserId))
+                    ? row.userId
+                    : actorUserId;
+            await describeEntityInTx(tx, descriptionScope, row, cleanText);
+            scopes.add(descriptionScope);
         }
         await bumpScopeInTx(tx, scopes);
     });

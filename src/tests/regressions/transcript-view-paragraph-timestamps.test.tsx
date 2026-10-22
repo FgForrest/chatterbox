@@ -8,6 +8,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 const PARAGRAPHS = [
     { speaker: "", startMs: 0, endMs: 4000, text: "Ahoj. Jak se máš?" },
@@ -20,13 +22,21 @@ describe("TranscriptView speakerless paragraphs", () => {
     it("seeks to a paragraph when its start time is clicked", () => {
         const onSeekToTurn = vi.fn();
         render(
-            <TranscriptView
-                text={"Ahoj. Jak se máš?\nDobře."}
-                source="riffado"
-                model="whisper-1"
-                storedTurns={PARAGRAPHS}
-                onSeekToTurn={onSeekToTurn}
-            />,
+            <PlaybackProvider
+                playback={
+                    createTestPlayback({
+                        seek: onSeekToTurn,
+                        play: onSeekToTurn,
+                    }).playback
+                }
+            >
+                <TranscriptView
+                    text={"Ahoj. Jak se máš?\nDobře."}
+                    source="riffado"
+                    model="whisper-1"
+                    storedTurns={PARAGRAPHS}
+                />
+            </PlaybackProvider>,
         );
 
         fireEvent.click(

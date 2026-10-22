@@ -14,6 +14,7 @@ import {
     type RecordingPlayerHandle,
 } from "@/components/dashboard/recording-player";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import {
     type PlaybackState,
     readingLineFraction,
@@ -53,19 +54,22 @@ const TURNS = [
 const TEXT = TURNS.map((turn) => `${turn.speaker}: ${turn.text}`).join("\n");
 
 function fakePlayback() {
-    let listener: ((state: PlaybackState) => void) | null = null;
+    const listeners = new Set<(state: PlaybackState) => void>();
     const playback: TranscriptPlayback = {
         play: vi.fn(),
         pause: vi.fn(),
         seek: vi.fn(),
         subscribe: (next) => {
-            listener = next;
+            listeners.add(next);
             return () => {
-                listener = null;
+                listeners.delete(next);
             };
         },
     };
-    const emit = (state: PlaybackState) => act(() => listener?.(state));
+    const emit = (state: PlaybackState) =>
+        act(() => {
+            for (const listener of listeners) listener(state);
+        });
     return { playback, emit };
 }
 
@@ -105,14 +109,14 @@ describe("TranscriptView sentence playback", () => {
     it("plays a clicked sentence from a little before its estimated start", () => {
         const { playback } = fakePlayback();
         render(
-            <TranscriptView
-                text={TEXT}
-                source="riffado"
-                model="scribe_v1"
-                storedTurns={TURNS}
-                onSeekToTurn={vi.fn()}
-                playback={playback}
-            />,
+            <PlaybackProvider playback={playback}>
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="scribe_v1"
+                    storedTurns={TURNS}
+                />
+            </PlaybackProvider>,
         );
 
         fireEvent.click(sentence("Second one follows."));
@@ -125,14 +129,14 @@ describe("TranscriptView sentence playback", () => {
     it("plays a turn from its start with the gutter button", () => {
         const { playback } = fakePlayback();
         render(
-            <TranscriptView
-                text={TEXT}
-                source="riffado"
-                model="scribe_v1"
-                storedTurns={TURNS}
-                onSeekToTurn={vi.fn()}
-                playback={playback}
-            />,
+            <PlaybackProvider playback={playback}>
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="scribe_v1"
+                    storedTurns={TURNS}
+                />
+            </PlaybackProvider>,
         );
 
         fireEvent.click(
@@ -146,14 +150,14 @@ describe("TranscriptView sentence playback", () => {
     it("marks the sentence being played, and pauses when it is clicked", () => {
         const { playback, emit } = fakePlayback();
         render(
-            <TranscriptView
-                text={TEXT}
-                source="riffado"
-                model="scribe_v1"
-                storedTurns={TURNS}
-                onSeekToTurn={vi.fn()}
-                playback={playback}
-            />,
+            <PlaybackProvider playback={playback}>
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="scribe_v1"
+                    storedTurns={TURNS}
+                />
+            </PlaybackProvider>,
         );
         expect(sentence("Second one follows.").className).not.toContain(
             "bg-primary/20",
@@ -180,30 +184,30 @@ describe("TranscriptView sentence playback", () => {
     it("leaves clicks on corrections to the corrections", () => {
         const { playback } = fakePlayback();
         render(
-            <TranscriptView
-                text={TEXT}
-                source="riffado"
-                model="scribe_v1"
-                storedTurns={TURNS}
-                onSeekToTurn={vi.fn()}
-                playback={playback}
-                corrections={{
-                    list: [
-                        {
-                            id: "c-second",
-                            turnIndex: 0,
-                            charStart: 21,
-                            charEnd: 27,
-                            heard: "Second",
-                            kind: "correct" as const,
-                            replacement: "Sekund",
-                            meaning: "Sekund",
-                        },
-                    ],
-                    canUndo: true,
-                    onUndo: vi.fn(),
-                }}
-            />,
+            <PlaybackProvider playback={playback}>
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="scribe_v1"
+                    storedTurns={TURNS}
+                    corrections={{
+                        list: [
+                            {
+                                id: "c-second",
+                                turnIndex: 0,
+                                charStart: 21,
+                                charEnd: 27,
+                                heard: "Second",
+                                kind: "correct" as const,
+                                replacement: "Sekund",
+                                meaning: "Sekund",
+                            },
+                        ],
+                        canUndo: true,
+                        onUndo: vi.fn(),
+                    }}
+                />
+            </PlaybackProvider>,
         );
 
         fireEvent.click(
@@ -225,7 +229,6 @@ describe("TranscriptView sentence playback", () => {
                 source="riffado"
                 model="scribe_v1"
                 storedTurns={TURNS}
-                onSeekToTurn={vi.fn()}
             />,
         );
         expect(container.querySelector("[data-sentence]")).toBeNull();

@@ -11,6 +11,7 @@ import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptChapterBar } from "@/components/dashboard/transcript-chapter-bar";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import type {
     PlaybackState,
     TranscriptPlayback,
@@ -51,33 +52,33 @@ function Harness({
     const scrollRef = useRef<HTMLElement>(null);
     const [original, setOriginal] = useState(false);
     return (
-        <section
-            ref={scrollRef}
-            aria-label="Transcript content"
-            className="@container/transcription overflow-y-auto"
-        >
-            <TranscriptChapterBar
-                topics={hasTopics ? topics : null}
-                playback={playback}
-                scrollRef={scrollRef}
-                canDetect={canDetect}
-                waitingForReview={waitingForReview}
-                detecting={detecting}
-                onDetect={onDetect}
-                onSelect={onSelect}
-                hasCorrections={hasCorrections}
-                showOriginal={original}
-                onShowOriginalChange={setOriginal}
-                widgetId="topics-test"
-            />
-            <TranscriptView
-                text="Hello. Next."
-                storedTurns={turns}
-                topics={hasTopics ? topics : null}
-                scrollRef={scrollRef}
-                playback={playback}
-            />
-        </section>
+        <PlaybackProvider playback={playback ?? null}>
+            <section
+                ref={scrollRef}
+                aria-label="Transcript content"
+                className="@container/transcription overflow-y-auto"
+            >
+                <TranscriptChapterBar
+                    topics={hasTopics ? topics : null}
+                    scrollRef={scrollRef}
+                    canDetect={canDetect}
+                    waitingForReview={waitingForReview}
+                    detecting={detecting}
+                    onDetect={onDetect}
+                    onSelect={onSelect}
+                    hasCorrections={hasCorrections}
+                    showOriginal={original}
+                    onShowOriginalChange={setOriginal}
+                    widgetId="topics-test"
+                />
+                <TranscriptView
+                    text="Hello. Next."
+                    storedTurns={turns}
+                    topics={hasTopics ? topics : null}
+                    scrollRef={scrollRef}
+                />
+            </section>
+        </PlaybackProvider>
     );
 }
 

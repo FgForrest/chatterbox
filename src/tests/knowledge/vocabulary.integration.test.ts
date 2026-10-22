@@ -735,7 +735,7 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         ]);
         expect(
             await refusal(keepAdoptedType(ALICE, "relation", sponsors)),
-        ).toMatchObject({ statusCode: 404 });
+        ).toMatchObject({ statusCode: 403 });
     });
 
     it("merges one of an account's relation types into another, combining facts and dropping those the other does not take", async () => {

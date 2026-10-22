@@ -5,7 +5,7 @@
  * Who may do what:
  * - a user creates, renames and deletes their own private types, and
  *   suggests relation phrases to the Organization (only the phrase goes);
- * - the organization account creates Organization types and adopts
+ * - Organization curators create Organization types and adopt
  *   suggested phrases;
  * - core types change only with the code.
  *
@@ -28,6 +28,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertAlmanacOwner } from "@/lib/knowledge/almanac-access";
 import { foldEntityInTx } from "@/lib/knowledge/entities";
 import {
     deleteFactsInTx,
@@ -52,7 +53,7 @@ import {
     CORE_RELATIONS,
     deniedTopicOf,
 } from "@/lib/knowledge/vocabulary-core";
-import { isOrgAccount } from "@/lib/org/config";
+import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = Pick<typeof db, "select">;
@@ -479,9 +480,38 @@ async function insertTypeInTx(
 function organizationOnly(): AppError {
     return new AppError(
         ErrorCode.FORBIDDEN,
-        "Only the organization account changes the Organization's vocabulary",
+        "Only an Organization curator changes the Organization's vocabulary",
         403,
     );
+}
+
+async function organizationOwner(actorUserId: string): Promise<string> {
+    const ownerUserId = await getOrgUserId();
+    if (!ownerUserId) throw organizationOnly();
+    await assertAlmanacOwner(actorUserId, ownerUserId);
+    return ownerUserId;
+}
+
+async function manageableTypeOwner(
+    actorUserId: string,
+    kind: TypeKind,
+    key: string,
+): Promise<string> {
+    const table = tableOf(kind);
+    const [row] = await db
+        .select({ userId: table.userId })
+        .from(table)
+        .where(
+            and(
+                eq(table.key, key),
+                visibleOwnerCondition(table.userId, actorUserId),
+                eq(table.status, "active"),
+            ),
+        )
+        .limit(1);
+    if (!row?.userId) throw typeNotFound();
+    await assertAlmanacOwner(actorUserId, row.userId);
+    return row.userId;
 }
 
 function typeNotFound(): AppError {
@@ -529,21 +559,21 @@ export async function createOwnTypeInTx(
     );
 }
 
-/** Create an Organization type. The organization account only. */
+/** Create an Organization type as its curator, keeping the actor as its author. */
 export async function createOrgType(
     actorUserId: string,
     spec: NewTypeSpec,
 ): Promise<string> {
-    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    const ownerUserId = await organizationOwner(actorUserId);
     return db.transaction(async (tx) => {
         const key = await insertTypeInTx(
             tx,
-            actorUserId,
+            ownerUserId,
             actorUserId,
             "o",
             spec,
         );
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [ownerUserId]);
         return key;
     });
 }
@@ -575,13 +605,14 @@ async function lockOwnType(
     return row;
 }
 
-/** Rename one of the user's own types (private, or the Organization's by its account). */
+/** Rename a private type as its owner, or an Organization type as its curator. */
 export async function renameOwnType(
-    userId: string,
+    actorUserId: string,
     kind: TypeKind,
     key: string,
     newLabel: string,
 ): Promise<void> {
+    const userId = await manageableTypeOwner(actorUserId, kind, key);
     await db.transaction(async (tx) => {
         const { id } = await lockOwnType(tx, kind, userId, key);
         const label = cleanLabel(newLabel);
@@ -697,10 +728,11 @@ export async function listOwnTypes(userId: string): Promise<OwnType[]> {
 
 /** Keep a type a share adopted as it is: it is no longer marked. */
 export async function keepAdoptedType(
-    userId: string,
+    actorUserId: string,
     kind: TypeKind,
     key: string,
 ): Promise<void> {
+    const userId = await manageableTypeOwner(actorUserId, kind, key);
     await db.transaction(async (tx) => {
         const { id } = await lockOwnType(tx, kind, userId, key);
         const table = tableOf(kind);
@@ -776,11 +808,12 @@ async function usesOfType(
  * transcript whose corrections or evidence go with it.
  */
 export async function deleteOwnType(
-    userId: string,
+    actorUserId: string,
     kind: TypeKind,
     key: string,
     confirmCount: number,
 ): Promise<void> {
+    const userId = await manageableTypeOwner(actorUserId, kind, key);
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         const { id, labelHmac } = await lockOwnType(tx, kind, userId, key);
@@ -1157,11 +1190,12 @@ type MergeableRow = {
  * the number `mergeOwnTypes` asks to be confirmed.
  */
 export async function typeMergeCount(
-    userId: string,
+    actorUserId: string,
     kind: TypeKind,
     from: string,
     into: string,
 ): Promise<number> {
+    const userId = await manageableTypeOwner(actorUserId, kind, from);
     return db.transaction(async (tx) => {
         await mergeableTypesInTx(tx, userId, kind, from, into, false);
         return mergeCountOf(
@@ -1195,12 +1229,13 @@ export async function typeMergeCount(
  * the scopes.
  */
 export async function mergeOwnTypes(
-    userId: string,
+    actorUserId: string,
     kind: TypeKind,
     from: string,
     into: string,
     confirmCount: number,
 ): Promise<void> {
+    const userId = await manageableTypeOwner(actorUserId, kind, from);
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         const rows = await mergeableTypesInTx(
@@ -1468,14 +1503,14 @@ export interface VocabularyProposal {
 }
 
 /**
- * The suggested phrases, most frequent first. The organization account
+ * The suggested phrases, most frequent first. Organization curators
  * only. An open phrase nobody stands behind any more (its voters' accounts
  * are gone) is left out.
  */
 export async function listVocabularyProposals(
     actorUserId: string,
 ): Promise<VocabularyProposal[]> {
-    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    await organizationOwner(actorUserId);
     const count = sql<number>`count(${knowledgeVocabularyProposalVotes.userId})::int`;
     const rows = await db
         .select({
@@ -1512,7 +1547,7 @@ export async function adoptPhrase(
         label?: string;
     },
 ): Promise<string> {
-    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    const ownerUserId = await organizationOwner(actorUserId);
     return db.transaction(async (tx) => {
         // A merge of an entity type the new one relates takes the type rows
         // in the other order: one waits for the other here.
@@ -1559,7 +1594,7 @@ export async function adoptPhrase(
             )
             .orderBy(asc(knowledgeRelationTypes.id))
             .for("update");
-        const key = await insertTypeInTx(tx, actorUserId, actorUserId, "o", {
+        const key = await insertTypeInTx(tx, ownerUserId, actorUserId, "o", {
             kind: "relation",
             label,
             subjectTypes: spec.subjectTypes,
@@ -1592,7 +1627,7 @@ export async function adoptPhrase(
                 );
         }
         await bumpScopeInTx(tx, [
-            actorUserId,
+            ownerUserId,
             ...adopters.map((row) => row.userId),
         ]);
         return key;
@@ -1611,7 +1646,7 @@ export async function mapPhrase(
     proposalId: string,
     key: string,
 ): Promise<void> {
-    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    const ownerUserId = await organizationOwner(actorUserId);
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         const [proposal] = await tx
@@ -1693,7 +1728,7 @@ export async function mapPhrase(
             await bumpVocabularyVersionInTx(tx);
         }
         await bumpScopeInTx(tx, [
-            actorUserId,
+            ownerUserId,
             ...adopters.map((row) => row.userId),
         ]);
     });
@@ -1707,7 +1742,7 @@ export async function rejectPhrase(
     actorUserId: string,
     proposalId: string,
 ): Promise<void> {
-    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    await organizationOwner(actorUserId);
     const [rejected] = await db
         .update(knowledgeVocabularyProposals)
         .set({ status: "rejected", updatedAt: new Date() })

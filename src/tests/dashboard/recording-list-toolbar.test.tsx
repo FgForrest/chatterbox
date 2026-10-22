@@ -87,7 +87,6 @@ function renderList({
             initialSortOrder="newest"
             initialKindFilter="all"
             initialChunkSize={50}
-            onOrganize={vi.fn()}
         />,
     );
 }

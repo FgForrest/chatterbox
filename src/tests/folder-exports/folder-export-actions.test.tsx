@@ -7,6 +7,7 @@
  */
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -16,6 +17,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const followJob = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/jobs/client", () => ({ followJob }));
 const pickDriveFolder = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: toastMock }));
 vi.mock("@/lib/integrations/google/picker-client", () => ({
@@ -65,7 +68,7 @@ function mockServer(options: {
                     available: true,
                     connection: options.connection
                         ? {
-                              email: "jane@example.com",
+                              email: "velnora@example.com",
                               hostedDomain: "example.com",
                               status: options.connection,
                           }
@@ -90,12 +93,14 @@ function mockServer(options: {
     return requests;
 }
 
-function renderActions() {
+function renderActions(reopen?: "form" | "list", onReopenHandled?: () => void) {
     render(
         <FolderExportActions
             folder={folder}
             providers={{ filesystem: false, googleDrive: true, mail: true }}
             privateTree
+            reopen={reopen}
+            onReopenHandled={onReopenHandled}
         />,
     );
 }
@@ -113,6 +118,56 @@ describe("folder export dialog with Google Drive", () => {
         vi.unstubAllGlobals();
     });
 
+    it("shows synchronization progress on the in-dialog button", async () => {
+        let finish: ((result: { status: string }) => void) | undefined;
+        followJob.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+                Response.json(
+                    init?.method === "POST"
+                        ? { jobId: "audit" }
+                        : {
+                              configured: [],
+                              applicableIds: ["inherited-export"],
+                          },
+                ),
+            ),
+        );
+        render(
+            <FolderExportActions
+                folder={folder}
+                providers={{
+                    filesystem: true,
+                    googleDrive: false,
+                    mail: false,
+                }}
+                privateTree
+                hideTrigger
+                open
+            />,
+        );
+        const button = await screen.findByRole("button", {
+            name: "Synchronize",
+        });
+        expect(button.getAttribute("type")).toBe("button");
+        fireEvent.click(button);
+        await waitFor(() => expect(followJob).toHaveBeenCalledWith("audit"));
+        expect(button).toHaveProperty("disabled", true);
+        expect(
+            button.querySelector("svg")?.classList.contains("animate-spin"),
+        ).toBe(true);
+        await act(async () => finish?.({ status: "completed" }));
+        expect(button).toHaveProperty("disabled", false);
+        expect(
+            button.querySelector("svg")?.classList.contains("animate-spin"),
+        ).toBe(false);
+    });
     it("picks a folder and saves a Drive export with Docs by default", async () => {
         const requests = mockServer({ connection: "active" });
         pickDriveFolder.mockResolvedValue({
@@ -126,7 +181,7 @@ describe("folder export dialog with Google Drive", () => {
                 name: /Add Google Drive export/,
             }),
         );
-        await screen.findByText("Connected as jane@example.com");
+        await screen.findByText("Connected as velnora@example.com");
         const save = screen.getByRole("button", { name: "Save export" });
         expect(save).toHaveProperty("disabled", true);
         // Mail is on here, and off for a new export.
@@ -203,12 +258,14 @@ describe("folder export dialog with Google Drive", () => {
         window.history.replaceState(
             null,
             "",
-            "/dashboard?folder=f1&googleExport=f1&google=connected",
+            "/dashboard?folder=f1&google=connected",
         );
-        renderActions();
-        await screen.findByText("Connected as jane@example.com");
+        const handled = vi.fn();
+        renderActions("form", handled);
+        await screen.findByText("Connected as velnora@example.com");
         expect(screen.getByText("No folder chosen")).toBeTruthy();
         expect(window.location.search).toBe("?folder=f1&google=connected");
+        expect(handled).toHaveBeenCalledOnce();
     });
 
     it("lists a Drive export by its folder name", async () => {

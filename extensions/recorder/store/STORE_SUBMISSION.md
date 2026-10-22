@@ -42,7 +42,7 @@ how to finish there. Manual address-and-key pairing stays available.
 | --- | --- |
 | `offscreen` | Runs Chrome's audio capture and encoder while the extension popup is closed. |
 | `desktopCapture` | Opens Chrome's picker when the user records audio from a desktop meeting app or another screen. The extension keeps the selected system audio, not screen video. |
-| `tabCapture` | Captures audio from the meeting tab the user chooses to record. |
+| `tabCapture` | Captures audio from the current tab when the user clicks Record this tab. |
 | `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Finds marked recorder setup tabs and shows their host and title for the user's connection choice. Tab URLs and titles are not uploaded. |
 | `notifications` | Tells the user when a meeting is detected, when recording stops, and when an upload completes or needs attention. |
 | `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
@@ -63,6 +63,14 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.6.0
+
+- The popup's primary button records the current tab directly, including tabs without a detected meeting. A separate **Record another screen or app** button opens Chrome's picker. Unsupported tabs fall back to that picker.
+- **Target folder in Chatterbox** is available before and during recording in the popup and recorder window. The target survives browser restarts and is remembered for the next recording. Older servers show the start folder read-only; if a changed folder is refused when saving, completion retries with the start folder.
+- Includes English and Czech copy for the new controls. No new permissions.
+
+- Chrome's "Choose what to share" dialog shows its list of tabs and screens again. On macOS and Linux Chrome draws that dialog inside the recorder window, which 0.4.1 shrank to its own content before the dialog opened, so only Cancel and a disabled Share were left. The window now opens at 800 x 680, centered over the browser window, and narrows to the recorder only after a source is chosen.
 
 ## What changed in 0.5.0
 

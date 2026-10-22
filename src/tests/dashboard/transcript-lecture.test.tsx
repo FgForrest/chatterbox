@@ -9,6 +9,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 // Twenty sentences of 21 characters with their space, 20 s each.
 const sentence = (i: number) =>
@@ -31,13 +33,21 @@ describe("TranscriptView for a lecture", () => {
     it("reads in timed paragraphs without naming the lone speaker", () => {
         const onSeekToTurn = vi.fn();
         const { container } = render(
-            <TranscriptView
-                text={`speaker_1: ${TEXT}`}
-                source="speechmatics"
-                model="enhanced+diarize"
-                storedTurns={LECTURE}
-                onSeekToTurn={onSeekToTurn}
-            />,
+            <PlaybackProvider
+                playback={
+                    createTestPlayback({
+                        seek: onSeekToTurn,
+                        play: onSeekToTurn,
+                    }).playback
+                }
+            >
+                <TranscriptView
+                    text={`speaker_1: ${TEXT}`}
+                    source="speechmatics"
+                    model="enhanced+diarize"
+                    storedTurns={LECTURE}
+                />
+            </PlaybackProvider>,
         );
 
         expect(screen.queryByText("Speaker 1")).toBeNull();

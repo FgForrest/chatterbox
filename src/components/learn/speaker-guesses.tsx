@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, GraduationCap, Loader2, Play, X } from "lucide-react";
+import { Check, GraduationCap, Loader2, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,8 +10,31 @@ import type {
 } from "@/components/learn/learn-marks";
 import { useLearnApiErrorMessage } from "@/components/learn/review-error";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
+import { PlayAtIcon, usePlayAt } from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
+
+function GuessListenButton({ ms, speaker }: { ms: number; speaker: string }) {
+    const i18n = useExtracted();
+    const play = usePlayAt({ ms });
+    if (!play.available) return null;
+    return (
+        <button
+            type="button"
+            onClick={() => play.toggle()}
+            aria-pressed={play.playing}
+            aria-label={
+                play.playing
+                    ? i18n("Pause")
+                    : i18n("Play where {speaker} speaks", { speaker })
+            }
+            title={i18n("Listen")}
+            className={`flex h-full items-center border-r border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary ${play.playing ? "text-primary" : ""}`}
+        >
+            <PlayAtIcon playing={play.playing} />
+        </button>
+    );
+}
 
 /**
  * The speakers a waiting Learn review proposes to name, above the
@@ -28,7 +51,6 @@ export function SpeakerGuesses({
     marks,
     answeredLabels,
     onAccepted,
-    onSeek,
 }: {
     recordingId: string;
     source: string;
@@ -40,7 +62,6 @@ export function SpeakerGuesses({
     answeredLabels: ReadonlySet<string>;
     /** Speakers were named here: the speaker strip reads them again. */
     onAccepted: () => void;
-    onSeek?: (ms: number) => void;
 }) {
     const i18n = useExtracted();
     const getApiErrorMessage = useLearnApiErrorMessage();
@@ -171,19 +192,11 @@ export function SpeakerGuesses({
                             key={guess.label}
                             className={`inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed border-primary/40 text-xs font-medium ${declined ? "opacity-50" : ""}`}
                         >
-                            {onSeek && evidenceMs !== undefined && (
-                                <button
-                                    type="button"
-                                    onClick={() => onSeek(evidenceMs)}
-                                    aria-label={i18n(
-                                        "Play where {speaker} speaks",
-                                        { speaker },
-                                    )}
-                                    title={i18n("Listen")}
-                                    className="flex h-full items-center border-r border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
-                                >
-                                    <Play className="size-3" />
-                                </button>
+                            {evidenceMs !== undefined && (
+                                <GuessListenButton
+                                    ms={evidenceMs}
+                                    speaker={speaker}
+                                />
                             )}
                             <span
                                 className="inline-flex h-full items-center gap-1 px-3"

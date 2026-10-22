@@ -37,17 +37,10 @@
         <section id="view-idle" hidden>
             <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
             <p id="notice-text" data-i18n="noticeDefault">Inform participants and obtain any required consent before recording.</p>
-            <div id="folder-row" class="field">
-                <label id="folder-label" for="folder-picker" data-i18n="folder">Folder</label>
-                <input id="folder-picker" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="folder-listbox" aria-activedescendant="" aria-describedby="folder-hint" autocomplete="off" />
-                <span id="folder-hint" class="hint" data-i18n="folderSearchHint">Type at least 2 characters to search folders.</span>
-                <div id="folder-results" hidden>
-                    <div id="folder-listbox" role="listbox" aria-labelledby="folder-label"></div>
-                    <p id="folder-status" class="hint" role="status" aria-live="polite"></p>
-                </div>
-            </div>
-            <button id="start" class="primary" type="button" data-i18n="recordWithConsent">Consent confirmed · Record</button>
-            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Chrome will ask you to choose a tab or screen with audio.</p>
+            <div id="folder-row" class="field"></div>
+            <button id="start" class="primary" type="button" data-i18n="recordTabWithConsent">Consent confirmed · Record this tab</button>
+            <button id="start-desktop" type="button" data-i18n="recordAnotherSource">Record another screen or app</button>
+            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">For another screen or app, choose a source with audio in Chrome's dialog.</p>
             <p id="auto-hint" class="hint" hidden></p>
         </section>
 
@@ -56,6 +49,7 @@
             <div class="status"><span class="dot"></span> <span data-i18n="recording">Recording</span> <span id="elapsed">0:00</span></div>
             <div class="meter"><label data-i18n="you">You</label><div class="bar"><div id="mic-bar"></div></div></div>
             <div class="meter"><label data-i18n="others">Others</label><div class="bar"><div id="sys-bar"></div></div></div>
+            <div id="recording-folder-row" class="field"></div>
             <p id="upload-status" class="hint"></p>
             <button id="stop" class="danger" type="button" data-i18n="stopSave">Stop and save</button>
         </section>

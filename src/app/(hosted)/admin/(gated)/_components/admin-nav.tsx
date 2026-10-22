@@ -33,7 +33,7 @@ export function AdminNav() {
                             key={item.href}
                             href={item.href}
                             className={cn(
-                                "px-3 py-2 text-sm border-b-2 -mb-px transition-colors whitespace-nowrap",
+                                "px-3 py-2 text-sm border-b-2 transition-colors whitespace-nowrap",
                                 active
                                     ? "border-foreground text-foreground"
                                     : "border-transparent text-muted-foreground hover:text-foreground",

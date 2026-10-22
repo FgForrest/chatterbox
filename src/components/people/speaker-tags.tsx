@@ -1,15 +1,19 @@
 "use client";
 
-import { Check, Loader2, Play, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { SpeakerTurnChip } from "@/components/playback/play-turn-button";
 import { useProductName } from "@/components/product-name-provider";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
+import { speakerGroups } from "@/lib/knowledge/speaker-groups";
 import {
+    resolveSpeakerAttribution,
     type SpeakerAttributions,
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
@@ -31,10 +35,10 @@ interface SpeakerTagsProps {
      * knowledge base, for everyone who can see the recording.
      */
     view?: RecordingView;
-    /** Play the recording from a moment, to hear a suggestion's evidence. */
-    onSeek?: (ms: number) => void;
-    /** Play a speaker's next timed turn; false leaves the browser menu alone. */
-    onPlaySpeaker?: (speaker: string) => boolean;
+    /** Select a speaker's next timed turn, or null when none exists. */
+    nextSpeakerTurn?: (
+        speaker: string | readonly string[],
+    ) => PlayAtTarget | null;
     /**
      * The version of the transcript on screen, from the page's data. Every
      * change names it; without it, the version the speakers were read at.
@@ -145,8 +149,7 @@ export function SpeakerTags({
     attributions,
     onAttributionsChange,
     view,
-    onSeek,
-    onPlaySpeaker,
+    nextSpeakerTurn,
     shownVersion,
     onStale,
     onUnknownLabelsChange,
@@ -159,6 +162,10 @@ export function SpeakerTags({
         view,
     );
     const [openLabel, setOpenLabel] = useState<string | null>(null);
+    const [openVoices, setOpenVoices] = useState<string[]>([]);
+    const [unlinkingLabels, setUnlinkingLabels] = useState<readonly string[]>(
+        [],
+    );
     const [savingLabel, setSavingLabel] = useState<string | null>(null);
     const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
         () => new Set(),
@@ -305,15 +312,26 @@ export function SpeakerTags({
         return true;
     }
 
-    if (speakers.length === 0) return null;
+    async function unlinkGroup(labels: readonly string[]) {
+        setUnlinkingLabels(labels);
+        try {
+            for (const label of labels) {
+                if (!mounted.current) break;
+                if (!(await attribute(label, null))) {
+                    await load();
+                    break;
+                }
+            }
+        } finally {
+            setUnlinkingLabels([]);
+        }
+    }
 
-    const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        const speaker =
-            target.closest<HTMLElement>("[data-speaker]")?.dataset.speaker;
-        if (speaker && onPlaySpeaker?.(speaker)) event.preventDefault();
-    };
+    const groups = speakerGroups(
+        speakers.map(({ speaker }) => speaker),
+        attributions,
+    );
+    if (speakers.length === 0) return null;
 
     const openSpeaker = speakers.find(
         (speaker) => speaker.speaker === openLabel,
@@ -326,23 +344,40 @@ export function SpeakerTags({
             <fieldset
                 className="flex min-w-0 flex-wrap items-center gap-2"
                 aria-label={i18n("Transcript speakers")}
-                onContextMenu={handleContextMenu}
             >
-                {speakers.map((speaker, index) => {
-                    const attribution = attributions[speaker.speaker];
+                {groups.map(({ labels, position }) => {
+                    const speaker = speakers.find(
+                        (voice) => voice.speaker === labels[0],
+                    );
+                    if (!speaker) return null;
+                    const attribution = resolveSpeakerAttribution(
+                        attributions,
+                        speaker.speaker,
+                    );
                     const unknown = unknownLabels.has(speaker.speaker);
                     const suggestion =
                         attribution || unknown || readOnly
                             ? undefined
                             : suggestions[speaker.speaker];
-                    const saving = savingLabel === speaker.speaker;
-                    const accent = speakerAccent(index).text;
+                    const saving = labels.some(
+                        (label) =>
+                            label === savingLabel ||
+                            unlinkingLabels.includes(label),
+                    );
+                    const accent = speakerAccent(position).text;
                     const name = attribution?.name ?? speaker.label;
+                    const voiceNames = labels
+                        .map(
+                            (label) =>
+                                speakers.find(
+                                    (voice) => voice.speaker === label,
+                                )?.label ?? label,
+                        )
+                        .join(", ");
                     const evidenceMs = suggestion?.evidenceStartMs;
                     const canPlayEvidence = Boolean(
-                        suggestion && onSeek && evidenceMs != null,
+                        suggestion && evidenceMs != null,
                     );
-                    const canListen = canPlayEvidence || Boolean(onPlaySpeaker);
                     const label =
                         attribution?.name ??
                         (suggestion
@@ -354,36 +389,47 @@ export function SpeakerTags({
                               : speaker.label);
 
                     return (
-                        <span
+                        <SpeakerTurnChip
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
-                            data-speaker={speaker.speaker}
-                            className={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
+                            speaker={speaker.speaker}
+                            chipClassName={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
+                            className={`${segmentClass} shrink-0 ${accent}`}
+                            label={
+                                canPlayEvidence
+                                    ? i18n("Play where {speaker} speaks", {
+                                          speaker: speaker.label,
+                                      })
+                                    : i18n("Play the next turn of {name}", {
+                                          name,
+                                      })
+                            }
+                            contextTurn={
+                                nextSpeakerTurn
+                                    ? () =>
+                                          nextSpeakerTurn(
+                                              labels.length === 1
+                                                  ? labels[0]
+                                                  : labels,
+                                          )
+                                    : null
+                            }
+                            nextTurn={
+                                canPlayEvidence && evidenceMs != null
+                                    ? () => ({ ms: evidenceMs })
+                                    : nextSpeakerTurn
+                                      ? () =>
+                                            nextSpeakerTurn(
+                                                labels.length === 1
+                                                    ? labels[0]
+                                                    : labels,
+                                            )
+                                      : undefined
+                            }
                         >
-                            <button
-                                type="button"
-                                className={`${segmentClass} shrink-0 ${accent}`}
-                                disabled={!canListen}
-                                aria-label={
-                                    canPlayEvidence
-                                        ? i18n("Play where {speaker} speaks", {
-                                              speaker: speaker.label,
-                                          })
-                                        : i18n("Play the next turn of {name}", {
-                                              name,
-                                          })
-                                }
-                                title={
-                                    canPlayEvidence ? i18n("Listen") : undefined
-                                }
-                                onClick={() => {
-                                    if (canPlayEvidence && evidenceMs != null) {
-                                        onSeek?.(evidenceMs);
-                                    } else onPlaySpeaker?.(speaker.speaker);
-                                }}
-                            >
-                                <Play className="size-3 fill-current" />
-                            </button>
+                            {labels.slice(1).map((label) => (
+                                <span key={label} id={speakerAnchorId(label)} />
+                            ))}
                             {readOnly ? (
                                 attribution ? (
                                     <Link
@@ -403,9 +449,10 @@ export function SpeakerTags({
                                     className={`${segmentClass} min-w-0 break-words text-left`}
                                     disabled={saving}
                                     aria-haspopup="dialog"
-                                    onClick={() =>
-                                        setOpenLabel(speaker.speaker)
-                                    }
+                                    onClick={() => {
+                                        setOpenVoices(labels);
+                                        setOpenLabel(speaker.speaker);
+                                    }}
                                     title={
                                         suggestion
                                             ? i18n(
@@ -472,16 +519,14 @@ export function SpeakerTags({
                                     type="button"
                                     className={`${segmentClass} shrink-0 border-l border-primary/20 hover:bg-destructive/10 hover:text-destructive`}
                                     disabled={saving}
-                                    onClick={() =>
-                                        void attribute(speaker.speaker, null)
-                                    }
+                                    onClick={() => void unlinkGroup(labels)}
                                     aria-label={
                                         attribution
                                             ? i18n(
                                                   "Unlink {name} from {speaker}",
                                                   {
                                                       name: attribution.name,
-                                                      speaker: speaker.label,
+                                                      speaker: voiceNames,
                                                   },
                                               )
                                             : i18n(
@@ -504,7 +549,7 @@ export function SpeakerTags({
                                     )}
                                 </button>
                             )}
-                        </span>
+                        </SpeakerTurnChip>
                     );
                 })}
             </fieldset>
@@ -516,7 +561,41 @@ export function SpeakerTags({
             {!readOnly && openSpeaker && (
                 <SpeakerPicker
                     label={openSpeaker.label}
-                    personId={attributions[openSpeaker.speaker]?.personId}
+                    personId={
+                        resolveSpeakerAttribution(
+                            attributions,
+                            openSpeaker.speaker,
+                        )?.personId
+                    }
+                    voices={
+                        openVoices.length > 1
+                            ? openVoices.flatMap((label) => {
+                                  const voice = speakers.find(
+                                      (speaker) => speaker.speaker === label,
+                                  );
+                                  if (!voice) return [];
+                                  const attribution = resolveSpeakerAttribution(
+                                      attributions,
+                                      label,
+                                  );
+                                  return [
+                                      {
+                                          ...voice,
+                                          name: attribution?.name,
+                                          linked: Boolean(attribution),
+                                      },
+                                  ];
+                              })
+                            : undefined
+                    }
+                    activeVoice={openSpeaker.speaker}
+                    onVoiceChange={setOpenLabel}
+                    nextVoiceTurn={
+                        nextSpeakerTurn
+                            ? (label) => nextSpeakerTurn(label)
+                            : undefined
+                    }
+                    onUnlinkVoice={(label) => attribute(label, null)}
                     organizationOnly={view === "org"}
                     onPick={(choice) => attribute(openSpeaker.speaker, choice)}
                     onMarkUnknown={() =>

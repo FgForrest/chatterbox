@@ -67,6 +67,8 @@ describe("getRecorderServerConfig", () => {
     it("serializes to the snake_case wire shape", () => {
         vi.spyOn(console, "warn").mockImplementation(() => {});
         const wire = serializeRecorderServerConfig(getRecorderServerConfig());
+        expect(wire.recording_folder_override).toBe(true);
+        expect(wire.encrypted_recording_protocol).toBe(1);
         expect(wire.extension_id).toBe(DEFAULT_RECORDER_EXTENSION_ID);
         expect(wire.defaults.auto_record_platforms).toEqual([
             "google-meet",

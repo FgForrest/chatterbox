@@ -16,6 +16,60 @@ describe("folder default profile picker", () => {
         vi.unstubAllGlobals();
     });
 
+    it.each([
+        false,
+        true,
+    ])("shows current defaults before opening a menu, with read-only actions: %s", async (readOnly) => {
+        const inherited = {
+            own: null,
+            ownManualOnly: false,
+            effective: {
+                id: "parent",
+                name: "Inherited recipe",
+                scope: "personal",
+            },
+            effectiveManualOnly: false,
+            inheritedFromFolderId: "parent-folder",
+            inherited: null,
+            inheritedManualOnly: false,
+            accountDefault: null,
+            accountDefaultUnavailable: false,
+        };
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (input: RequestInfo | URL) =>
+                String(input).includes("default-profiles")
+                    ? Response.json({
+                          scope: "personal",
+                          canEdit: !readOnly,
+                          defaults: {
+                              audio: inherited,
+                              mail: {
+                                  ...inherited,
+                                  effective: null,
+                                  inheritedFromFolderId: null,
+                              },
+                          },
+                      })
+                    : Response.json({ profiles: [] }),
+            ),
+        );
+        render(<FolderDefaultProfiles folderId="folder" readOnly={readOnly} />);
+        expect(
+            await screen.findByText("Recordings: Inherited recipe (inherited)"),
+        ).toBeTruthy();
+        expect(screen.getByText("Mail: According to settings")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Change" }) !== null).toBe(
+            !readOnly,
+        );
+        expect(screen.queryByRole("button", { name: "Processing" })).toBeNull();
+        const requested = vi
+            .mocked(fetch)
+            .mock.calls.map(([input]) => String(input));
+        expect(
+            requested.filter((url) => url.includes("/api/settings/profiles")),
+        ).toHaveLength(readOnly ? 0 : 2);
+    });
     it("shows inherited defaults and saves an own channel default", async () => {
         const fetchMock = vi.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -121,7 +175,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Processing" }),
+            await screen.findByRole("button", { name: "Change" }),
             { button: 0, ctrlKey: false },
         );
         expect(
@@ -158,10 +212,10 @@ describe("folder default profile picker", () => {
             );
         });
 
-        fireEvent.pointerDown(
-            screen.getByRole("button", { name: "Processing" }),
-            { button: 0, ctrlKey: false },
-        );
+        fireEvent.pointerDown(screen.getByRole("button", { name: "Change" }), {
+            button: 0,
+            ctrlKey: false,
+        });
         fireEvent.click(screen.getByText("Default profile for mail"));
         expect(
             await screen.findByRole("menuitemradio", {
@@ -229,7 +283,7 @@ describe("folder default profile picker", () => {
         render(<FolderDefaultProfiles folderId="org-folder" />);
 
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Processing" }),
+            await screen.findByRole("button", { name: "Change" }),
             { button: 0, ctrlKey: false },
         );
         expect(
@@ -303,7 +357,7 @@ describe("folder default profile picker", () => {
 
         render(<FolderDefaultProfiles folderId="folder" />);
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Processing" }),
+            await screen.findByRole("button", { name: "Change" }),
             { button: 0, ctrlKey: false },
         );
 
@@ -353,7 +407,7 @@ describe("folder default profile picker", () => {
 
         render(<FolderDefaultProfiles folderId="folder" />);
         fireEvent.pointerDown(
-            await screen.findByRole("button", { name: "Processing" }),
+            await screen.findByRole("button", { name: "Change" }),
             { button: 0, ctrlKey: false },
         );
 

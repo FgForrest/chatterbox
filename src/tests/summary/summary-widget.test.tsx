@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { SummaryData } from "@/hooks/use-transcription-summary";
-import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import {
+    deriveWorkflowWidgets,
+    type WorkflowWidgetState,
+} from "@/lib/pipeline/workflow-widgets";
 
 const mocks = vi.hoisted(() => ({
     copy: vi.fn(),
@@ -220,6 +232,54 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
+    it("shows a settled shared step without a generating state", () => {
+        state.summaryData = null;
+        const data: ItemProcessingPresentation = {
+            itemId: `${kind}-1`,
+            kind,
+            legacy: false,
+            manualOnly: false,
+            phases: {
+                categorize: { state: "done", generation: 1, at: "2026-10-01" },
+                learn: { state: "done", generation: 1, at: "2026-10-01" },
+                summary: {
+                    state: "skipped",
+                    reason: "shared",
+                    generation: 1,
+                    at: "2026-10-01",
+                },
+                taskReview: { state: "done", generation: 1, at: "2026-10-01" },
+            },
+            profile: null,
+            placements: [],
+            intents: [],
+            outputs: { transcript: true, learn: true, summary: false },
+            processAgain: false,
+            processAgainReason: null,
+            learnFindingsWaiting: 0,
+            taskReviewWaiting: 0,
+            jobs: { transcription: null, summary: null },
+            failures: [],
+        };
+        const workflow = deriveWorkflowStatus(data, kind);
+        const widgets = deriveWorkflowWidgets(data);
+        expect(workflow.visible).toBe(true);
+        expect(
+            workflow.steps.find((step) => step.id === "summary"),
+        ).toMatchObject({ state: "skipped", reason: "shared" });
+        expect(workflow.status).toBeNull();
+        expect(widgets.summary.tone).toBe("quiet");
+        renderWidget(kind, {
+            canChange: false,
+            workflowVisible: widgets.workflowVisible,
+            widget: widgets.summary,
+        });
+        fireEvent.click(screen.getByRole("button", { name: "View summary" }));
+        expect(screen.getByText("No summary yet.")).toBeTruthy();
+        expect(screen.queryByText(/Generating/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Summarize" })).toBeNull();
+    });
+
     it("shows the profile name on the collapsed workflow line", () => {
         renderWidget(kind, {
             profileName: "Customer follow-up",
@@ -228,6 +288,39 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         });
 
         expect(screen.getByText("Customer follow-up")).toBeTruthy();
+    });
+
+    it("hides tasks, summary and metadata until expanded", () => {
+        const rendered = renderWidget(kind);
+        const content = screen.getByRole("region", { name: "Summary content" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Collapse summary" }),
+        );
+        state.summaryExpanded = false;
+        rendered.rerender(getWidget(kind));
+        expect(
+            screen.getByRole("button", { name: "Expand summary" }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("region", { name: "Summary content" }),
+        ).toBeNull();
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeTruthy();
+        expect(
+            screen.getByText("Send the proposal").closest("[hidden]"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Expand summary" }));
+        state.summaryExpanded = true;
+        rendered.rerender(getWidget(kind));
+        expect(screen.getByRole("region", { name: "Summary content" })).toBe(
+            content,
+        );
+        expect(
+            screen.getByTestId("recording-tasks").closest("[hidden]"),
+        ).toBeNull();
+        expect(screen.getByText("Send the proposal")).toBeTruthy();
+        expect(screen.getByText("gpt-summary")).toBeTruthy();
     });
 
     it("starts a first summary from the compact line in one click", () => {
@@ -241,6 +334,36 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts a first summary when the processing strip opens the compact line", () => {
+        state.summaryData = null;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+    });
+
+    it("expands instead of starting while the compact line cannot run", () => {
+        state.summaryData = null;
+        state.summaryProfilesLoading = true;
+        renderWidget(kind, {
+            workflowVisible: true,
+            widget: widget({ collapsed: true }),
+        });
+
+        act(() => openWidget(`${kind}-summary`));
+
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        const heading = screen.getByRole("heading", { name: /^Summary/ });
+        expect(heading.closest("[hidden]")).toBeNull();
+        expect(heading.closest("[data-workflow-widget]")?.tagName).not.toBe(
+            "SPAN",
+        );
     });
 
     it("keeps a manually started summary inline while it runs", () => {
@@ -325,6 +448,53 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         for (const view of taskViews) {
             expect(view.getAttribute("data-allow-add")).toBe("false");
         }
+    });
+
+    it.each([
+        false,
+        true,
+    ])("shows the earlier-content chip when stale is %s", (stale) => {
+        state.summaryData = summary({ olderContent: true, stale });
+        renderWidget(kind, { learnHold: "review" });
+
+        expect(
+            screen.getByText(
+                kind === "mail"
+                    ? "Made from an earlier version of the message"
+                    : "Made from an earlier transcript",
+            ),
+        ).toBeTruthy();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+        expect(
+            screen.queryByText("May contain stale names or terms"),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+    });
+
+    it("shows the earlier-content chip without Regenerate for a read-only viewer", () => {
+        state.summaryData = summary({ olderContent: true });
+        renderWidget(kind, { canChange: false });
+
+        expect(
+            screen.getByText(
+                kind === "mail"
+                    ? "Made from an earlier version of the message"
+                    : "Made from an earlier transcript",
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+    });
+
+    it("clears the note after a summary of the current content is loaded", () => {
+        state.summaryData = summary({ olderContent: true });
+        const rendered = renderWidget(kind);
+        state.summaryData = summary({ olderContent: false, stale: false });
+        rendered.rerender(getWidget(kind));
+
+        expect(screen.queryByText(/Made from an earlier/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+        expect(screen.getByText("A concise result")).toBeTruthy();
     });
 
     it("shows multi-pass progress and elapsed time while running", () => {

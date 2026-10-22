@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { type Ref, useImperativeHandle } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RecordingPlayerHandle } from "@/components/dashboard/recording-player";
@@ -9,17 +9,32 @@ import type { Recording } from "@/types/recording";
 const playFrom = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/dashboard/recording-player", () => ({
-    RecordingPlayer: ({ ref }: { ref: Ref<RecordingPlayerHandle> }) => {
+    RecordingPlayer: ({
+        ref,
+        onEnded,
+    }: {
+        ref: Ref<RecordingPlayerHandle>;
+        onEnded?: () => void;
+    }) => {
         useImperativeHandle(ref, () => ({
             playFrom,
             seekTo: vi.fn(),
-            getCurrentTime: () => 0,
             pause: vi.fn(),
             subscribe: () => () => {},
         }));
-        return <div data-testid="recording-player" />;
+        return (
+            <button
+                type="button"
+                data-testid="recording-player"
+                onClick={onEnded}
+            >
+                End playback
+            </button>
+        );
     },
-    transcriptPlayback: () => undefined,
+    transcriptPlayback: (ref: { current: RecordingPlayerHandle | null }) => ({
+        play: (ms: number) => ref.current?.playFrom(ms / 1000),
+    }),
 }));
 
 vi.mock("@/components/dashboard/recording-player-header", () => ({
@@ -116,6 +131,71 @@ describe("recording detail layout", () => {
         expect(playFrom).toHaveBeenCalledTimes(1);
     });
 
+    it("plays captured link context after its URL parameters have been consumed", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=rec-1&view=org",
+        );
+        const linked = { ...recording, view: "org" as const };
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org&playFrom=12500"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledExactlyOnceWith(12.5);
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledTimes(1);
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={linked}
+                itemLinkQuery="recording=rec-1&view=org&playFrom=12500"
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledTimes(2);
+    });
+
+    it("auto advances through the automatic selection callback", () => {
+        const onSelectRecording = vi.fn();
+        const next = { ...recording, id: "next" };
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+                visibleRecordings={[recording, next]}
+                onSelectRecording={onSelectRecording}
+            />,
+        );
+        fireEvent.click(screen.getByTestId("recording-player"));
+        expect(onSelectRecording).toHaveBeenCalledExactlyOnceWith(next);
+    });
+
+    it("keeps the player mounted when switching recordings", () => {
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+        const player = screen.getByTestId("recording-player");
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{ ...recording, id: "next-recording" }}
+            />,
+        );
+        expect(screen.getByTestId("recording-player")).toBe(player);
+    });
+
     it("orders the title, workflow, folder row, player, and detail panels", () => {
         render(
             <WorkstationDetailPane
@@ -139,7 +219,7 @@ describe("recording detail layout", () => {
         }
     });
 
-    it("uses the pile label and a kind-neutral empty state", () => {
+    it("uses the current location and a kind-neutral empty state", () => {
         const { rerender } = render(
             <WorkstationDetailPane
                 {...sharedProps}
@@ -147,9 +227,7 @@ describe("recording detail layout", () => {
             />,
         );
 
-        expect(
-            screen.getByRole("button", { name: "Back to the pile" }),
-        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Recent" })).toBeTruthy();
 
         rerender(
             <WorkstationDetailPane {...sharedProps} currentRecording={null} />,
@@ -160,6 +238,24 @@ describe("recording detail layout", () => {
         expect(screen.queryByText(/Select a recording/)).toBeNull();
     });
 
+    it.each([
+        "Recent",
+        "Private",
+        "Invented folder",
+    ])("names the current list location on the phone back button: %s", (backLabel) => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+                backLabel={backLabel}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: backLabel }).className,
+        ).toContain("lg:hidden");
+        fireEvent.click(screen.getByRole("button", { name: backLabel }));
+        expect(sharedProps.onBackToList).toHaveBeenCalled();
+    });
     it.each([
         ["a different recording", "recording=other&playFrom=12500", recording],
         [

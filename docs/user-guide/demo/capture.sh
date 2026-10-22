@@ -159,9 +159,17 @@ section_onboarding() {
 section_dashboard() {
     select_recording "Weekly product sync"
     page dashboard
-    click_button "Needs review (1)"
-    shot "css:.bg-card:has(input[aria-label='Search recordings'])" recording-list-needs-review
-    click_button "Needs review (1)"
+    needs_review
+    tag row "Weekly product sync" "button"
+    crop recording-list-needs-review "css:[aria-label='Current location']" "css:[role=menu]" row
+    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    escape
+}
+
+needs_review() {
+    click_button "All · Newest"
+    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    ab wait 900 >/dev/null
 }
 
 section_recording() {
@@ -169,17 +177,18 @@ section_recording() {
     click_button "Erase recording artifacts"
     crop erase-menu "css:[role=menu]" "css:button[aria-label='Erase recording artifacts']"
     escape
-    click_button "Add to folder"
-    crop add-to-folder "css:[data-testid='processing-folder-row']" "css:[role=menu]"
+    click_button "Add to folder" 1200
+    dialog add-to-folder
     escape
     ab click "[data-testid='profile-chip']" >/dev/null
     ab wait 1500 >/dev/null
     crop profile-chip-menu "css:[data-testid='processing-folder-row']" "css:[role=menu]"
     escape
-    click_text "Estimated AI spend"
+    ab click "button[aria-label^='Estimated AI spend']" >/dev/null
+    ab wait 900 >/dev/null
     tag title "Weekly product sync" "h1"
-    crop ai-spend title "css:details[open] *"
-    click_text "Estimated AI spend"
+    crop ai-spend title "css:[role=dialog][aria-label='Estimated AI spend']"
+    escape
 }
 
 section_filing() {
@@ -300,14 +309,15 @@ section_tasks() {
 
 section_folders() {
     open "/dashboard"
-    click_button "Organize" 1500
+    click_button "Clients, 4 recordings" 1500
     page folders
-    click_text "Bluefin Logistics" 1500
-    top folder-pane 640
-    click_button "Default profiles" 1200
-    crop folder-default-profiles "css:[role=menu]" "css:button[aria-label='Default profiles']"
+    click_button "Bluefin Logistics, 4 recordings" 1500
+    click_button "Folder settings" 1200
+    dialog folder-pane
+    click_button "Change" 1200
+    crop folder-default-profiles "css:[role=menu]" "css:[role=dialog]"
     escape
-    click_button "Settings" 1500
+    click_button "Configure" 1500
     dialog folder-export
     click_button "Add filesystem export" 1200
     dialog folder-export-filesystem
@@ -326,8 +336,7 @@ section_profiles() {
 
 section_organization() {
     open "/dashboard"
-    click_button "Organize" 1500
-    click_text "Usability studies" 1500
+    click_button "Usability studies, 1 recording" 1500
     top organization-folder 640
     click_text "Usability test: tracking page" 2500
     page organization-recording
@@ -411,7 +420,9 @@ section_help() {
 
 section_palette() {
     open "/dashboard"
-    click_button "Open command palette" 1000
+    click_button "Search Chatter" 1000
+    ab keyboard type "clie" >/dev/null
+    ab wait 900 >/dev/null
     page command-palette
     escape
 }

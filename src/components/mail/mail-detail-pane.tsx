@@ -47,10 +47,12 @@ import type { Recording } from "@/types/recording";
 
 interface Props {
     mail: Recording;
+    itemLinkQuery?: string;
     /** The private item has been shared into the Organization. */
     shared?: boolean;
     dateTimeFormat: DateTimeFormat;
     onBackToList: () => void;
+    backLabel?: string;
     hiddenOnMobile: boolean;
     /** The mail was deleted or shared: reload the pile. */
     onChanged: () => void;
@@ -120,9 +122,11 @@ function evidenceRange(params: URLSearchParams) {
  */
 export function MailDetailPane({
     mail,
+    itemLinkQuery,
     shared = false,
     dateTimeFormat,
     onBackToList,
+    backLabel,
     hiddenOnMobile,
     onChanged,
     onFolderCreated,
@@ -145,10 +149,13 @@ export function MailDetailPane({
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
     const [title, setTitle] = useState(mail.filename);
-    const highlight = useMemo(
-        () => evidenceRange(searchParams),
-        [searchParams],
-    );
+    const highlightQuery = itemLinkQuery ?? searchParams.toString();
+    const highlight = useMemo(() => {
+        const params = new URLSearchParams(highlightQuery);
+        return params.get("recording") === mail.id
+            ? evidenceRange(params)
+            : null;
+    }, [highlightQuery, mail.id]);
 
     useEffect(() => {
         setTitle(mail.filename);
@@ -292,7 +299,7 @@ export function MailDetailPane({
     return (
         <div
             className={cn(
-                "space-y-6 lg:col-span-2 lg:block lg:self-start",
+                "min-w-0 space-y-6 lg:block lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -302,7 +309,7 @@ export function MailDetailPane({
                 onClick={onBackToList}
                 className="-ml-2 h-9 gap-1 px-2 lg:hidden"
             >
-                <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
+                <ArrowLeft className="size-4" /> {backLabel ?? i18n("Recent")}
             </Button>
             <ItemHeader
                 itemId={mail.id}
@@ -310,6 +317,7 @@ export function MailDetailPane({
                 title={title || i18n("(no subject)")}
                 metadata={metadata}
                 view={mail.view}
+                shared={shared}
                 isOwn={isOwn}
                 ownerName={mail.ownerName}
                 readOnly={!canChange}
@@ -332,6 +340,7 @@ export function MailDetailPane({
             <ItemWorkflow
                 itemId={mail.id}
                 kind="mail"
+                canCurate={canCurate}
                 initialData={processing}
                 onProcessingChange={setProcessing}
                 folders={folders}

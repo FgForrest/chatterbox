@@ -11,7 +11,7 @@ When your administrator has set it up, everyone on the instance shares an **Orga
 
 Choose an Organization folder in the inline **Categorize recording** or **Categorize email** card. After categorizing, use **Add to folder** in the folder row to add another Organization placement. You can also drag an item onto a folder.
 
-![The folder row and Add to folder menu with Organization folders](images/add-to-folder.png)
+![The folder row and Add to folder picker with Organization folders](images/add-to-folder.png)
 
 This first creates an intended Organization placement. The item remains private while its profile runs. Chatterbox shares it automatically when it is ready for others to read:
 

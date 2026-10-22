@@ -34,6 +34,7 @@ export interface OrphanedPipelineStepRow extends Record<string, unknown> {
     phase: "transcribe" | "summary";
     step: "summary" | "title" | "topics" | null;
     errorCode: string;
+    phaseGeneration: number;
 }
 
 /** Increment one owner-scoped processing request, creating its row if needed. */
@@ -319,6 +320,7 @@ export async function listOrphanedPipelineStepRows(
                 item_processing.view as "view",
                 'transcribe'::text as phase,
                 null::text as step,
+                (item_processing.phases -> 'transcribe' ->> 'generation')::integer as "phaseGeneration",
                 coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED') as "errorCode",
                 failed.completed_at as failed_at
             from item_processing
@@ -365,7 +367,10 @@ export async function listOrphanedPipelineStepRows(
                 item_processing.view as "view",
                 'summary'::text as phase,
                 summary_step.step,
-                coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED') as "errorCode",
+                (item_processing.phases -> 'summary' ->> 'generation')::integer as "phaseGeneration",
+                case when failed.status = 'completed' then 'JOB_COMPLETED_WITHOUT_SETTLEMENT'
+                     else coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED')
+                end as "errorCode",
                 failed.completed_at as failed_at
             from item_processing
             cross join (
@@ -375,7 +380,7 @@ export async function listOrphanedPipelineStepRows(
                     ('topics'::text, 'topics'::text)
             ) summary_step(step, job_kind)
             cross join lateral (
-                select async_jobs.error_code, async_jobs.completed_at
+                select async_jobs.error_code, async_jobs.completed_at, async_jobs.status, async_jobs.payload, async_jobs.result
                 from async_jobs
                 where async_jobs.user_id = item_processing.user_id
                   and async_jobs.kind = summary_step.job_kind
@@ -384,17 +389,34 @@ export async function listOrphanedPipelineStepRows(
                             then 'org:' || item_processing.item_id
                         else item_processing.item_id
                       end
-                  and async_jobs.status = 'failed'
-                  and (
-                      summary_step.step = 'title'
-                      or async_jobs.payload ->> 'trigger' <> 'manual'
-                  )
-                  and async_jobs.completed_at >=
-                        (item_processing.phases -> 'summary' ->> 'at')::timestamptz
-                order by async_jobs.completed_at desc, async_jobs.created_at desc
+                order by async_jobs.created_at desc, async_jobs.completed_at desc
                 limit 1
             ) failed
-            where item_processing.phases -> 'summary' -> 'steps' -> summary_step.step is not null
+            where failed.status in ('failed', 'completed')
+              and (summary_step.step = 'title' or failed.payload ->> 'trigger' <> 'manual')
+              and (failed.status = 'failed' or coalesce(failed.result ->> 'skipped', '') <> 'held')
+              and (failed.status = 'completed' or failed.completed_at >=
+                    (item_processing.phases -> 'summary' ->> 'at')::timestamptz)
+              and (
+                  failed.status = 'failed'
+                  or (
+                      coalesce(
+                          item_processing.phases -> 'summary' -> 'steps' -> summary_step.step ->> 'state',
+                          'pending'
+                      ) in ('pending', 'running')
+                      and (item_processing.phases -> 'summary' ->> 'at')::timestamptz
+                            < now() - interval '2 minutes'
+                      and not exists (
+                          select 1
+                          from chatter_items
+                          where chatter_items.id = item_processing.item_id
+                            and chatter_items.user_id = item_processing.user_id
+                            and chatter_items.summary_due_at is not null
+                      )
+                  )
+              )
+              and item_processing.phases -> 'summary' ->> 'state' <> 'outdated'
+              and item_processing.phases -> 'summary' -> 'steps' -> summary_step.step is not null
               and coalesce(
                     item_processing.phases -> 'summary' -> 'steps' -> summary_step.step ->> 'state',
                     'pending'

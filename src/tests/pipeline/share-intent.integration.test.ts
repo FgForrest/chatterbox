@@ -497,6 +497,53 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         ]);
     });
 
+    it("counts the findings of an Organization-scoped Learn run on a private item", async () => {
+        const itemId = "presentation-org-scope";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        const [transcript] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, itemId),
+                    eq(transcriptions.userId, ALICE),
+                ),
+            );
+        const [run] = await db()
+            .insert(learnRuns)
+            .values({
+                userId: ALICE,
+                scopeUserId: ORG,
+                itemId,
+                transcriptionId: transcript?.id,
+                view: "private",
+                trigger: "auto",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status: "ready",
+            })
+            .returning({ id: learnRuns.id });
+        await db()
+            .insert(learnReviewItems)
+            .values(
+                ["one", "two", "three"].map((fingerprintHmac) => ({
+                    runId: run?.id ?? "",
+                    userId: ORG,
+                    kind: "known_fact" as const,
+                    fingerprintHmac,
+                    payload: {},
+                })),
+            );
+
+        await expect(
+            loadPrivateItemProcessing(ALICE, itemId),
+        ).resolves.toMatchObject({ learnFindingsWaiting: 3 });
+        await expect(
+            loadPrivateItemProcessing(BOB, itemId),
+        ).resolves.toBeNull();
+    });
+
     it("routes an awaiting-share task proposal when an intended share executes", async () => {
         const targetItemId = "audio-task-target";
         const sourceItemId = "audio-task-source";

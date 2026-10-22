@@ -1,9 +1,11 @@
 "use client";
 
-import { Check, Loader2, Search, UserPlus } from "lucide-react";
+import { Check, Loader2, Search, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { PlayTurnButton } from "@/components/playback/play-turn-button";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -42,6 +44,16 @@ export interface SpeakerPickerProps {
      * private person would leak into everyone's view.
      */
     organizationOnly?: boolean;
+    voices?: readonly {
+        speaker: string;
+        label: string;
+        name?: string;
+        linked: boolean;
+    }[];
+    activeVoice?: string;
+    onVoiceChange?: (label: string) => void;
+    nextVoiceTurn?: (label: string) => PlayAtTarget | null;
+    onUnlinkVoice?: (label: string) => Promise<boolean>;
 }
 
 /**
@@ -59,6 +71,11 @@ export function SpeakerPicker({
     onMarkUnknown,
     onClose,
     organizationOnly = false,
+    voices,
+    activeVoice,
+    onVoiceChange,
+    nextVoiceTurn,
+    onUnlinkVoice,
 }: SpeakerPickerProps) {
     const i18n = useExtracted();
     const [people, setPeople] = useState<PickablePerson[] | null>(null);
@@ -147,6 +164,76 @@ export function SpeakerPicker({
                     </DialogDescription>
                 </DialogHeader>
 
+                {voices && (
+                    <fieldset
+                        className="space-y-1 rounded-md border bg-muted/20 p-2"
+                        aria-label={i18n("Transcript speakers")}
+                    >
+                        {voices.map((voice) => (
+                            <div
+                                key={voice.speaker}
+                                className="flex items-center gap-1"
+                            >
+                                <PlayTurnButton
+                                    className="grid size-8 place-items-center"
+                                    disabled={submitting}
+                                    label={i18n(
+                                        "Play the next turn of {name}",
+                                        { name: voice.label },
+                                    )}
+                                    nextTurn={
+                                        nextVoiceTurn
+                                            ? () => nextVoiceTurn(voice.speaker)
+                                            : undefined
+                                    }
+                                />
+                                <Button
+                                    size="sm"
+                                    variant={
+                                        activeVoice === voice.speaker
+                                            ? "secondary"
+                                            : "ghost"
+                                    }
+                                    className="min-w-0 flex-1 justify-start text-xs"
+                                    disabled={submitting}
+                                    aria-pressed={activeVoice === voice.speaker}
+                                    onClick={() => {
+                                        setQuery("");
+                                        setSelectedPersonId(null);
+                                        onVoiceChange?.(voice.speaker);
+                                    }}
+                                >
+                                    {voice.label}
+                                </Button>
+                                {voice.linked && onUnlinkVoice && (
+                                    <Button
+                                        size="icon-sm"
+                                        variant="ghost"
+                                        disabled={submitting}
+                                        aria-label={i18n(
+                                            "Unlink {name} from {speaker}",
+                                            {
+                                                name: voice.name ?? "",
+                                                speaker: voice.label,
+                                            },
+                                        )}
+                                        onClick={async () => {
+                                            if (submitting) return;
+                                            setSubmitting(true);
+                                            const saved = await onUnlinkVoice(
+                                                voice.speaker,
+                                            );
+                                            setSubmitting(false);
+                                            if (saved) onClose();
+                                        }}
+                                    >
+                                        <X className="size-3" />
+                                    </Button>
+                                )}
+                            </div>
+                        ))}
+                    </fieldset>
+                )}
                 {personId && (
                     <Button asChild variant="outline">
                         <Link href={`/almanac/${personId}`} onClick={onClose}>

@@ -1,10 +1,11 @@
 import { createCaptureHost, openSystemAudio } from "../lib/capture-host.js";
-import { STATE } from "../lib/constants.js";
+import { RECORDER_WINDOW_WIDTH, STATE } from "../lib/constants.js";
 import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 
+import { createRecordingFolder } from "../popup/folder-combobox.js";
+
 localizeDocument();
-fitWindowToContent();
 
 const requestId = new URL(location.href).searchParams.get("requestId");
 const status = document.getElementById("picker-status");
@@ -21,6 +22,11 @@ const systemBar = document.getElementById("picker-system-bar");
 const silentHint = document.getElementById("picker-silent");
 const SILENT_DB = -50;
 const SILENT_HINT_MS = 20_000;
+const recordingFolder = createRecordingFolder({
+    container: document.getElementById("picker-folder-row"), prefix: "picker-folder",
+    request: (params) => chrome.runtime.sendMessage({ type: "get-folders", ...params }),
+    send: (message) => chrome.runtime.sendMessage(message), t,
+});
 let chooseRequestId = null;
 let systemSilentSince = null;
 let systemStream = null;
@@ -64,6 +70,7 @@ function renderState(state) {
         return;
     }
     if (state.pickerRequestId !== requestId) return;
+    recordingFolder.render(state);
 
     if (elapsedTimer) clearInterval(elapsedTimer);
     elapsedTimer = undefined;
@@ -194,6 +201,16 @@ function chooseDesktopMedia() {
     });
 }
 
+async function fitToRecorder() {
+    const current = await chrome.windows.getCurrent().catch(() => null);
+    if (current?.state === "normal") {
+        await chrome.windows
+            .update(current.id, { width: RECORDER_WINDOW_WIDTH })
+            .catch(() => {});
+    }
+    fitWindowToContent();
+}
+
 async function report(type, error) {
     return chrome.runtime.sendMessage({ type, requestId, error });
 }
@@ -208,6 +225,7 @@ cancel.addEventListener("click", async () => {
 });
 
 stop.addEventListener("click", async () => {
+    await recordingFolder.saved();
     stop.disabled = true;
     status.textContent = t("finishing");
     const response = await chrome.runtime.sendMessage({ type: "stop-recording" });
@@ -266,6 +284,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             window.close();
             return;
         }
+        await fitToRecorder();
         status.textContent = t("startingCapture");
         const response = await report("desktop-capture-ready");
         if (!response?.ok) throw new Error(response?.error ?? t("couldNotStart"));
@@ -273,5 +292,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (!recording) releaseSystemStream();
         await report("desktop-picker-error", error?.message ?? String(error)).catch(() => {});
         showError(error);
+        await fitToRecorder();
     }
 })();

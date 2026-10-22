@@ -1,16 +1,26 @@
 "use client";
 
-import { Play, RotateCcw, Trash2, Unlink } from "lucide-react";
+import { ArrowUpRight, RotateCcw, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
+import { toast } from "sonner";
+import { PlayAtButton } from "@/components/playback/play-at-button";
 import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
+import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
+import { formatClock } from "@/lib/topics/timeline";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,10 +32,10 @@ export function TaskRow({
     task,
     recording,
     evidence,
+    currentItemId,
     showAssignee = true,
     speakers = [],
     organizationOnly,
-    onPlay,
     onChange,
     onMerge,
     onUndoMatch,
@@ -35,11 +45,10 @@ export function TaskRow({
     recording?: TaskListItem["recording"];
     /** The latest visible item that evidences the task. */
     evidence?: TaskListItem["evidence"];
+    currentItemId?: string;
     showAssignee?: boolean;
     speakers?: readonly SpeakerChoice[];
     organizationOnly: boolean;
-    /** Play the recording where the task was said. */
-    onPlay?: (startMs: number) => void;
     onChange: TaskRowChange;
     onMerge?: (
         targetTaskId: string,
@@ -51,20 +60,65 @@ export function TaskRow({
     const done = task.status === "done";
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
+    let closeReason: string | null = null;
+    if (!task.canClose && !dropped) {
+        if (!task.assignee) {
+            closeReason = i18n(
+                "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
+            );
+        } else if (task.assigneeHasEmail) {
+            closeReason = i18n(
+                "Assigned to {name}. Only they, the recording's owner or a curator can mark it done.",
+                { name: task.assignee.name },
+            );
+        } else {
+            closeReason = i18n(
+                "Assigned to {name}, who has no email in the Almanac, so the task is on nobody's list.",
+                { name: task.assignee.name },
+            );
+        }
+    }
+    const checkbox = (
+        <input
+            type="checkbox"
+            className="mt-1 size-4 shrink-0 accent-primary aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            checked={done}
+            disabled={dropped}
+            aria-disabled={closeReason ? true : undefined}
+            onClick={() => {
+                if (closeReason) {
+                    toast.error(closeReason);
+                }
+            }}
+            onKeyDown={(event) => {
+                if (closeReason && event.key === " ") {
+                    event.preventDefault();
+                    toast.error(closeReason);
+                }
+            }}
+            onChange={(event) => {
+                if (!task.canClose || dropped) return;
+                const status = event.target.checked ? "done" : "open";
+                onChange({ status }, { status });
+            }}
+            aria-label={i18n("Done")}
+        />
+    );
 
     return (
         <li className="group flex items-start gap-3 p-3 text-sm">
-            <input
-                type="checkbox"
-                className="mt-1 size-4 shrink-0 accent-primary"
-                checked={done}
-                disabled={!task.canClose || dropped}
-                onChange={(event) => {
-                    const status = event.target.checked ? "done" : "open";
-                    onChange({ status }, { status });
-                }}
-                aria-label={i18n("Done")}
-            />
+            {closeReason ? (
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>{checkbox}</TooltipTrigger>
+                        <TooltipContent className="max-w-72">
+                            {closeReason}
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            ) : (
+                checkbox
+            )}
             <div className="min-w-0 flex-1 space-y-1.5">
                 {editable ? (
                     <TaskTextInput
@@ -119,9 +173,13 @@ export function TaskRow({
                     {evidence && (
                         <>
                             <Link
-                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                 className="truncate hover:text-primary hover:underline"
                             >
+                                <ArrowUpRight
+                                    className="mr-1 inline size-3"
+                                    aria-hidden="true"
+                                />
                                 {evidence.title}
                             </Link>
                             <span>
@@ -133,19 +191,40 @@ export function TaskRow({
                             </span>
                         </>
                     )}
-                    {task.evidenceStartMs !== null && onPlay && (
-                        <button
-                            type="button"
-                            className="inline-flex items-center gap-1 hover:text-primary"
-                            title={task.quote ?? undefined}
-                            onClick={() =>
-                                onPlay(task.evidenceStartMs as number)
-                            }
-                        >
-                            <Play className="size-3" />
-                            {i18n("Where it was said")}
-                        </button>
-                    )}
+                    {!evidence &&
+                        task.evidenceItemId === currentItemId &&
+                        task.evidenceItemKind === "audio" &&
+                        task.evidenceStartMs !== null &&
+                        (task.evidenceAudioAvailable ? (
+                            <PlayAtButton
+                                ms={task.evidenceStartMs}
+                                label={i18n("Where it was said")}
+                                playLabel={i18n("Play where it was said")}
+                                title={task.quote ?? undefined}
+                            />
+                        ) : (
+                            <span
+                                className="tabular-nums"
+                                title={task.quote ?? undefined}
+                            >
+                                {formatClock(task.evidenceStartMs)}
+                            </span>
+                        ))}
+                    {!evidence &&
+                        (task.evidenceItemId !== currentItemId ||
+                            task.evidenceItemKind === "mail") && (
+                            <TaskEvidenceLink
+                                evidence={{
+                                    itemId: task.evidenceItemId,
+                                    itemKind: task.evidenceItemKind,
+                                    audioAvailable: task.evidenceAudioAvailable,
+                                    startMs: task.evidenceStartMs,
+                                    text: task.evidenceText,
+                                }}
+                                quote={task.quote}
+                                currentItemId={currentItemId}
+                            />
+                        )}
                     {dropped && (
                         <span className="rounded bg-muted px-1.5">
                             {i18n("Dropped")}

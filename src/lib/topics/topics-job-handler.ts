@@ -8,7 +8,10 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
-import { markSummaryStepFailed } from "@/lib/pipeline/state";
+import {
+    markAutomaticStepShared,
+    markSummaryStepFailed,
+} from "@/lib/pipeline/state";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
     admitRateLimitedAutoTopics,
@@ -71,6 +74,12 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
                 error.code === ErrorCode.RECORDING_SHARED &&
                 payload.trigger !== "manual"
             ) {
+                await markAutomaticStepShared({
+                    itemId: payload.recordingId,
+                    userId,
+                    view: payload.view ?? "private",
+                    step: "topics",
+                });
                 return { skipped: "shared" };
             }
             throw error;
