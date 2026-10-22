@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,7 +16,6 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { parseApiError } from "@/lib/api-errors";
 import type { OwnType } from "@/lib/knowledge/vocabulary";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
@@ -325,16 +325,13 @@ export function VocabularyList({
                                   )}
                         </DialogDescription>
                     </DialogHeader>
-                    <NativeSelect
+                    <MergeTargetPicker
                         value={targetKey}
-                        onChange={(event) => setTargetKey(event.target.value)}
-                        aria-label={i18n("Merge target")}
-                        className="w-full"
-                    >
-                        <option value="">{i18n("Choose a type")}</option>
-                        {candidates.map((candidate) => (
-                            <option key={candidate.key} value={candidate.key}>
-                                {candidate.kind === "entity"
+                        onChange={setTargetKey}
+                        candidates={candidates.map((candidate) => ({
+                            id: candidate.key,
+                            name:
+                                candidate.kind === "entity"
                                     ? labels.entityType(
                                           candidate.key,
                                           candidate.label,
@@ -342,11 +339,12 @@ export function VocabularyList({
                                     : labels.relation(
                                           candidate.key,
                                           candidate.label,
-                                      )}
-                                {candidate.core ? ` · ${i18n("built in")}` : ""}
-                            </option>
-                        ))}
-                    </NativeSelect>
+                                      ),
+                            badge: candidate.core
+                                ? i18n("built in")
+                                : undefined,
+                        }))}
+                    />
                     {target && mergeCount !== null && (
                         <p className="text-sm">
                             {current?.kind === "entity"
