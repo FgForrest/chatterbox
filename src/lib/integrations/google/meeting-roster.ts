@@ -37,15 +37,14 @@ export function selectMeetingEvent(
             const to = Date.parse(event.end);
             const overlap =
                 Math.min(end.getTime(), to) - Math.max(start.getTime(), from);
-            return to > from && overlap > 0
+            return to > from &&
+                overlap > 0 &&
+                (overlap >= duration / 2 || overlap >= (to - from) / 2)
                 ? [
                       {
                           event,
                           overlap,
                           lengthDifference: Math.abs(to - from - duration),
-                          eligible:
-                              overlap >= duration / 2 ||
-                              overlap >= (to - from) / 2,
                       },
                   ]
                 : [];
@@ -56,7 +55,7 @@ export function selectMeetingEvent(
                 a.lengthDifference - b.lengthDifference,
         );
     const best = ranked[0];
-    if (!best?.eligible) return null;
+    if (!best) return null;
     if (
         ranked[1] &&
         ranked[1].overlap >= best.overlap * 0.9 &&

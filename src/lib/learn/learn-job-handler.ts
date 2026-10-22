@@ -819,11 +819,26 @@ async function runLearnJob({
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
         const { chat, bridge, provider, baseUrl, model, payerUserId } =
             await chatFor(run, signal, profile.settings.steps.learn.provider);
-        const selectedEventId =
-            payload.calendarEventId ??
-            (typeof run.inputs?.calendarEventId === "string"
+        const mayChooseEvent =
+            run.view === "private" && run.actorUserId === run.userId;
+        const storedEventId =
+            typeof run.inputs?.calendarEventId === "string"
                 ? run.inputs.calendarEventId
-                : undefined);
+                : undefined;
+        const storedAutoSelected =
+            run.inputs?.calendarEventAutoSelected === true;
+        const chosenEventId = mayChooseEvent
+            ? payload.calendarEventId
+            : undefined;
+        let selectedEventId: string | undefined;
+        if (mayChooseEvent) {
+            selectedEventId = chosenEventId ?? storedEventId;
+        } else if (storedAutoSelected) {
+            selectedEventId = storedEventId;
+        }
+        const eventAutoSelected =
+            selectedEventId === undefined ||
+            (chosenEventId === undefined && storedAutoSelected);
         const roster = await resolveMeetingRoster({
             ownerUserId: run.userId,
             itemId: run.itemId,
@@ -838,6 +853,7 @@ async function runLearnJob({
                 inputs: {
                     ...run.inputs,
                     calendarEventId: roster?.eventId ?? selectedEventId ?? "",
+                    calendarEventAutoSelected: eventAutoSelected,
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },

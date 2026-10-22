@@ -118,6 +118,18 @@ export async function startLearnRun(input: {
             400,
         );
     }
+    if (
+        input.calendarEventId !== undefined &&
+        (trigger !== "manual" ||
+            access.view !== "private" ||
+            actorUserId !== access.ownerUserId)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Calendar context is only available to the recording owner",
+            400,
+        );
+    }
     if (!isLearnDeploymentAvailable()) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,

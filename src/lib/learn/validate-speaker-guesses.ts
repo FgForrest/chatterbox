@@ -137,6 +137,7 @@ export function appendSpeakerGuesses(
             )?.source ?? "transcript";
         const metadataForRoster = {
             ...metadata,
+            confidence: Math.min(0.49, metadata.confidence),
             clues: metadata.clues.filter((clue) => {
                 if (clue === "meet") {
                     return rosterMatches.some((one) => one.source === "meet");

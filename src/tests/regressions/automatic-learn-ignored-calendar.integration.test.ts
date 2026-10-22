@@ -16,6 +16,7 @@ import {
     learnRuns,
     people,
     recordingFolders,
+    transcriptCorrectionPasses,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -59,11 +60,15 @@ const mocks = vi.hoisted(() => {
         connection: vi.fn(),
         token: vi.fn().mockResolvedValue("test-token"),
         chat: vi.fn(),
+        learnAccess: vi.fn(),
     };
 });
 vi.mock("@/db", () => ({ db: mocks.db, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mocks.env }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/sharing/learn-access", () => ({
+    requireLearnAccess: mocks.learnAccess,
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
     captureServerException: vi.fn(),
@@ -84,6 +89,7 @@ vi.mock("@/lib/learn/chat-clients", () => ({
     })),
 }));
 
+import { POST } from "@/app/api/recordings/[id]/learn/route";
 import { encrypt } from "@/lib/encryption";
 import {
     decryptJsonField,
@@ -106,9 +112,11 @@ import { createPerson } from "@/lib/knowledge/people";
 import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { startAutomaticLearn } from "@/lib/learn/auto-learn";
+import { correctionPassJobHandler } from "@/lib/learn/correction-pass-job";
+import { startLearnRun } from "@/lib/learn/learn-job";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { llmRendering } from "@/lib/learn/llm-input";
-import { decideReviewItem, finishReview } from "@/lib/learn/review";
+import { decideReviewItem, finishReview, loadReview } from "@/lib/learn/review";
 import { withSpeakerProposalContext } from "@/lib/learn/speaker-proposal-context";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { requireRecordingView } from "@/lib/sharing/access";
@@ -311,6 +319,235 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
     });
     afterAll(() => vi.unstubAllGlobals());
 
+    async function shareRecording() {
+        const orgUserId = (await ensureOrgAccount()) ?? "";
+        await database.db.insert(transcriptSpeakers).values({
+            userId: "owner",
+            transcriptionId: transcriptId,
+            label: "speaker_0",
+            personId: null,
+            source: "user",
+            status: "confirmed",
+            markedUnknown: true,
+            confirmedByUserId: "owner",
+        });
+        const [root] = await database.db
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await addRecordingToFolder({
+            userId: "owner",
+            recordingId: "recording",
+            folderId: root?.id ?? "",
+        });
+        return orgUserId;
+    }
+
+    it.each([
+        "meeting",
+        "",
+    ])("rejects a curator's explicit Calendar choice at the route (%s)", async (calendarEventId) => {
+        const orgUserId = await shareRecording();
+        const access = await requireRecordingView(
+            orgUserId,
+            "recording",
+            "org",
+        );
+        mocks.learnAccess.mockResolvedValue({
+            access,
+            actorUserId: orgUserId,
+            curates: true,
+        });
+        const response = await POST(
+            new Request(
+                `http://localhost/api/recordings/recording/learn?view=org&calendarEventId=${calendarEventId}`,
+                { method: "POST" },
+            ),
+            { params: Promise.resolve({ id: "recording" }) },
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+            code: "INVALID_INPUT",
+            error: "Calendar context is only available to the recording owner",
+        });
+        expect(
+            await database.db
+                .select()
+                .from(learnRuns)
+                .where(eq(learnRuns.userId, "owner")),
+        ).toEqual([]);
+        expect(mocks.connection).not.toHaveBeenCalled();
+    });
+
+    it("rejects automatic and non-owner private event choices at start", async () => {
+        const access = await requireRecordingView(
+            "owner",
+            "recording",
+            "private",
+        );
+        for (const [actorUserId, trigger] of [
+            ["owner", "auto"],
+            ["other", "manual"],
+        ] as const) {
+            await expect(
+                startLearnRun({
+                    access,
+                    actorUserId,
+                    trigger,
+                    source: "riffado",
+                    calendarEventId: "meeting",
+                }),
+            ).rejects.toMatchObject({
+                code: "INVALID_INPUT",
+                message:
+                    "Calendar context is only available to the recording owner",
+            });
+        }
+    });
+
+    it.each([
+        "chosen",
+        "",
+    ])("honors the owner's manual private event choice (%s) and bounds loaded review confidence", async (calendarEventId) => {
+        const access = await requireRecordingView(
+            "owner",
+            "recording",
+            "private",
+        );
+        mocks.learnAccess.mockResolvedValue({
+            access,
+            actorUserId: "owner",
+            curates: false,
+        });
+        vi.stubGlobal(
+            "fetch",
+            googleFetch([calendarEvent, event("chosen", "10:00", "10:10")]),
+        );
+        const response = await POST(
+            new Request(
+                `http://localhost/api/recordings/recording/learn?calendarEventId=${calendarEventId}`,
+                { method: "POST" },
+            ),
+            { params: Promise.resolve({ id: "recording" }) },
+        );
+        expect(response.status).toBe(202);
+        const [run] = await database.db
+            .select()
+            .from(learnRuns)
+            .where(eq(learnRuns.userId, "owner"));
+        if (!run) throw new Error("Manual run missing");
+        expect(run.inputs?.calendarEventId).toBe(calendarEventId);
+        const [job] = await database.db
+            .select()
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.id, run.jobId ?? ""),
+                    eq(asyncJobs.userId, "owner"),
+                ),
+            );
+        expect(job?.payload.calendarEventId).toBe(calendarEventId);
+        await learnJobHandler.run({
+            userId: "owner",
+            jobId: run.jobId ?? "",
+            payload: learnJobHandler.parsePayload(job?.payload ?? {}),
+            attempt: 1,
+            maxAttempts: 1,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        const [stored] = await database.db
+            .select()
+            .from(learnRuns)
+            .where(
+                and(eq(learnRuns.id, run.id), eq(learnRuns.userId, "owner")),
+            );
+        expect(stored?.inputs).toMatchObject({
+            calendarEventId,
+            calendarEventAutoSelected: false,
+        });
+        const review = await loadReview(access);
+        expect(review.items).toHaveLength(1);
+        expect(review.items[0]?.payload).toMatchObject({
+            guess: { confidence: 0.49 },
+        });
+        if (calendarEventId === "")
+            expect(mocks.connection).not.toHaveBeenCalled();
+        else
+            expect(review.items[0]?.payload).toMatchObject({
+                source: "calendar",
+            });
+    });
+
+    it.each([
+        false,
+        true,
+    ])("guards the correction pass's stored event reuse (automatically selected: %s)", async (autoSelected) => {
+        const orgUserId = await shareRecording();
+        const [run] = await database.db
+            .insert(learnRuns)
+            .values({
+                userId: "owner",
+                scopeUserId: orgUserId,
+                itemId: "recording",
+                transcriptionId: transcriptId,
+                actorUserId: orgUserId,
+                view: "org",
+                trigger: "auto",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status: "finished",
+                inputs: {
+                    calendarEventId: "chosen",
+                    calendarEventAutoSelected: autoSelected,
+                },
+            })
+            .returning({ id: learnRuns.id });
+        const [pass] = await database.db
+            .insert(transcriptCorrectionPasses)
+            .values({
+                userId: "owner",
+                scopeUserId: orgUserId,
+                recordingId: "recording",
+                transcriptionId: transcriptId,
+                actorUserId: orgUserId,
+                view: "org",
+                transcriptRevision: 0,
+                learnRunId: run?.id ?? "",
+            })
+            .returning({ id: transcriptCorrectionPasses.id });
+        vi.stubGlobal(
+            "fetch",
+            googleFetch([
+                calendarEvent,
+                {
+                    ...event("chosen", "10:00", "10:10"),
+                    attendees: [{ name: "Tavin Vosk" }],
+                },
+            ]),
+        );
+        mocks.chat.mockResolvedValue('{"fixes":[]}');
+        await correctionPassJobHandler.run({
+            userId: orgUserId,
+            jobId: "correction-job",
+            payload: { passId: pass?.id ?? "" },
+            attempt: 1,
+            maxAttempts: 1,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        const prompts = mocks.chat.mock.calls
+            .flatMap(([messages]) => messages as LearnChatMessage[])
+            .map((message) => message.content)
+            .join("\n");
+        expect(prompts).toContain(
+            `MEETING ATTENDEES (JSON):\n["${autoSelected ? "Tavin Vosk" : "Nera Veln"}"]`,
+        );
+        expect(prompts).not.toContain(
+            autoSelected ? "Nera Veln" : "Tavin Vosk",
+        );
+    });
+
     it("returns null without connection or scope, and for mail, another owner or a Google error", async () => {
         for (const connection of [null, { status: "active", scopes: [] }]) {
             mocks.connection.mockResolvedValue(connection);
@@ -382,7 +619,20 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         });
     });
 
-    it("uses the owner's calendar for an automatic Organization run by another actor", async () => {
+    it.each([
+        "manual",
+        "auto",
+    ] as const)("ignores a non-owner's forged event choices in a %s Organization run", async (trigger) => {
+        vi.stubGlobal(
+            "fetch",
+            googleFetch([
+                calendarEvent,
+                {
+                    ...event("forged", "10:00", "10:10"),
+                    attendees: [{ name: "Tavin Vosk" }],
+                },
+            ]),
+        );
         const orgUserId = (await ensureOrgAccount()) ?? "";
         await database.db.insert(transcriptSpeakers).values({
             userId: "owner",
@@ -447,7 +697,8 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
                 transcriptionId: transcriptId,
                 view: "org",
                 actorUserId: orgUserId,
-                trigger: "auto",
+                trigger,
+                inputs: { calendarEventId: "forged" },
                 transcriptRevision: 0,
                 vocabularyVersion: 0,
             })
@@ -455,7 +706,7 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         await learnJobHandler.run({
             userId: orgUserId,
             jobId: "organization-job",
-            payload: { runId: run?.id ?? "" },
+            payload: { runId: run?.id ?? "", calendarEventId: "forged" },
             attempt: 1,
             maxAttempts: 1,
             signal: new AbortController().signal,
@@ -470,6 +721,7 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         expect(request?.content).not.toContain("Private invented role");
         expect(request?.content).not.toContain(privatePerson.id);
         expect(request?.content).not.toContain("Private Vosk");
+        expect(request?.content).not.toContain("Tavin Vosk");
         expect(mocks.connection).toHaveBeenCalledWith("owner");
         expect(mocks.connection).not.toHaveBeenCalledWith(orgUserId);
         const items = await database.db
@@ -481,6 +733,51 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
             personId,
             source: "calendar",
         });
+        const [storedRun] = await database.db
+            .select()
+            .from(learnRuns)
+            .where(
+                and(
+                    eq(learnRuns.id, run?.id ?? ""),
+                    eq(learnRuns.userId, "owner"),
+                ),
+            );
+        expect(storedRun?.inputs).toMatchObject({
+            calendarEventId: "meeting",
+            calendarEventAutoSelected: true,
+        });
+        await database.db
+            .update(learnRuns)
+            .set({ status: "queued" })
+            .where(
+                and(
+                    eq(learnRuns.id, run?.id ?? ""),
+                    eq(learnRuns.userId, "owner"),
+                ),
+            );
+        mocks.chat.mockClear();
+        vi.stubGlobal(
+            "fetch",
+            googleFetch([calendarEvent, { ...calendarEvent, id: "ambiguous" }]),
+        );
+        await learnJobHandler.run({
+            userId: orgUserId,
+            jobId: "organization-job",
+            payload: { runId: run?.id ?? "", calendarEventId: "forged" },
+            attempt: 2,
+            maxAttempts: 2,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        expect(
+            mocks.chat.mock.calls
+                .flatMap(([messages]) => messages as LearnChatMessage[])
+                .some((message) =>
+                    message.content.includes(
+                        '"speakerCandidates":[{"name":"Nera Veln","source":"calendar"}]',
+                    ),
+                ),
+        ).toBe(true);
     });
 
     it("keeps Calendar invitees and logs a Meet error", async () => {
@@ -751,7 +1048,7 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         expect(items).toHaveLength(proposedName ? 2 : 1);
         expect(items[0]?.preTicked).toBe(false);
         expect(decryptJsonField(items[0]?.payload ?? null)).toMatchObject({
-            guess: { confidence: 0.7 },
+            guess: { confidence: 0.49 },
             source: "calendar",
         });
         return items;
@@ -879,7 +1176,7 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
             ).toMatchObject({
                 source: "calendar",
                 reason: "Role odpovídá tématu.",
-                guess: { confidence: 0.7 },
+                guess: { confidence: 0.49 },
             });
             expect(
                 (
@@ -970,4 +1267,22 @@ it("ignores Focus time without invitees and prefers the closest duration on equa
             end,
         ),
     ).toBeNull();
+});
+
+it("filters ineligible events before choosing the greatest overlap", () => {
+    const longEnd = new Date(`${recordingDate}T14:00:00Z`);
+    const ineligible = event("ineligible", "06:00", "10:40");
+    const eligible = event("eligible", "12:00", "12:30");
+    expect(selectMeetingEvent([ineligible, eligible], start, longEnd)?.id).toBe(
+        "eligible",
+    );
+});
+
+it("ignores ineligible runners-up when judging ambiguity", () => {
+    const longEnd = new Date(`${recordingDate}T14:00:00Z`);
+    const ineligible = event("ineligible", "06:00", "10:28");
+    const eligible = event("eligible", "12:00", "12:30");
+    expect(selectMeetingEvent([eligible, ineligible], start, longEnd)?.id).toBe(
+        "eligible",
+    );
 });

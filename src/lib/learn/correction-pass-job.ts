@@ -136,6 +136,8 @@ async function runPass({
         .select({
             profileRevisionId: learnRuns.profileRevisionId,
             inputs: learnRuns.inputs,
+            view: learnRuns.view,
+            actorUserId: learnRuns.actorUserId,
         })
         .from(learnRuns)
         .where(
@@ -281,6 +283,9 @@ async function runPass({
             ownerUserId: pass.userId,
             itemId: pass.recordingId,
             calendarEventId:
+                ((learnRun.view === "private" &&
+                    learnRun.actorUserId === pass.userId) ||
+                    learnRun.inputs?.calendarEventAutoSelected === true) &&
                 typeof learnRun.inputs?.calendarEventId === "string"
                     ? learnRun.inputs.calendarEventId
                     : undefined,

@@ -58,6 +58,27 @@ function knownGuess(label = "speaker_0"): LearnOutput["speakers"][number] {
 }
 
 describe("meeting speaker guesses", () => {
+    it.each([
+        0, 0.2, 0.49, 0.7, 1,
+    ])("caps every review payload's confidence without raising %s", (confidence) => {
+        const result = validateLearnOutput(
+            answer([
+                {
+                    ...knownGuess(),
+                    personId: null,
+                    rosterName: "Míra Luvin",
+                    guess: { confidence, clues: ["meet"] },
+                },
+            ]),
+            frame,
+        );
+        expect(result.items).toHaveLength(2);
+        for (const item of result.items) {
+            expect(item.payload).toMatchObject({
+                guess: { confidence: Math.min(0.49, confidence) },
+            });
+        }
+    });
     it("accepts a bounded guess without evidence and stores it unticked", () => {
         const parsed = parseLearnOutput(JSON.stringify(answer([knownGuess()])));
         expect(parsed.ok).toBe(true);
@@ -70,7 +91,7 @@ describe("meeting speaker guesses", () => {
                     personId: "p1",
                     evidenceMs: [],
                     source: "calendar",
-                    guess: { confidence: 0.7 },
+                    guess: { confidence: 0.49 },
                 },
             },
         ]);
@@ -113,7 +134,7 @@ describe("meeting speaker guesses", () => {
                     name: "Míra Luvin",
                     speakerLabel: "speaker_0",
                     source: "meet",
-                    guess: guess.guess,
+                    guess: { ...guess.guess, confidence: 0.49 },
                 },
             },
             {
