@@ -1,12 +1,12 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-22 17:00
-status: proposed
+updated: 2026-10-22 20:30
+status: partially-implemented
 kind: feature
 issues: [240]
-prs: []
-areas: [src/app/(app)/almanac, src/lib/knowledge/name-match.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/components/almanac/merge-target-picker.tsx, src/db/queries/almanac-usage.ts, src/lib/folders/item-scope.ts, src/lib/transcription/almanac-terms.ts, src/lib/learn/correction-pass.ts, src/lib/authz/curator.ts]
+prs: [244, 247]
+areas: [src/app/(app)/almanac, src/lib/knowledge/name-match.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/components/almanac/merge-target-picker.tsx, src/db/queries/almanac-usage.ts, src/lib/knowledge/duplicate-score.ts, src/lib/knowledge/duplicates.ts, src/components/almanac/care-queue.tsx, src/lib/knowledge/read-folder-knowledge.ts, src/components/dashboard/folder-knowledge-panel.tsx, src/lib/transcription/almanac-terms.ts, src/lib/learn/correction-pass.ts, src/lib/authz/curator.ts]
 supersedes: []
 superseded-by: []
 relates: [2026-10-22-organization-almanac-grows-on-share, 2026-10-21-curators-manage-organization-almanac, 2026-10-01-name-matching-across-word-forms]
@@ -17,9 +17,10 @@ relates: [2026-10-22-organization-almanac-grows-on-share, 2026-10-21-curators-ma
 Once sharing turns confirmed Learn findings into Organization knowledge without asking
 ([organization Almanac grows on share](2026-10-22-organization-almanac-grows-on-share.md)), a few
 curators have to keep a growing Organization Almanac clean. Issue #240 plans three PRs: a curators'
-"Péče" tab that finds likely duplicate people and things and joins them; a read-only view of the
-knowledge each folder contributes, including what the models receive; and the rest of the problem
-queue. Decided on 2026-10-22 from a design page; PR 1 and PR 2 are in review, nothing is merged.
+"Péče" (Care) tab that finds likely duplicate people and things and joins them; a read-only view of
+the knowledge each folder contributes, including what the models receive; and the rest of the
+problem queue. Decided on 2026-10-22 from a design page. PR 2 merged as #244 and PR 1 as #247;
+PR 3 is not started.
 
 ## Why
 
@@ -78,7 +79,7 @@ scope, history) stays in one place.
 
 ## Key technical details
 
-As built on the PR 1 and PR 2 branches (not on `dev`):
+As merged in #247 (PR 1) and #244 (PR 2):
 
 - **Signals for** a pair: nickname, Czech surname form, diacritics, typo, legal form, a shared heard-as
   form. **Signals against:** both are confirmed speakers in the same recording; different e-mails at
@@ -86,7 +87,7 @@ As built on the PR 1 and PR 2 branches (not on `dev`):
 - **Compare and join:** keeps everything that does not clash, asks only about real clashes (name,
   single-valued facts), proposes the record with an e-mail and more evidence as the survivor, then
   calls the existing `mergePeople` / `mergeEntities`. Merging now also moves a person's extra e-mails
-  and mail participants to the survivor (a behaviour change named in the PR).
+  and mail participants to the survivor (a behaviour change named in #247).
 - **Scan cost is a constraint:** the first build scanned 2,000 people in 12 to 68 seconds (more
   nicknames, slower) and blocked a single-process server. The fix precomputes stems, considers only
   pairs that share trigrams, works one kind at a time, and caches the ranked list per Organization
@@ -99,17 +100,55 @@ As built on the PR 1 and PR 2 branches (not on `dev`):
 
 ## Verification
 
-Not merged. PR 1 fixes: whole suite 7,349 tests passing on the branch; PR 2 review found no blockers
-(access control and byte parity with the real model input confirmed) and four should-fix items, in
-progress.
+- **PR 2 (#244):** `src/tests/knowledge/folder-knowledge.integration.test.ts` checks parity with
+  `almanacTermsFor`, including an inherited pinned language, for private and Organization child
+  folders; `src/tests/regressions/240-folder-knowledge-ranking.test.ts` covers the overflow and
+  below-the-cut ranking and the Czech plurals. Targeted folder API and UI, ranking and plural
+  regressions, transcription ranking and route classification: 6 files, 60 tests.
+  `vitest run --changed origin/dev`: 4,085 passed; whole suite 7,332 passed (two teardown errors in
+  the task-review test were fixed afterwards and the affected UI files rerun clean). Browser check on
+  the demo stack: an Organization folder, all tabs, the model preview with reasons and the correction
+  block. Three review rounds, all approving: the access control and the parity with the real model
+  input held, the findings (hard-coded limits, the untested Private-root path, the panel toggle, an
+  untranslated heading, the total on an empty page, a Czech label) were fixed before merge, and the
+  third round raised none. CI (lint and format, type check, test, build, CodeQL, review) was green on
+  the merged head.
+- **PR 1 (#247):** new `src/tests/knowledge/duplicate-score.test.ts`,
+  `src/tests/knowledge/duplicates.integration.test.ts`, `src/tests/almanac/care.test.tsx` and
+  `src/tests/regressions/240-duplicate-scan.test.ts` cover scorer signals, authorization,
+  Organization boundaries, dismissals, bounds and cursors, name and clash choices, stale comparisons,
+  reference moves, backup scope, cache expiry and in-flight sharing. The benchmark in
+  `240-duplicate-scan.test.ts` scans 2,000 people with eight aliases and eight heard-as forms each in
+  about 2 s (in-memory scoring; the first version took 12 to 68 s and blocked the server). Locally
+  against PostgreSQL, as stated in the PR: `vitest --changed origin/dev` 465 files / 5,130 tests
+  passed; whole suite 671 files / 7,364 tests passed; Biome, tsc, fumadocs-mdx and the message
+  extractor clean. The review fixes added `src/tests/regressions/240-duplicate-comparison-previews.test.ts`,
+  `src/tests/regressions/240-duplicate-picker-access.test.tsx`,
+  `src/tests/regressions/240-duplicate-evidence.test.ts` (identical evidence before and after
+  inserting 2,000 unrelated facts) and a database-backed `email_conflict` case in
+  `duplicates.integration.test.ts` that asserts a refused join changes nothing. The fourth review
+  round approved with no findings.
 
 ## Consequences & open follow-ups
 
-- PR 3 (what each share added with undo per share, conflicting facts, corrections pointing two ways,
-  thin records, problem flags in the folder view, the count badge) depends on per-share provenance
-  recorded at share time.
+- PR 3 is not started: what each share added with undo per share, conflicting facts, corrections
+  pointing two ways, thin records, problem flags in the folder view, and the Care badge count. It
+  depends on per-share provenance recorded at share time. The badge is wired but not fed:
+  `careCount` in `src/components/almanac/almanac-tabs.tsx` is never supplied by the Almanac layout
+  until PR 3 counts the problems.
+- Each kind scans at most the newest 2,000 live records (`MAX_DUPLICATE_RECORDS` in
+  `src/lib/knowledge/duplicate-limits.ts`; 8 aliases, 8 heard-as forms and 16 extra addresses per
+  record, 40 nearest neighbours each). A new record is not paired with an older one beyond that cap;
+  the Care tab and the user guide say so.
+- The full scan looks each record up by its primary and canonical name only, while aliases and
+  heard-as forms are indexed as targets. A pair whose only overlap is alias-to-alias is therefore not
+  listed in the queue; it still appears in the merge picker for either record, which looks up all
+  forms. Seeding the scan with every form would multiply lookups by up to eight; the #247 review
+  accepted the trade-off.
 - The five-minute cache means a merge or new duplicate can take that long to change the queue unless
-  the scope generation moves; the PR 1 review checks it across processes.
+  the scope generation moves. Every request checks the database scope generation, and dismissals,
+  authorization and merge validation always read the database, so the cache is safe across processes
+  (confirmed in the #247 review).
 
 ## Related work
 
@@ -126,3 +165,7 @@ progress.
   decisions A to D and the e-mail remark; issue #240 opened; PR 1 and PR 2 built; PR 1 scan blocker
   found in review and fixed.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: PR 2 merged as #244.
+- **2026-10-22**: PR 1 merged as #247, after four review rounds (per-record comparison previews and
+  curator-only picker ranking, fact evidence read for candidate records only, a database-backed
+  e-mail conflict test).
