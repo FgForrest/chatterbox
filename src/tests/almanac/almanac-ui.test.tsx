@@ -336,12 +336,7 @@ describe("EntityActions", () => {
         fireEvent.click(screen.getByRole("button", { name: "Merge into…" }));
         await screen.findByRole("option", { name: /Orion Co/ });
         expect(screen.queryByRole("option", { name: /mine/ })).toBeNull();
-        fireEvent.change(
-            screen.getByRole("combobox", { name: "Merge target" }),
-            {
-                target: { value: "e-shared" },
-            },
-        );
+        fireEvent.click(screen.getByRole("option", { name: /Orion Co/ }));
         fireEvent.click(screen.getByRole("button", { name: "Merge" }));
         await waitFor(() =>
             expect(push).toHaveBeenCalledWith("/almanac/things/e-shared"),
