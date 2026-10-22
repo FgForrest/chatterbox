@@ -32,7 +32,6 @@ import {
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
-    canFileRecording,
     FOLDER_DRAG_TYPE,
     RECORDING_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -80,7 +79,6 @@ interface FolderTreeProps {
     ) => Promise<void>;
     onNewFolder?: () => void;
     canCurate?: boolean;
-    isOrgAccount?: boolean;
     onSettings: (folder: RecordingFolder) => void;
     navigation?: FolderNavigation;
     recentCount?: number;
@@ -99,7 +97,6 @@ export function FolderTree({
     onMoveRecording,
     onNewFolder,
     canCurate = false,
-    isOrgAccount = false,
     onSettings,
     navigation,
     recentCount,
@@ -340,8 +337,6 @@ export function FolderTree({
                                     Array.from(event.dataTransfer.types),
                                     folder.scope,
                                     !!onMoveRecording,
-                                    canCurate,
-                                    isOrgAccount,
                                 );
                                 event.dataTransfer.dropEffect = effect;
                                 if (effect === "none") {
@@ -396,17 +391,9 @@ export function FolderTree({
                                         Array.from(event.dataTransfer.types),
                                         folder.scope,
                                         !!onMoveRecording,
-                                        canCurate,
-                                        isOrgAccount,
                                     ) === "none" ||
-                                    (recording &&
-                                        (!canFileRecording(
-                                            recording,
-                                            canCurate,
-                                            isOrgAccount,
-                                        ) ||
-                                            (recording.isOwn === false &&
-                                                folder.scope !== "org")))
+                                    (recording?.isOwn === false &&
+                                        folder.scope !== "org")
                                 ) {
                                     event.dataTransfer.dropEffect = "none";
                                     setRecordingDropFolderId(null);

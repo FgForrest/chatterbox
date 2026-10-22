@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
-    canFileRecording,
     RECORDING_DRAG_TYPE,
     RECORDING_OTHER_OWNER_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -103,7 +102,6 @@ export function RecordingRow({
                   (folder) => folder.id === sourceFolder?.id,
               ) ?? folderLocations[0])
             : null;
-    const canFile = canFileRecording(recording, canCurate, isOrgAccount);
     const subfolders = folderLocations.filter(
         (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
     );
@@ -128,12 +126,8 @@ export function RecordingRow({
                     registerRef(recording.id, el);
                 }}
                 type="button"
-                draggable={!!onAssignRecording && canFile}
+                draggable={!!onAssignRecording}
                 onDragStart={(event) => {
-                    if (!canFile) {
-                        event.preventDefault();
-                        return;
-                    }
                     if (recording.isOwn === false)
                         event.dataTransfer.setData(
                             RECORDING_OTHER_OWNER_DRAG_TYPE,
@@ -268,7 +262,7 @@ export function RecordingRow({
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
-                        {onAssignRecording && canFile && (
+                        {onAssignRecording && (
                             <DropdownMenuItem
                                 onSelect={() => setPickerOpen(true)}
                             >
@@ -350,7 +344,7 @@ export function RecordingRow({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
-            {onAssignRecording && canFile && pickerOpen && (
+            {onAssignRecording && pickerOpen && (
                 <FolderPicker
                     folders={folders}
                     canCurate={canCurate}

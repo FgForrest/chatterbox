@@ -135,34 +135,29 @@ describe("recording folder tags", () => {
             isOwn: true,
             canCurate: false,
             canWithdraw: true,
-            writable: true,
         },
         {
             role: "curator",
             isOwn: false,
             canCurate: true,
             canWithdraw: false,
-            writable: true,
         },
         {
             role: "organization account",
             isOwn: false,
             canCurate: false,
             canWithdraw: true,
-            writable: true,
         },
         {
             role: "member",
             isOwn: false,
             canCurate: false,
             canWithdraw: false,
-            writable: false,
         },
-    ])("gates the Organization picker for $role and moves non-owned items", async ({
+    ])("allows the Organization picker for $role and moves non-owned items", async ({
         isOwn,
         canCurate,
         canWithdraw,
-        writable,
     }) => {
         const onAdd = vi.fn().mockResolvedValue(undefined);
         const onMove = vi.fn().mockResolvedValue(undefined);
@@ -181,11 +176,15 @@ describe("recording folder tags", () => {
                 organizationOnly
             />,
         );
-        const action = screen.queryByRole("button", {
+        const action = screen.getByRole("button", {
             name: isOwn ? "Add to folder" : "Move to…",
         });
-        expect(action !== null).toBe(writable);
-        if (!action) return;
+        if (!canWithdraw)
+            expect(
+                screen.queryByRole("button", {
+                    name: "Remove from Organization",
+                }),
+            ).toBeNull();
         fireEvent.click(action);
         expect(screen.queryByRole("option", { name: "Meetings" })).toBeNull();
         expect(screen.queryByText("Private")).toBeNull();

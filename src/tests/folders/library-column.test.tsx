@@ -168,37 +168,36 @@ const roles = [
         isOwn: true,
         canCurate: false,
         isOrgAccount: false,
-        writable: true,
     },
     {
         role: "curator",
         isOwn: false,
         canCurate: true,
         isOrgAccount: false,
-        writable: true,
     },
     {
         role: "organization account",
         isOwn: false,
         canCurate: false,
         isOrgAccount: true,
-        writable: true,
     },
     {
         role: "member",
         isOwn: false,
         canCurate: false,
         isOrgAccount: false,
-        writable: false,
     },
 ];
 
 function organizationDropTests(variant: "rail" | "walk") {
-    it.each(roles)("accepts shared items only for $role", ({
+    it.each(
+        roles.flatMap((role) =>
+            [false, true].map((fromFolder) => ({ ...role, fromFolder })),
+        ),
+    )("files or moves shared items for $role: fromFolder=$fromFolder", ({
         isOwn,
         canCurate,
-        isOrgAccount,
-        writable,
+        fromFolder,
     }) => {
         const item = { ...recordings[0], view: "org" as const, isOwn };
         const placements = [{ recordingId: item.id, folderId: orgSource.id }];
@@ -210,7 +209,6 @@ function organizationDropTests(variant: "rail" | "walk") {
                     recordings={[item]}
                     assignments={placements}
                     canCurate={canCurate}
-                    isOrgAccount={isOrgAccount}
                 />
             ) : (
                 <LibraryLocationHeader
@@ -223,30 +221,49 @@ function organizationDropTests(variant: "rail" | "walk") {
                     recordings={[item]}
                     folder={org}
                     canCurate={canCurate}
-                    isOrgAccount={isOrgAccount}
                 />
             ),
         );
         const dataTransfer = transfer();
         dataTransfer.setData(RECORDING_DRAG_TYPE, item.id);
-        dataTransfer.setData(RECORDING_SOURCE_FOLDER_DRAG_TYPE, orgSource.id);
-        dataTransfer.setData(RECORDING_SOURCE_SCOPE_DRAG_TYPES.org, "org");
+        if (fromFolder) {
+            dataTransfer.setData(
+                RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+                orgSource.id,
+            );
+            dataTransfer.setData(RECORDING_SOURCE_SCOPE_DRAG_TYPES.org, "org");
+        }
         if (!isOwn)
             dataTransfer.setData(RECORDING_OTHER_OWNER_DRAG_TYPE, "true");
         const target = screen.getByRole("button", { name: /^Shared target/ });
         fireEvent.dragOver(target, { dataTransfer });
-        expect(dataTransfer.dropEffect).toBe(writable ? "move" : "none");
+        expect(dataTransfer.dropEffect).toBe(fromFolder ? "move" : "copy");
         fireEvent.drop(target, { dataTransfer });
-        expect(move).toHaveBeenCalledTimes(writable ? 1 : 0);
-        if (writable)
-            expect(move).toHaveBeenCalledWith(
+        if (fromFolder) {
+            expect(move).toHaveBeenCalledExactlyOnceWith(
                 item.id,
                 orgSource.id,
                 orgTarget.id,
             );
-        expect(assign).not.toHaveBeenCalled();
+            expect(assign).not.toHaveBeenCalled();
+        } else {
+            expect(assign).toHaveBeenCalledExactlyOnceWith(
+                item.id,
+                orgTarget.id,
+            );
+            expect(move).not.toHaveBeenCalled();
+        }
     });
-    it("refuses a colleague's item on a personal target even for curators", () => {
+    it.each(
+        roles
+            .filter((role) => !role.isOwn)
+            .flatMap((role) =>
+                [false, true].map((marked) => ({ ...role, marked })),
+            ),
+    )("refuses a colleague's item on a personal target for $role: marked=$marked", ({
+        canCurate,
+        marked,
+    }) => {
         const item = { ...recordings[0], view: "org" as const, isOwn: false };
         render(
             variant === "rail" ? (
@@ -254,7 +271,7 @@ function organizationDropTests(variant: "rail" | "walk") {
                     {...treeProps}
                     folders={sharedFolders}
                     recordings={[item]}
-                    canCurate
+                    canCurate={canCurate}
                 />
             ) : (
                 <LibraryLocationHeader
@@ -263,17 +280,19 @@ function organizationDropTests(variant: "rail" | "walk") {
                     organization={{ folders: sharedFolders, assignments: [] }}
                     recordings={[item]}
                     folder={root}
-                    canCurate
+                    canCurate={canCurate}
                 />
             ),
         );
         const dataTransfer = transfer();
         dataTransfer.setData(RECORDING_DRAG_TYPE, item.id);
-        dataTransfer.setData(RECORDING_OTHER_OWNER_DRAG_TYPE, "true");
+        if (marked)
+            dataTransfer.setData(RECORDING_OTHER_OWNER_DRAG_TYPE, "true");
         const target = screen.getByRole("button", { name: /^Folder 0/ });
         fireEvent.dragOver(target, { dataTransfer });
-        expect(dataTransfer.dropEffect).toBe("none");
+        if (marked) expect(dataTransfer.dropEffect).toBe("none");
         fireEvent.drop(target, { dataTransfer });
+        expect(dataTransfer.dropEffect).toBe("none");
         expect(move).not.toHaveBeenCalled();
         expect(assign).not.toHaveBeenCalled();
     });
@@ -593,11 +612,15 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
 });
 
 describe("library item list", () => {
-    it.each(roles)("gates dragging and row picker for $role", async ({
+    it.each(
+        roles.flatMap((role) =>
+            [false, true].map((fromFolder) => ({ ...role, fromFolder })),
+        ),
+    )("allows dragging and row filing for $role: fromFolder=$fromFolder", async ({
         isOwn,
         canCurate,
         isOrgAccount,
-        writable,
+        fromFolder,
     }) => {
         const item = { ...recordings[0], view: "org" as const, isOwn };
         const select = vi.fn();
@@ -614,7 +637,7 @@ describe("library item list", () => {
                     initialDateTimeFormat="relative"
                     initialSortOrder="newest"
                     initialChunkSize={50}
-                    folder={orgSource}
+                    folder={fromFolder ? orgSource : org}
                     folders={sharedFolders}
                     rowLocations={new Map([[item.id, [orgSource]]])}
                     assignments={[
@@ -628,11 +651,15 @@ describe("library item list", () => {
             </ConfirmDialogProvider>,
         );
         const row = screen.getByRole("button", { name: /Item 0/ });
-        expect(row.draggable).toBe(writable);
+        expect(row.draggable).toBe(true);
         const dataTransfer = transfer();
         fireEvent.dragStart(row, { dataTransfer });
-        expect(dataTransfer.getData(RECORDING_DRAG_TYPE)).toBe(
-            writable ? item.id : "",
+        expect(dataTransfer.getData(RECORDING_DRAG_TYPE)).toBe(item.id);
+        expect(dataTransfer.getData(RECORDING_OTHER_OWNER_DRAG_TYPE)).toBe(
+            isOwn ? "" : "true",
+        );
+        expect(dataTransfer.getData(RECORDING_SOURCE_FOLDER_DRAG_TYPE)).toBe(
+            fromFolder ? orgSource.id : "",
         );
         fireEvent.click(row);
         expect(select).toHaveBeenCalledWith(item);
@@ -640,24 +667,29 @@ describe("library item list", () => {
             screen.getByRole("button", { name: "Row actions" }),
             { button: 0, ctrlKey: false },
         );
+        fireEvent.click(
+            screen.getByRole("menuitem", {
+                name: fromFolder ? "Move to…" : "Add to folder",
+            }),
+        );
         expect(
-            screen.queryByRole("menuitem", { name: "Move to…" }) !== null,
-        ).toBe(writable);
-        if (writable) {
-            fireEvent.click(screen.getByRole("menuitem", { name: "Move to…" }));
-            expect(
-                screen.queryByRole("option", { name: /Private|Folder 0/ }),
-            ).toBeNull();
-            fireEvent.click(
-                screen.getByRole("option", { name: "Shared target" }),
-            );
-            await act(async () => {});
-            expect(move).toHaveBeenCalledWith(
+            screen.queryByRole("option", { name: "Folder 0" }) !== null,
+        ).toBe(isOwn && !fromFolder);
+        fireEvent.click(screen.getByRole("option", { name: "Shared target" }));
+        await act(async () => {});
+        if (fromFolder) {
+            expect(move).toHaveBeenCalledExactlyOnceWith(
                 item.id,
                 orgSource.id,
                 orgTarget.id,
             );
             expect(assign).not.toHaveBeenCalled();
+        } else {
+            expect(assign).toHaveBeenCalledExactlyOnceWith(
+                item.id,
+                orgTarget.id,
+            );
+            expect(move).not.toHaveBeenCalled();
         }
     });
 

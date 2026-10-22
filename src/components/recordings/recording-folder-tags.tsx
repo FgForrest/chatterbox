@@ -46,7 +46,7 @@ interface RecordingFolderTagsProps {
     /**
      * Whether the viewer owns the recording. Only the owner files it in
      * Private folders or shares it with (and withdraws it from) the
-     * Organization; curators and the organization account may move it within the Organization.
+     * Organization; every viewer may move it within the Organization.
      */
     isOwn?: boolean;
     /**
@@ -105,12 +105,7 @@ export function RecordingFolderTags({
     );
     const assignedOrg = assigned.filter((folder) => folder.scope === "org");
     const moveSource =
-        !isOwn &&
-        (canCurate || canWithdraw) &&
-        onMove &&
-        assignedOrg.length === 1
-            ? assignedOrg[0]
-            : null;
+        !isOwn && onMove && assignedOrg.length === 1 ? assignedOrg[0] : null;
 
     const hasMoveTarget =
         moveSource &&

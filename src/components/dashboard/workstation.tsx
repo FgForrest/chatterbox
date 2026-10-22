@@ -1518,7 +1518,6 @@ export function Workstation({
         recordings: treeRecordings,
         navigation,
         canCurate,
-        isOrgAccount,
         folder: selectedFolder,
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
@@ -1579,7 +1578,6 @@ export function Workstation({
                                 onAssignRecording={assignRecording}
                                 onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
-                                isOrgAccount={isOrgAccount}
                                 navigation={navigation}
                                 recentCount={visibleRecordings.length}
                                 onSettings={(folder) =>

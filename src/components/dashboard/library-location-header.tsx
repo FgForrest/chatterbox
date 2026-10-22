@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
-    canFileRecording,
     RECORDING_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     recordingDropEffect,
@@ -44,7 +43,6 @@ export function LibraryLocationHeader({
     navigation,
     part = "all",
     canCurate = false,
-    isOrgAccount = false,
 }: {
     variant: "rail" | "walk";
     organization: FolderOrganization;
@@ -59,7 +57,6 @@ export function LibraryLocationHeader({
     navigation?: FolderNavigation;
     part?: "all" | "header" | "tiles";
     canCurate?: boolean;
-    isOrgAccount?: boolean;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -100,13 +97,7 @@ export function LibraryLocationHeader({
                         event.dataTransfer.dropEffect = "none";
                         return;
                     }
-                    const effect = recordingDropEffect(
-                        types,
-                        item.scope,
-                        true,
-                        canCurate,
-                        isOrgAccount,
-                    );
+                    const effect = recordingDropEffect(types, item.scope, true);
                     event.dataTransfer.dropEffect = effect;
                     if (effect === "none") return;
                     event.preventDefault();
@@ -125,17 +116,8 @@ export function LibraryLocationHeader({
                         Array.from(event.dataTransfer.types),
                         item.scope,
                         true,
-                        canCurate,
-                        isOrgAccount,
                     ) === "none" ||
-                    (recording &&
-                        (!canFileRecording(
-                            recording,
-                            canCurate,
-                            isOrgAccount,
-                        ) ||
-                            (recording.isOwn === false &&
-                                item.scope !== "org")))
+                    (recording?.isOwn === false && item.scope !== "org")
                 ) {
                     event.dataTransfer.dropEffect = "none";
                     return;

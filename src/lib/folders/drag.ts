@@ -1,5 +1,4 @@
 import type { RecordingFolder } from "@/types/folder";
-import type { Recording } from "@/types/recording";
 
 export const RECORDING_DRAG_TYPE = "application/x-riffado-recording";
 export const RECORDING_SOURCE_FOLDER_DRAG_TYPE =
@@ -13,6 +12,7 @@ export const RECORDING_SOURCE_SCOPE_DRAG_TYPES = {
     org: "application/x-riffado-recording-source-org",
 } as const;
 
+/** Whether the viewer manages Organization folders (a curator or the organization account). */
 export function canManageOrganization(
     canCurate: boolean,
     isOrgAccount: boolean,
@@ -20,30 +20,15 @@ export function canManageOrganization(
     return canCurate || isOrgAccount;
 }
 
+/** The drop effect for a dragged recording: moving within its scope, filing across, never a colleague's item into a personal folder. */
 export function recordingDropEffect(
     types: readonly string[],
     scope: RecordingFolder["scope"],
     canMove = true,
-    canCurate = false,
-    isOrgAccount = false,
 ): "move" | "copy" | "none" {
-    if (
-        types.includes(RECORDING_OTHER_OWNER_DRAG_TYPE) &&
-        (scope !== "org" || !canManageOrganization(canCurate, isOrgAccount))
-    )
+    if (types.includes(RECORDING_OTHER_OWNER_DRAG_TYPE) && scope !== "org")
         return "none";
     return canMove && types.includes(RECORDING_SOURCE_SCOPE_DRAG_TYPES[scope])
         ? "move"
         : "copy";
-}
-
-export function canFileRecording(
-    recording: Recording,
-    canCurate = false,
-    isOrgAccount = false,
-): boolean {
-    return (
-        recording.isOwn !== false ||
-        canManageOrganization(canCurate, isOrgAccount)
-    );
 }
