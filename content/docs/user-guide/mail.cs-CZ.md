@@ -5,6 +5,8 @@ description: Posílání pošty do vašich Klepů.
 
 Když to váš správce nastaví, může se k nahrávkám přidat i pošta. Pošta poslaná na vaše adresy přistane zašifrovaná ve vašich **Klepech** vedle nahrávek. Přepínač nad seznamem ukazuje **Vše**, **Zvuk** nebo **Pošta**.
 
+Když máte otevřené **Klepy** a dorazí pošta, upozornění **Nový e-mail** ukáže předmět, odesílatele a čas. Výběr ani složka se nezmění. **Otevřít** otevře zprávu a tlačítko Zpět vás vrátí. Upozornění můžete zavřít a poštu si přečíst později v **Nedávných**. Novější příchozí položka upozornění nahradí. Pošta, kterou kolegové sdílejí do Organizace, ho nevyvolá.
+
 Pošta vyžaduje jednotné přihlášení: adresy dostanete, jakmile se přihlásíte účtem své organizace. Když se tak dlouho nepřihlásíte, adresy se pozastaví a obnoví se při dalším přihlášení.
 
 ## Vaše adresy
