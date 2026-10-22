@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, itemProcessing, transcriptions } from "@/db/schema";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import {
     AssignedProfileUnavailableError,
     resolveItemProfile,
@@ -18,6 +19,7 @@ export async function pipelineMayQueue(
         .select({
             summaryDueAt: chatterItems.summaryDueAt,
             manualOnly: itemProcessing.manualOnly,
+            phases: itemProcessing.phases,
         })
         .from(chatterItems)
         .leftJoin(
@@ -33,7 +35,8 @@ export async function pipelineMayQueue(
         )
         .limit(1);
 
-    if (!item || item.summaryDueAt !== null || item.manualOnly) return false;
+    if (!item || item.summaryDueAt !== null || effectiveManualOnly(item))
+        return false;
     const profile = await resolveItemProfile(itemId, "private", userId).catch(
         (error: unknown) => {
             if (error instanceof AssignedProfileUnavailableError) return null;

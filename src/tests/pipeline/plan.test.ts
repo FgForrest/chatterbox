@@ -801,7 +801,6 @@ describe("planAdvance audio", () => {
     it.each([
         ["content_reaped", { contentReaped: true }],
         ["audio_reaped", { audioReaped: true }],
-        ["shared", { shared: true }],
     ] as const)("skips automatic transcription when the recording is %s", (reason, guard) => {
         const result = planAdvance(
             audioFacts({
@@ -833,6 +832,47 @@ describe("planAdvance audio", () => {
                     reason,
                 }),
             }),
+        ]);
+    });
+
+    it("continues automatic transcription on a shared recording", () => {
+        const facts = audioFacts({
+            content: null,
+            phases: { transcribe: undefined },
+            transcription: {
+                riffado: null,
+                plaud: null,
+                jobActive: false,
+                shared: true,
+            },
+            profile: {
+                ...DEFAULT_PROFILE,
+                transcribe: { automatic: true, plaudTranscript: "use" },
+            },
+        });
+        expect(actionTypes(planAdvance(facts).actions)).toEqual([
+            "queueTranscription",
+            "markPhase",
+        ]);
+    });
+
+    it("restarts Learn in its new scope before releasing an existing summary hold", () => {
+        const facts = audioFacts({
+            summaryDueAt: "2026-10-17T12:00:00.000Z",
+            profile: profileAutomatic({ learn: true }),
+            learnRunOpen: false,
+            phases: { learn: phase("pending", "scope_changed") },
+        });
+        expect(planAdvance(facts).actions).toEqual([
+            {
+                type: "startAutoLearn",
+                source: "riffado",
+                input: {
+                    contentId: "transcription-1",
+                    contentSourceId: "riffado",
+                    contentRevision: 7,
+                },
+            },
         ]);
     });
 
@@ -1255,6 +1295,28 @@ describe("planAdvance audio", () => {
         expect(planAdvance(applyMarks(facts, first.actions)).actions).toEqual(
             [],
         );
+    });
+
+    it("keeps completed steps when sharing changes the profile used by later steps", () => {
+        const facts = audioFacts();
+        const settled = applyMarks(facts, planAdvance(facts).actions);
+        const summary = settled.phases.summary;
+        if (!summary?.steps) throw new Error("Summary steps missing");
+        summary.state = "done";
+        for (const step of Object.values(summary.steps)) step.state = "done";
+        settled.phases.taskReview = phase("done", "reviewed");
+        settled.profile = {
+            ...DEFAULT_PROFILE,
+            revisionId: "organization-profile-revision",
+        };
+        settled.transcription = {
+            riffado: facts.content,
+            plaud: null,
+            jobActive: false,
+            shared: true,
+        };
+        expect(planAdvance(settled).actions).toEqual([]);
+        expect(summary.state).toBe("done");
     });
 
     it("requests summary steps again for a replacement content row at the same revision", () => {

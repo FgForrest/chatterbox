@@ -21,6 +21,7 @@ import type {
     WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 vi.mock("next-intl", () => ({
@@ -84,7 +85,7 @@ interface LineReview {
     available: boolean;
 }
 
-const REVIEW_PROCESSING: ItemProcessingPresentation = {
+const REVIEW_PROCESSING: ItemProcessingPresentation = processingFixture({
     itemId: "recording-finish",
     kind: "audio",
     legacy: false,
@@ -118,7 +119,7 @@ const REVIEW_PROCESSING: ItemProcessingPresentation = {
     taskReviewWaiting: 0,
     jobs: { transcription: null, summary: null },
     failures: [],
-};
+});
 
 function FinishReviewWorkflow() {
     const { workflow } = useItemProcessing({
@@ -482,7 +483,7 @@ it("moves the workflow strip off Review Learn after finishing without a reload",
                 const url = String(input);
                 if (url.includes("?processing=1")) {
                     processingReads += 1;
-                    const processing =
+                    const processing: ItemProcessingPresentation =
                         processingReads === 1
                             ? REVIEW_PROCESSING
                             : {
@@ -498,7 +499,14 @@ it("moves the workflow strip off Review Learn after finishing without a reload",
                                   },
                                   learnFindingsWaiting: 0,
                               };
-                    return Response.json({ processing });
+                    return Response.json({
+                        processing: {
+                            ...processingFixture(processing),
+                            nextCheckAt: new Date(
+                                Date.now() + 2_000,
+                            ).toISOString(),
+                        },
+                    });
                 }
                 if (init?.method === "POST" && url.includes("/review/finish")) {
                     return Response.json({

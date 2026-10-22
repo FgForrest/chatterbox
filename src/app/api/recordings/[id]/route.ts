@@ -83,6 +83,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                 localeFromAcceptLanguage(
                     request.headers.get("accept-language"),
                 ),
+                access.view,
             ),
         });
     }

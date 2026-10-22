@@ -23,6 +23,7 @@ import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
@@ -207,7 +208,8 @@ export async function generateSummaryForRecording(
     if (item?.kind === "mail") {
         return generateMailSummary(ctx, recordingId, opts);
     }
-    const orgView = ctx.view === "org";
+    const orgView =
+        ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
     // Before the provider is paid; the write checks again under the lock.
@@ -220,8 +222,13 @@ export async function generateSummaryForRecording(
     if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
-        (await readProcessing(recordingId, ctx.view, ctx.ownerUserId))
-            ?.profileRevisionId ?? null;
+        (
+            await readProcessing(
+                recordingId,
+                pipelineDriver(ctx.ownerUserId).view,
+                ctx.ownerUserId,
+            )
+        )?.profileRevisionId ?? null;
 
     const [recording] = await db
         .select(audioItemColumns)
@@ -280,7 +287,7 @@ export async function generateSummaryForRecording(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "audio",
-                view: ctx.view,
+                view: orgView ? "org" : ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -289,6 +296,8 @@ export async function generateSummaryForRecording(
                 ctx.view,
                 ctx.ownerUserId,
                 ctx.actorUserId,
+                opts.trigger === "auto" ? "summary" : undefined,
+                opts.trigger === "auto" ? opts.jobId : undefined,
             );
     const profileSettings = profile?.settings as
         | AudioProfileSettings
@@ -321,7 +330,7 @@ export async function generateSummaryForRecording(
                   refs: new Map<string, string>(),
                   scopeFingerprint: await itemScopeFingerprint(
                       recordingId,
-                      ctx.view,
+                      orgView ? "org" : ctx.view,
                       ctx.ownerUserId,
                   ),
               };

@@ -43,6 +43,14 @@ type FolderDefaultOutcome =
     | { kind: "profile"; profile: ProfileRecord }
     | { kind: "manual_only" };
 
+type ProfileReader = Pick<typeof db, "select">;
+
+async function organizationUserIdOr(
+    known: string | null | undefined,
+): Promise<string | null> {
+    return known !== undefined ? known : await getOrgUserId();
+}
+
 interface FolderContext {
     id: string;
     ownerUserId: string;
@@ -52,9 +60,10 @@ interface FolderContext {
 async function accessibleFolder(
     folderId: string,
     allowedOwnerUserIds: readonly string[],
+    executor: ProfileReader = db,
 ): Promise<FolderContext | null> {
     if (allowedOwnerUserIds.length === 0) return null;
-    const [folder] = await db
+    const [folder] = await executor
         .select({
             id: recordingFolders.id,
             ownerUserId: recordingFolders.userId,
@@ -78,8 +87,9 @@ async function usableDefaultAtFolder(input: {
     channel: ProfileChannel;
     organizationUserId: string | null;
     organizationOnly: boolean;
+    executor?: ProfileReader;
 }): Promise<FolderDefaultOutcome | null> {
-    const [row] = await db
+    const [row] = await (input.executor ?? db)
         .select({
             profileId: folderDefaultProfiles.profileId,
             manualOnly: folderDefaultProfiles.manualOnly,
@@ -117,6 +127,7 @@ async function usableDefaultAtFolder(input: {
             ownerUserId,
             row.profileId,
             input.actorUserId,
+            { executor: input.executor, readOnly: Boolean(input.executor) },
         );
         if (
             profile?.channel === input.channel &&
@@ -135,11 +146,17 @@ export async function folderDefaultProfileDetails(input: {
     actorUserId: string;
     channel: ProfileChannel;
     organizationOnly?: boolean;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<FolderDefaultProfileDetails | null> {
-    const organizationUserId = await getOrgUserId();
-    const folder = await accessibleFolder(input.folderId, [
-        input.folderOwnerUserId,
-    ]);
+    const organizationUserId = await organizationUserIdOr(
+        input.organizationUserId,
+    );
+    const folder = await accessibleFolder(
+        input.folderId,
+        [input.folderOwnerUserId],
+        input.executor,
+    );
     if (!folder) return null;
     if (folder.parentId === null) {
         return {
@@ -158,6 +175,7 @@ export async function folderDefaultProfileDetails(input: {
         channel: input.channel,
         organizationUserId,
         organizationOnly: input.organizationOnly ?? false,
+        executor: input.executor,
     });
     if (own) {
         return {
@@ -171,7 +189,11 @@ export async function folderDefaultProfileDetails(input: {
 
     let parentId = folder.parentId;
     while (parentId) {
-        const parent = await accessibleFolder(parentId, [folder.ownerUserId]);
+        const parent = await accessibleFolder(
+            parentId,
+            [folder.ownerUserId],
+            input.executor,
+        );
         if (!parent || parent.parentId === null) break;
         const inherited = await usableDefaultAtFolder({
             folderId: parent.id,
@@ -180,6 +202,7 @@ export async function folderDefaultProfileDetails(input: {
             channel: input.channel,
             organizationUserId,
             organizationOnly: input.organizationOnly ?? false,
+            executor: input.executor,
         });
         if (inherited) {
             return {
@@ -227,9 +250,13 @@ async function usableProfiles(
     ownerUserId: string,
     channel: ProfileChannel,
     seedProfiles: boolean,
+    executor?: ProfileReader,
+    organizationUserIdOverride?: string | null,
 ): Promise<ProfileRecord[]> {
     if (seedProfiles) await ensureProfiles(ownerUserId);
-    const organizationUserId = await getOrgUserId();
+    const organizationUserId = await organizationUserIdOr(
+        organizationUserIdOverride,
+    );
     if (
         organizationUserId &&
         organizationUserId !== ownerUserId &&
@@ -252,6 +279,8 @@ async function usableProfiles(
                 actorUserId: ownerUserId,
                 channel,
                 limit: 100,
+                executor,
+                readOnly: !seedProfiles,
             }),
         ),
     );
@@ -262,11 +291,15 @@ async function organizationItemProfile(input: {
     ownerUserId: string;
     itemId: string;
     channel: ProfileChannel;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<ProfileRecord | null> {
-    const organizationUserId = await getOrgUserId();
+    const organizationUserId = await organizationUserIdOr(
+        input.organizationUserId,
+    );
     if (!organizationUserId) return null;
     for (const view of ["org", "private"] as const) {
-        const [processing] = await db
+        const [processing] = await (input.executor ?? db)
             .select({ profileId: itemProcessing.profileId })
             .from(itemProcessing)
             .where(
@@ -282,6 +315,7 @@ async function organizationItemProfile(input: {
             organizationUserId,
             processing.profileId,
             input.ownerUserId,
+            { executor: input.executor, readOnly: Boolean(input.executor) },
         );
         if (
             profile?.scope === "organization" &&
@@ -298,8 +332,12 @@ async function defaultsForPlacements(input: {
     channel: ProfileChannel;
     folderIds: readonly string[];
     view: RecordingView;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<FolderDefaultOutcome[]> {
-    const organizationUserId = await getOrgUserId();
+    const organizationUserId = await organizationUserIdOr(
+        input.organizationUserId,
+    );
     const allowedOwners =
         input.view === "org"
             ? organizationUserId
@@ -314,7 +352,11 @@ async function defaultsForPlacements(input: {
               ];
     const profiles = await Promise.all(
         [...new Set(input.folderIds)].map(async (folderId) => {
-            const folder = await accessibleFolder(folderId, allowedOwners);
+            const folder = await accessibleFolder(
+                folderId,
+                allowedOwners,
+                input.executor,
+            );
             if (!folder) return null;
             const details = await folderDefaultProfileDetails({
                 folderId,
@@ -322,6 +364,8 @@ async function defaultsForPlacements(input: {
                 actorUserId: input.ownerUserId,
                 channel: input.channel,
                 organizationOnly: input.view === "org",
+                executor: input.executor,
+                organizationUserId,
             });
             if (details?.effectiveManualOnly) {
                 return { kind: "manual_only" } as const;
@@ -342,6 +386,8 @@ async function accountDefaultProfile(input: {
     channel: ProfileChannel;
     seedProfiles: boolean;
     throwOnUnavailable: boolean;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<ProfileRecord | null> {
     if (input.seedProfiles) await ensureProfiles(input.ownerUserId);
     if (!input.throwOnUnavailable) {
@@ -350,6 +396,11 @@ async function accountDefaultProfile(input: {
                 input.ownerUserId,
                 input.channel,
                 input.actorUserId,
+                {
+                    seed: input.seedProfiles,
+                    executor: input.executor,
+                    organizationUserId: input.organizationUserId,
+                },
             )
         ).effective;
     }
@@ -357,6 +408,11 @@ async function accountDefaultProfile(input: {
         input.ownerUserId,
         input.channel,
         input.actorUserId,
+        {
+            seed: input.seedProfiles,
+            executor: input.executor,
+            organizationUserId: input.organizationUserId,
+        },
     );
 }
 
@@ -370,9 +426,13 @@ export async function resolveChannelDefaultProfile(input: {
     view: RecordingView;
     seedProfiles?: boolean;
     throwOnUnavailable?: boolean;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<ProfileRecord | null> {
     const profileOwnerUserId =
-        input.view === "org" ? await getOrgUserId() : input.ownerUserId;
+        input.view === "org"
+            ? await organizationUserIdOr(input.organizationUserId)
+            : input.ownerUserId;
     if (!profileOwnerUserId) return null;
     return accountDefaultProfile({
         ownerUserId: profileOwnerUserId,
@@ -380,6 +440,8 @@ export async function resolveChannelDefaultProfile(input: {
         channel: input.channel,
         seedProfiles: input.seedProfiles ?? true,
         throwOnUnavailable: input.throwOnUnavailable ?? true,
+        executor: input.executor,
+        organizationUserId: input.organizationUserId,
     });
 }
 
@@ -401,9 +463,12 @@ export async function resolveProfileForPlacements(input: {
     view: RecordingView;
     seedProfiles?: boolean;
     throwOnUnavailable?: boolean;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
+    ignoreItemAssignment?: boolean;
 }): Promise<PlacementProfileResolution> {
     const seedProfiles = input.seedProfiles ?? true;
-    if (input.view === "org") {
+    if (input.view === "org" && !input.ignoreItemAssignment) {
         const itemProfile = await organizationItemProfile(input);
         if (itemProfile) {
             return {
@@ -470,6 +535,8 @@ export async function resolveProfileForPlacements(input: {
         input.ownerUserId,
         input.channel,
         seedProfiles,
+        input.executor,
+        input.organizationUserId,
     );
     if (distinctDefaults.size > 1) {
         return { status: "choose", candidates: profileCandidates(candidates) };

@@ -1,8 +1,7 @@
 /**
  * A shared recording is one recording, against a real PostgreSQL: the
- * Organization view reads the owner's rows, only the organization account
- * changes them while it is shared, and a withdrawal gives them back to the
- * owner as the Organization left them.
+ * Organization view reads the owner's rows, the owner and Organization
+ * writers change them while shared, and withdrawal keeps those changes.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -22,7 +21,10 @@ import {
     aiEnhancements,
     apiCredentials,
     chatterItems,
+    people,
     recordingFolders,
+    recordingTasks,
+    taskMentions,
     transcriptions,
     userSettings,
     users,
@@ -64,6 +66,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+            ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60,
         },
     };
 });
@@ -91,9 +94,13 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/jobs/watch", () => ({
+    watchJob: vi.fn(async () => ({ row: null, reason: "timeout" })),
+}));
 vi.mock("@/lib/export/document-sidecars", () => ({
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
     refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
+    exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
@@ -161,6 +168,7 @@ import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
+import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { insertRecordings } from "@/tests/integration/items";
@@ -303,21 +311,27 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         expect(body).not.toHaveProperty("fallback");
     });
 
-    it("lets neither a member nor the owner generate or delete its summary while shared", async () => {
+    it("allows the owner to queue and delete its shared summary, while refusing members", async () => {
         await share();
 
+        await db()
+            .insert(apiCredentials)
+            .values({
+                userId: OWNER,
+                provider: "openai",
+                apiKey: encrypt("owner-key"),
+                defaultModel: "gpt-4o-mini",
+                isDefaultEnhancement: true,
+            });
         for (const method of ["POST", "DELETE"]) {
             const handler =
                 method === "POST" ? postSummaryRoute : deleteSummaryRoute;
             const member = await call(handler, BOB, { view: "org", method });
             expect(member.status).toBe(403);
             const owner = await call(handler, OWNER, { method });
-            expect(owner.status).toBe(409);
-            await expect(owner.json()).resolves.toMatchObject({
-                code: "RECORDING_SHARED",
-            });
+            expect(owner.status).toBe(method === "POST" ? 202 : 200);
         }
-        expect(await summaries()).toEqual([{ userId: OWNER }]);
+        expect(await summaries()).toEqual([]);
     });
 
     it("lets the organization account delete it, for the owner too", async () => {
@@ -357,43 +371,24 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         ).toEqual([]);
     });
 
-    it("keeps the title and topics the organization account's while shared", async () => {
+    it("lets the owner rename a shared recording and still refuses another member", async () => {
         await share();
-
-        const rename = await call(patchRecordingRoute, OWNER, {
+        for (const view of [undefined, "org"] as const) {
+            const rename = await call(patchRecordingRoute, OWNER, {
+                method: "PATCH",
+                path: "",
+                view,
+                body: { filename: "Renamed" },
+            });
+            expect(rename.status).toBe(200);
+        }
+        const member = await call(patchRecordingRoute, BOB, {
             method: "PATCH",
             path: "",
-            body: { filename: "Renamed" },
+            view: "org",
+            body: { filename: "Member" },
         });
-        expect(rename.status).toBe(409);
-        await expect(rename.json()).resolves.toMatchObject({
-            code: "RECORDING_SHARED",
-        });
-        const topics = await call(postTopicsRoute, OWNER, {
-            method: "POST",
-            path: "topics",
-        });
-        expect(topics.status).toBe(409);
-        // An automatic detection queued before the share has nothing to do.
-        expect(
-            await topicsJobHandler.run({
-                payload: {
-                    recordingId: REC,
-                    source: "riffado",
-                    trigger: "auto",
-                },
-                userId: OWNER,
-                reportProgress: () => {},
-            } as unknown as Parameters<typeof topicsJobHandler.run>[0]),
-        ).toEqual({ skipped: "shared" });
-
-        await unshareRecording(OWNER, REC, { withdraw: true });
-        const renamed = await call(patchRecordingRoute, OWNER, {
-            method: "PATCH",
-            path: "",
-            body: { filename: "Renamed" },
-        });
-        expect(renamed.status).toBe(200);
+        expect(member.status).toBe(403);
     });
 
     it("lets the organization account rename it while shared, in the owner's storage, and the owner keeps the title", async () => {
@@ -407,7 +402,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             });
 
         expect((await rename(BOB, "Bob's", "org")).status).toBe(403);
-        expect((await rename(OWNER, "Owner's", "org")).status).toBe(403);
+        expect((await rename(OWNER, "Owner's", "org")).status).toBe(200);
         const curated = await rename(orgUserId, "Curated", "org");
         expect(curated.status).toBe(200);
         await expect(curated.json()).resolves.toEqual({ filename: "Curated" });
@@ -433,7 +428,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         expect((await rename(orgUserId, "Again", "org")).status).toBe(404);
     });
 
-    it("lets the organization account detect topics on the Organization view, with the Organization's settings", async () => {
+    it("lets the owner detect topics from its private view with Organization settings", async () => {
         const turns = [
             {
                 speaker: "speaker_0",
@@ -484,7 +479,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             });
 
         expect((await detect(BOB, "org")).status).toBe(403);
-        expect((await detect(OWNER, "org")).status).toBe(403);
+        expect((await detect(OWNER, "org")).status).toBe(202);
         // Anyone the recording is shared with reads them there.
         expect(
             (await call(getTopicsRoute, BOB, { path: "topics", view: "org" }))
@@ -510,9 +505,8 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 recordingId: REC,
                 source: "riffado",
                 trigger: "manual",
-                view: "org",
             },
-            userId: orgUserId,
+            userId: OWNER,
             reportProgress: () => {},
         } as unknown as Parameters<typeof topicsJobHandler.run>[0]);
 
@@ -643,6 +637,45 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 .where(eq(transcriptions.recordingId, REC)),
         ).toEqual([]);
     });
+    it("saves the owner's automatic summary when sharing lands during generation", async () => {
+        await db()
+            .insert(apiCredentials)
+            .values({
+                userId: OWNER,
+                provider: "openai",
+                apiKey: encrypt("owner-key"),
+                defaultModel: "gpt-4o-mini",
+                isDefaultEnhancement: true,
+            });
+        createCompletion.mockReset();
+        createCompletion.mockImplementationOnce(async () => {
+            await share();
+            return {
+                choices: [
+                    {
+                        message: {
+                            content: JSON.stringify({
+                                summary: "Finished after sharing",
+                                keyPoints: [],
+                                actionItems: [],
+                            }),
+                        },
+                    },
+                ],
+            };
+        });
+        const result = await generateSummaryForRecording(OWNER, REC, {
+            trigger: "auto",
+        });
+        expect(result.committed).toBe(true);
+        const [summary] = await db()
+            .select()
+            .from(aiEnhancements)
+            .where(eq(aiEnhancements.itemId, REC));
+        expect(decryptText(summary?.summary)).toBe("Finished after sharing");
+        expect(summary?.userId).toBe(OWNER);
+    });
+
     it("lets only the writer of the moment store a summary", async () => {
         const [transcript] = await db()
             .select({ id: transcriptions.id })
@@ -663,10 +696,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             });
         await share();
 
-        expect(await store(OWNER)).toEqual({
-            committed: false,
-            reason: "shared",
-        });
+        expect(await store(OWNER)).toEqual({ committed: true });
         expect(await store(BOB)).toEqual({
             committed: false,
             reason: "shared",
@@ -679,5 +709,67 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             reason: "withdrawn",
         });
         expect(await store(OWNER)).toEqual({ committed: true });
+    });
+
+    it("does not attach a private task assignee when an owner's summary finishes after sharing", async () => {
+        const [person] = await db()
+            .insert(people)
+            .values({
+                userId: OWNER,
+                displayName: encryptText("Private person"),
+            })
+            .returning();
+        await share();
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, REC));
+        const result = await upsertEnhancement({
+            userId: OWNER,
+            recordingId: REC,
+            transcriptionId: transcript?.id ?? "",
+            summary: "Summary started privately",
+            keyPoints: [],
+            actionItems: [],
+            source: "riffado",
+            provider: "openai",
+            model: "gpt",
+            tasks: {
+                source: "riffado",
+                reviewer: {
+                    userId: OWNER,
+                    orgUserId,
+                    emailHash: "",
+                    isOrg: false,
+                    isCurator: false,
+                },
+                fingerprintOf: (text) => text,
+                updates: [],
+                tasks: [
+                    {
+                        text: "Follow up",
+                        fingerprint: "Follow up",
+                        assigneePersonId: person?.id ?? null,
+                        assigneeHint: null,
+                        assigneeCheck: false,
+                        dueDate: null,
+                        duePhrase: null,
+                        quote: null,
+                        evidenceStartMs: null,
+                    },
+                ],
+            },
+        });
+        expect(result.committed).toBe(true);
+        const [task] = await db()
+            .select()
+            .from(recordingTasks)
+            .where(eq(recordingTasks.itemId, REC));
+        expect(task?.assigneePersonId).toBeNull();
+        const [mention] = await db()
+            .select()
+            .from(taskMentions)
+            .where(eq(taskMentions.itemId, REC));
+        expect(mention?.view).toBe("org");
     });
 });

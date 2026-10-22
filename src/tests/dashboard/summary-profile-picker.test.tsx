@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const followUps = vi.hoisted(() => ({ held: false, correcting: false }));
 
@@ -65,7 +66,7 @@ import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 function processing(
     overrides: Partial<ItemProcessingPresentation> = {},
 ): ItemProcessingPresentation {
-    return {
+    return processingFixture({
         itemId: "recording-1",
         kind: "audio",
         legacy: false,
@@ -115,7 +116,7 @@ function processing(
         jobs: { transcription: null, summary: null },
         failures: [],
         ...overrides,
-    };
+    });
 }
 
 function renderSummary(processingState: ItemProcessingPresentation) {

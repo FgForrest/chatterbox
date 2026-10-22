@@ -590,7 +590,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
         expect(await loadMailDetail("u-eva", row?.id ?? "")).toBeNull();
     });
 
-    it("files a mail like a recording: personal folders freely, the Organization through the gate", async () => {
+    it("files mail in personal and Organization folders even with legacy proposed tasks", async () => {
         const raw = await signMessage(
             rawMessage(
                 headers("jan@company.example", "jan@klepna.example"),
@@ -648,13 +648,10 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 recordingId: itemId,
                 folderId: orgWeeklyFolderId,
             }),
-        ).rejects.toMatchObject({
-            statusCode: 409,
-            details: {
-                problems: [{ kind: "tasks_unreviewed", proposals: 1 }],
-            },
-        });
-        expect(await assigned()).toEqual([weeklyFolderId]);
+        ).resolves.toBeUndefined();
+        expect(await assigned()).toEqual(
+            [weeklyFolderId, orgWeeklyFolderId].sort(),
+        );
 
         await db()
             .update(recordingTasks)

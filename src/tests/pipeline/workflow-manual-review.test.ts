@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 function waitingLearn(reason: string): ItemProcessingPresentation {
-    return {
+    return processingFixture({
         itemId: "item-1",
         kind: "audio",
         legacy: false,
@@ -47,7 +48,7 @@ function waitingLearn(reason: string): ItemProcessingPresentation {
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 describe("Learn review workflow copy", () => {

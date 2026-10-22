@@ -193,7 +193,9 @@ describe("recording route classification", () => {
                 expect(source, file).toContain("requireApiSession");
             }
             if (rules.has("view")) {
-                expect(source, file).toContain("requireRecordingView");
+                expect(source, file).toMatch(
+                    /requireRecordingView|requireLearnAccess/,
+                );
             }
             if (rules.has("access")) {
                 expect(source, file).toContain("requireRecordingAccess");

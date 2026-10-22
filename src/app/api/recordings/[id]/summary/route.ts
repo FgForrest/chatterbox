@@ -172,6 +172,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const { job } = await enqueueSummaryJob({
         userId,
+        ownerUserId: access.ownerUserId,
         recordingId: id,
         presetId,
         ...(selectedProfile

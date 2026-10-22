@@ -18,6 +18,7 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({
     copy: vi.fn(),
@@ -234,7 +235,7 @@ afterEach(cleanup);
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it("shows a settled shared step without a generating state", () => {
         state.summaryData = null;
-        const data: ItemProcessingPresentation = {
+        const data: ItemProcessingPresentation = processingFixture({
             itemId: `${kind}-1`,
             kind,
             legacy: false,
@@ -260,7 +261,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             taskReviewWaiting: 0,
             jobs: { transcription: null, summary: null },
             failures: [],
-        };
+        });
         const workflow = deriveWorkflowStatus(data, kind);
         const widgets = deriveWorkflowWidgets(data);
         expect(workflow.visible).toBe(true);

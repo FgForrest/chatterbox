@@ -6,12 +6,9 @@
  */
 
 import { AppError, ErrorCode } from "@/lib/errors";
-import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import type { JobHandler } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
-import {
-    markAutomaticStepShared,
-    markSummaryStepFailed,
-} from "@/lib/pipeline/state";
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
     admitRateLimitedAutoTopics,
@@ -31,18 +28,12 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseTopicsJobPayload,
 
-    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
-        if (payload.trigger === "manual") return;
-        await markSummaryStepFailed({
-            itemId: payload.recordingId,
-            userId,
-            view: payload.view ?? "private",
-            step: "topics",
-            errorCode,
-        });
-    },
-
-    async run({ payload, userId, reportProgress }): Promise<JobResult> {
+    async run({
+        payload,
+        userId,
+        jobId,
+        reportProgress,
+    }): Promise<PipelineJobResult> {
         // As for automatic summaries: the hold's release detects them. It
         // holds the Riffado transcript's; the Plaud one's go on.
         if (
@@ -51,7 +42,10 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
             payload.source === "riffado" &&
             (await isHeldForLearn(payload.recordingId))
         ) {
-            return { skipped: "held" };
+            return {
+                skipped: "held",
+                outcome: { kind: "skipped", reason: "held" },
+            };
         }
         if (payload.rateLimited) await admitRateLimitedAutoTopics(userId);
         let result: Awaited<ReturnType<typeof generateTopicsForTranscript>>;
@@ -62,6 +56,7 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
                 payload.source,
                 {
                     trigger: payload.trigger,
+                    jobId,
                     onProgress: reportProgress,
                     view: payload.view,
                 },
@@ -74,17 +69,20 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
                 error.code === ErrorCode.RECORDING_SHARED &&
                 payload.trigger !== "manual"
             ) {
-                await markAutomaticStepShared({
-                    itemId: payload.recordingId,
-                    userId,
-                    view: payload.view ?? "private",
-                    step: "topics",
-                });
-                return { skipped: "shared" };
+                return {
+                    skipped: "shared",
+                    outcome: { kind: "skipped", reason: "shared" },
+                };
             }
             throw error;
         }
         return {
+            outcome: {
+                kind: "done",
+                ...(result.inputFingerprint === undefined
+                    ? {}
+                    : { inputFingerprint: result.inputFingerprint }),
+            },
             source: payload.source,
             topicCount: result.topics.length,
             provider: result.provider,

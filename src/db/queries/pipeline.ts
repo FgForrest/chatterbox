@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { itemProcessing } from "@/db/schema";
+import { effectiveManualOnlySql } from "@/lib/pipeline/effective-profile";
 import type {
     PhaseName,
     PhaseRecord,
@@ -25,16 +26,6 @@ export interface AutomaticTranscriptionRetryRow
     view: "private";
     requestedGeneration: number;
     reason: string;
-}
-
-export interface OrphanedPipelineStepRow extends Record<string, unknown> {
-    itemId: string;
-    userId: string;
-    view: PipelineView;
-    phase: "transcribe" | "summary";
-    step: "summary" | "title" | "topics" | null;
-    errorCode: string;
-    phaseGeneration: number;
 }
 
 /** Increment one owner-scoped processing request, creating its row if needed. */
@@ -274,17 +265,6 @@ export async function listAutomaticTranscriptionRetryRows(
           and item_processing.phases -> 'transcribe' ->> 'at' < ${retryBefore}
           and not exists (
               select 1
-              from recording_folder_assignments
-              inner join recording_folders
-                  on recording_folders.id = recording_folder_assignments.folder_id
-              inner join users organization_user
-                  on organization_user.id = recording_folders.user_id
-                 and organization_user.role = 'org'
-              where recording_folder_assignments.recording_id = item_processing.item_id
-                and recording_folder_assignments.user_id = item_processing.user_id
-          )
-          and not exists (
-              select 1
               from async_jobs
               where async_jobs.user_id = item_processing.user_id
                 and async_jobs.kind = 'transcription'
@@ -302,139 +282,6 @@ export async function listAutomaticTranscriptionRetryRows(
                 and async_jobs.completed_at >= now() - interval '24 hours'
           ) < 3
         order by item_processing.phases -> 'transcribe' ->> 'at' asc
-        limit ${limit}
-    `);
-    return rows;
-}
-
-/** Running pipeline steps whose worker job ended without settling the phase. */
-export async function listOrphanedPipelineStepRows(
-    limit: number,
-): Promise<OrphanedPipelineStepRow[]> {
-    const rows = await db.execute<OrphanedPipelineStepRow>(sql`
-        select *
-        from (
-            select
-                item_processing.item_id as "itemId",
-                item_processing.user_id as "userId",
-                item_processing.view as "view",
-                'transcribe'::text as phase,
-                null::text as step,
-                (item_processing.phases -> 'transcribe' ->> 'generation')::integer as "phaseGeneration",
-                coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED') as "errorCode",
-                failed.completed_at as failed_at
-            from item_processing
-            cross join lateral (
-                select async_jobs.error_code, async_jobs.completed_at
-                from async_jobs
-                where async_jobs.user_id = item_processing.user_id
-                  and async_jobs.kind = 'transcription'
-                  and async_jobs.subject_id = case
-                        when item_processing.view = 'org'
-                            then 'org:' || item_processing.item_id
-                        else item_processing.item_id
-                      end
-                  and async_jobs.status = 'failed'
-                  and async_jobs.payload ->> 'trigger' <> 'manual'
-                  and async_jobs.completed_at >=
-                        (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz
-                order by async_jobs.completed_at desc, async_jobs.created_at desc
-                limit 1
-            ) failed
-            where item_processing.phases -> 'transcribe' ->> 'state' = 'running'
-              and coalesce(
-                    (item_processing.phases -> 'transcribe' ->> 'automatic')::boolean,
-                    false
-                  )
-              and not exists (
-                  select 1
-                  from async_jobs
-                  where async_jobs.user_id = item_processing.user_id
-                    and async_jobs.kind = 'transcription'
-                    and async_jobs.subject_id = case
-                          when item_processing.view = 'org'
-                              then 'org:' || item_processing.item_id
-                          else item_processing.item_id
-                        end
-                    and async_jobs.status in ('pending', 'processing')
-              )
-
-            union all
-
-            select
-                item_processing.item_id as "itemId",
-                item_processing.user_id as "userId",
-                item_processing.view as "view",
-                'summary'::text as phase,
-                summary_step.step,
-                (item_processing.phases -> 'summary' ->> 'generation')::integer as "phaseGeneration",
-                case when failed.status = 'completed' then 'JOB_COMPLETED_WITHOUT_SETTLEMENT'
-                     else coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED')
-                end as "errorCode",
-                failed.completed_at as failed_at
-            from item_processing
-            cross join (
-                values
-                    ('summary'::text, 'summary'::text),
-                    ('title'::text, 'title.generate'::text),
-                    ('topics'::text, 'topics'::text)
-            ) summary_step(step, job_kind)
-            cross join lateral (
-                select async_jobs.error_code, async_jobs.completed_at, async_jobs.status, async_jobs.payload, async_jobs.result
-                from async_jobs
-                where async_jobs.user_id = item_processing.user_id
-                  and async_jobs.kind = summary_step.job_kind
-                  and async_jobs.subject_id = case
-                        when item_processing.view = 'org'
-                            then 'org:' || item_processing.item_id
-                        else item_processing.item_id
-                      end
-                order by async_jobs.created_at desc, async_jobs.completed_at desc
-                limit 1
-            ) failed
-            where failed.status in ('failed', 'completed')
-              and (summary_step.step = 'title' or failed.payload ->> 'trigger' <> 'manual')
-              and (failed.status = 'failed' or coalesce(failed.result ->> 'skipped', '') <> 'held')
-              and (failed.status = 'completed' or failed.completed_at >=
-                    (item_processing.phases -> 'summary' ->> 'at')::timestamptz)
-              and (
-                  failed.status = 'failed'
-                  or (
-                      coalesce(
-                          item_processing.phases -> 'summary' -> 'steps' -> summary_step.step ->> 'state',
-                          'pending'
-                      ) in ('pending', 'running')
-                      and (item_processing.phases -> 'summary' ->> 'at')::timestamptz
-                            < now() - interval '2 minutes'
-                      and not exists (
-                          select 1
-                          from chatter_items
-                          where chatter_items.id = item_processing.item_id
-                            and chatter_items.user_id = item_processing.user_id
-                            and chatter_items.summary_due_at is not null
-                      )
-                  )
-              )
-              and item_processing.phases -> 'summary' ->> 'state' <> 'outdated'
-              and item_processing.phases -> 'summary' -> 'steps' -> summary_step.step is not null
-              and coalesce(
-                    item_processing.phases -> 'summary' -> 'steps' -> summary_step.step ->> 'state',
-                    'pending'
-                  ) not in ('done', 'failed', 'skipped', 'outdated')
-              and not exists (
-                  select 1
-                  from async_jobs
-                  where async_jobs.user_id = item_processing.user_id
-                    and async_jobs.kind = summary_step.job_kind
-                    and async_jobs.subject_id = case
-                          when item_processing.view = 'org'
-                              then 'org:' || item_processing.item_id
-                          else item_processing.item_id
-                        end
-                    and async_jobs.status in ('pending', 'processing')
-              )
-        ) orphaned
-        order by failed_at asc
         limit ${limit}
     `);
     return rows;
@@ -469,7 +316,7 @@ export async function listProviderRecoveryRowsInTx(
             inner join chatter_items i on i.id = p.item_id and i.user_id = p.user_id
             where ${owners}
               and p.view = 'private'
-              and not p.manual_only
+              and not ${effectiveManualOnlySql(sql`p.manual_only`, sql`p.phases`)}
               and i.deleted_at is null
               and i.content_reaped_at is null
               and p.updated_at >= now() - interval '30 days'

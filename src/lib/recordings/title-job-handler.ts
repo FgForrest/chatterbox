@@ -1,4 +1,5 @@
-import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import type { JobHandler } from "@/lib/jobs/types";
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import {
     parseTitleJobPayload,
     TITLE_JOB_KIND,
@@ -14,7 +15,10 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseTitleJobPayload,
 
-    async run(): Promise<JobResult> {
-        return { skipped: "superseded" };
+    async run(): Promise<PipelineJobResult> {
+        return {
+            skipped: "superseded",
+            outcome: { kind: "skipped", reason: "superseded" },
+        };
     },
 };

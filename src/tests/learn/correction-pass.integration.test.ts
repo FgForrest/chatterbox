@@ -9,6 +9,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import type * as OpenAIModule from "openai";
 import {
     afterAll,
     beforeAll,
@@ -87,7 +88,7 @@ const { createCompletion } = vi.hoisted(() => ({
     createCompletion: vi.fn(),
 }));
 vi.mock("openai", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("openai")>();
+    const actual = await importOriginal<typeof OpenAIModule>();
     return {
         ...actual,
         OpenAI: class {
@@ -306,7 +307,11 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
             }),
         );
         const result = await runPass(passId, job?.id ?? "");
-        expect(result).toMatchObject({ status: "finished", written: 3 });
+        expect(result).toMatchObject({
+            status: "finished",
+            written: 3,
+            outcome: { kind: "done", reason: "released" },
+        });
 
         const corrections = await listCorrections(OWNER, transcriptId);
         expect(
@@ -345,6 +350,49 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
         const prompt = JSON.stringify(createCompletion.mock.calls[0]?.[0]);
         expect(prompt).toContain("Orion");
         expect(prompt).toContain("sklat");
+    });
+
+    it.each([
+        "cancelled",
+        "superseded",
+        "finished",
+    ] as const)("reports the final %s pass outcome after the model returns", async (status) => {
+        await finish();
+        const job = await passJob();
+        const passId = String(job?.payload.passId);
+        createCompletion.mockImplementationOnce(async () => {
+            if (status === "cancelled") {
+                await db()
+                    .update(transcriptCorrectionPasses)
+                    .set({ status: "cancelled" })
+                    .where(
+                        and(
+                            eq(transcriptCorrectionPasses.id, passId),
+                            eq(transcriptCorrectionPasses.userId, OWNER),
+                        ),
+                    );
+            } else if (status === "superseded") {
+                await db()
+                    .update(transcriptions)
+                    .set({ revision: 1 })
+                    .where(
+                        and(
+                            eq(transcriptions.id, transcriptId),
+                            eq(transcriptions.userId, OWNER),
+                        ),
+                    );
+            }
+            return reply({ fixes: [] });
+        });
+        expect(await runPass(passId, job?.id ?? "")).toMatchObject({
+            status,
+            written: 0,
+            outcome:
+                status === "finished"
+                    ? { kind: "done", reason: "released" }
+                    : { kind: "skipped", reason: status },
+        });
+        expect(await listCorrections(OWNER, transcriptId)).toEqual([]);
     });
 
     it("is not queued when the person turned it off", async () => {

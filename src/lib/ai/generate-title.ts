@@ -37,12 +37,16 @@ export async function generateTitleFromTranscription(
     ownerUserId = userId,
     view: RecordingView = "private",
     detectedLanguage?: string | null,
+    automatic = false,
+    jobId?: string,
 ): Promise<string | null> {
     const profile = await resolveItemProfile(
         recordingId,
         view,
         ownerUserId,
         userId,
+        automatic ? "title" : undefined,
+        automatic ? jobId : undefined,
     );
     const settings = profile.settings as ProfileSettings;
     let contentLanguage = detectedLanguage;

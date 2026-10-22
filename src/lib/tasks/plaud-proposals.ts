@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements } from "@/db/schema";
+import { aiEnhancements, recordings } from "@/db/schema";
 import { decryptJsonField } from "@/lib/encryption/fields";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PhaseRecord, PipelineView } from "@/lib/pipeline/types";
+import { contentWriterScope, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
 import { taskViewerById } from "@/lib/tasks/access";
 import { resolveTaskProposals } from "@/lib/tasks/proposals";
@@ -26,6 +27,7 @@ export async function applyPlaudActionItemProposals(input: {
     view: PipelineView;
     expectedFingerprint: string;
     record: PhaseRecord;
+    settle?: boolean;
 }): Promise<boolean> {
     const source = await readPlaudTaskSource(input.userId, input.itemId);
     if (
@@ -55,8 +57,25 @@ export async function applyPlaudActionItemProposals(input: {
     });
     proposals.matches = [];
     proposals.updates = [];
+    const orgUserId = await sharingOrgUserId();
 
     return db.transaction(async (tx) => {
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, input.itemId),
+                    eq(recordings.userId, input.userId),
+                ),
+            )
+            .for("update");
+        const { scopeUserId } = await contentWriterScope(tx, {
+            recordingId: input.itemId,
+            ownerUserId: input.userId,
+            actorUserId: input.userId,
+            orgUserId,
+        });
         const [current] = await tx
             .select({ actionItems: aiEnhancements.actionItems })
             .from(aiEnhancements)
@@ -82,18 +101,22 @@ export async function applyPlaudActionItemProposals(input: {
             recordingId: input.itemId,
             ownerUserId: input.userId,
             actorUserId: input.userId,
-            view: input.view,
+            view:
+                orgUserId !== null && scopeUserId === orgUserId
+                    ? "org"
+                    : input.view,
             contentSourceId: "plaud",
             proposals,
         });
-        await updatePhaseInTx(
-            tx,
-            input.itemId,
-            input.view,
-            input.userId,
-            "summary",
-            input.record,
-        );
+        if (input.settle !== false)
+            await updatePhaseInTx(
+                tx,
+                input.itemId,
+                input.view,
+                input.userId,
+                "summary",
+                input.record,
+            );
         await requestAdvanceInTx(tx, {
             itemId: input.itemId,
             userId: input.userId,

@@ -87,6 +87,7 @@ function stepRequested(
     input: ContentRevisionInput,
     minimumGeneration?: number,
     retryNoProvider = false,
+    retryHeld = false,
 ): boolean {
     const requested = record?.steps?.[step];
     return (
@@ -95,6 +96,11 @@ function stepRequested(
             input.contentSourceId &&
         requested.contentRevision === input.contentRevision &&
         requested.state !== "outdated" &&
+        !(
+            retryHeld &&
+            requested.state === "skipped" &&
+            requested.reason === "held"
+        ) &&
         !(
             retryNoProvider &&
             ["skipped", "failed"].includes(requested.state ?? "") &&
@@ -396,6 +402,8 @@ function planMail(
             input,
             minimumGeneration,
             true,
+            facts.phases.learn?.state === "done" &&
+                facts.phases.learn.reason === "released",
         )
     ) {
         actions.push({ type: "queueSummary", presetId: null, strict: true });
@@ -422,6 +430,15 @@ function learnSkipReason(
         (facts.hasEnhancementCredential ? "available" : "no_provider");
     if (availability !== "available") return availability;
     return null;
+}
+
+function autoLearnSource(
+    facts: PipelineFacts,
+    content: NonNullable<PipelineFacts["content"]>,
+): Extract<PipelineAction, { type: "startAutoLearn" }>["source"] {
+    if (facts.item.kind === "mail") return "mail";
+    if (content.contentSourceId === "plaud") return "plaud";
+    return "riffado";
 }
 
 function learnSkipMatches(
@@ -452,6 +469,8 @@ function sameProblems(
 
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
+    if (facts.phases.share?.jobId || facts.phases.share?.state === "failed")
+        return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
     if (facts.manualOnly && facts.share?.confirmationRequired) {
         if (
@@ -474,7 +493,6 @@ function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
         if (
             current?.state === "waiting" &&
             current.reason === "gate_blocked" &&
-            current.generation >= facts.generation &&
             sameProblems(current.problems, problems)
         ) {
             return;
@@ -513,6 +531,7 @@ function planReleasedAudio(
                 ? releaseGeneration
                 : Math.max(releaseGeneration, minimumGeneration),
             retryNoProvider,
+            true,
         );
     for (const step of ["topics", "summary"] as const) {
         if (
@@ -749,6 +768,25 @@ function automaticTranscribePhase(
     };
 }
 
+function placementPreservesStartedPhase(
+    facts: PipelineFacts,
+    record: PhaseRecord | undefined,
+): boolean {
+    return Boolean(
+        facts.phases.categorize?.placementProfile &&
+            record &&
+            (record.state === "done" ||
+                record.state === "running" ||
+                record.state === "failed" ||
+                Object.values(record.steps ?? {}).some(
+                    (step) =>
+                        step.state === "done" ||
+                        step.state === "running" ||
+                        step.state === "pending",
+                )),
+    );
+}
+
 /** Decide the work due solely from durable item facts. */
 export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (facts.view === "org") return { actions: [] };
@@ -910,9 +948,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         ? "content_reaped"
         : facts.transcription?.audioReaped
           ? "audio_reaped"
-          : facts.transcription?.shared
-            ? "shared"
-            : null;
+          : null;
     if (!content) {
         if (
             facts.item.kind === "audio" &&
@@ -929,8 +965,24 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             );
         }
         if (facts.manualOnly) {
+            const transcribe = facts.phases.transcribe;
+            const failure = facts.transcription?.failed;
+            if (
+                transcribe?.state === "running" &&
+                failure &&
+                Date.parse(failure.completedAt) >= Date.parse(transcribe.at)
+            ) {
+                actions.push(
+                    automaticTranscribePhase(
+                        facts,
+                        "failed",
+                        failure.errorCode,
+                    ),
+                );
+            }
             for (const phase of ["transcribe", "learn", "summary"] as const) {
                 const current = facts.phases[phase];
+                if (placementPreservesStartedPhase(facts, current)) continue;
                 if (
                     current?.state === "skipped" &&
                     current.reason === "manual_only" &&
@@ -1063,24 +1115,6 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         };
     }
 
-    if (facts.manualOnly) {
-        for (const phase of ["learn", "summary"] as const) {
-            const current = facts.phases[phase];
-            if (current?.state === "outdated") continue;
-            if (
-                current?.state === "skipped" &&
-                current.reason === "manual_only" &&
-                (minimumGeneration === undefined ||
-                    current.generation >= minimumGeneration)
-            ) {
-                continue;
-            }
-            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
-        }
-        actions.push(...taskReviewActions(facts, true));
-        planShare(facts, actions);
-        return { actions };
-    }
     if (facts.item.kind === "mail") {
         if (
             !phaseMatches(
@@ -1114,7 +1148,96 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         }
     }
 
+    if (facts.manualOnly) {
+        const learn = facts.phases.learn;
+        if (
+            facts.summaryDueAt &&
+            Date.parse(facts.summaryDueAt) < Date.parse(facts.at)
+        ) {
+            actions.push({ type: "releaseLearnTimeout" });
+        } else if (facts.learnRunReadyForReview) {
+            const reason = facts.summaryDueAt
+                ? "review_pending"
+                : "manual_review_pending";
+            if (
+                !phaseMatches(
+                    learn,
+                    "waiting",
+                    reason,
+                    minimumGeneration,
+                    input,
+                )
+            ) {
+                actions.push({
+                    type: "markPhase",
+                    phase: "learn",
+                    record: {
+                        ...learn,
+                        state: "waiting",
+                        reason,
+                        generation: facts.generation,
+                        at: facts.at,
+                        inputs: input,
+                    },
+                });
+            }
+        } else if (
+            facts.summaryDueAt &&
+            !facts.learnRunInFlight &&
+            !facts.learnCorrectionInFlight
+        ) {
+            actions.push({ type: "releaseLearnHold" });
+        } else if (
+            learn?.state === "running" &&
+            !facts.learnRunOpen &&
+            !facts.learnCorrectionInFlight
+        ) {
+            actions.push({
+                type: "markPhase",
+                phase: "learn",
+                record: {
+                    ...learn,
+                    state: "done",
+                    reason: "review_finished",
+                    generation: facts.generation,
+                    at: facts.at,
+                    inputs: input,
+                },
+            });
+        }
+        for (const phase of ["learn", "summary"] as const) {
+            const current = facts.phases[phase];
+            if (
+                phase === "learn" &&
+                (facts.learnRunOpen ||
+                    facts.learnCorrectionInFlight ||
+                    facts.summaryDueAt ||
+                    actions.some(
+                        (action) =>
+                            action.type === "markPhase" &&
+                            action.phase === "learn",
+                    ))
+            )
+                continue;
+            if (placementPreservesStartedPhase(facts, current)) continue;
+            if (current?.state === "outdated") continue;
+            if (
+                current?.state === "skipped" &&
+                current.reason === "manual_only" &&
+                (minimumGeneration === undefined ||
+                    current.generation >= minimumGeneration)
+            ) {
+                continue;
+            }
+            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
+        }
+        actions.push(...taskReviewActions(facts, true));
+        planShare(facts, actions);
+        return { actions };
+    }
     const learn = facts.phases.learn;
+    if (learn?.jobId && !facts.learnRunOpen && !facts.learnCorrectionInFlight)
+        return { actions };
     const timedOut =
         learn?.state === "waiting" &&
         learn.reason === "review_pending_timeout" &&
@@ -1160,6 +1283,11 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         planShare(facts, actions);
     };
 
+    if (learn?.state === "failed") {
+        planSummary();
+        return { actions };
+    }
+
     if (timedOut) {
         if (!facts.learnRunOpen) {
             actions.push(
@@ -1173,6 +1301,20 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             );
         }
         planSummary();
+        return { actions };
+    }
+
+    if (learn?.reason === "scope_changed" && !facts.learnRunOpen) {
+        const skip = learnSkipReason(facts, content);
+        if (skip) {
+            actions.push(markPhase(facts, "learn", "skipped", skip, input));
+        } else {
+            actions.push({
+                type: "startAutoLearn",
+                input,
+                source: autoLearnSource(facts, content),
+            });
+        }
         return { actions };
     }
 
@@ -1317,9 +1459,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (
         learn !== undefined &&
         learn.state === "skipped" &&
-        ["erased", "gone", "shared", "start_failed"].includes(
-            learn.reason ?? "",
-        ) &&
+        ["erased", "gone", "start_failed"].includes(learn.reason ?? "") &&
         sameInput(learn, input) &&
         (minimumGeneration === undefined ||
             learn.generation >= minimumGeneration)
@@ -1331,12 +1471,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     actions.push({
         type: "startAutoLearn",
         input,
-        source:
-            facts.item.kind === "mail"
-                ? "mail"
-                : content.contentSourceId === "plaud"
-                  ? "plaud"
-                  : "riffado",
+        source: autoLearnSource(facts, content),
     });
     return { actions };
 }

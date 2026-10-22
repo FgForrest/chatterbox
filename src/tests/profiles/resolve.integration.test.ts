@@ -707,7 +707,6 @@ describeWithDatabase("item profile resolution", () => {
         await expect(
             loadItemProfileRevision({
                 itemId: ITEM,
-                view: "private",
                 ownerUserId: OWNER,
                 revisionId,
             }),

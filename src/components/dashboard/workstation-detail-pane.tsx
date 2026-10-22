@@ -321,6 +321,7 @@ export function WorkstationDetailPane({
                                 onTranscribeComplete={onTranscribeComplete}
                                 onTranscriptStale={onTranscriptStale}
                                 readOnly={transcriptReadOnly}
+                                shared={recordingShared}
                                 processing={processing}
                             />
                         )}

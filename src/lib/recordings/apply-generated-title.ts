@@ -36,6 +36,7 @@ export async function applyGeneratedTitle(input: {
     skipIfTitleStepDoneForFence?: boolean;
     actsForOrganization?: boolean;
     skipIfAutomaticTitleSettled?: boolean;
+    jobId?: string;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -47,6 +48,9 @@ export async function applyGeneratedTitle(input: {
         userId,
         input.view ?? "private",
         input.contentLanguage,
+        input.skipIfAutomaticTitleSettled === true ||
+            input.skipIfTitleStepDoneForFence === true,
+        input.jobId,
     );
 
     // Not stored when a person has set a title, and then nothing below runs.

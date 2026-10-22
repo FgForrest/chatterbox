@@ -1,13 +1,10 @@
 import { db } from "@/db";
 import { completeProcessingGenerationInTx } from "@/db/queries/pipeline";
 import { JobDeferredError } from "@/lib/jobs/retryable";
-import {
-    InvalidJobPayloadError,
-    type JobHandler,
-    type JobResult,
-} from "@/lib/jobs/types";
+import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { executePipelineAction } from "@/lib/pipeline/execute";
 import { gatherFacts } from "@/lib/pipeline/facts";
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { isProviderBlockedReason, planAdvance } from "@/lib/pipeline/plan";
 import { sweepAutomaticTranscriptionRetries } from "@/lib/pipeline/sweep";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
@@ -26,7 +23,7 @@ async function advancePipeline(
     userId: string,
     payload: PipelineAdvancePayload,
     signal: AbortSignal,
-): Promise<JobResult> {
+): Promise<PipelineJobResult> {
     for (let iteration = 0; iteration < MAX_STABLE_CHECKS; iteration++) {
         const facts = await gatherFacts(payload.itemId, payload.view, userId, {
             legacyIfEmpty: payload.reason !== "arrival",
@@ -65,9 +62,16 @@ async function advancePipeline(
                 generation,
             ),
         );
-        if (completed === "missing") return { skipped: "gone" };
+        if (completed === "missing")
+            return {
+                skipped: "gone",
+                outcome: { kind: "skipped", reason: "gone" },
+            };
         if (completed === "stable") {
-            return { processedGeneration: generation };
+            return {
+                processedGeneration: generation,
+                outcome: { kind: "done" },
+            };
         }
     }
     throw new JobDeferredError(

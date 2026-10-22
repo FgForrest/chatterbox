@@ -14,6 +14,8 @@ import {
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { canChangeItem } from "@/lib/sharing/change-permission";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
@@ -65,7 +67,7 @@ const recording: Recording = {
     deviceSn: "local",
 };
 
-const personTranscribing: ItemProcessingPresentation = {
+const personTranscribing: ItemProcessingPresentation = processingFixture({
     itemId: "rec-1",
     kind: "audio",
     legacy: false,
@@ -100,14 +102,14 @@ const personTranscribing: ItemProcessingPresentation = {
     jobs: { transcription: "running", summary: null },
     startedBy: { transcription: "person", summary: null, topics: null },
     failures: [],
-};
+});
 
-const idleProcessing: ItemProcessingPresentation = {
+const idleProcessing: ItemProcessingPresentation = processingFixture({
     ...personTranscribing,
     jobs: { transcription: null, summary: null },
-};
+});
 
-const completedProcessing: ItemProcessingPresentation = {
+const completedProcessing: ItemProcessingPresentation = processingFixture({
     ...personTranscribing,
     phases: {
         categorize: personTranscribing.phases.categorize,
@@ -119,9 +121,9 @@ const completedProcessing: ItemProcessingPresentation = {
     },
     outputs: { transcript: true, learn: false, summary: false },
     jobs: { transcription: null, summary: null },
-};
+});
 
-const workflowProcessing: ItemProcessingPresentation = {
+const workflowProcessing: ItemProcessingPresentation = processingFixture({
     ...completedProcessing,
     phases: {
         ...completedProcessing.phases,
@@ -152,7 +154,7 @@ const workflowProcessing: ItemProcessingPresentation = {
             confirmed: false,
         },
     ],
-};
+});
 
 function panel(
     isTranscribing: boolean,
@@ -248,6 +250,60 @@ describe("transcription dialog", () => {
         );
         expect(await screen.findByText("Transcribing audio…")).toBeTruthy();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it.each([
+        { view: "private", isOwn: true },
+        { view: "org", isOwn: true },
+        { view: "private", isOwn: false },
+        { view: "org", isOwn: false },
+    ] as const)("offers shared recording actions only to its owner (view=$view, isOwn=$isOwn)", ({
+        view,
+        isOwn,
+    }) => {
+        const { rerender } = render(
+            <TranscriptionPanel
+                recording={{ ...recording, view, isOwn }}
+                shared
+                readOnly={
+                    !canChangeItem({
+                        view,
+                        isOwn,
+                        isOrgAccount: false,
+                        canCurate: false,
+                    })
+                }
+                transcripts={[]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Transcribe" })),
+        ).toBe(isOwn);
+        rerender(
+            <TranscriptionPanel
+                recording={{ ...recording, view, isOwn }}
+                shared
+                readOnly={
+                    !canChangeItem({
+                        view,
+                        isOwn,
+                        isOrgAccount: false,
+                        canCurate: false,
+                    })
+                }
+                transcripts={[{ source: "riffado", text: "Hello." }]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Re-transcribe" })),
+        ).toBe(isOwn);
+        expect(
+            Boolean(screen.queryByRole("button", { name: "Summarize" })),
+        ).toBe(isOwn);
     });
 
     it("starts a summary without opening a dialog", async () => {

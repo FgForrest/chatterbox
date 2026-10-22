@@ -8,6 +8,10 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
+import {
+    bindPipelineJobInTx,
+    lockPipelineTargetsInTx,
+} from "@/db/queries/pipeline-jobs";
 import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
 import {
     asyncJobs,
@@ -33,7 +37,7 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
-import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
+import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 export const LEARN_JOB_KIND = "learn.run";
@@ -102,7 +106,11 @@ export async function startLearnRun(input: {
     /** Whether the actor acts for the Organization; see `writerRefusal`. */
     actsForOrganization?: boolean;
 }): Promise<StartedLearnRun> {
-    const { access, actorUserId, source, trigger, actsForOrganization } = input;
+    const { actorUserId, source, trigger, actsForOrganization } = input;
+    const access = {
+        ...input.access,
+        view: input.access.shared ? ("org" as const) : input.access.view,
+    };
     if (input.calendarEventId && input.calendarEventId.length > 1024) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -163,7 +171,7 @@ export async function startLearnRun(input: {
     // take, with the transcript read and the writer rule checked there: a
     // share, withdrawal, rewrite or erase that landed since the route
     // authorized the actor is seen.
-    const inserted = await db.transaction(async (tx) => {
+    const insertRun = async (tx: Tx) => {
         if (access.kind === "mail") {
             return insertMailRunInTx(tx, {
                 access,
@@ -223,7 +231,7 @@ export async function startLearnRun(input: {
                 400,
             );
         }
-        const refusal = await contentWriterRefusal(tx, {
+        const { refusal, scopeUserId } = await contentWriterScope(tx, {
             recordingId: access.recordingId,
             ownerUserId: access.ownerUserId,
             actorUserId,
@@ -231,6 +239,14 @@ export async function startLearnRun(input: {
             actsForOrganization,
         });
         if (refusal) throw writerRefusalError(refusal);
+        if (
+            scopeUserId !==
+            (access.view === "org" ? access.orgUserId : access.ownerUserId)
+        ) {
+            throw writerRefusalError(
+                access.view === "org" ? "withdrawn" : "shared",
+            );
+        }
         // One open run per transcript and view: one learning, or one whose
         // review waits (a second would leave that review unreachable).
         const [open] = await tx
@@ -282,99 +298,158 @@ export async function startLearnRun(input: {
             runId: (run as { id: string }).id,
             transcriptionId: transcript.id,
         };
-    });
-    if ("open" in inserted) {
-        return {
-            runId: inserted.open.id,
-            jobId: inserted.open.jobId,
-            created: false,
-        };
-    }
-    const runId = inserted.runId;
-    const transcriptionId = inserted.transcriptionId;
-    const enqueue = () =>
-        enqueueJob({
-            userId: actorUserId,
-            kind: LEARN_JOB_KIND,
-            subjectId: recordingJobSubject(access.recordingId, view),
-            priority:
-                trigger === "manual"
-                    ? LEARN_PRIORITY_MANUAL
-                    : LEARN_PRIORITY_AUTO,
-            maxAttempts: LEARN_MAX_ATTEMPTS,
-            payload: {
-                runId,
-                ...(input.calendarEventId
-                    ? { calendarEventId: input.calendarEventId }
-                    : {}),
-            },
-        });
-    const abandon = () => db.delete(learnRuns).where(eq(learnRuns.id, runId));
-    let queued: Awaited<ReturnType<typeof enqueue>>;
-    try {
-        queued = await enqueue();
-        // One Learn job per recording and view. A job that holds the slot
-        // for a run nobody waits for any more (superseded, failed, gone)
-        // and has not started is let go, and this one queued instead.
-        if (!queued.created && queued.job.payload.runId !== runId) {
-            const holderId = String(queued.job.payload.runId);
-            const [holder] = await db
-                .select({
-                    transcriptionId: learnRuns.transcriptionId,
-                    status: learnRuns.status,
-                })
-                .from(learnRuns)
-                .where(eq(learnRuns.id, holderId))
-                .limit(1);
-            const holderOpen =
-                holder?.status === "queued" || holder?.status === "running";
-            if (holderOpen && holder?.transcriptionId === transcriptionId) {
-                await abandon();
-                return {
-                    runId: holderId,
-                    jobId: queued.job.id,
-                    created: false,
-                };
-            }
-            if (!holderOpen && queued.job.status === "pending") {
-                await db
-                    .update(asyncJobs)
-                    .set({
-                        status: "failed",
-                        completedAt: new Date(),
-                        updatedAt: new Date(),
-                        lastError: "Its Learn run is no longer waiting",
-                    })
+    };
+    const started = await db.transaction(async (tx) => {
+        await tx
+            .select({
+                id: access.kind === "mail" ? chatterItems.id : recordings.id,
+            })
+            .from(access.kind === "mail" ? chatterItems : recordings)
+            .where(
+                access.kind === "mail"
+                    ? and(
+                          eq(chatterItems.id, access.recordingId),
+                          eq(chatterItems.userId, access.ownerUserId),
+                      )
+                    : and(
+                          eq(recordings.id, access.recordingId),
+                          eq(recordings.userId, access.ownerUserId),
+                      ),
+            )
+            .for("share");
+        await lockPipelineTargetsInTx(
+            tx,
+            [{ itemId: access.recordingId, userId: access.ownerUserId }],
+            trigger !== "manual",
+        );
+        const inserted = await insertRun(tx);
+        if ("open" in inserted) {
+            if (inserted.open.jobId) {
+                const [job] = await tx
+                    .select()
+                    .from(asyncJobs)
                     .where(
                         and(
-                            eq(asyncJobs.id, queued.job.id),
-                            eq(asyncJobs.status, "pending"),
+                            eq(asyncJobs.id, inserted.open.jobId),
+                            eq(asyncJobs.userId, actorUserId),
                         ),
-                    );
-                queued = await enqueue();
+                    )
+                    .for("update")
+                    .limit(1);
+                if (
+                    job &&
+                    (job.status === "pending" || job.status === "processing")
+                )
+                    await bindPipelineJobInTx(tx, job, {
+                        itemId: access.recordingId,
+                        userId: access.ownerUserId,
+                        phase: "learn",
+                        existingOnly: trigger === "manual",
+                    });
             }
-            if (!queued.created && queued.job.payload.runId !== runId) {
-                await abandon();
-                throw new AppError(
-                    ErrorCode.CONFLICT,
-                    holderOpen
-                        ? "Learn is already running on this recording's other transcript. Try again when it finishes."
-                        : "Learn is finishing on this recording. Try again in a moment.",
-                    409,
-                );
-            }
+            return {
+                runId: inserted.open.id,
+                jobId: inserted.open.jobId,
+                created: false,
+            };
         }
-    } catch (error) {
-        // Not queued: the run must not wait for a job that never comes.
-        await abandon().catch(() => {});
-        throw error;
-    }
-    await db
-        .update(learnRuns)
-        .set({ jobId: queued.job.id, updatedAt: new Date() })
-        .where(eq(learnRuns.id, runId));
-    if (queued.created) nudge();
-    return { runId, jobId: queued.job.id, created: true };
+        const runId = inserted.runId;
+        const transcriptionId = inserted.transcriptionId;
+        const enqueue = () =>
+            enqueueJob(
+                {
+                    userId: actorUserId,
+                    kind: LEARN_JOB_KIND,
+                    subjectId: recordingJobSubject(access.recordingId, view),
+                    priority:
+                        trigger === "manual"
+                            ? LEARN_PRIORITY_MANUAL
+                            : LEARN_PRIORITY_AUTO,
+                    maxAttempts: LEARN_MAX_ATTEMPTS,
+                    pipeline: {
+                        itemId: access.recordingId,
+                        userId: access.ownerUserId,
+                        phase: "learn",
+                        existingOnly: trigger === "manual",
+                    },
+                    payload: {
+                        runId,
+                        ...(input.calendarEventId
+                            ? { calendarEventId: input.calendarEventId }
+                            : {}),
+                    },
+                },
+                tx,
+            );
+        const abandon = () =>
+            tx.delete(learnRuns).where(eq(learnRuns.id, runId));
+        let queued: Awaited<ReturnType<typeof enqueue>>;
+        try {
+            queued = await enqueue();
+            // One Learn job per recording and view. A job that holds the slot
+            // for a run nobody waits for any more (superseded, failed, gone)
+            // and has not started is let go, and this one queued instead.
+            if (!queued.created && queued.job.payload.runId !== runId) {
+                const holderId = String(queued.job.payload.runId);
+                const [holder] = await tx
+                    .select({
+                        transcriptionId: learnRuns.transcriptionId,
+                        status: learnRuns.status,
+                    })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, holderId))
+                    .limit(1);
+                const holderOpen =
+                    holder?.status === "queued" || holder?.status === "running";
+                if (holderOpen && holder?.transcriptionId === transcriptionId) {
+                    await abandon();
+                    return {
+                        runId: holderId,
+                        jobId: queued.job.id,
+                        created: false,
+                    };
+                }
+                if (!holderOpen && queued.job.status === "pending") {
+                    await tx
+                        .update(asyncJobs)
+                        .set({
+                            status: "failed",
+                            completedAt: new Date(),
+                            updatedAt: new Date(),
+                            lastError: "Its Learn run is no longer waiting",
+                        })
+                        .where(
+                            and(
+                                eq(asyncJobs.id, queued.job.id),
+                                eq(asyncJobs.status, "pending"),
+                            ),
+                        );
+                    queued = await enqueue();
+                }
+                if (!queued.created && queued.job.payload.runId !== runId) {
+                    await abandon();
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        holderOpen
+                            ? "Learn is already running on this recording's other transcript. Try again when it finishes."
+                            : "Learn is finishing on this recording. Try again in a moment.",
+                        409,
+                    );
+                }
+            }
+        } catch (error) {
+            // Not queued: the run must not wait for a job that never comes.
+            await abandon().catch(() => {});
+            throw error;
+        }
+        await tx
+            .update(learnRuns)
+            .set({ jobId: queued.job.id, updatedAt: new Date() })
+            .where(eq(learnRuns.id, runId));
+        return { runId, jobId: queued.job.id, created: true };
+    });
+    if (started.created) nudge();
+    return started;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -460,7 +535,7 @@ async function insertMailRunInTx(
             400,
         );
     }
-    const refusal = await contentWriterRefusal(tx, {
+    const { refusal, scopeUserId } = await contentWriterScope(tx, {
         recordingId: access.recordingId,
         ownerUserId: access.ownerUserId,
         actorUserId,
@@ -468,6 +543,14 @@ async function insertMailRunInTx(
         actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
+    if (
+        scopeUserId !==
+        (access.view === "org" ? access.orgUserId : access.ownerUserId)
+    ) {
+        throw writerRefusalError(
+            access.view === "org" ? "withdrawn" : "shared",
+        );
+    }
     const [open] = await tx
         .select({ id: learnRuns.id, jobId: learnRuns.jobId })
         .from(learnRuns)

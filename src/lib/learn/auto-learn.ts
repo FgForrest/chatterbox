@@ -1,3 +1,4 @@
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 /**
  * Automatic Learn and what waits for it (Task 5.5).
  *
@@ -5,7 +6,7 @@
  * itself, and the recording's title, summary and topics are held back
  * (`chatterItems.summaryDueAt`) so they are made from the transcript as the
  * person's review corrects it. The hold is released, once, when:
- * - no Learn run on the recording's private view is open (`learnRunOpen`:
+ * - no Learn run in the recording's current scope is open (`learnRunOpen`:
  *   ready for review, or queued or running with its job alive): the review
  *   finished, the run found nothing, failed, died, or was cancelled or
  *   superseded with no successor; and no correction pass the run's end
@@ -33,6 +34,7 @@ import {
     ne,
     notExists,
     or,
+    sql,
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -45,21 +47,21 @@ import {
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
-import {
-    InvalidJobPayloadError,
-    type JobHandler,
-    type JobResult,
-} from "@/lib/jobs/types";
+import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
-import { learnRunOpen } from "@/lib/learn/learn-open";
+import { learnRunCurrentScope, learnRunOpen } from "@/lib/learn/learn-open";
+import { learnScopeRestartPending } from "@/lib/learn/sharing";
+import { getOrgUserId } from "@/lib/org/config";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { markLearnReleasedInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
+import { recordingJobSubject } from "@/lib/sharing/view";
 
 /** How long the title, summary and topics wait for Learn's review. */
 export const AUTO_LEARN_HOLD_MS = 72 * 60 * 60 * 1000;
@@ -100,7 +102,10 @@ export async function startAutomaticLearn(input: {
         const profile = await resolveItemProfile(itemId, "private", userId);
         const learn = profile.settings.steps.learn;
         const [processing] = await db
-            .select({ manualOnly: itemProcessing.manualOnly })
+            .select({
+                manualOnly: itemProcessing.manualOnly,
+                phases: itemProcessing.phases,
+            })
             .from(itemProcessing)
             .where(
                 and(
@@ -110,7 +115,7 @@ export async function startAutomaticLearn(input: {
                 ),
             )
             .limit(1);
-        if (processing?.manualOnly || !learn.automatic) {
+        if (effectiveManualOnly(processing) || !learn.automatic) {
             return { status: "skipped", reason: "profile_off" };
         }
         try {
@@ -146,7 +151,6 @@ export async function startAutomaticLearn(input: {
         if (!access || access.role !== "owner") {
             return { status: "skipped", reason: "gone" };
         }
-        if (access.shared) return { status: "skipped", reason: "shared" };
         const rateLimit = await consumeRateLimitBucket(
             `auto-learn:user:${userId}`,
             {
@@ -166,7 +170,11 @@ export async function startAutomaticLearn(input: {
 
         try {
             await startLearnRun({
-                access: { ...access, view: "private", contentUserId: userId },
+                access: {
+                    ...access,
+                    view: access.shared ? "org" : "private",
+                    contentUserId: userId,
+                },
                 actorUserId: userId,
                 source: source === "mail" ? "riffado" : source,
                 trigger: "auto",
@@ -199,7 +207,7 @@ export async function startAutomaticLearn(input: {
 }
 
 /**
- * A correction pass on the recording's private view still to run: a job
+ * A correction pass on the recording still to run: a job
  * queued or running, other than `exceptJobId` (the pass that asks).
  */
 function correctionPending(
@@ -212,7 +220,15 @@ function correctionPending(
         .where(
             and(
                 eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
-                eq(asyncJobs.subjectId, recordingId),
+                or(
+                    eq(asyncJobs.subjectId, recordingId),
+                    eq(
+                        asyncJobs.subjectId,
+                        typeof recordingId === "string"
+                            ? recordingJobSubject(recordingId, "org")
+                            : sql`'org:' || ${recordingId}`,
+                    ),
+                ),
                 inArray(asyncJobs.status, ["pending", "processing"]),
                 exceptJobId ? ne(asyncJobs.id, exceptJobId) : undefined,
             ),
@@ -220,7 +236,7 @@ function correctionPending(
 }
 
 /**
- * Release a recording's hold when no run on its private view is open and
+ * Release a recording's hold when no run in its current scope is open and
  * no correction pass is still to run (`expired`: when its time is up,
  * whatever is open). Exactly once: the hold is cleared by the statement
  * that checks it, and the pipeline driver is requested in the same transaction.
@@ -241,13 +257,15 @@ export async function releaseAutoLearnHold(
 ): Promise<boolean> {
     try {
         if (!expired) await settleDeadLearnRuns(recordingId);
+        const orgUserId = await getOrgUserId();
         const open = db
             .select({ id: learnRuns.id })
             .from(learnRuns)
             .where(
                 and(
                     eq(learnRuns.itemId, recordingId),
-                    eq(learnRuns.view, "private"),
+                    eq(learnRuns.userId, chatterItems.userId),
+                    learnRunCurrentScope(orgUserId),
                     learnRunOpen(),
                 ),
             );
@@ -264,6 +282,9 @@ export async function releaseAutoLearnHold(
                             ? lte(chatterItems.summaryDueAt, now)
                             : and(
                                   notExists(open),
+                                  notExists(
+                                      learnScopeRestartPending(recordingId),
+                                  ),
                                   notExists(
                                       correctionPending(
                                           recordingId,
@@ -337,13 +358,25 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
         }
         return { recordingId: raw.recordingId };
     },
-    async run({ userId, payload }): Promise<JobResult> {
+    async run({ userId, payload }): Promise<PipelineJobResult> {
         const requested = await db.transaction((tx) =>
-            requestLearnReleaseInTx(tx, payload.recordingId, userId),
+            requestAdvanceInTx(tx, {
+                itemId: payload.recordingId,
+                userId,
+                view: "private",
+                reason: "learn-released",
+            }),
         );
-        if (!requested) return { skipped: "gone" };
+        if (!requested)
+            return {
+                skipped: "gone",
+                outcome: { kind: "skipped", reason: "gone" },
+            };
         nudge();
-        return { queued: ["pipeline.advance"] };
+        return {
+            queued: ["pipeline.advance"],
+            outcome: { kind: "done", reason: "released" },
+        };
     },
 };
 
@@ -358,14 +391,15 @@ export async function sweepAutoLearnHolds(
     now = new Date(),
     limit = 500,
 ): Promise<number> {
-    // Open as `learnRunOpen` says: a run whose job died holds nothing.
+    const orgUserId = await getOrgUserId();
     const open = db
         .select({ id: learnRuns.id })
         .from(learnRuns)
         .where(
             and(
                 eq(learnRuns.itemId, chatterItems.id),
-                eq(learnRuns.view, "private"),
+                eq(learnRuns.userId, chatterItems.userId),
+                learnRunCurrentScope(orgUserId),
                 learnRunOpen(),
             ),
         );
@@ -379,6 +413,7 @@ export async function sweepAutoLearnHolds(
                     lte(chatterItems.summaryDueAt, now),
                     and(
                         notExists(open),
+                        notExists(learnScopeRestartPending(chatterItems.id)),
                         notExists(correctionPending(chatterItems.id)),
                     ),
                 ),

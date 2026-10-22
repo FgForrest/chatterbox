@@ -1,12 +1,11 @@
 /**
- * While shared, only the organization account changes a recording, checked
- * where its data is written, against a real PostgreSQL.
+ * Owners and Organization writers change a shared recording, checked where
+ * its data is written, against a real PostgreSQL.
  *
  * The routes refuse early, but a run queued or started before a share or a
  * withdrawal reaches the writer after it: the provider job, a transcript
- * made in the browser, a Plaud import. The owner's must write nothing once
- * shared, and an automatic job must end as skipped, not failed; the
- * organization account's must write nothing once withdrawn.
+ * made in the browser, a Plaud import. Owner runs continue after sharing;
+ * the organization account's runs write nothing once withdrawn.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -155,7 +154,7 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
-import { addRecordingToFolder } from "@/lib/folders/folders";
+import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -176,7 +175,7 @@ type Handler = (
 ) => Promise<Response>;
 
 describeWithDatabase(
-    "only the organization account changes a shared recording (PostgreSQL)",
+    "owners and curators change shared recordings (PostgreSQL)",
     () => {
         let database: TestPostgresDatabase | null = null;
         let orgUserId = "";
@@ -315,32 +314,35 @@ describeWithDatabase(
             return error as Error;
         }
 
-        it("lets a provider run that began before the share write nothing after it, and skips its job", async () => {
+        it("saves an owner transcription that finishes after sharing", async () => {
             provider.during = share;
 
             expect(await runJob(OWNER, "private")).toEqual({
-                skipped: "shared",
+                transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
 
             expect(provider.calls).toBe(1);
-            expect(await textOf(OWNER)).toBe(SHARED_TEXT);
+            expect(await textOf(OWNER)).toBe("A new transcript.");
         });
 
-        it("never pays a provider for a run queued before the share and started after it", async () => {
+        it("runs owner transcription queued before sharing", async () => {
             await share();
 
             expect(await runJob(OWNER, "private")).toEqual({
-                skipped: "shared",
+                transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
-            expect(provider.calls).toBe(0);
+            expect(provider.calls).toBe(1);
         });
 
-        it("tells whoever asked for the run why it was refused", async () => {
+        it("lets the owner manually transcribe a shared recording", async () => {
             await share();
-
-            const error = await refusal(runJob(OWNER, "private", "manual"));
-            expect(error.message).toContain("shared with the Organization");
-            expect(provider.calls).toBe(0);
+            expect(await runJob(OWNER, "private", "manual")).toEqual({
+                transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
+            });
+            expect(provider.calls).toBe(1);
         });
 
         it("refuses a member's Organization run where it executes", async () => {
@@ -437,6 +439,7 @@ describeWithDatabase(
 
             expect(await runJob(orgUserId, "org", "manual")).toEqual({
                 transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
 
             // One recording: the owner's row, rewritten, and no other.
@@ -485,7 +488,6 @@ describeWithDatabase(
 
         it("lets an organization account's run that outlives the withdrawal write nothing", async () => {
             await share();
-            const { unshareRecording } = await import("@/lib/folders/folders");
             provider.during = () =>
                 unshareRecording(OWNER, REC, { withdraw: true });
 
@@ -514,7 +516,6 @@ describeWithDatabase(
                     payload: { recordingId: REC, view: "org" },
                 })
                 .returning({ id: asyncJobs.id });
-            const { unshareRecording } = await import("@/lib/folders/folders");
             // Withdrawn and shared again while the provider ran.
             provider.during = async () => {
                 await unshareRecording(OWNER, REC, { withdraw: true });
@@ -542,7 +543,7 @@ describeWithDatabase(
             expect(await textOf(OWNER)).toBe(SHARED_TEXT);
         });
 
-        it("refuses a transcript made in the browser once the recording is shared", async () => {
+        it("saves an owner browser transcript while shared", async () => {
             await share();
 
             const response = await (
@@ -565,14 +566,11 @@ describeWithDatabase(
                 { params: Promise.resolve({ id: REC }) },
             );
 
-            expect(response.status).toBe(409);
-            await expect(response.json()).resolves.toMatchObject({
-                code: "RECORDING_SHARED",
-            });
-            expect(await textOf(OWNER)).toBe(SHARED_TEXT);
+            expect(response.status).toBe(200);
+            expect(await textOf(OWNER)).toBe("Made in the browser.");
         });
 
-        it("refuses a Plaud import while the recording is shared, and takes it once withdrawn", async () => {
+        it("imports Plaud transcripts while shared and after withdrawal", async () => {
             await share();
             const plaudImport = () =>
                 upsertTranscription({
@@ -585,13 +583,9 @@ describeWithDatabase(
                     model: "plaud-native",
                 });
 
-            expect(await plaudImport()).toEqual({
-                committed: false,
-                reason: "shared",
-            });
-            expect(await textOf(OWNER, "plaud")).toBeNull();
+            expect(await plaudImport()).toEqual({ committed: true });
+            expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
 
-            const { unshareRecording } = await import("@/lib/folders/folders");
             await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await plaudImport()).toEqual({ committed: true });
             expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
@@ -670,7 +664,6 @@ describeWithDatabase(
             expect(offered).toEqual([]);
 
             // Withdrawn, the recording is the owner's to change again.
-            const { unshareRecording } = await import("@/lib/folders/folders");
             await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await offer()).toBe(1);
         });

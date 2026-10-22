@@ -43,7 +43,7 @@ export interface ArchivedTask {
     createdAt: string;
     acceptedAt: string | null;
     statusChangedAt: string | null;
-    /** A proposal's review so far: kept or not, and whether its assignee needs a check. */
+    /** A legacy proposal's draft, or an accepted task's unresolved assignee. */
     review?: { ticked: boolean; assigneeCheck: boolean };
 }
 
@@ -285,7 +285,7 @@ export async function tasksForArchive(
             createdAt: row.createdAt.toISOString(),
             acceptedAt: row.acceptedAt?.toISOString() ?? null,
             statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
-            ...(status === "proposed"
+            ...(status === "proposed" || row.assigneeCheck
                 ? {
                       review: {
                           ticked: row.ticked,

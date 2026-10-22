@@ -791,7 +791,7 @@ describeWithDatabase("task merges", () => {
             db().transaction((tx) =>
                 mailShareProblems(tx, "pending-review-item", ALICE),
             ),
-        ).resolves.toContainEqual({ kind: "tasks_unreviewed", proposals: 1 });
+        ).resolves.toEqual([]);
     });
 
     it("collapses a suggested target mention into the moved linked mention", async () => {

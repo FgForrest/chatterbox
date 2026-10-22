@@ -36,6 +36,7 @@ const CODEX_MODELS = {
     "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWriteInput: 0.125, output: 0.5 },
     "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 10 },
     "gpt-6-astra": { input: 10, cachedInput: 1, cacheWriteInput: 12.5, output: 50 },
+    "gpt-6.1-sol": { input: 2, cachedInput: 0.1, cacheWriteInput: 2.5, output: 10 },
 };
 
 /**

@@ -1,4 +1,5 @@
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
+import type { PipelineWait, StepOutcome } from "./outcome";
 
 export type PipelineView = "private" | "org";
 
@@ -29,6 +30,13 @@ export interface ContentRevisionInput {
 export type SummaryStepName = "summary" | "topics" | "title";
 
 export interface PhaseStepRecord {
+    replannedAt?: string;
+    replanAttempts?: number;
+    at?: string;
+    jobId?: string;
+    outcome?: StepOutcome;
+    retryable?: boolean;
+    waitingFor?: PipelineWait;
     contentId: string;
     contentSourceId?: string;
     contentRevision: number;
@@ -40,7 +48,21 @@ export interface PhaseStepRecord {
     inputFingerprint?: string | null;
 }
 
+export type ProfileStepName = "transcribe" | "learn" | SummaryStepName;
+
+export interface PlacementProfileBinding {
+    profileId: string;
+    profileRevisionId: string;
+    manualOnly: boolean;
+}
+
 export interface PhaseRecord {
+    replannedAt?: string;
+    replanAttempts?: number;
+    jobId?: string;
+    outcome?: StepOutcome;
+    retryable?: boolean;
+    waitingFor?: PipelineWait;
     state: PhaseState;
     reason?: string;
     /** Identifies Transcribe failures owned by automatic pipeline processing. */
@@ -52,6 +74,11 @@ export interface PhaseRecord {
     profileRevisionId?: string;
     staleFingerprint?: string;
     problems?: ShareGateProblem[];
+    profileChoice?: "manual" | "placement";
+    placementProfile?: PlacementProfileBinding;
+    heldProfiles?: Partial<
+        Record<ProfileStepName, { jobId: string; profileRevisionId: string }>
+    >;
 }
 
 export type PipelinePhases = Partial<Record<PhaseName, PhaseRecord>>;

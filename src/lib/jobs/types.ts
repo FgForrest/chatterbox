@@ -104,6 +104,7 @@ export interface JobHandler<P = unknown> {
         userId: string;
         payload: P;
         errorCode: string;
+        errorMessage?: string;
     }) => Promise<void>;
 }
 

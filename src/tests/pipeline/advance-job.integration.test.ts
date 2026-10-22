@@ -123,10 +123,11 @@ vi.mock("@/lib/topics/topics-job", () => ({
     queueAutoTopics: mocks.queueAutoTopics,
 }));
 
+import { claimDueJobs, completeJob } from "@/db/queries/async-jobs";
+import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import {
     sweepAutomaticTranscriptionRetries,
-    sweepOrphanedPipelineSteps,
     sweepStalledPipelines,
 } from "@/lib/pipeline/sweep";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
@@ -294,6 +295,30 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             view: "private",
             reason: "summary",
         });
+    }
+
+    async function drainActions() {
+        for (let i = 0; i < 5; i++) {
+            const jobs = await claimDueJobs("pipeline.action", 10);
+            if (jobs.length === 0) return;
+            for (const job of jobs) {
+                const result = await pipelineActionJobHandler.run({
+                    ...job,
+                    jobId: job.id,
+                    attempt: job.attempts,
+                    signal: new AbortController().signal,
+                    payload: pipelineActionJobHandler.parsePayload(job.payload),
+                    reportProgress: vi.fn(),
+                });
+                await completeJob({
+                    jobId: job.id,
+                    claimToken: job.claimToken,
+                    result: result ?? null,
+                });
+            }
+            await pipelineAdvanceJobHandler.run(jobContext());
+        }
+        throw new Error("pipeline actions did not settle");
     }
 
     beforeAll(async () => {
@@ -606,6 +631,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         await expect(
             pipelineAdvanceJobHandler.run(jobContext()),
         ).resolves.toMatchObject({ processedGeneration: 1 });
+        await drainActions();
         expect((await processing())?.phases.share).toMatchObject({
             state: "waiting",
             reason: "org_unavailable",
@@ -631,29 +657,28 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await expect(
             pipelineAdvanceJobHandler.run(jobContext()),
-        ).resolves.toMatchObject({ processedGeneration: 2 });
+        ).resolves.toMatchObject({ processedGeneration: 1 });
 
+        await drainActions();
         expect((await processing())?.phases).toMatchObject({
             taskReview: { state: "done", reason: "reviewed" },
             share: { state: "waiting", reason: "org_unavailable" },
         });
     });
 
-    it("waits for Task review and blocks sharing when Plaud proposals are valid", async () => {
+    it("accepts Plaud tasks and reaches sharing without Task review", async () => {
         await seedPlaudTaskPipeline(["Draft the final report"]);
 
         await expect(
             pipelineAdvanceJobHandler.run(jobContext()),
-        ).resolves.toMatchObject({ processedGeneration: 2 });
+        ).resolves.toMatchObject({ processedGeneration: 1 });
 
+        await drainActions();
         expect((await processing())?.phases).toMatchObject({
-            taskReview: { state: "waiting", reason: "needs_review" },
+            taskReview: { state: "done", reason: "reviewed" },
             share: {
                 state: "waiting",
-                reason: "gate_blocked",
-                problems: [
-                    expect.objectContaining({ kind: "tasks_unreviewed" }),
-                ],
+                reason: "org_unavailable",
             },
         });
     });
@@ -1389,131 +1414,6 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         );
     });
 
-    it("settles running pipeline steps whose terminal jobs were buried", async () => {
-        const steps = ["summary", "title", "topics"] as const;
-        const old = new Date(Date.now() - 31 * 60_000);
-        const failedAt = new Date(old.getTime() + 60_000);
-        const transcribeItem = "orphaned-transcribe";
-        await seedAudio(transcribeItem);
-        await db()
-            .delete(transcriptions)
-            .where(eq(transcriptions.recordingId, transcribeItem));
-        await db()
-            .update(itemProcessing)
-            .set({
-                phases: {
-                    categorize: {
-                        state: "done",
-                        reason: "categorized",
-                        generation: 0,
-                        at: old.toISOString(),
-                    },
-                    transcribe: {
-                        state: "running",
-                        reason: "started",
-                        automatic: true,
-                        generation: 1,
-                        at: old.toISOString(),
-                    },
-                },
-                requestedGeneration: 1,
-                processedGeneration: 1,
-            })
-            .where(eq(itemProcessing.itemId, transcribeItem));
-
-        for (const step of steps) {
-            const itemId = `orphaned-${step}`;
-            await seedAudio(itemId);
-            await db()
-                .update(itemProcessing)
-                .set({
-                    phases: {
-                        categorize: {
-                            state: "done",
-                            reason: "categorized",
-                            generation: 0,
-                            at: old.toISOString(),
-                        },
-                        summary: {
-                            state: "pending",
-                            reason: "requested",
-                            generation: 1,
-                            at: old.toISOString(),
-                            steps: {
-                                [step]: {
-                                    contentId: `transcription-${itemId}`,
-                                    contentRevision: 1,
-                                    generation: 1,
-                                    state: "running",
-                                    reason: "started",
-                                    at: old.toISOString(),
-                                },
-                            },
-                        },
-                    },
-                    requestedGeneration: 1,
-                    processedGeneration: 1,
-                })
-                .where(eq(itemProcessing.itemId, itemId));
-        }
-
-        await db()
-            .insert(asyncJobs)
-            .values([
-                {
-                    userId: USER_ID,
-                    kind: TRANSCRIPTION_JOB_KIND,
-                    subjectId: transcribeItem,
-                    payload: {
-                        recordingId: transcribeItem,
-                        trigger: "pipeline",
-                        force: false,
-                    },
-                    status: "failed",
-                    errorCode: "TRANSCRIPTION_CRASHED",
-                    completedAt: failedAt,
-                },
-                ...steps.map((step) => ({
-                    userId: USER_ID,
-                    kind:
-                        step === "summary"
-                            ? "summary"
-                            : step === "title"
-                              ? "title.generate"
-                              : "topics",
-                    subjectId: `orphaned-${step}`,
-                    payload: {
-                        recordingId: `orphaned-${step}`,
-                        trigger: "auto",
-                        ...(step === "topics" ? { source: "riffado" } : {}),
-                    },
-                    status: "failed" as const,
-                    errorCode: `${step.toUpperCase()}_CRASHED`,
-                    completedAt: failedAt,
-                })),
-            ]);
-
-        await expect(sweepOrphanedPipelineSteps()).resolves.toBe(4);
-        await expect(sweepOrphanedPipelineSteps()).resolves.toBe(0);
-        expect(
-            (await processing(transcribeItem))?.phases.transcribe,
-        ).toMatchObject({
-            state: "failed",
-            reason: "TRANSCRIPTION_CRASHED",
-            automatic: true,
-        });
-        for (const step of steps) {
-            expect(
-                (await processing(`orphaned-${step}`))?.phases.summary?.steps?.[
-                    step
-                ],
-            ).toMatchObject({
-                state: "failed",
-                reason: `${step.toUpperCase()}_CRASHED`,
-            });
-        }
-    });
-
     it("retries an old automatic transcription failure within the daily bound", async () => {
         const ids = {
             eligible: "transcription-retry-eligible",
@@ -1618,7 +1518,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 ),
             );
 
-        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(1);
+        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(2);
         await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(0);
 
         expect(
@@ -1638,7 +1538,9 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             );
-        expect(pipelineSubjects).toEqual([{ subjectId: ids.eligible }]);
+        expect(pipelineSubjects.map((row) => row.subjectId).sort()).toEqual(
+            [ids.eligible, ids.shared].sort(),
+        );
     });
 
     it("sweeps only old, unclaimed, non-poison stalled rows", async () => {

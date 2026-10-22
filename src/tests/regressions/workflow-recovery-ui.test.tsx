@@ -6,8 +6,10 @@ import { WorkflowStrip } from "@/components/pipeline/workflow-indicator";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (input: string | { message: string }) =>
         typeof input === "string" ? input : input.message,
 }));
@@ -15,7 +17,7 @@ afterEach(cleanup);
 
 function processing(): ItemProcessingPresentation {
     const phase = { generation: 1, at: new Date().toISOString() };
-    return {
+    return processingFixture({
         itemId: "recovery",
         kind: "audio",
         legacy: false,
@@ -55,7 +57,7 @@ function processing(): ItemProcessingPresentation {
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 describe("workflow recovery presentation", () => {
@@ -78,7 +80,7 @@ describe("workflow recovery presentation", () => {
                 retryAvailable: true,
             },
         ];
-        const workflow = deriveWorkflowStatus(data, "audio");
+        const workflow = deriveWorkflowStatus(processingFixture(data), "audio");
         expect(workflow.status?.actor).toBe(
             status === "queued" ? "queued" : "working",
         );
@@ -107,12 +109,16 @@ describe("workflow recovery presentation", () => {
             state: "skipped",
             reason,
         };
-        expect(deriveWorkflowWidgets(data).summary).toMatchObject({
+        expect(
+            deriveWorkflowWidgets(processingFixture(data)).summary,
+        ).toMatchObject({
             visible: true,
             action: "run",
             collapsed: false,
         });
-        expect(deriveWorkflowStatus(data, "audio").visible).toBe(true);
+        expect(
+            deriveWorkflowStatus(processingFixture(data), "audio").visible,
+        ).toBe(true);
     });
 
     it.each([
@@ -131,7 +137,7 @@ describe("workflow recovery presentation", () => {
             delete data.phases.transcribe;
             data.outputs.transcript = false;
         }
-        const workflow = deriveWorkflowStatus(data, kind);
+        const workflow = deriveWorkflowStatus(processingFixture(data), kind);
         expect(workflow.visible).toBe(true);
         expect(workflow.status).toMatchObject({
             message: "manualSummary",
@@ -149,7 +155,9 @@ describe("workflow recovery presentation", () => {
     it("keeps automatic Learn's provider skip visible even when a summary exists", () => {
         const data = processing();
         data.outputs.summary = true;
-        expect(deriveWorkflowStatus(data, "audio")).toMatchObject({
+        expect(
+            deriveWorkflowStatus(processingFixture(data), "audio"),
+        ).toMatchObject({
             visible: true,
             status: { actor: "problem", params: { step: "learn" } },
         });

@@ -127,6 +127,7 @@ vi.mock("@/lib/learn/correction-pass-queue", () => ({
 }));
 
 vi.mock("@/lib/learn/learn-job", () => ({
+    LEARN_JOB_KIND: "learn.run",
     settleDeadLearnRuns: vi.fn(),
     startLearnRun: mocks.startLearnRun,
 }));
@@ -215,6 +216,7 @@ vi.mock("@/lib/summary/summary-job", () => ({
 }));
 
 vi.mock("@/lib/topics/topics-job", () => ({
+    TOPICS_JOB_KIND: "topics",
     queueAutoTopics: mocks.queueAutoTopics,
 }));
 
@@ -1031,7 +1033,10 @@ describe("learn.release triggers", () => {
     it("reports gone and queues nothing when the item is missing", async () => {
         mountRelease({ recording: [] });
 
-        await expect(runLearnRelease()).resolves.toEqual({ skipped: "gone" });
+        await expect(runLearnRelease()).resolves.toEqual({
+            skipped: "gone",
+            outcome: { kind: "skipped", reason: "gone" },
+        });
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
     });
@@ -1113,6 +1118,7 @@ describe("learn.release triggers", () => {
 
         await expect(runLearnRelease()).resolves.toEqual({
             queued: ["pipeline.advance"],
+            outcome: { kind: "done", reason: "released" },
         });
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
     });

@@ -190,6 +190,26 @@ describe("title after summary", () => {
         });
     });
 
+    it("settles a title disabled by the effective placement policy", async () => {
+        mocks.readProcessing.mockResolvedValue({
+            manualOnly: false,
+            phases: {
+                categorize: {
+                    placementProfile: {
+                        profileId: "org-profile",
+                        profileRevisionId: "org-revision",
+                        manualOnly: true,
+                    },
+                },
+            },
+        });
+        await updateTitleAfterSummary(input);
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.markAutomaticTitleSkipped).toHaveBeenCalledWith(
+            expect.objectContaining({ reason: "first_summary_title_disabled" }),
+        );
+    });
+
     it("closes a failed attempt without settling the title", async () => {
         mocks.applyGeneratedTitle.mockResolvedValue(false);
 

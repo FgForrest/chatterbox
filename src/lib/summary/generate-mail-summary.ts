@@ -23,6 +23,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { readProcessing } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
@@ -76,7 +77,8 @@ export async function generateMailSummary(
     itemId: string,
     opts: GenerateSummaryOptions,
 ): Promise<GenerateSummaryResult> {
-    const orgView = ctx.view === "org";
+    const orgView =
+        ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     const refusal = await contentWriterRefusalNow({
         recordingId: itemId,
         ownerUserId: ctx.ownerUserId,
@@ -86,8 +88,13 @@ export async function generateMailSummary(
     if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
-        (await readProcessing(itemId, ctx.view, ctx.ownerUserId))
-            ?.profileRevisionId ?? null;
+        (
+            await readProcessing(
+                itemId,
+                pipelineDriver(ctx.ownerUserId).view,
+                ctx.ownerUserId,
+            )
+        )?.profileRevisionId ?? null;
 
     const [mail] = await db
         .select({
@@ -145,7 +152,7 @@ export async function generateMailSummary(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "mail",
-                view: ctx.view,
+                view: orgView ? "org" : ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -154,6 +161,8 @@ export async function generateMailSummary(
                 ctx.view,
                 ctx.ownerUserId,
                 ctx.actorUserId,
+                opts.trigger === "auto" ? "summary" : undefined,
+                opts.trigger === "auto" ? opts.jobId : undefined,
             );
     const profileSettings = profile?.settings as
         | MailProfileSettings
@@ -190,7 +199,7 @@ export async function generateMailSummary(
                   refs: new Map<string, string>(),
                   scopeFingerprint: await itemScopeFingerprint(
                       itemId,
-                      ctx.view,
+                      orgView ? "org" : ctx.view,
                       ctx.ownerUserId,
                   ),
               };

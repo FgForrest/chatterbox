@@ -17,16 +17,18 @@ import {
 } from "@/db/schema";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
-import { learnRunOpen } from "@/lib/learn/learn-open";
+import { learnRunCurrentScope, learnRunOpen } from "@/lib/learn/learn-open";
 import { staleReadingFingerprint } from "@/lib/learn/summary-refresh";
 import { mailShareProblems } from "@/lib/mail/share-gate";
+import { getOrgUserId } from "@/lib/org/config";
+import {
+    effectiveManualOnly,
+    itemProfileFenceMatches,
+} from "@/lib/pipeline/effective-profile";
+import { legacyPhases } from "@/lib/pipeline/legacy";
 import { readProcessing } from "@/lib/pipeline/state";
-import type {
-    PhaseRecord,
-    PipelineFacts,
-    PipelinePhases,
-    PipelineView,
-} from "@/lib/pipeline/types";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import type { PipelineFacts, PipelineView } from "@/lib/pipeline/types";
 import {
     type ProcessingStep,
     resolveStepProviderSelection,
@@ -38,6 +40,7 @@ import {
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import type { ProviderPin } from "@/lib/profiles/settings";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -89,58 +92,6 @@ async function readShared(itemId: string, userId: string): Promise<boolean> {
     return row !== undefined;
 }
 
-function legacyPhases(input: {
-    kind: "audio" | "mail";
-    hasPlacement: boolean;
-    content: { id: string; revision: number } | null;
-}): PipelinePhases {
-    const at = new Date().toISOString();
-    const phases: PipelinePhases = {
-        categorize: {
-            state: input.hasPlacement ? "done" : "skipped",
-            reason: "legacy",
-            generation: 0,
-            at,
-        },
-    };
-    if (!input.content) return phases;
-
-    const contentInput = {
-        contentId: input.content.id,
-        contentSourceId: input.kind === "audio" ? "riffado" : "mail",
-        contentRevision: input.content.revision,
-    };
-    const summarySteps: NonNullable<PhaseRecord["steps"]> = {};
-    const stepNames =
-        input.kind === "audio"
-            ? (["title", "topics", "summary"] as const)
-            : (["title", "summary"] as const);
-    for (const step of stepNames) {
-        summarySteps[step] = {
-            contentId: contentInput.contentId,
-            contentSourceId: contentInput.contentSourceId,
-            contentRevision: contentInput.contentRevision,
-            generation: 0,
-        };
-    }
-    phases.learn = {
-        state: "done",
-        reason: "legacy",
-        generation: 0,
-        inputs: contentInput,
-        at,
-    };
-    phases.summary = {
-        state: "done",
-        reason: "legacy",
-        generation: 0,
-        inputs: contentInput,
-        steps: summarySteps,
-        at,
-    };
-    return phases;
-}
-
 /** Read the durable, owner-scoped facts consumed by the Stage 1 planner. */
 export async function gatherFacts(
     itemId: string,
@@ -148,6 +99,11 @@ export async function gatherFacts(
     userId: string,
     options: { legacyIfEmpty?: boolean } = {},
 ): Promise<PipelineFacts> {
+    const orgUserId = await getOrgUserId();
+    const contentView =
+        orgUserId && (await isRecordingShared(itemId, orgUserId))
+            ? "org"
+            : view;
     const [processing, [item]] = await Promise.all([
         readProcessing(itemId, view, userId),
         db
@@ -468,7 +424,7 @@ export async function gatherFacts(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, userId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                     learnRunOpen(),
                 ),
             )
@@ -484,7 +440,7 @@ export async function gatherFacts(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, userId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt)),
@@ -506,15 +462,14 @@ export async function gatherFacts(
                   )
                   .where(
                       and(
-                          eq(asyncJobs.userId, userId),
                           eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
                           eq(
                               asyncJobs.subjectId,
-                              recordingJobSubject(itemId, view),
+                              recordingJobSubject(itemId, contentView),
                           ),
                           inArray(asyncJobs.status, ["pending", "processing"]),
                           eq(transcriptCorrectionPasses.userId, userId),
-                          eq(transcriptCorrectionPasses.view, view),
+                          eq(transcriptCorrectionPasses.view, contentView),
                       ),
                   )
             : Promise.resolve([]),
@@ -541,10 +496,33 @@ export async function gatherFacts(
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
     const storedPhases = processing?.phases ?? {};
+    const placementOnly =
+        Object.keys(storedPhases).length === 1 &&
+        storedPhases.categorize?.reason === "placement";
+    const [arrival] =
+        options.legacyIfEmpty !== false && placementOnly && content
+            ? await db
+                  .select({ id: asyncJobs.id })
+                  .from(asyncJobs)
+                  .where(
+                      and(
+                          eq(asyncJobs.userId, userId),
+                          eq(
+                              asyncJobs.subjectId,
+                              recordingJobSubject(itemId, view),
+                          ),
+                          eq(asyncJobs.kind, PIPELINE_ADVANCE_JOB_KIND),
+                          inArray(asyncJobs.status, ["pending", "processing"]),
+                          sql`${asyncJobs.payload}->>'reason' = ${"arrival"}`,
+                      ),
+                  )
+                  .limit(1)
+            : [];
     const legacyFallback =
         options.legacyIfEmpty !== false &&
-        Object.keys(storedPhases).length === 0;
-    const phases = legacyFallback
+        (Object.keys(storedPhases).length === 0 ||
+            (placementOnly && content !== null && !arrival));
+    const synthesized = legacyFallback
         ? legacyPhases({
               kind: item.kind,
               hasPlacement:
@@ -553,12 +531,30 @@ export async function gatherFacts(
                   ? { id: content.id, revision: content.revision }
                   : null,
           })
+        : {};
+    const phases = legacyFallback
+        ? {
+              ...synthesized,
+              ...(synthesized.categorize
+                  ? {
+                        categorize: {
+                            ...synthesized.categorize,
+                            profileChoice:
+                                storedPhases.categorize?.profileChoice,
+                            placementProfile:
+                                storedPhases.categorize?.placementProfile,
+                            heldProfiles: storedPhases.categorize?.heldProfiles,
+                        },
+                    }
+                  : {}),
+          }
         : storedPhases;
     const categorizedAsLegacy =
         phases.categorize?.state === "done" &&
         phases.categorize.reason === "legacy";
     const profileAssigned = Boolean(
-        processing?.profileId && processing.profileRevisionId,
+        (processing?.profileId && processing.profileRevisionId) ||
+            phases.categorize?.placementProfile,
     );
     const legacyCutoverAt =
         phases.categorize?.reason === "legacy"
@@ -610,6 +606,7 @@ export async function gatherFacts(
             profileUnavailable = true;
         }
     }
+    const manualOnly = effectiveManualOnly(processing);
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
@@ -618,7 +615,7 @@ export async function gatherFacts(
                   "transcribe" in resolvedProfile.settings.steps
                       ? {
                             automatic:
-                                !processing?.manualOnly &&
+                                !manualOnly &&
                                 resolvedProfile.settings.steps.transcribe
                                     .automatic,
                             plaudTranscript:
@@ -628,22 +625,22 @@ export async function gatherFacts(
                       : undefined,
               automatic: {
                   learn:
-                      !processing?.manualOnly &&
+                      !manualOnly &&
                       resolvedProfile.settings.steps.learn.automatic,
                   summary:
-                      !processing?.manualOnly &&
+                      !manualOnly &&
                       resolvedProfile.settings.steps.summary.automatic,
                   title:
-                      !processing?.manualOnly &&
+                      !manualOnly &&
                       resolvedProfile.settings.steps.title.automatic,
                   topics:
                       "topics" in resolvedProfile.settings.steps &&
-                      !processing?.manualOnly &&
+                      !manualOnly &&
                       resolvedProfile.settings.steps.topics.automatic,
               },
               learn: {
                   automatic:
-                      !processing?.manualOnly &&
+                      !manualOnly &&
                       resolvedProfile.settings.steps.learn.automatic,
               },
           }
@@ -652,7 +649,7 @@ export async function gatherFacts(
     if (!isLearnDeploymentAvailable()) {
         learnAvailability = "hosted";
     } else if (
-        !processing?.manualOnly &&
+        !manualOnly &&
         resolvedProfile &&
         resolvedProfile.settings.steps.learn.automatic
     ) {
@@ -668,7 +665,7 @@ export async function gatherFacts(
         }
     }
     const stepAvailability: NonNullable<PipelineFacts["stepAvailability"]> = {};
-    if (!processing?.manualOnly && resolvedProfile) {
+    if (!manualOnly && resolvedProfile) {
         const checks = [
             ["summary", resolvedProfile.settings.steps.summary.provider],
             ["title", resolvedProfile.settings.steps.title.provider],
@@ -727,7 +724,7 @@ export async function gatherFacts(
         },
         view,
         generation: processing?.requestedGeneration ?? 0,
-        manualOnly: processing?.manualOnly ?? false,
+        manualOnly,
         legacyFallback,
         legacyContinuation,
         profileUnavailable,
@@ -830,8 +827,10 @@ export async function gatherFacts(
                 summary?.inputs?.contentId === summaryContent.id &&
                 summary.inputs.contentRevision === summaryContent.revision &&
                 summary.inputs.contentSourceId === summarySource &&
-                summary.inputs.itemProfileRevisionId ===
-                    processing?.profileRevisionId,
+                itemProfileFenceMatches(
+                    summary.inputs.itemProfileRevisionId,
+                    processing,
+                ),
             jobActive: activeSummaryJobs.some(
                 (job) => job.kind === SUMMARY_JOB_KIND,
             ),
@@ -865,7 +864,7 @@ export async function gatherFacts(
         share: {
             problems: shareProblems,
             confirmationRequired:
-                (processing?.manualOnly ?? false) &&
+                manualOnly &&
                 intents.some((intent) => intent.confirmedAt === null),
         },
         phases,

@@ -198,6 +198,13 @@ export async function queueAutoTopics(
         );
         if (queued) {
             taken(queued);
+            if (queued.payload.source === source)
+                await enqueueTopicsJob({
+                    userId,
+                    recordingId,
+                    source,
+                    trigger: "auto",
+                });
             return;
         }
 
