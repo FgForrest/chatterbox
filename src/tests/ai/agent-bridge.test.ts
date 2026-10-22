@@ -783,6 +783,24 @@ describe("agent-bridge", () => {
             });
         });
 
+        it("prices gpt-6.1-sol with its own cached-input rate", () => {
+            const stdout = JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                    input_tokens: 1_000_000,
+                    cached_input_tokens: 800_000,
+                    cache_write_input_tokens: 100_000,
+                    output_tokens: 100_000,
+                },
+            });
+            expect(parseCodexUsage(stdout, "gpt-6.1-sol")).toEqual({
+                prompt_tokens: 1_000_000,
+                completion_tokens: 100_000,
+                total_tokens: 1_100_000,
+                cost: 1.53,
+            });
+        });
+
         it("keeps unknown models and incomplete usage unpriced", () => {
             const stdout = JSON.stringify({
                 type: "turn.completed",
@@ -811,7 +829,7 @@ describe("agent-bridge", () => {
                     output_tokens: 5,
                 },
             });
-            expect(parseCodexUsage(completeUsage, "gpt-6.1-sol")).toEqual({
+            expect(parseCodexUsage(completeUsage, "gpt-9-unpriced")).toEqual({
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
