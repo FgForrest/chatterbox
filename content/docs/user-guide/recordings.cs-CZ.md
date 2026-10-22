@@ -116,4 +116,14 @@ Kliknutím na složku zobrazíte její položky v seznamu. Název aktuální slo
 
 Nastavení složky ukazuje **Název** jako text; **Přejmenovat** otevře pole pro úpravu. **E-mail do složky** ukazuje adresu, kopírování a čas posledního e-mailu, pokud je příjem pošty zapnutý. **Výchozí profil zpracování** ukazuje aktuální profily nahrávek a pošty včetně zděděných hodnot; **Změnit** je upraví. **Export** ukazuje cíle nebo **Nenastaveno**, s akcí **Změnit** či **Nastavit** pro export na disk nebo Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
 
+<span id="folder-knowledge" />
+
+### Znalosti složky
+
+Tlačítko **Znalosti** vedle názvu aktuální složky otevře pohled pouze pro čtení místo detailu položky. Na telefonu se otevře samostatný pohled; **Zpět** vrátí seznam. Je dostupný v každé soukromé složce i složce Organizace pro každého čtenáře.
+
+Karty **Lidé**, **Věci**, **Opravy** a **Fakta** ukazují znalosti zmíněné položkami složky a jejích podsložek, počty použití, poslední použití a položky s doklady. Stav e-mailu osoby je informace, nikoli problém k opravě. Soukromé složky ukazují Vaše znalosti i znalosti Organizace; složky Organizace jen znalosti Organizace. Karty se načítají samostatně a delší seznamy mají ovládání Předchozí/Další.
+
+Karta **Co dostanou modely** ukazuje seřazené výrazy pro přepis a přesný náhled JSON Almanachu pro model oprav přepisu. Limity a předpoklady náhledu popisuje [Almanach](almanac.md#folder-knowledge).
+
 Další: [Přepisy](transcripts.md)
