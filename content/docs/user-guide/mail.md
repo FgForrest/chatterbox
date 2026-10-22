@@ -5,6 +5,8 @@ description: Sending mail into your Chatter pile.
 
 When your administrator has set it up, mail can join your recordings. Mail sent to your addresses lands in your **Chatter** pile, encrypted, beside your recordings. The type filter above the list shows **All**, **Audio** or **Mail**.
 
+When mail arrives while the dashboard is open, a **New email** notice shows its subject, sender and time. It leaves your selection and folder in place. **Open** opens the message; Back returns. You can close the notice and read the mail later in **Recent**. A newer arrival replaces the notice. Mail colleagues share to the Organization does not trigger it.
+
 Mail needs single sign-on: you get addresses once you sign in with your organization's account. They pause if you have not signed in that way for a long time, and resume at your next sign-in.
 
 ## Your addresses

@@ -81,7 +81,10 @@ function useChromeState(config: AppChromeConfig) {
         syncOnVisibilityChange: initialSettings.syncOnVisibilityChange,
         enabled: !demo && initialSettings.autoSyncEnabled,
         onSuccess: (newRecordings) => {
-            if (initialSettings.syncNotifications !== false) {
+            if (
+                initialSettings.syncNotifications !== false &&
+                !(pathname === "/dashboard" && newRecordings > 0)
+            ) {
                 toast.success(
                     newRecordings > 0
                         ? i18n(
