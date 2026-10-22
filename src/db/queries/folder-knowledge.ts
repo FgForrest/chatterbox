@@ -39,9 +39,13 @@ function folderItems(input: FolderKnowledgeScope) {
 
 async function folderResult<Row extends Record<string, unknown>>(
     input: FolderKnowledgeScope,
-    page: SQL,
+    results: SQL,
     ctes: SQL = sql``,
+    pagination?: { offset: number; limit: number },
 ) {
+    const page = pagination
+        ? sql`${results} limit ${pagination.limit} offset ${pagination.offset}`
+        : results;
     const [row] = await db.execute<{
         item_count: number;
         subfolder_count: number;
@@ -53,13 +57,23 @@ async function folderResult<Row extends Record<string, unknown>>(
                array(select id from folders where parent_id is not null order by id) as ranking_folder_ids,
                (select coalesce(json_agg(page), '[]'::json) from (${page}) page) as rows
     `);
+    const rows = row?.rows ?? [];
+    let total = Number(rows[0]?.total ?? 0);
+    if (rows.length === 0 && pagination && pagination.offset > 0) {
+        const [count] = await db.execute<{ total: number }>(sql`
+            ${folderItems(input)} ${ctes}
+            select count(*)::int as total from (${results}) results
+        `);
+        total = Number(count?.total ?? 0);
+    }
     return {
         context: {
             itemCount: Number(row?.item_count ?? 0),
             subfolderCount: Number(row?.subfolder_count ?? 0),
             rankingFolderIds: row?.ranking_folder_ids ?? [],
         },
-        rows: row?.rows ?? [],
+        rows,
+        total,
     };
 }
 
@@ -141,9 +155,9 @@ export async function folderKnowledgeRecords(
                max(at) as last_at, count(*) over()::int as total
         from records group by id, name, type_key, user_id, has_email
         order by item_count desc, last_at desc, id
-        limit ${limit} offset ${offset}
     `,
         sql`${folderUses(input)}, records as (${records})`,
+        { offset, limit },
     );
 }
 
@@ -173,7 +187,7 @@ export async function folderKnowledgeCorrections(
                max(created_at) as last_at, count(*) over()::int as total
         from corrections where target_id is not null
         group by heard_hmac, target_id, target_name, user_id
-        order by use_count desc, last_at desc, id limit ${limit} offset ${offset}
+        order by use_count desc, last_at desc, id
     `,
         sql`, corrections as (
         select correction.*, item.id as item_id,
@@ -188,6 +202,7 @@ export async function folderKnowledgeCorrections(
           and entity.user_id = any(${sql.param(input.scopes)}::text[]) and entity.merged_into_id is null
         where correction.user_id = any(${sql.param(input.scopes)}::text[]) and correction.kind = 'correct'
     )`,
+        { offset, limit },
     );
 }
 
@@ -233,7 +248,9 @@ export async function folderKnowledgeFacts(
           and evidence.status = 'supported' and fact.replaced_by_fact_id is null
           and coalesce(subject_person.id, subject_entity.id) is not null
           and (fact.object_literal is not null or coalesce(object_person.id, object_entity.id) is not null)
-        order by item.occurred_at desc, evidence.id limit ${limit} offset ${offset}
+        order by item.occurred_at desc, evidence.id
     `,
+        sql``,
+        { offset, limit },
     );
 }

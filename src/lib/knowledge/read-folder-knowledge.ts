@@ -66,14 +66,14 @@ export async function readFolderKnowledge(
         subfolderCount: context.subfolderCount,
     });
     const limit = FOLDER_KNOWLEDGE_PAGE_SIZE;
-    const page = (rows: readonly { total: number }[]) => ({
-        total: Number(rows[0]?.total ?? 0),
+    const page = (rows: readonly { total: number }[], total: number) => ({
+        total,
         nextOffset: rows.length > limit ? offset + limit : null,
     });
     const scopeOf = (userId: string) =>
         userId === orgUserId ? ("org" as const) : ("personal" as const);
     if (tab === "people" || tab === "things") {
-        const { rows, context } = await folderKnowledgeRecords(
+        const { rows, context, total } = await folderKnowledgeRecords(
             scope,
             tab,
             offset,
@@ -89,7 +89,7 @@ export async function readFolderKnowledge(
         return {
             ...metadata(context),
             tab,
-            ...page(rows),
+            ...page(rows, total),
             records: rows.slice(0, limit).map((row) => ({
                 id: row.id,
                 name: decryptText(row.name),
@@ -103,7 +103,7 @@ export async function readFolderKnowledge(
         };
     }
     if (tab === "corrections") {
-        const { rows, context } = await folderKnowledgeCorrections(
+        const { rows, context, total } = await folderKnowledgeCorrections(
             scope,
             offset,
             limit + 1,
@@ -111,7 +111,7 @@ export async function readFolderKnowledge(
         return {
             ...metadata(context),
             tab,
-            ...page(rows),
+            ...page(rows, total),
             corrections: rows.slice(0, limit).map((row) => ({
                 id: row.id,
                 heard: decryptText(row.heard),
@@ -125,7 +125,7 @@ export async function readFolderKnowledge(
         };
     }
     if (tab === "facts") {
-        const { rows, context } = await folderKnowledgeFacts(
+        const { rows, context, total } = await folderKnowledgeFacts(
             scope,
             offset,
             limit + 1,
@@ -142,7 +142,7 @@ export async function readFolderKnowledge(
         return {
             ...metadata(context),
             tab,
-            ...page(rows),
+            ...page(rows, total),
             facts: rows.slice(0, limit).map((row) => ({
                 id: row.id,
                 factId: row.fact_id,

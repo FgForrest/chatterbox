@@ -8,13 +8,19 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import type * as NextIntl from "next-intl";
 import type { ComponentProps } from "react";
+import type { TranslationValues } from "use-intl/core";
+import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
 import { Workstation } from "@/components/dashboard/workstation";
 import type { useOrgEvents } from "@/hooks/use-org-events";
-import { translatedSourceMessage } from "@/lib/i18n/messages";
+import {
+    messagesForLocale,
+    translatedSourceMessage,
+} from "@/lib/i18n/messages";
 import {
     FOLDER_KNOWLEDGE_PAGE_SIZE,
     type FolderKnowledgeResponse,
@@ -28,6 +34,34 @@ const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
     fetch: vi.fn<typeof fetch>(),
 }));
+vi.mock("next-intl", async (importOriginal) => {
+    const original = await importOriginal<typeof NextIntl>();
+    return {
+        ...original,
+        useExtracted: () => {
+            const translate = useTranslations();
+            const ids = new Map(
+                Object.entries(messagesForLocale("en")).map(([id, source]) => [
+                    source,
+                    id,
+                ]),
+            );
+            return (
+                message:
+                    | string
+                    | Parameters<ReturnType<typeof NextIntl.useExtracted>>[0],
+                values?: TranslationValues,
+            ) => {
+                if (typeof message === "string")
+                    return translate(ids.get(message) ?? message, values);
+                return translate(
+                    message.id ?? ids.get(message.message) ?? message.message,
+                    message.values,
+                );
+            };
+        },
+    };
+});
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: mocks.refresh }),
     useSearchParams: () => new URLSearchParams(window.location.search),
@@ -478,6 +512,23 @@ describe("folder knowledge panel", () => {
                 { limit },
             ),
         ).toContain(`Až ${records}.`);
+    });
+    it("renders the recording owner reason in Czech", async () => {
+        render(
+            <IntlProvider
+                locale="cs-CZ"
+                messages={messagesForLocale("cs-CZ")}
+                timeZone="UTC"
+            >
+                <FolderKnowledgePanel folder={folder} onBack={vi.fn()} />
+            </IntlProvider>,
+        );
+        fireEvent.click(
+            screen.getByRole("tab", { name: "Co dostanou modely" }),
+        );
+        expect(
+            await screen.findByText(/vlastník nahrávky · 3× ve složce/),
+        ).toBeTruthy();
     });
     it("returns to the previous page using the shared page size", async () => {
         mocks.fetch.mockImplementation(async (input) => {

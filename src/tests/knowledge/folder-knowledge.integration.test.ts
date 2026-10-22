@@ -749,11 +749,11 @@ withDatabase("folder knowledge API (PostgreSQL)", () => {
         });
     });
     it.each([
-        "people",
-        "things",
-        "corrections",
-        "facts",
-    ])("reads the subtree once for %s, even on an empty page", async (tab) => {
+        ["people", "records", 2],
+        ["things", "records", 1],
+        ["corrections", "corrections", 1],
+        ["facts", "facts", 1],
+    ] as const)("preserves scoped totals for %s past the last page with a fallback count", async (tab, rowsKey, privateTotal) => {
         await db().insert(recordingFolderAssignments).values({
             userId: "other",
             itemId: "colleague",
@@ -768,9 +768,30 @@ withDatabase("folder knowledge API (PostgreSQL)", () => {
             expect(execute).toHaveBeenCalledTimes(1);
             execute.mockClear();
             expect(await read("org-folder", tab, "&offset=1000")).toMatchObject(
-                { itemCount: 1, subfolderCount: 1 },
+                {
+                    itemCount: 1,
+                    subfolderCount: 1,
+                    total: 1,
+                    nextOffset: null,
+                    [rowsKey]: [],
+                },
             );
-            expect(execute).toHaveBeenCalledTimes(1);
+            expect(execute).toHaveBeenCalledTimes(2);
+            expect(
+                await read("private-folder", tab, "&offset=1000"),
+            ).toMatchObject({
+                total: privateTotal,
+                nextOffset: null,
+                [rowsKey]: [],
+            });
+            mocks.env.IS_HOSTED = true;
+            expect(
+                await read("private-folder", tab, "&offset=1000"),
+            ).toMatchObject({
+                total: tab === "people" ? 1 : 0,
+                nextOffset: null,
+                [rowsKey]: [],
+            });
         } finally {
             execute.mockRestore();
         }
