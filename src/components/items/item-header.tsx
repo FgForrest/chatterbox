@@ -72,7 +72,7 @@ export function ItemHeader({
             className={cn(
                 "flex min-w-0 items-start justify-between gap-4 px-1",
                 organization &&
-                    "rounded-r-lg border-l-2 border-primary bg-primary/5 py-2 pl-3",
+                    "rounded-r-lg border-l-2 border-organization bg-organization/5 py-2 pl-3",
             )}
         >
             <div className="min-w-0 flex-1">
@@ -106,7 +106,7 @@ export function ItemHeader({
                         view={view}
                     />
                     {organization && (
-                        <span className="inline-flex items-center gap-2 text-primary">
+                        <span className="inline-flex items-center gap-2 text-organization">
                             <MetadataSeparator />
                             <Users
                                 className="size-4"

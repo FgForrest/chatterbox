@@ -121,7 +121,7 @@ export function ProcessingFolderRow({
             {!processing.legacy &&
                 processing.profile?.scope === "organization" && (
                     <Users
-                        className="size-3.5 shrink-0 text-primary"
+                        className="size-3.5 shrink-0 text-organization"
                         aria-label={i18n("Organization")}
                     />
                 )}
@@ -155,11 +155,11 @@ export function ProcessingFolderRow({
                     processing?.intents.map((intent) => (
                         <span
                             key={intent.folderId}
-                            className="inline-flex min-h-7 items-center overflow-hidden rounded-full border border-dashed border-primary/40 bg-primary/5 text-xs"
+                            className="inline-flex min-h-7 items-center overflow-hidden rounded-full border border-dashed border-organization/40 bg-organization/5 text-xs"
                         >
                             <span className="inline-flex items-center gap-1.5 px-2.5 text-foreground">
                                 <Users
-                                    className="size-3.5 text-primary"
+                                    className="size-3.5 text-organization"
                                     aria-label={i18n("Organization")}
                                 />
                                 <span>{intent.path}</span>
@@ -177,7 +177,7 @@ export function ProcessingFolderRow({
                                 )}
                             <button
                                 type="button"
-                                className="inline-flex h-7 items-center border-l border-primary/15 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="inline-flex h-7 items-center border-l border-organization/15 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 aria-label={i18n("Cancel {folder}", {
                                     folder: intent.path,
                                 })}
@@ -234,7 +234,7 @@ export function ProcessingFolderRow({
                                                 {profile.scope ===
                                                     "organization" && (
                                                     <Users
-                                                        className="ml-auto size-3.5 text-primary"
+                                                        className="ml-auto size-3.5 text-organization"
                                                         aria-label={i18n(
                                                             "Organization",
                                                         )}

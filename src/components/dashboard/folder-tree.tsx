@@ -462,13 +462,13 @@ export function FolderTree({
                         className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-[13px]"
                     >
                         {folder.kind === "public" ? (
-                            <Users className="size-4 shrink-0 text-blue-600" />
+                            <Users className="size-4 shrink-0 text-organization" />
                         ) : (
                             <Folder
                                 className={cn(
                                     "size-4 shrink-0",
                                     folder.scope === "org"
-                                        ? "text-blue-600"
+                                        ? "text-organization"
                                         : "text-primary",
                                     folder.kind !== "custom" &&
                                         "fill-primary/10",
@@ -625,7 +625,7 @@ export function FolderTree({
                                     className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent"
                                 >
                                     {folder.scope === "org" ? (
-                                        <Users className="size-4 text-blue-600" />
+                                        <Users className="size-4 text-organization" />
                                     ) : (
                                         <Folder className="size-4 text-primary" />
                                     )}
