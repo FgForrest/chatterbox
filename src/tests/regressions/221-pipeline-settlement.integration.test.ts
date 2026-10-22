@@ -12,13 +12,15 @@ import {
     asyncJobs,
     chatterItems,
     itemProcessing,
+    processingProfileRevisions,
+    processingProfiles,
     recordings,
     transcriptCorrectionPasses,
     transcriptions,
     users,
 } from "@/db/schema";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
-import { markLearnReleasedInTx } from "@/lib/pipeline/state";
+import { markLearnReleasedInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import type {
     PhaseName,
     PipelinePhases,
@@ -73,6 +75,7 @@ import { POST as retryProcessing } from "@/app/api/recordings/[id]/process-again
 
 import {
     buryExhaustedStaleJobs,
+    cancelActiveJobsInTx,
     claimDueJobs,
     completeJob,
     enqueueJob,
@@ -84,6 +87,9 @@ import {
 } from "@/db/queries/async-jobs";
 import { settlePipelineBindingInTx } from "@/db/queries/pipeline-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
+import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
 const url = getTestDatabaseUrl();
 const owner = "owner-veln";
@@ -576,7 +582,7 @@ const input = {
             }
         });
 
-        it("rejects a stale claim and an older step generation without changing either row", async () => {
+        it("rejects a stale claim but completes a superseded generation without changing its step", async () => {
             await seed();
             await queue();
             const job = await claim();
@@ -607,13 +613,19 @@ const input = {
                     jobId: job.id,
                     claimToken: job.claimToken,
                 }),
-            ).toBe(false);
+            ).toBe(true);
             await age(job.id);
             expect(await buryExhaustedStaleJobs(120_000)).toBe(0);
             expect((await stored()).phases.learn?.generation).toBe(9);
             expect((await getJobForUser(job.id, owner))?.status).toBe(
-                "processing",
+                "completed",
             );
+            expect(await reconcilePipelineSteps()).toBe(1);
+            expect((await stored()).phases.learn).toMatchObject({
+                state: "failed",
+                reason: "lost",
+                generation: 9,
+            });
         });
 
         it.each([
@@ -659,12 +671,32 @@ const input = {
             );
         });
 
-        it("buries a stale heartbeat and fails its step through the terminal path", async () => {
+        it("reclaims an interrupted bound job and loses it only after its attempts are exhausted", async () => {
             await seed();
             await queue();
             const job = await claim();
             await age(job.id);
-            expect(await reclaimStaleJobs(120_000)).toBe(0);
+            const binding = (await stored()).phases.learn;
+            expect(await reclaimStaleJobs(120_000)).toBe(1);
+            expect((await stored()).phases.learn).toEqual(binding);
+            const retried = await claim();
+            expect(retried.id).toBe(job.id);
+            expect(retried.claimToken).not.toBe(job.claimToken);
+            expect(
+                await completeJob({
+                    jobId: job.id,
+                    claimToken: job.claimToken,
+                }),
+            ).toBe(false);
+            await age(job.id);
+            expect(await reconcilePipelineSteps()).toBe(1);
+            expect((await getJobForUser(job.id, owner))?.status).toBe(
+                "pending",
+            );
+            expect((await stored()).phases.learn).toEqual(binding);
+            const exhausted = await claim();
+            expect(exhausted.attempts).toBe(3);
+            await age(job.id);
             const afterFailure = vi.fn(
                 async (ended: {
                     id: string;
@@ -785,7 +817,10 @@ const input = {
             expect(await reconcilePipelineSteps()).toBe(3);
             expect(
                 (await stored()).phases.summary?.steps?.summary,
-            ).toBeUndefined();
+            ).toMatchObject({
+                reason: "started",
+                replanAttempts: 1,
+            });
             expect((await stored()).phases.share).toEqual({
                 state: "waiting",
                 generation: 1,
@@ -802,6 +837,536 @@ const input = {
                     .from(asyncJobs)
                     .where(eq(asyncJobs.kind, "pipeline.advance")),
             ).toHaveLength(1);
+        });
+
+        it("completes a cancelled Share job so later actions for its owner are claimable (probe A)", async () => {
+            await seed();
+            await seed("item-tavro");
+            const share = (itemId: string) =>
+                enqueueJob({
+                    userId: owner,
+                    kind: "pipeline.action",
+                    subjectId: `share:${itemId}`,
+                    payload: { itemId },
+                    pipeline: { itemId, userId: owner, phase: "share" },
+                });
+            const first = await share("item-veln");
+            const [claimed] = await claimDueJobs("pipeline.action", 1);
+            await db().transaction((tx) =>
+                updatePhaseInTx(tx, "item-veln", "private", owner, "share", {
+                    state: "skipped",
+                    reason: "cancelled",
+                    generation: 9,
+                    at,
+                }),
+            );
+            const cancelled = (await stored()).phases.share;
+            expect(
+                await completeJob({
+                    jobId: claimed.id,
+                    claimToken: claimed.claimToken,
+                    result: { outcome: { kind: "done", reason: "shared" } },
+                }),
+            ).toBe(true);
+            expect((await getJobForUser(first.job.id, owner))?.status).toBe(
+                "completed",
+            );
+            expect((await stored()).phases.share).toEqual(cancelled);
+            const second = await share("item-tavro");
+            expect(
+                (await claimDueJobs("pipeline.action", 1)).map((job) => job.id),
+            ).toEqual([second.job.id]);
+        });
+
+        it.each([
+            false,
+            true,
+        ])("starts a fresh summary after its binding is superseded, settled first: %s (probe B)", async (settleFirst) => {
+            await seed("item-veln", owner, {
+                summary: { state: "pending", generation: 1, at, inputs: input },
+            });
+            const enqueue = () =>
+                enqueueJob({
+                    userId: owner,
+                    kind: "summary",
+                    subjectId: "item-veln",
+                    payload: { recordingId: "item-veln", trigger: "auto" },
+                });
+            const first = await enqueue();
+            const [claimed] = await claimDueJobs("summary", 1);
+            const current = await stored();
+            const summary = current.phases.summary;
+            if (!summary) throw new Error("missing summary");
+            const phases: PipelinePhases = {
+                ...current.phases,
+                summary: {
+                    ...summary,
+                    state: "outdated",
+                    generation: 9,
+                    steps: Object.fromEntries(
+                        Object.entries(summary.steps ?? {}).map(
+                            ([step, value]) => [
+                                step,
+                                { ...value, state: "outdated", generation: 9 },
+                            ],
+                        ),
+                    ),
+                },
+            };
+            await db()
+                .update(itemProcessing)
+                .set({ phases })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, "item-veln"),
+                        eq(itemProcessing.userId, owner),
+                    ),
+                );
+            if (settleFirst)
+                expect(
+                    await completeJob({
+                        jobId: claimed.id,
+                        claimToken: claimed.claimToken,
+                    }),
+                ).toBe(true);
+            const next = await enqueue();
+            expect(next.created).toBe(true);
+            expect(next.job.id).not.toBe(first.job.id);
+            const leaf = (await stored()).phases.summary?.steps?.summary;
+            expect(leaf).toMatchObject({
+                state: "running",
+                jobId: next.job.id,
+            });
+            expect(leaf?.generation).toBeGreaterThan(9);
+            expect((await stored()).phases.summary?.steps?.title?.jobId).toBe(
+                next.job.id,
+            );
+            expect((await getJobForUser(first.job.id, owner))?.status).not.toBe(
+                "processing",
+            );
+            expect(
+                await completeJob({
+                    jobId: claimed.id,
+                    claimToken: claimed.claimToken,
+                }),
+            ).toBe(false);
+            expect((await stored()).phases.summary?.steps?.summary).toEqual(
+                leaf,
+            );
+        });
+
+        it("shares while a Learn worker settles without a processing/job deadlock (probe D)", async () => {
+            await seed();
+            await enqueueJob({
+                userId: owner,
+                kind: "learn.run",
+                subjectId: "item-veln",
+                payload: { runId: "run-veln" },
+                pipeline: {
+                    itemId: "item-veln",
+                    userId: owner,
+                    phase: "learn",
+                },
+            });
+            const [claimed] = await claimDueJobs("learn.run", 1);
+            let locked = () => {};
+            const acquired = new Promise<void>((resolve) => {
+                locked = resolve;
+            });
+            let release = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const sharing = db().transaction(async (tx) => {
+                await requestAdvanceInTx(tx, {
+                    itemId: "item-veln",
+                    userId: owner,
+                    view: "private",
+                    reason: "placement",
+                });
+                locked();
+                await gate;
+                await cancelActiveJobsInTx(tx, {
+                    userId: owner,
+                    kind: "learn.run",
+                    subjectId: "item-veln",
+                    payloadValues: { key: "runId", values: ["run-veln"] },
+                    message: "cancelled",
+                });
+            });
+            await acquired;
+            const transaction = vi.spyOn(db(), "transaction");
+            const settling = completeJob({
+                jobId: claimed.id,
+                claimToken: claimed.claimToken,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            release();
+            try {
+                await expect(Promise.all([sharing, settling])).resolves.toEqual(
+                    [undefined, false],
+                );
+                expect(transaction).toHaveBeenCalledOnce();
+            } finally {
+                transaction.mockRestore();
+            }
+            expect((await getJobForUser(claimed.id, owner))?.status).toBe(
+                "failed",
+            );
+        }, 20_000);
+
+        it("shares while a profile-guarded enqueue waits without a processing/profile deadlock (probe E)", async () => {
+            await seed("item-veln", owner, {
+                summary: { state: "pending", generation: 1, at, inputs: input },
+            });
+            await db().insert(processingProfiles).values({
+                id: "profile-tavro",
+                ownerUserId: other,
+                scope: "organization",
+                channel: "mail",
+                name: "Fixture profile",
+            });
+            await db().insert(processingProfileRevisions).values({
+                id: "revision-tavro",
+                profileId: "profile-tavro",
+                settings: "fixture",
+            });
+            let locked = () => {};
+            const acquired = new Promise<void>((resolve) => {
+                locked = resolve;
+            });
+            let release = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const sharing = db().transaction(async (tx) => {
+                await requestAdvanceInTx(tx, {
+                    itemId: "item-veln",
+                    userId: owner,
+                    view: "private",
+                    reason: "placement",
+                });
+                locked();
+                await gate;
+                await lockProfileMutation(tx, other);
+            });
+            await acquired;
+            const enqueuing = withProfileRevisionGuard(
+                {
+                    revisionId: "revision-tavro",
+                    actorUserId: owner,
+                    organizationUserId: other,
+                    pipelineTarget: { itemId: "item-veln", userId: owner },
+                },
+                (tx) =>
+                    enqueueJob(
+                        {
+                            userId: owner,
+                            kind: "summary",
+                            subjectId: "item-veln",
+                            payload: {
+                                recordingId: "item-veln",
+                                trigger: "auto",
+                            },
+                        },
+                        tx,
+                    ),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            release();
+            await expect(
+                Promise.all([sharing, enqueuing]),
+            ).resolves.toMatchObject([undefined, { created: true }]);
+        }, 20_000);
+
+        it("waits two minutes for a new marker, backs off 2/10/60 minutes, and stops with a retryable failure", async () => {
+            const start = new Date();
+            await seed("item-veln", owner, {
+                summary: {
+                    state: "pending",
+                    generation: 1,
+                    at: start.toISOString(),
+                    inputs: input,
+                    steps: {
+                        summary: { ...input, generation: 1, state: "pending" },
+                    },
+                },
+            });
+            const reconcileAt = (minutes: number) =>
+                reconcilePipelineSteps(
+                    undefined,
+                    undefined,
+                    new Date(start.getTime() + minutes * 60_000),
+                );
+            expect(await reconcileAt(1)).toBe(0);
+            expect(await reconcileAt(2)).toBe(1);
+            expect(
+                (await stored()).phases.summary?.steps?.summary?.replanAttempts,
+            ).toBe(1);
+            const generation = (await stored()).requestedGeneration;
+            expect(await reconcileAt(3)).toBe(0);
+            expect((await stored()).requestedGeneration).toBe(generation);
+            await db().transaction((tx) =>
+                updatePhaseInTx(tx, "item-veln", "private", owner, "summary", {
+                    state: "pending",
+                    generation: generation + 1,
+                    at: new Date(start.getTime() + 180_000).toISOString(),
+                    inputs: input,
+                    steps: {
+                        summary: {
+                            ...input,
+                            generation: generation + 1,
+                            state: "pending",
+                        },
+                    },
+                }),
+            );
+            expect(
+                (await stored()).phases.summary?.steps?.summary?.replanAttempts,
+            ).toBe(1);
+            expect(await reconcileAt(4)).toBe(1);
+            expect(await reconcileAt(13)).toBe(0);
+            expect(await reconcileAt(14)).toBe(1);
+            expect(await reconcileAt(73)).toBe(0);
+            expect(await reconcileAt(74)).toBe(1);
+            expect(
+                (await stored()).phases.summary?.steps?.summary,
+            ).toMatchObject({
+                state: "failed",
+                reason: "lost",
+                retryable: true,
+                replanAttempts: 3,
+            });
+            expect(await reconcileAt(200)).toBe(0);
+        });
+
+        it("retains and settles a legacy nameless summary whose last job failed", async () => {
+            await seed("item-veln", owner, {
+                summary: {
+                    state: "pending",
+                    generation: 1,
+                    at,
+                    inputs: input,
+                    steps: {
+                        summary: { ...input, generation: 1, reason: "started" },
+                    },
+                },
+            });
+            await db().insert(asyncJobs).values({
+                userId: owner,
+                kind: "summary",
+                subjectId: "item-veln",
+                status: "failed",
+                errorCode: "PROVIDER_FAILED",
+                completedAt: new Date(),
+            });
+            expect(await reconcilePipelineSteps()).toBe(1);
+            expect(
+                (await stored()).phases.summary?.steps?.summary,
+            ).toMatchObject({
+                ...input,
+                generation: 1,
+                state: "failed",
+                reason: "PROVIDER_FAILED",
+            });
+            expect(await reconcilePipelineSteps()).toBe(0);
+        });
+
+        it("settles the current summary binding while preserving its superseded title binding", async () => {
+            await seed("item-veln", owner, {
+                summary: { state: "pending", generation: 1, at, inputs: input },
+            });
+            const queued = await enqueueJob({
+                userId: owner,
+                kind: "summary",
+                subjectId: "item-veln",
+                payload: { recordingId: "item-veln", trigger: "auto" },
+            });
+            const [claimed] = await claimDueJobs("summary", 1);
+            const current = await stored();
+            const phase = current.phases.summary;
+            const title = phase?.steps?.title;
+            if (!phase || !title) throw new Error("missing title binding");
+            const superseded = {
+                ...title,
+                state: "outdated" as const,
+                generation: 8,
+            };
+            await db()
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        ...current.phases,
+                        summary: {
+                            ...phase,
+                            steps: { ...phase.steps, title: superseded },
+                        },
+                    },
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, "item-veln"),
+                        eq(itemProcessing.userId, owner),
+                    ),
+                );
+            expect(
+                await completeJob({
+                    jobId: claimed.id,
+                    claimToken: claimed.claimToken,
+                    result: {
+                        outcome: { kind: "done" },
+                        titleOutcome: { kind: "done" },
+                    },
+                }),
+            ).toBe(true);
+            expect((await getJobForUser(queued.job.id, owner))?.status).toBe(
+                "completed",
+            );
+            expect((await stored()).phases.summary?.steps?.summary?.state).toBe(
+                "done",
+            );
+            expect((await stored()).phases.summary?.steps?.title).toEqual(
+                superseded,
+            );
+        });
+
+        it.each([
+            "reconcile",
+            "bury",
+        ] as const)("isolates a broken processing row during %s so the next job still settles", async (mode) => {
+            for (const itemId of ["item-broken", "item-healthy"]) {
+                await seed(itemId);
+                await enqueueJob({
+                    userId: owner,
+                    kind: "test.pipeline",
+                    subjectId: itemId,
+                    pipeline: { itemId, userId: owner, phase: "learn" },
+                });
+            }
+            const jobs = await claimDueJobs("test.pipeline", 2);
+            for (const job of jobs) {
+                await age(job.id);
+                await db()
+                    .update(asyncJobs)
+                    .set({ attempts: 3, maxAttempts: 3 })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, job.id),
+                            eq(asyncJobs.userId, owner),
+                        ),
+                    );
+            }
+            await database.sql`create function reject_broken_phase() returns trigger language plpgsql as $$ begin if NEW.item_id = 'item-broken' then raise exception 'forced broken row'; end if; return NEW; end $$`;
+            await database.sql`create trigger reject_broken before update on item_processing for each row execute function reject_broken_phase()`;
+            const error = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => {});
+            try {
+                expect(
+                    await (mode === "reconcile"
+                        ? reconcilePipelineSteps()
+                        : buryExhaustedStaleJobs(120_000)),
+                ).toBe(1);
+                expect(error).toHaveBeenCalledOnce();
+                expect((await stored("item-broken")).phases.learn?.state).toBe(
+                    "running",
+                );
+                expect(
+                    (await stored("item-healthy")).phases.learn?.reason,
+                ).toBe("lost");
+                const broken = jobs.find(
+                    (job) => job.subjectId === "item-broken",
+                );
+                expect(
+                    (await getJobForUser(broken?.id ?? "", owner))?.status,
+                ).toBe("processing");
+            } finally {
+                error.mockRestore();
+                await database.sql`drop trigger reject_broken on item_processing`;
+                await database.sql`drop function reject_broken_phase()`;
+            }
+        });
+
+        it("reconciles every row of a shared job under sorted processing locks", async () => {
+            await seed("item-veln");
+            await seed("item-zurna");
+            const queued = await queue();
+            const joined = await enqueueJob({
+                userId: owner,
+                kind: "test.pipeline",
+                subjectId: "item-veln",
+                pipeline: {
+                    itemId: "item-zurna",
+                    userId: owner,
+                    phase: "learn",
+                },
+            });
+            expect(joined.job.id).toBe(queued.job.id);
+            const claimed = await claim();
+            await age(claimed.id);
+            await db()
+                .update(asyncJobs)
+                .set({ attempts: 3 })
+                .where(
+                    and(
+                        eq(asyncJobs.id, claimed.id),
+                        eq(asyncJobs.userId, owner),
+                    ),
+                );
+            const results = await Promise.all([
+                reconcilePipelineSteps(),
+                reconcilePipelineSteps(),
+            ]);
+            expect(results.reduce((a, b) => a + b, 0)).toBe(1);
+            for (const itemId of ["item-veln", "item-zurna"])
+                expect((await stored(itemId)).phases.learn).toMatchObject({
+                    state: "failed",
+                    reason: "lost",
+                    retryable: true,
+                });
+        });
+
+        it("skips a processing row held by another transaction during stale burial", async () => {
+            await seed();
+            await queue();
+            const job = await claim();
+            await age(job.id);
+            await db()
+                .update(asyncJobs)
+                .set({ attempts: 3 })
+                .where(
+                    and(eq(asyncJobs.id, job.id), eq(asyncJobs.userId, owner)),
+                );
+            let release = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            let signal = () => {};
+            const acquired = new Promise<void>((resolve) => {
+                signal = resolve;
+            });
+            const holder = db().transaction(async (tx) => {
+                await tx
+                    .select()
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, "item-veln"),
+                            eq(itemProcessing.userId, owner),
+                        ),
+                    )
+                    .for("update");
+                signal();
+                await gate;
+            });
+            try {
+                await acquired;
+                expect(await buryExhaustedStaleJobs(120_000)).toBe(0);
+            } finally {
+                release();
+                await holder;
+            }
+            expect(await buryExhaustedStaleJobs(120_000)).toBe(1);
         });
 
         it("claims Share and task actions fairly across users", async () => {

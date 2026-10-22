@@ -117,6 +117,46 @@ export async function updatePhaseInTx(
             };
         }
     }
+    if (
+        previous &&
+        !record.jobId &&
+        record.state !== "outdated" &&
+        ["pending", "running"].includes(record.state) &&
+        previous.profileRevisionId === record.profileRevisionId &&
+        previous.inputs?.contentId === record.inputs?.contentId &&
+        previous.inputs?.contentRevision === record.inputs?.contentRevision &&
+        previous.inputs?.contentSourceId === record.inputs?.contentSourceId
+    ) {
+        record = {
+            ...record,
+            replannedAt: previous.replannedAt,
+            replanAttempts: previous.replanAttempts,
+        };
+        if (record.steps) {
+            const steps = { ...record.steps };
+            for (const name of ["summary", "topics", "title"] as const) {
+                const old = previous.steps?.[name];
+                const next = steps[name];
+                if (
+                    old?.replannedAt &&
+                    next &&
+                    !next.jobId &&
+                    ["pending", "running"].includes(next.state ?? "pending") &&
+                    old.contentId === next.contentId &&
+                    old.contentRevision === next.contentRevision &&
+                    old.contentSourceId === next.contentSourceId &&
+                    old.profileRevisionId === next.profileRevisionId
+                )
+                    steps[name] = {
+                        ...next,
+                        at: old.at ?? previous.at,
+                        replannedAt: old.replannedAt,
+                        replanAttempts: old.replanAttempts,
+                    };
+            }
+            record = { ...record, steps };
+        }
+    }
     if (record.state === "waiting" && !record.jobId) {
         const waitingFor = record.waitingFor ?? waitForReason(record.reason);
         if (previous?.waitingFor?.kind === waitingFor.kind)

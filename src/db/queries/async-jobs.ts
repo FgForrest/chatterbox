@@ -13,7 +13,10 @@ import {
     bindAvailableCorrectionInTx,
     bindPipelineJobInTx,
     jobBindings,
+    lockPipelineTargetsInTx,
     type PipelineJobTarget,
+    pipelineJobBindingsCurrentInTx,
+    pipelineJobTarget,
     settlePipelineBindingInTx,
     terminalStepOutcome,
     wakePipelineInTx,
@@ -25,6 +28,7 @@ import {
     learnRuns,
     transcriptCorrectionPasses,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
@@ -169,7 +173,30 @@ export async function enqueueJob(
     input: EnqueueJobInput,
     executor?: EnqueueExecutor,
 ): Promise<EnqueueJobResult> {
-    if (!executor) return db.transaction((tx) => enqueueJob(input, tx));
+    if (!executor) return pipelineJobTransaction((tx) => enqueueJob(input, tx));
+    const target = pipelineJobTarget(
+        {
+            kind: input.kind,
+            userId: input.userId,
+            payload: input.payload ?? {},
+        },
+        input.pipeline,
+    );
+    const snapshot = input.subjectId
+        ? await getActiveJob(input.kind, input.subjectId, executor)
+        : null;
+    await lockPipelineTargetsInTx(executor, [
+        ...(target ? [target] : []),
+        ...(snapshot?.userId === input.userId
+            ? jobBindings(snapshot.payload)
+            : []),
+    ]);
+    if (target)
+        await lockPipelineTargetsInTx(
+            executor,
+            [target],
+            input.payload?.trigger !== "manual" && target.existingOnly !== true,
+        );
     const bind = async (
         result: EnqueueJobResult,
     ): Promise<EnqueueJobResult> => {
@@ -203,6 +230,46 @@ export async function enqueueJob(
         if (row) return bind({ job: row as AsyncJobRow, created: true });
         // Only a subject can conflict: NULLs are distinct in the index.
         if (!input.subjectId) break;
+        let active = await getActiveJob(input.kind, input.subjectId, executor);
+        if (active && active.userId === input.userId) {
+            await lockPipelineTargetsInTx(
+                executor,
+                jobBindings(active.payload),
+            );
+            const [locked] = await executor
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.id, active.id),
+                        eq(asyncJobs.userId, input.userId),
+                        isActive(),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked) continue;
+            active = locked as AsyncJobRow;
+            if (!(await pipelineJobBindingsCurrentInTx(executor, locked))) {
+                await executor
+                    .update(asyncJobs)
+                    .set({
+                        status: "failed",
+                        claimToken: null,
+                        completedAt: new Date(),
+                        updatedAt: new Date(),
+                        errorCode: "superseded",
+                        lastError: "The pipeline step was superseded",
+                    })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, locked.id),
+                            eq(asyncJobs.userId, input.userId),
+                        ),
+                    );
+                continue;
+            }
+        }
         if (input.takeOverDelayed) {
             const [taken] = await executor
                 .update(asyncJobs)
@@ -231,27 +298,8 @@ export async function enqueueJob(
             if (taken)
                 return bind({ job: taken as AsyncJobRow, created: true });
         }
-        const active = await getActiveJob(
-            input.kind,
-            input.subjectId,
-            executor,
-        );
-        if (active && active.userId === input.userId) {
-            const [locked] = await executor
-                .select()
-                .from(asyncJobs)
-                .where(
-                    and(
-                        eq(asyncJobs.id, active.id),
-                        eq(asyncJobs.userId, input.userId),
-                        isActive(),
-                    ),
-                )
-                .for("update")
-                .limit(1);
-            if (locked)
-                return bind({ job: locked as AsyncJobRow, created: false });
-        }
+        if (active && active.userId === input.userId)
+            return bind({ job: active, created: false });
     }
     throw new Error(
         `Could not queue a ${input.kind} job for ${input.subjectId ?? "no subject"}`,
@@ -522,7 +570,7 @@ export async function prepareClaimedPipelineJob(
     jobId: string,
     claimToken: string,
 ): Promise<boolean> {
-    return db.transaction(async (tx) => {
+    return pipelineJobTransaction(async (tx) => {
         const [job] = await tx
             .select()
             .from(asyncJobs)
@@ -533,10 +581,13 @@ export async function prepareClaimedPipelineJob(
                     eq(asyncJobs.status, "processing"),
                 ),
             )
-            .for("update")
             .limit(1);
         if (!job) return false;
-        if (jobBindings(job.payload).length > 0) return true;
+        if (jobBindings(job.payload).length > 0)
+            return (
+                (await lockClaimedPipelineJobInTx(tx, jobId, claimToken)) !==
+                null
+            );
         let pipeline: PipelineJobTarget | undefined;
         if (job.kind === "learn.run" && typeof job.payload.runId === "string") {
             const [run] = await tx
@@ -586,6 +637,16 @@ export async function prepareClaimedPipelineJob(
                 userId: job.userId,
                 phase: "learn",
             };
+        const target = pipelineJobTarget(job, pipeline);
+        if (target)
+            await lockPipelineTargetsInTx(
+                tx,
+                [target],
+                target.existingOnly !== true &&
+                    job.payload.trigger !== "manual",
+            );
+        const current = await lockClaimedPipelineJobInTx(tx, jobId, claimToken);
+        if (!current) return false;
         if (job.kind === "learn.correct" && pipeline) {
             const [processing] = await tx
                 .select({ phases: itemProcessing.phases })
@@ -628,9 +689,88 @@ export async function prepareClaimedPipelineJob(
                 return false;
             }
         }
-        await bindPipelineJobInTx(tx, job, pipeline);
+        await bindPipelineJobInTx(tx, current, pipeline);
         return true;
     });
+}
+
+class PipelineBindingsChangedError extends Error {}
+
+/** Retry a transaction when its unlocked binding snapshot changed or PostgreSQL aborted a deadlock. */
+export async function pipelineJobTransaction<T>(
+    run: (tx: EnqueueExecutor) => Promise<T>,
+): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await retryOnDeadlock(() => db.transaction(run));
+        } catch (error) {
+            if (
+                !(error instanceof PipelineBindingsChangedError) ||
+                attempt >= 2
+            )
+                throw error;
+        }
+    }
+}
+
+/** Lock current processing bindings before locking and validating the worker claim. */
+export async function lockClaimedPipelineJobInTx(
+    tx: EnqueueExecutor,
+    jobId: string,
+    claimToken: string,
+    skipLocked = false,
+): Promise<AsyncJobRow | null> {
+    const [snapshot] = await tx
+        .select()
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.id, jobId),
+                eq(asyncJobs.claimToken, claimToken),
+                eq(asyncJobs.status, "processing"),
+            ),
+        )
+        .limit(1);
+    if (!snapshot) return null;
+    const targets = jobBindings(snapshot.payload);
+    if (
+        snapshot.kind === "pipeline.advance" &&
+        typeof snapshot.payload.itemId === "string"
+    )
+        targets.push({
+            itemId: snapshot.payload.itemId,
+            userId: snapshot.userId,
+            phase: "categorize",
+            generation: 0,
+        });
+    if (!(await lockPipelineTargetsInTx(tx, targets, false, skipLocked)))
+        return null;
+    const [job] = await tx
+        .select()
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.id, jobId),
+                eq(asyncJobs.userId, snapshot.userId),
+                eq(asyncJobs.claimToken, claimToken),
+                eq(asyncJobs.status, "processing"),
+            ),
+        )
+        .for("update", skipLocked ? { skipLocked: true } : {})
+        .limit(1);
+    if (!job) return null;
+    if (
+        jobBindings(job.payload).some(
+            (binding) =>
+                !targets.some(
+                    (target) =>
+                        target.itemId === binding.itemId &&
+                        target.userId === binding.userId,
+                ),
+        )
+    )
+        throw new PipelineBindingsChangedError();
+    return job as AsyncJobRow;
 }
 
 /**
@@ -647,7 +787,7 @@ export async function completeJob(input: {
         result: input.result ?? null,
         errorCode: null,
     });
-    return db.transaction((tx) =>
+    return pipelineJobTransaction((tx) =>
         settleTerminalJobInTx(tx, {
             ...input,
             status: outcome.kind === "failed" ? "failed" : "completed",
@@ -675,18 +815,11 @@ export async function settleTerminalJobInTx(
         retryable?: boolean;
     },
 ): Promise<boolean> {
-    const [job] = await tx
-        .select()
-        .from(asyncJobs)
-        .where(
-            and(
-                eq(asyncJobs.id, input.jobId),
-                eq(asyncJobs.claimToken, input.claimToken),
-                eq(asyncJobs.status, "processing"),
-            ),
-        )
-        .for("update")
-        .limit(1);
+    const job = await lockClaimedPipelineJobInTx(
+        tx,
+        input.jobId,
+        input.claimToken,
+    );
     if (!job) {
         console.debug("[pipeline] superseded job claim", {
             jobId: input.jobId,
@@ -694,29 +827,6 @@ export async function settleTerminalJobInTx(
         return false;
     }
     const bindings = jobBindings(job.payload);
-    for (const binding of bindings) {
-        const [processing] = await tx
-            .select({ phases: itemProcessing.phases })
-            .from(itemProcessing)
-            .where(
-                and(
-                    eq(itemProcessing.itemId, binding.itemId),
-                    eq(itemProcessing.userId, binding.userId),
-                    eq(itemProcessing.view, "private"),
-                ),
-            )
-            .for("update")
-            .limit(1);
-        const phase = processing?.phases[binding.phase];
-        const step = binding.step ? phase?.steps?.[binding.step] : phase;
-        if (step?.jobId !== job.id || step.generation !== binding.generation) {
-            console.debug("[pipeline] superseded step generation", {
-                jobId: job.id,
-                generation: binding.generation,
-            });
-            return false;
-        }
-    }
     const now = new Date();
     let outcome: StepOutcome =
         input.status === "failed"
@@ -780,7 +890,7 @@ export async function settleTerminalJobInTx(
         );
     for (const binding of bindings) {
         const titleOutcome = input.result?.titleOutcome;
-        await settlePipelineBindingInTx(
+        const settled = await settlePipelineBindingInTx(
             tx,
             binding,
             job.id,
@@ -790,6 +900,8 @@ export async function settleTerminalJobInTx(
                 ? (titleOutcome as StepOutcome)
                 : outcome,
         );
+        if (!settled)
+            await wakePipelineInTx(tx, binding.itemId, binding.userId);
     }
     if (input.status === "completed") {
         for (const binding of bindings)
@@ -837,6 +949,11 @@ export async function cancelActiveJobsInTx(
         now?: Date;
     },
 ): Promise<void> {
+    await lockPipelineTargetsInTx(
+        tx,
+        [{ itemId: input.subjectId, userId: input.userId }],
+        true,
+    );
     const now = input.now ?? new Date();
     await tx
         .update(asyncJobs)
@@ -892,19 +1009,12 @@ export async function failJobAttempt(input: {
     retryable: boolean;
     delayMs: number;
 }): Promise<FailJobOutcome | null> {
-    return db.transaction(async (tx) => {
-        const [job] = await tx
-            .select()
-            .from(asyncJobs)
-            .where(
-                and(
-                    eq(asyncJobs.id, input.jobId),
-                    eq(asyncJobs.claimToken, input.claimToken),
-                    eq(asyncJobs.status, "processing"),
-                ),
-            )
-            .for("update")
-            .limit(1);
+    return pipelineJobTransaction(async (tx) => {
+        const job = await lockClaimedPipelineJobInTx(
+            tx,
+            input.jobId,
+            input.claimToken,
+        );
         if (!job) return null;
         if (!input.retryable || job.attempts >= job.maxAttempts) {
             const settled = await settleTerminalJobInTx(tx, {
@@ -964,7 +1074,6 @@ export async function reclaimStaleJobs(staleMs: number): Promise<number> {
             updated_at = now()
         where status = 'processing'
           and attempts < max_attempts
-          and coalesce(payload -> 'pipelineSteps', '[]'::jsonb) = '[]'::jsonb
           and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => ${staleMs / 1000}::double precision)
         returning id
     `);
@@ -972,7 +1081,7 @@ export async function reclaimStaleJobs(staleMs: number): Promise<number> {
 }
 
 /**
- * Bury expired pipeline claims and unbound jobs that exhausted their attempts.
+ * Bury stale jobs only after they have exhausted their attempts.
  *
  * Separate from `reclaimStaleJobs` because the two say different things: one
  * is "try again", this is "this job has now killed as many workers as it is
@@ -984,51 +1093,74 @@ export async function buryExhaustedStaleJobs(
     afterFailure?: (job: AsyncJobRow) => Promise<void>,
 ): Promise<number> {
     const ended: AsyncJobRow[] = [];
-    const count = await db.transaction(async (tx) => {
-        const jobs = await tx
-            .select()
-            .from(asyncJobs)
-            .where(
-                and(
-                    eq(asyncJobs.status, "processing"),
-                    sql`(${asyncJobs.attempts} >= ${asyncJobs.maxAttempts} or coalesce(${asyncJobs.payload} -> 'pipelineSteps', '[]'::jsonb) <> '[]'::jsonb)`,
-                    sql`${asyncJobs.id} in (
+    const jobs = await db
+        .select()
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.status, "processing"),
+                sql`${asyncJobs.attempts} >= ${asyncJobs.maxAttempts}`,
+                sql`${asyncJobs.id} in (
                         select id from (
                             select id, row_number() over (partition by user_id order by coalesce(heartbeat_at, started_at), id) as owner_rank
                             from async_jobs where status = 'processing'
-                              and (attempts >= max_attempts or coalesce(payload -> 'pipelineSteps', '[]'::jsonb) <> '[]'::jsonb)
+                              and attempts >= max_attempts
                               and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => ${staleMs / 1000}::double precision)
                         ) candidates where owner_rank <= 5
                     )`,
-                    sql`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}) < now() - make_interval(secs => ${staleMs / 1000}::double precision)`,
-                ),
-            )
-            .limit(100)
-            .for("update", { skipLocked: true });
-        let settled = 0;
-        for (const job of jobs) {
-            if (
-                job.claimToken &&
-                (await settleTerminalJobInTx(tx, {
-                    jobId: job.id,
-                    claimToken: job.claimToken,
-                    status: "failed",
-                    message: "Worker stopped responding and no attempts remain",
-                    code: "lost",
-                    retryable: true,
-                }))
-            ) {
-                settled++;
-                ended.push({
-                    ...job,
-                    status: "failed",
-                    errorCode: "lost",
-                    lastError: "Processing was interrupted",
-                });
-            }
+                sql`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}) < now() - make_interval(secs => ${staleMs / 1000}::double precision)`,
+            ),
+        )
+        .limit(100);
+    let count = 0;
+    for (const candidate of jobs) {
+        const endedJob = await pipelineJobTransaction(async (tx) => {
+            if (!candidate.claimToken) return null;
+            const job = await lockClaimedPipelineJobInTx(
+                tx,
+                candidate.id,
+                candidate.claimToken,
+                true,
+            );
+            if (!job || job.attempts < job.maxAttempts) return null;
+            const [stale] = await tx
+                .select({ id: asyncJobs.id })
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.id, job.id),
+                        eq(asyncJobs.userId, job.userId),
+                        sql`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}) < now() - make_interval(secs => ${staleMs / 1000}::double precision)`,
+                    ),
+                );
+            if (!stale || !job.claimToken) return null;
+            await settleTerminalJobInTx(tx, {
+                jobId: job.id,
+                claimToken: job.claimToken,
+                status: "failed",
+                message: "Processing was interrupted",
+                code: "lost",
+                retryable: true,
+            });
+            return {
+                ...job,
+                status: "failed" as const,
+                errorCode: "lost",
+                lastError: "Processing was interrupted",
+            };
+        }).catch((error: unknown) => {
+            console.error(
+                "[job-worker] stale burial failed",
+                { jobId: candidate.id },
+                error,
+            );
+            return null;
+        });
+        if (endedJob) {
+            count++;
+            ended.push(endedJob);
         }
-        return settled;
-    });
+    }
     if (afterFailure) for (const job of ended) await afterFailure(job);
     return count;
 }

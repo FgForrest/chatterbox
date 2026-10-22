@@ -71,6 +71,121 @@ function jobPhase(kind: string): PhaseName | undefined {
     return undefined;
 }
 
+/** Resolve the owner row that must be locked before queue deduplication. */
+export function pipelineJobTarget(
+    job: Pick<Job, "kind" | "userId" | "payload">,
+    target?: PipelineJobTarget,
+): PipelineJobTarget | undefined {
+    if (target) return target;
+    const phase = jobPhase(job.kind);
+    if (!phase || typeof job.payload.recordingId !== "string") return;
+    return {
+        itemId: job.payload.recordingId,
+        userId: job.userId,
+        phase,
+        ...(phase === "summary"
+            ? {
+                  step:
+                      job.kind === "title.generate"
+                          ? "title"
+                          : (job.kind as SummaryStepName),
+              }
+            : {}),
+    };
+}
+
+/** Lock order: item (when needed) → processing rows sorted by item/user id → profile locks sorted by owner id → job. */
+export async function lockPipelineTargetsInTx(
+    tx: Tx,
+    targets: readonly Pick<PipelineJobTarget, "itemId" | "userId">[],
+    create = false,
+    skipLocked = false,
+): Promise<boolean> {
+    const ordered = [
+        ...new Map(
+            targets.map((target) => [
+                JSON.stringify([target.itemId, target.userId]),
+                target,
+            ]),
+        ).values(),
+    ].sort(
+        (a, b) =>
+            a.itemId.localeCompare(b.itemId) ||
+            a.userId.localeCompare(b.userId),
+    );
+    for (const target of ordered) {
+        if (create) {
+            const [item] = await tx
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, target.itemId),
+                        eq(chatterItems.userId, target.userId),
+                        isNull(chatterItems.deletedAt),
+                    ),
+                )
+                .limit(1);
+            if (!item) continue;
+            await tx
+                .insert(itemProcessing)
+                .values({ ...target, view: "private" })
+                .onConflictDoNothing();
+        }
+        const locked = await tx
+            .select({ id: itemProcessing.itemId })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, target.itemId),
+                    eq(itemProcessing.userId, target.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update", skipLocked ? { skipLocked: true } : {});
+        if (skipLocked && locked.length === 0) {
+            const [exists] = await tx
+                .select({ id: itemProcessing.itemId })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, target.itemId),
+                        eq(itemProcessing.userId, target.userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1);
+            if (exists) return false;
+        }
+    }
+    return true;
+}
+
+/** Check deduplication against the generations protected by the processing locks. */
+export async function pipelineJobBindingsCurrentInTx(
+    tx: Tx,
+    job: Job,
+): Promise<boolean> {
+    for (const binding of jobBindings(job.payload)) {
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, binding.itemId),
+                    eq(itemProcessing.userId, binding.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        const phase = processing?.phases[binding.phase];
+        const step = binding.step ? phase?.steps?.[binding.step] : phase;
+        if (step?.jobId !== job.id || step.generation !== binding.generation)
+            return false;
+    }
+    return true;
+}
+
 function contentOf(
     transcript?: { id: string; revision: number; source: string },
     mail?: { id: string; revision: number },
@@ -249,7 +364,8 @@ export async function bindPipelineJobInTx(
     const bindTitle =
         selected.step === "summary" &&
         job.kind === "summary" &&
-        !previous?.steps?.title?.jobId &&
+        (!previous?.steps?.title?.jobId ||
+            previous.steps.title.state === "outdated") &&
         !automaticTitleSettled(processing.phases);
     const generation = Math.max(
         processing.requestedGeneration,
@@ -260,6 +376,8 @@ export async function bindPipelineJobInTx(
         ...previous,
         ...selected.record,
         state: "running",
+        replannedAt: undefined,
+        replanAttempts: undefined,
         generation,
         reason:
             selected.phase === "transcribe"
@@ -295,6 +413,9 @@ export async function bindPipelineJobInTx(
                     ...record.steps?.[step],
                     ...content,
                     state: "running",
+                    at: new Date().toISOString(),
+                    replannedAt: undefined,
+                    replanAttempts: undefined,
                     reason: "started",
                     jobId: job.id,
                     generation,

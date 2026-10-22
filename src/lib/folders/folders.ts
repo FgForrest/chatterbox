@@ -1,5 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
+import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     asyncJobs,
     chatterItems,
@@ -482,6 +484,17 @@ export async function lockItemForFolderMutation(
             ),
         )
         .for("update");
+}
+
+async function lockPlacementProfilesInTx(
+    tx: Tx,
+    itemId: string,
+    ownerUserId: string,
+    orgUserId: string,
+): Promise<void> {
+    await lockPipelineTargetsInTx(tx, [{ itemId, userId: ownerUserId }], true);
+    for (const userId of [...new Set([ownerUserId, orgUserId])].sort())
+        await lockProfileMutation(tx, userId);
 }
 
 async function lockItemTaskGraphForFolderMutation(
@@ -1145,6 +1158,12 @@ export async function shareItemToOrganizationFolderInTx(
     await lockOrgTree(tx);
     await lockOrgPeople(tx);
     await lockItemForFolderMutation(tx, input.itemId, input.ownerUserId);
+    await lockPlacementProfilesInTx(
+        tx,
+        input.itemId,
+        input.ownerUserId,
+        input.orgUserId,
+    );
     const [folder] = await tx
         .select({ id: recordingFolders.id })
         .from(recordingFolders)
@@ -1678,6 +1697,13 @@ async function endSharingIfUnfiled(
         .limit(1);
     if (remaining.length > 0) return new Set();
 
+    const [owner] = await tx
+        .select({ userId: chatterItems.userId })
+        .from(chatterItems)
+        .where(eq(chatterItems.id, recordingId))
+        .limit(1);
+    if (!owner) return new Set();
+    await lockPlacementProfilesInTx(tx, recordingId, owner.userId, orgUserId);
     const now = new Date();
     await tx
         .update(asyncJobs)
@@ -1700,12 +1726,6 @@ async function endSharingIfUnfiled(
             ),
         );
 
-    const [owner] = await tx
-        .select({ userId: chatterItems.userId })
-        .from(chatterItems)
-        .where(eq(chatterItems.id, recordingId))
-        .limit(1);
-    if (!owner) return new Set();
     await bindPlacementProfileInTx(tx, {
         itemId: recordingId,
         ownerUserId: owner.userId,

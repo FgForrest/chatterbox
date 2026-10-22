@@ -36,6 +36,7 @@ import {
     reclaimStaleJobs,
     releaseClaimedJobs,
 } from "@/db/queries/async-jobs";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { StepFailedError } from "@/lib/pipeline/outcome";
 import { captureServerException } from "@/lib/posthog-server";
 import { backoffDelayMs } from "./backoff";
@@ -199,11 +200,32 @@ async function runJob(
         )
             throw new StepFailedError(stepOutcome.code, stepOutcome.retryable);
         stop();
-        await completeJob({
-            jobId: job.id,
-            claimToken: job.claimToken,
-            result: result ?? null,
-        });
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const settled = await retryOnDeadlock(() =>
+                    completeJob({
+                        jobId: job.id,
+                        claimToken: job.claimToken,
+                        result: result ?? null,
+                    }),
+                );
+                if (!settled)
+                    console.debug("[job-worker] superseded completion claim", {
+                        jobId: job.id,
+                    });
+                break;
+            } catch (error) {
+                if (attempt < 2) continue;
+                console.error(
+                    `[job-worker] could not settle completed job ${job.id}:`,
+                    error,
+                );
+                captureServerException(error, {
+                    source: `worker:settle:${job.kind}`,
+                    distinctId: job.userId,
+                });
+            }
+        }
     } catch (error) {
         stop();
         if (error instanceof JobDeferredError) {

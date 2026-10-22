@@ -8,7 +8,10 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
-import { bindPipelineJobInTx } from "@/db/queries/pipeline-jobs";
+import {
+    bindPipelineJobInTx,
+    lockPipelineTargetsInTx,
+} from "@/db/queries/pipeline-jobs";
 import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
 import {
     asyncJobs,
@@ -297,6 +300,28 @@ export async function startLearnRun(input: {
         };
     };
     const started = await db.transaction(async (tx) => {
+        await tx
+            .select({
+                id: access.kind === "mail" ? chatterItems.id : recordings.id,
+            })
+            .from(access.kind === "mail" ? chatterItems : recordings)
+            .where(
+                access.kind === "mail"
+                    ? and(
+                          eq(chatterItems.id, access.recordingId),
+                          eq(chatterItems.userId, access.ownerUserId),
+                      )
+                    : and(
+                          eq(recordings.id, access.recordingId),
+                          eq(recordings.userId, access.ownerUserId),
+                      ),
+            )
+            .for("share");
+        await lockPipelineTargetsInTx(
+            tx,
+            [{ itemId: access.recordingId, userId: access.ownerUserId }],
+            trigger !== "manual",
+        );
         const inserted = await insertRun(tx);
         if ("open" in inserted) {
             if (inserted.open.jobId) {

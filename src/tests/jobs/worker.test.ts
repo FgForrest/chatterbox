@@ -152,6 +152,42 @@ describe("job worker", () => {
         expect(queries.failJobAttempt).not.toHaveBeenCalled();
     });
 
+    it("retries a deadlocked completion without repeating paid work", async () => {
+        const run = vi.fn().mockResolvedValue({ outcome: { kind: "done" } });
+        const failure = vi.fn();
+        registerJobHandler(testHandler({ run, onTerminalFailure: failure }));
+        queries.completeJob
+            .mockRejectedValueOnce(
+                Object.assign(new Error("deadlock"), {
+                    cause: { code: "40P01" },
+                }),
+            )
+            .mockResolvedValue(true);
+        claimOnce(claimed());
+        await runTick();
+        expect(run).toHaveBeenCalledOnce();
+        expect(queries.completeJob).toHaveBeenCalledTimes(2);
+        expect(queries.failJobAttempt).not.toHaveBeenCalled();
+        expect(failure).not.toHaveBeenCalled();
+    });
+
+    it("bounds completion retries and keeps settlement errors out of handler failure handling", async () => {
+        const run = vi.fn().mockResolvedValue({ outcome: { kind: "done" } });
+        registerJobHandler(testHandler({ run }));
+        queries.completeJob.mockRejectedValue(
+            new Error("database unavailable"),
+        );
+        claimOnce(claimed());
+        await runTick();
+        expect(run).toHaveBeenCalledOnce();
+        expect(queries.completeJob).toHaveBeenCalledTimes(3);
+        expect(queries.failJobAttempt).not.toHaveBeenCalled();
+        expect(captureServerException).toHaveBeenCalledWith(expect.any(Error), {
+            source: "worker:settle:test",
+            distinctId: "user-1",
+        });
+    });
+
     it("hands the handler the payload its own parser produced", async () => {
         const run = vi.fn().mockResolvedValue(undefined);
         registerJobHandler(

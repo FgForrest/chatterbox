@@ -1,10 +1,13 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     type AsyncJobRow,
+    pipelineJobTransaction,
     settleTerminalJobInTx,
 } from "@/db/queries/async-jobs";
 import {
+    jobBindings,
+    lockPipelineTargetsInTx,
     type PipelineJobBinding,
     settlePipelineBindingInTx,
     terminalStepOutcome,
@@ -53,12 +56,11 @@ export async function reconcilePipelineSteps(
 ): Promise<number> {
     if (limit <= 0 || perUserLimit <= 0) return 0;
     const ended: AsyncJobRow[] = [];
-    const count = await db.transaction(async (tx) => {
-        const rows = await tx.execute<{
-            itemId: string;
-            userId: string;
-            phases: PipelinePhases;
-        }>(sql`
+    const rows = await db.execute<{
+        itemId: string;
+        userId: string;
+        phases: PipelinePhases;
+    }>(sql`
             with candidates as (
                 select p.item_id, p.user_id, p.updated_at,
                     row_number() over (partition by p.user_id order by p.updated_at, p.item_id) as owner_rank
@@ -76,12 +78,19 @@ export async function reconcilePipelineSteps(
                     where coalesce(leaf.record ->> 'state', 'pending') in ('pending', 'running', 'waiting')
                       and case when leaf.record ->> 'jobId' is not null then
                         j.id is null or j.status in ('completed', 'failed') or
-                        (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at) < ${now.toISOString()}::timestamp - interval '120 seconds')
+                        (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at) < now() - interval '120 seconds')
                       else
-                        (leaf.record -> 'waitingFor' ->> 'until' is not null and
+                        coalesce(leaf.record ->> 'at', phase.value ->> 'at')::timestamp <= ${now.toISOString()}::timestamp - interval '120 seconds'
+                        and (leaf.record ->> 'replannedAt' is null or
+                            (leaf.record ->> 'replannedAt')::timestamp <= ${now.toISOString()}::timestamp -
+                            case coalesce((leaf.record ->> 'replanAttempts')::int, 0)
+                                when 1 then interval '2 minutes'
+                                when 2 then interval '10 minutes'
+                                else interval '60 minutes' end)
+                        and ((leaf.record -> 'waitingFor' ->> 'until' is not null and
                             leaf.record -> 'waitingFor' ->> 'until' <= ${now.toISOString()})
                         or (leaf.record -> 'waitingFor' is null and
-                            (coalesce(leaf.record ->> 'state', 'pending') <> 'waiting' or leaf.record ->> 'reason' is null))
+                            (coalesce(leaf.record ->> 'state', 'pending') <> 'waiting' or leaf.record ->> 'reason' is null)))
                       end
                   )
             )
@@ -90,11 +99,65 @@ export async function reconcilePipelineSteps(
             where c.owner_rank <= ${perUserLimit}
             order by c.owner_rank, c.updated_at, c.user_id, c.item_id
             limit ${limit}
-            for update of p skip locked
         `);
-        let repaired = 0;
-        for (const row of rows) {
-            for (const { phase, step, record } of leaves(row.phases)) {
+    let count = 0;
+    for (const candidate of rows) {
+        const result = await pipelineJobTransaction(async (tx) => {
+            const ids = leaves(candidate.phases).flatMap(({ record }) =>
+                record.jobId ? [record.jobId] : [],
+            );
+            const snapshots =
+                ids.length > 0
+                    ? await tx
+                          .select({ payload: asyncJobs.payload })
+                          .from(asyncJobs)
+                          .where(
+                              and(
+                                  inArray(asyncJobs.id, ids),
+                                  sql`(${asyncJobs.userId} = ${candidate.userId} or coalesce(${asyncJobs.payload} -> 'pipelineSteps', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('itemId', ${candidate.itemId}::text, 'userId', ${candidate.userId}::text)))`,
+                              ),
+                          )
+                    : [];
+            const targets = [
+                candidate,
+                ...snapshots.flatMap((job) => jobBindings(job.payload)),
+            ];
+            if (!(await lockPipelineTargetsInTx(tx, targets, false, true)))
+                return { repaired: 0, ended: [] as AsyncJobRow[] };
+            const [row] = await tx
+                .select()
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, candidate.itemId),
+                        eq(itemProcessing.userId, candidate.userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update", { skipLocked: true })
+                .limit(1);
+            if (!row) return { repaired: 0, ended: [] as AsyncJobRow[] };
+            let repaired = 0;
+            const ended: AsyncJobRow[] = [];
+            for (const leaf of leaves(row.phases)) {
+                const { phase, step } = leaf;
+                const [current] = await tx
+                    .select({ phases: itemProcessing.phases })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, row.itemId),
+                            eq(itemProcessing.userId, row.userId),
+                            eq(itemProcessing.view, "private"),
+                        ),
+                    )
+                    .limit(1);
+                if (!current) continue;
+                row.phases = current.phases;
+                const record = step
+                    ? row.phases[phase]?.steps?.[step]
+                    : row.phases[phase];
+                if (!record) continue;
                 if (
                     !["pending", "running", "waiting"].includes(
                         record.state ?? "pending",
@@ -102,8 +165,11 @@ export async function reconcilePipelineSteps(
                 )
                     continue;
                 if (record.jobId) {
-                    const [job] = await tx
-                        .select()
+                    const [selected] = await tx
+                        .select({
+                            job: asyncJobs,
+                            stale: sql<boolean>`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}, ${asyncJobs.updatedAt}) < now() - interval '120 seconds'`,
+                        })
                         .from(asyncJobs)
                         .where(
                             and(
@@ -113,6 +179,19 @@ export async function reconcilePipelineSteps(
                         )
                         .for("update", { skipLocked: true })
                         .limit(1);
+                    const job = selected?.job;
+                    if (
+                        job &&
+                        jobBindings(job.payload).some(
+                            (binding) =>
+                                !targets.some(
+                                    (target) =>
+                                        target.itemId === binding.itemId &&
+                                        target.userId === binding.userId,
+                                ),
+                        )
+                    )
+                        continue;
                     if (!job) {
                         const [exists] = await tx
                             .select({ id: asyncJobs.id })
@@ -134,14 +213,35 @@ export async function reconcilePipelineSteps(
                         generation: record.generation,
                     };
                     const stale =
-                        job?.status === "processing" &&
-                        (
-                            job.heartbeatAt ??
-                            job.startedAt ??
-                            job.updatedAt
-                        ).getTime() <
-                            now.getTime() - 120_000;
+                        job?.status === "processing" && selected?.stale;
                     if (stale && job.claimToken) {
+                        if (job.attempts < job.maxAttempts) {
+                            await tx
+                                .update(asyncJobs)
+                                .set({
+                                    status: "pending",
+                                    claimToken: null,
+                                    startedAt: null,
+                                    heartbeatAt: null,
+                                    nextAttemptAt: new Date(),
+                                    updatedAt: new Date(),
+                                    lastError:
+                                        "Worker stopped responding; job reclaimed",
+                                })
+                                .where(
+                                    and(
+                                        eq(asyncJobs.id, job.id),
+                                        eq(asyncJobs.userId, job.userId),
+                                        eq(
+                                            asyncJobs.claimToken,
+                                            job.claimToken,
+                                        ),
+                                        eq(asyncJobs.status, "processing"),
+                                    ),
+                                );
+                            repaired++;
+                            continue;
+                        }
                         if (
                             await settleTerminalJobInTx(tx, {
                                 jobId: job.id,
@@ -176,7 +276,17 @@ export async function reconcilePipelineSteps(
                         job.status === "failed"
                     ) {
                         let outcome: StepOutcome;
-                        if (!job)
+                        const superseded =
+                            job &&
+                            jobBindings(job.payload).some(
+                                (named) =>
+                                    named.itemId === binding.itemId &&
+                                    named.userId === binding.userId &&
+                                    named.phase === binding.phase &&
+                                    named.step === binding.step &&
+                                    named.generation !== binding.generation,
+                            );
+                        if (!job || superseded)
                             outcome = {
                                 kind: "failed",
                                 code: "lost",
@@ -208,31 +318,95 @@ export async function reconcilePipelineSteps(
                         record.reason
                     )
                         continue;
-                    const [current] = await tx
-                        .select({ phases: itemProcessing.phases })
-                        .from(itemProcessing)
-                        .where(
-                            and(
-                                eq(itemProcessing.itemId, row.itemId),
-                                eq(itemProcessing.userId, row.userId),
-                                eq(itemProcessing.view, "private"),
-                            ),
+                    const phaseRecord = row.phases[phase];
+                    if (!phaseRecord) continue;
+                    const createdAt = Date.parse(
+                        ("at" in record ? record.at : undefined) ??
+                            phaseRecord.at,
+                    );
+                    const attempts = record.replanAttempts ?? 0;
+                    const delay =
+                        attempts === 1
+                            ? 120_000
+                            : attempts === 2
+                              ? 600_000
+                              : 3_600_000;
+                    if (
+                        !Number.isFinite(createdAt) ||
+                        createdAt > now.getTime() - 120_000 ||
+                        (record.replannedAt &&
+                            Date.parse(record.replannedAt) >
+                                now.getTime() - delay)
+                    )
+                        continue;
+                    let outcome: StepOutcome | undefined;
+                    if (step) {
+                        const [legacy] = await tx
+                            .select()
+                            .from(asyncJobs)
+                            .where(
+                                and(
+                                    eq(asyncJobs.userId, row.userId),
+                                    eq(asyncJobs.subjectId, row.itemId),
+                                    eq(
+                                        asyncJobs.kind,
+                                        step === "title"
+                                            ? "title.generate"
+                                            : step,
+                                    ),
+                                ),
+                            )
+                            .orderBy(desc(asyncJobs.createdAt))
+                            .limit(1);
+                        if (
+                            legacy?.status === "failed" &&
+                            legacy.completedAt &&
+                            legacy.completedAt.getTime() >=
+                                Date.parse(phaseRecord.at)
                         )
-                        .limit(1);
-                    if (!current) continue;
-                    const phases = { ...current.phases };
-                    if (step && phases[phase]) {
-                        const steps = { ...phases[phase].steps };
-                        delete steps[step];
-                        phases[phase] = { ...phases[phase], steps };
-                    } else {
-                        const currentPhase = phases[phase];
-                        if (currentPhase?.waitingFor?.until)
-                            phases[phase] = {
-                                ...currentPhase,
-                                waitingFor: undefined,
-                            };
+                            outcome = terminalStepOutcome(legacy);
                     }
+                    if (!outcome && attempts >= 3)
+                        outcome = {
+                            kind: "failed",
+                            code: "lost",
+                            retryable: true,
+                        };
+                    const next = {
+                        ...record,
+                        replannedAt: now.toISOString(),
+                        replanAttempts: attempts + (outcome ? 0 : 1),
+                        waitingFor: undefined,
+                        ...(outcome
+                            ? {
+                                  state: "failed" as const,
+                                  reason:
+                                      outcome.kind === "failed"
+                                          ? outcome.code
+                                          : "lost",
+                                  outcome,
+                                  retryable: true,
+                              }
+                            : {}),
+                    };
+                    const phases: PipelinePhases = {
+                        ...row.phases,
+                        [phase]: step
+                            ? {
+                                  ...phaseRecord,
+                                  ...(outcome
+                                      ? {
+                                            state: "failed" as const,
+                                            reason: next.reason,
+                                        }
+                                      : {}),
+                                  steps: {
+                                      ...phaseRecord.steps,
+                                      [step]: next,
+                                  },
+                              }
+                            : { ...phaseRecord, ...next },
+                    };
                     await tx
                         .update(itemProcessing)
                         .set({ phases, updatedAt: now })
@@ -243,13 +417,23 @@ export async function reconcilePipelineSteps(
                                 eq(itemProcessing.view, "private"),
                             ),
                         );
+                    row.phases = phases;
                     await wakePipelineInTx(tx, row.itemId, row.userId);
                     repaired++;
                 }
             }
-        }
-        return repaired;
-    });
+            return { repaired, ended };
+        }).catch((error: unknown) => {
+            console.error(
+                "[pipeline] reconciliation failed",
+                { itemId: candidate.itemId, userId: candidate.userId },
+                error,
+            );
+            return { repaired: 0, ended: [] as AsyncJobRow[] };
+        });
+        count += result.repaired;
+        ended.push(...result.ended);
+    }
     if (afterFailure) for (const job of ended) await afterFailure(job);
     return count;
 }

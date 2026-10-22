@@ -182,6 +182,10 @@ export async function enqueueSummaryJob(
                   revisionId: input.profileRevisionId,
                   actorUserId: input.userId,
                   organizationUserId: await getOrgUserId(),
+                  pipelineTarget: {
+                      itemId: input.recordingId,
+                      userId: input.userId,
+                  },
               },
               queue,
           )

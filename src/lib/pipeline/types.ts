@@ -30,6 +30,9 @@ export interface ContentRevisionInput {
 export type SummaryStepName = "summary" | "topics" | "title";
 
 export interface PhaseStepRecord {
+    replannedAt?: string;
+    replanAttempts?: number;
+    at?: string;
     jobId?: string;
     outcome?: StepOutcome;
     retryable?: boolean;
@@ -54,6 +57,8 @@ export interface PlacementProfileBinding {
 }
 
 export interface PhaseRecord {
+    replannedAt?: string;
+    replanAttempts?: number;
     jobId?: string;
     outcome?: StepOutcome;
     retryable?: boolean;

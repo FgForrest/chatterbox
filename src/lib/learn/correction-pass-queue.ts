@@ -8,7 +8,10 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import { bindAvailableCorrectionInTx } from "@/db/queries/pipeline-jobs";
+import {
+    bindAvailableCorrectionInTx,
+    lockPipelineTargetsInTx,
+} from "@/db/queries/pipeline-jobs";
 import {
     asyncJobs,
     type learnRuns,
@@ -42,6 +45,7 @@ export async function supersedeCorrectionPassesInTx(
     const passes = await tx
         .select({
             id: transcriptCorrectionPasses.id,
+            itemId: transcriptCorrectionPasses.recordingId,
             actorUserId: transcriptCorrectionPasses.actorUserId,
         })
         .from(transcriptCorrectionPasses)
@@ -61,6 +65,10 @@ export async function supersedeCorrectionPassesInTx(
         );
     const passIds = passes.map((pass) => pass.id);
     if (passIds.length === 0) return;
+    await lockPipelineTargetsInTx(
+        tx,
+        passes.map((pass) => ({ itemId: pass.itemId, userId })),
+    );
     const actorUserIds = [
         ...new Set(
             passes.flatMap((pass) =>
@@ -129,6 +137,9 @@ export async function queueCorrectionPassInTx(
 ): Promise<boolean> {
     if (!run.actorUserId) return false;
     if (!correctAfterLearn) return false;
+    await lockPipelineTargetsInTx(tx, [
+        { itemId: run.itemId, userId: run.userId },
+    ]);
     const [pass] = await tx
         .insert(transcriptCorrectionPasses)
         .values({
