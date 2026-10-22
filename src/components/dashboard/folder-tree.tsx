@@ -4,40 +4,46 @@ import {
     ChevronDown,
     ChevronRight,
     Folder,
-    FolderInput,
     FolderPlus,
     History,
     MoreHorizontal,
-    Pencil,
+    PanelLeftClose,
     Search,
-    Trash2,
+    Settings,
+    Users,
     X,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { type DragEvent, useMemo, useState } from "react";
-import { useConfirm } from "@/components/confirm-dialog";
-import { FolderDeletionAddresses } from "@/components/mail/folder-mail-addresses";
+import { type DragEvent, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { effectiveRecordingCounts } from "@/lib/folders/hierarchy";
+import { useLibraryPreferences } from "@/hooks/use-library-preferences";
+import {
+    FOLDER_DRAG_TYPE,
+    RECORDING_DRAG_TYPE,
+    RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+    recordingDropEffect,
+} from "@/lib/folders/drag";
+import { ancestorFolderIds } from "@/lib/folders/hierarchy";
+import {
+    type FolderNavigation,
+    libraryNavigation,
+    matchFolderEntries,
+    visibleFolderLevel,
+} from "@/lib/folders/navigation";
 import { cn } from "@/lib/utils";
 import type {
     RecordingFolder,
@@ -45,18 +51,7 @@ import type {
 } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
-type FolderAction =
-    | { kind: "create"; folder: RecordingFolder }
-    | { kind: "rename"; folder: RecordingFolder }
-    | { kind: "move"; folder: RecordingFolder }
-    | null;
-
 type DropPlacement = "before" | "inside" | "after";
-
-const RECORDING_DRAG_TYPE = "application/x-riffado-recording";
-/** Set alongside a recording drag when it starts inside an Organization folder. */
-export const RECORDING_SOURCE_FOLDER_DRAG_TYPE =
-    "application/x-riffado-recording-source-folder";
 
 interface DropTarget {
     folderId: string;
@@ -70,25 +65,24 @@ interface FolderTreeProps {
     selectedFolderId: string | null;
     onRecent: () => void;
     onSelectFolder: (folder: RecordingFolder) => void;
-    onCreateFolder: (parentId: string, name: string) => Promise<void>;
-    onRenameFolder: (folderId: string, name: string) => Promise<void>;
     onMoveFolder: (
         folderId: string,
         parentId: string,
         beforeId?: string | null,
     ) => Promise<void>;
-    onDeleteFolder: (folderId: string) => Promise<void>;
     onAssignRecording: (recordingId: string, folderId: string) => Promise<void>;
-    /** Move a shared recording between Organization folders. */
+
     onMoveRecording?: (
         recordingId: string,
         fromFolderId: string,
         toFolderId: string,
     ) => Promise<void>;
-    /** The instance receives mail: deleting a folder stops its addresses. */
-    mailEnabled?: boolean;
     onNewFolder?: () => void;
     canCurate?: boolean;
+    onSettings: (folder: RecordingFolder) => void;
+    navigation?: FolderNavigation;
+    recentCount?: number;
+    onCollapse?: () => void;
 }
 
 export function FolderTree({
@@ -98,27 +92,51 @@ export function FolderTree({
     selectedFolderId,
     onRecent,
     onSelectFolder,
-    onCreateFolder,
-    onRenameFolder,
     onMoveFolder,
-    onDeleteFolder,
     onAssignRecording,
     onMoveRecording,
-    mailEnabled = false,
     onNewFolder,
     canCurate = false,
+    onSettings,
+    navigation,
+    recentCount,
+    onCollapse,
 }: FolderTreeProps) {
     const i18n = useExtracted();
-    const confirm = useConfirm();
     const folderLabel = useFolderLabel();
-    const [query, setQuery] = useState("");
-    const [expanded, setExpanded] = useState<Set<string>>(
-        () => new Set(folders.map((folder) => folder.id)),
+    const [isMac, setIsMac] = useState(false);
+    useEffect(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
+    const { ready, preferences, setPreferences, recentFolders } =
+        useLibraryPreferences();
+    const [allLevels, setAllLevels] = useState<Set<string>>(new Set());
+    const data = useMemo(
+        () =>
+            navigation ??
+            libraryNavigation(folders, assignments, recordings, folderLabel),
+        [navigation, folders, assignments, recordings, folderLabel],
     );
-    const [action, setAction] = useState<FolderAction>(null);
-    const [draft, setDraft] = useState("");
-    const [moveParentId, setMoveParentId] = useState("");
-    const [saving, setSaving] = useState(false);
+    const activity = data.activity;
+    const countByFolder = data.counts;
+    const byId = useMemo(
+        () => new Map(folders.map((folder) => [folder.id, folder])),
+        [folders],
+    );
+    const currentPath = useMemo(
+        () =>
+            selectedFolderId
+                ? ancestorFolderIds(folders, selectedFolderId, byId)
+                : new Set<string>(),
+        [folders, selectedFolderId, byId],
+    );
+    const [query, setQuery] = useState("");
+    const [expanded, setExpanded] = useState(
+        () =>
+            new Set(
+                folders
+                    .filter((folder) => folder.parentId === null)
+                    .map((folder) => folder.id),
+            ),
+    );
     const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
     const [recordingDropFolderId, setRecordingDropFolderId] = useState<
@@ -146,79 +164,38 @@ export function FolderTree({
         return result;
     }, [folders]);
 
-    const countByFolder = useMemo(() => {
-        return effectiveRecordingCounts(
-            folders,
-            assignments,
-            recordings.map((recording) => recording.id),
-            recordings
-                .filter((recording) => recording.view !== "org")
-                .map((recording) => recording.id),
-        );
-    }, [assignments, folders, recordings]);
-
+    useEffect(() => {
+        if (preferences.expanded) setExpanded(new Set(preferences.expanded));
+    }, [preferences.expanded]);
+    useEffect(() => {
+        if (!ready || currentPath.size === 0) return;
+        setExpanded((value) => new Set([...value, ...currentPath]));
+        setPreferences((value) => ({
+            ...value,
+            expanded: [
+                ...new Set([
+                    ...(value.expanded ??
+                        folders
+                            .filter((folder) => folder.parentId === null)
+                            .map((folder) => folder.id)),
+                    ...currentPath,
+                ]),
+            ],
+        }));
+    }, [ready, currentPath, folders, setPreferences]);
     const matchingIds = useMemo(() => {
-        const normalized = query.trim().toLowerCase();
-        if (!normalized) return null;
-        const byId = new Map(folders.map((folder) => [folder.id, folder]));
+        if (!query.trim()) return null;
         const result = new Set<string>();
-        for (const folder of folders) {
-            if (!folderLabel(folder).toLowerCase().includes(normalized))
-                continue;
-            let current: RecordingFolder | undefined = folder;
-            while (current) {
-                result.add(current.id);
-                current = current.parentId
-                    ? byId.get(current.parentId)
-                    : undefined;
-            }
+        for (const { folder } of matchFolderEntries(
+            data.entries,
+            query,
+            folderLabel,
+        )) {
+            for (const id of ancestorFolderIds(folders, folder.id, byId))
+                result.add(id);
         }
         return result;
-    }, [folderLabel, folders, query]);
-
-    const descendantsOfAction = useMemo(() => {
-        if (action?.kind !== "move") return new Set<string>();
-        const descendants = new Set<string>([action.folder.id]);
-        const visit = (parentId: string) => {
-            for (const child of childrenByParent.get(parentId) ?? []) {
-                descendants.add(child.id);
-                visit(child.id);
-            }
-        };
-        visit(action.folder.id);
-        return descendants;
-    }, [action, childrenByParent]);
-
-    const openAction = (
-        kind: Exclude<FolderAction, null>["kind"],
-        folder: RecordingFolder,
-    ) => {
-        setAction({ kind, folder });
-        setDraft(kind === "rename" ? folder.name : "");
-        setMoveParentId(folder.parentId ?? "");
-    };
-
-    const submitAction = async () => {
-        if (!action) return;
-        setSaving(true);
-        try {
-            if (action.kind === "create") {
-                await onCreateFolder(action.folder.id, draft);
-                setExpanded((current) =>
-                    new Set(current).add(action.folder.id),
-                );
-            } else if (action.kind === "rename") {
-                await onRenameFolder(action.folder.id, draft);
-            } else if (moveParentId) {
-                await onMoveFolder(action.folder.id, moveParentId);
-            }
-            setAction(null);
-        } catch {
-            return;
-        } finally {
-            setSaving(false);
-        }
-    };
+    }, [data.entries, folderLabel, folders, byId, query]);
 
     const dropPlacementFor = (
         event: DragEvent<HTMLButtonElement>,
@@ -277,11 +254,9 @@ export function FolderTree({
     const renderFolder = (folder: RecordingFolder, depth: number) => {
         if (matchingIds && !matchingIds.has(folder.id)) return null;
         const children = childrenByParent.get(folder.id) ?? [];
-        const isExpanded = query.trim() ? true : expanded.has(folder.id);
+        const isExpanded = !!query.trim() || expanded.has(folder.id);
         const canExpand = children.length > 0;
         const canManage = folder.scope !== "org" || canCurate;
-        const canCreateSubfolder =
-            folder.scope !== "org" || folder.parentId !== null || canCurate;
         return (
             <div key={folder.id}>
                 <div
@@ -301,27 +276,27 @@ export function FolderTree({
                         recordingDropFolderId === folder.id &&
                             "border-primary bg-primary/10 ring-1 ring-primary/30",
                     )}
-                    style={{ paddingLeft: `${depth * 20 + 4}px` }}
+                    style={{ paddingLeft: `${depth * 12 + 2}px` }}
                 >
                     {canExpand ? (
                         <button
                             type="button"
                             className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            aria-expanded={isExpanded}
                             aria-label={
                                 isExpanded
                                     ? i18n("Collapse folder")
                                     : i18n("Expand folder")
                             }
                             onClick={() => {
-                                setExpanded((current) => {
-                                    const next = new Set(current);
-                                    if (next.has(folder.id)) {
-                                        next.delete(folder.id);
-                                    } else {
-                                        next.add(folder.id);
-                                    }
-                                    return next;
-                                });
+                                const next = new Set(expanded);
+                                if (isExpanded) next.delete(folder.id);
+                                else next.add(folder.id);
+                                setExpanded(next);
+                                setPreferences((value) => ({
+                                    ...value,
+                                    expanded: [...next],
+                                }));
                             }}
                         >
                             {isExpanded ? (
@@ -339,7 +314,7 @@ export function FolderTree({
                         onDragStart={(event) => {
                             setDraggedFolderId(folder.id);
                             event.dataTransfer.setData(
-                                "application/x-riffado-folder",
+                                FOLDER_DRAG_TYPE,
                                 folder.id,
                             );
                             event.dataTransfer.effectAllowed = "move";
@@ -353,9 +328,22 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (folder.kind === "private") return;
+                                if (folder.kind === "private") {
+                                    event.dataTransfer.dropEffect = "none";
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
+                                const effect = recordingDropEffect(
+                                    Array.from(event.dataTransfer.types),
+                                    folder.scope,
+                                    !!onMoveRecording,
+                                );
+                                event.dataTransfer.dropEffect = effect;
+                                if (effect === "none") {
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
                                 event.preventDefault();
-                                event.dataTransfer.dropEffect = "copy";
                                 setDropTarget(null);
                                 setRecordingDropFolderId(folder.id);
                                 return;
@@ -388,6 +376,29 @@ export function FolderTree({
                                   )
                                 : "";
                             if (recordingId) {
+                                const recording =
+                                    recordings.find(
+                                        (item) =>
+                                            item.id === recordingId &&
+                                            item.view === "org",
+                                    ) ??
+                                    recordings.find(
+                                        (item) => item.id === recordingId,
+                                    );
+                                if (
+                                    folder.kind === "private" ||
+                                    recordingDropEffect(
+                                        Array.from(event.dataTransfer.types),
+                                        folder.scope,
+                                        !!onMoveRecording,
+                                    ) === "none" ||
+                                    (recording?.isOwn === false &&
+                                        folder.scope !== "org")
+                                ) {
+                                    event.dataTransfer.dropEffect = "none";
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
                                 event.preventDefault();
                                 setDropTarget(null);
                                 setRecordingDropFolderId(null);
@@ -397,7 +408,8 @@ export function FolderTree({
                                     );
                                 if (
                                     sourceFolderId &&
-                                    folder.scope === "org" &&
+                                    byId.get(sourceFolderId)?.scope ===
+                                        folder.scope &&
                                     onMoveRecording
                                 ) {
                                     if (sourceFolderId !== folder.id) {
@@ -407,7 +419,7 @@ export function FolderTree({
                                             folder.id,
                                         ).catch(() => {});
                                     }
-                                } else if (folder.kind !== "private") {
+                                } else {
                                     void onAssignRecording(
                                         recordingId,
                                         folder.id,
@@ -417,9 +429,7 @@ export function FolderTree({
                             }
                             const draggedId =
                                 draggedFolderId ||
-                                event.dataTransfer.getData(
-                                    "application/x-riffado-folder",
-                                );
+                                event.dataTransfer.getData(FOLDER_DRAG_TYPE);
                             if (!canDropFolderOn(draggedId, folder)) {
                                 setDropTarget(null);
                                 setDraggedFolderId(null);
@@ -444,14 +454,27 @@ export function FolderTree({
                                 count: countByFolder.get(folder.id) ?? 0,
                             },
                         )}
-                        className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left text-sm"
+                        aria-current={
+                            selectedFolderId === folder.id
+                                ? "location"
+                                : undefined
+                        }
+                        className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-[13px]"
                     >
-                        <Folder
-                            className={cn(
-                                "size-5 shrink-0 text-primary",
-                                folder.kind !== "custom" && "fill-primary/10",
-                            )}
-                        />
+                        {folder.kind === "public" ? (
+                            <Users className="size-4 shrink-0 text-blue-600" />
+                        ) : (
+                            <Folder
+                                className={cn(
+                                    "size-4 shrink-0",
+                                    folder.scope === "org"
+                                        ? "text-blue-600"
+                                        : "text-primary",
+                                    folder.kind !== "custom" &&
+                                        "fill-primary/10",
+                                )}
+                            />
+                        )}
                         <span className="truncate">{folderLabel(folder)}</span>
                         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                             {countByFolder.get(folder.id) ?? 0}
@@ -463,10 +486,6 @@ export function FolderTree({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                disabled={
-                                    !canCreateSubfolder &&
-                                    !(folder.kind === "custom" && canManage)
-                                }
                                 className="size-7 opacity-100 sm:opacity-0 sm:group-hover/folder:opacity-100 data-[state=open]:opacity-100"
                                 aria-label={i18n(
                                     "Folder actions for {folder}",
@@ -477,254 +496,168 @@ export function FolderTree({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            {canCreateSubfolder ? (
-                                <DropdownMenuItem
-                                    onSelect={() =>
-                                        openAction("create", folder)
-                                    }
-                                >
-                                    <FolderPlus /> {i18n("New subfolder")}
-                                </DropdownMenuItem>
-                            ) : null}
-                            {folder.kind === "custom" && canManage && (
-                                <>
-                                    <DropdownMenuItem
-                                        onSelect={() =>
-                                            openAction("rename", folder)
-                                        }
-                                    >
-                                        <Pencil /> {i18n("Rename")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        onSelect={() =>
-                                            openAction("move", folder)
-                                        }
-                                    >
-                                        <FolderInput /> {i18n("Move to…")}
-                                    </DropdownMenuItem>
-                                </>
-                            )}
-                            {folder.kind === "custom" && canManage && (
-                                <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={(event) => {
-                                            event.preventDefault();
-                                            void confirm({
-                                                title: i18n(
-                                                    "Delete “{folder}”?",
-                                                    { folder: folder.name },
-                                                ),
-                                                description: (
-                                                    <>
-                                                        <p>
-                                                            {folder.scope ===
-                                                            "org"
-                                                                ? i18n(
-                                                                      "This folder and all its subfolders will be deleted for everyone. Their recordings stay shared and move to the Organization folder.",
-                                                                  )
-                                                                : i18n(
-                                                                      "This folder and all its subfolders will be deleted. Recordings stay intact; only their folder assignments are removed.",
-                                                                  )}
-                                                        </p>
-                                                        {mailEnabled && (
-                                                            <FolderDeletionAddresses
-                                                                folderId={
-                                                                    folder.id
-                                                                }
-                                                            />
-                                                        )}
-                                                    </>
-                                                ),
-                                                confirmLabel:
-                                                    i18n("Delete folder"),
-                                                pendingLabel: i18n("Deleting…"),
-                                                destructive: true,
-                                                onConfirm: () =>
-                                                    onDeleteFolder(folder.id),
-                                            });
-                                        }}
-                                    >
-                                        <Trash2 /> {i18n("Delete")}
-                                    </DropdownMenuItem>
-                                </>
-                            )}
+                            <DropdownMenuItem
+                                onSelect={() => onSettings(folder)}
+                            >
+                                <Settings /> {i18n("Folder settings")}
+                            </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
-                {isExpanded &&
-                    children.map((child) => renderFolder(child, depth + 1))}
+                {isExpanded && renderLevel(children, depth + 1, folder.id)}
             </div>
         );
     };
 
-    const customFolderCount = folders.filter(
-        (folder) => folder.kind === "custom",
-    ).length;
+    const renderLevel = (
+        level: RecordingFolder[],
+        depth: number,
+        parentId: string,
+    ) => {
+        const visible = visibleFolderLevel(
+            level,
+            activity,
+            currentPath,
+            8,
+            !!query.trim() || allLevels.has(parentId),
+        );
+        return (
+            <>
+                {visible.map((folder) => renderFolder(folder, depth))}
+                {visible.length < level.length && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-muted-foreground"
+                        onClick={() =>
+                            setAllLevels((current) =>
+                                new Set(current).add(parentId),
+                            )
+                        }
+                    >
+                        {i18n(
+                            "{count, plural, one {All # folder} other {All # folders}}",
+                            { count: level.length },
+                        )}
+                    </Button>
+                )}
+            </>
+        );
+    };
 
     return (
-        <>
-            <Card hasNoPadding>
-                <CardContent className="p-0">
-                    <div className="flex flex-col gap-2 border-b p-3">
-                        <div className="relative">
-                            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                                value={query}
-                                onChange={(event) =>
-                                    setQuery(event.target.value)
-                                }
-                                placeholder={i18n("Search folders...")}
-                                aria-label={i18n("Search folders")}
-                                className="h-9 pl-8 pr-8"
-                            />
-                            {query && (
-                                <button
-                                    type="button"
-                                    onClick={() => setQuery("")}
-                                    aria-label={i18n("Clear search")}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                                >
-                                    <X className="size-4" />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>
-                                {i18n(
-                                    "{count, plural, one {# folder} other {# folders}}",
-                                    { count: customFolderCount },
-                                )}
-                            </span>
-                            <div className="flex items-center gap-1">
-                                {onNewFolder ? (
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 px-2 text-xs"
-                                        onClick={onNewFolder}
-                                    >
-                                        <FolderPlus className="size-3.5" />{" "}
-                                        {i18n("New folder")}
-                                    </Button>
-                                ) : null}
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 px-2 text-xs"
-                                    onClick={onRecent}
-                                >
-                                    <History className="size-3.5" />{" "}
-                                    {i18n("Recent")}
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="p-2">
-                        {(childrenByParent.get(null) ?? []).map((folder) =>
-                            renderFolder(folder, 0),
-                        )}
-                        {matchingIds?.size === 0 && (
-                            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                                {i18n("No folders match your search.")}
-                            </p>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
-
-            <Dialog
-                open={action !== null}
-                onOpenChange={(open) => {
-                    if (!open && !saving) setAction(null);
-                }}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>
-                            {action?.kind === "create"
-                                ? i18n("Create subfolder")
-                                : action?.kind === "rename"
-                                  ? i18n("Rename folder")
-                                  : i18n("Move folder")}
-                        </DialogTitle>
-                        <DialogDescription>
-                            {action?.kind === "create"
-                                ? `Add a folder inside ${folderLabel(action.folder)}.`
-                                : action?.kind === "rename"
-                                  ? i18n("Choose a clear name for this folder.")
-                                  : i18n("Choose the new parent folder.")}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {action?.kind === "move" ? (
-                        <NativeSelect
-                            value={moveParentId}
-                            onChange={(event) =>
-                                setMoveParentId(event.target.value)
-                            }
-                            aria-label={i18n("Destination folder")}
-                            className="w-full"
-                        >
-                            {folders
-                                .filter(
-                                    (folder) =>
-                                        !descendantsOfAction.has(folder.id) &&
-                                        folder.scope === action?.folder.scope,
-                                )
-                                .map((folder) => (
-                                    <option key={folder.id} value={folder.id}>
-                                        {folderLabel(folder)}
-                                    </option>
-                                ))}
-                        </NativeSelect>
-                    ) : (
+        <Card
+            hasNoPadding
+            className="flex h-full min-h-0 flex-col overflow-hidden"
+        >
+            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                <div className="flex items-center gap-1 border-b p-2">
+                    <div className="relative min-w-0 flex-1">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
-                            value={draft}
-                            onChange={(event) => setDraft(event.target.value)}
-                            maxLength={100}
-                            placeholder={i18n("Folder name")}
-                            aria-label={i18n("Folder name")}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" && draft.trim()) {
-                                    event.preventDefault();
-                                    void submitAction();
-                                }
-                            }}
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            placeholder={i18n("Find a folder")}
+                            aria-label={i18n("Search folders")}
+                            className="h-8 pl-8 pr-8 text-xs"
                         />
+                        {!query && (
+                            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                                {isMac ? "⌘K" : "Ctrl K"}
+                            </kbd>
+                        )}
+                        {query && (
+                            <button
+                                type="button"
+                                onClick={() => setQuery("")}
+                                aria-label={i18n("Clear search")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                            >
+                                <X className="size-4" />
+                            </button>
+                        )}
+                    </div>
+                    {onCollapse && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Hide folders")}
+                                    onClick={onCollapse}
+                                >
+                                    <PanelLeftClose className="size-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {i18n("Hide folders")}
+                            </TooltipContent>
+                        </Tooltip>
                     )}
-                    <DialogFooter>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-1">
+                    <Button
+                        variant="ghost"
+                        className="w-full justify-start gap-2 text-sm"
+                        aria-current={
+                            !selectedFolderId ? "location" : undefined
+                        }
+                        onClick={onRecent}
+                    >
+                        <History className="size-4" />
+                        {i18n("Recent")}
+                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                            {recentCount ??
+                                recordings.filter((item) => item.view !== "org")
+                                    .length}
+                        </span>
+                    </Button>
+                    {!query.trim() && recentFolders.length > 0 && (
+                        <div className="border-b pb-2">
+                            <p className="px-2 py-2 text-xs text-muted-foreground">
+                                {i18n("Recently used")}
+                            </p>
+                            {recentFolders.map((folder) => (
+                                <button
+                                    key={folder.id}
+                                    type="button"
+                                    onClick={() => onSelectFolder(folder)}
+                                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent"
+                                >
+                                    {folder.scope === "org" ? (
+                                        <Users className="size-4 text-blue-600" />
+                                    ) : (
+                                        <Folder className="size-4 text-primary" />
+                                    )}
+                                    <span className="truncate">
+                                        {folderLabel(folder)}
+                                    </span>
+                                    <span className="ml-auto text-xs text-muted-foreground">
+                                        {countByFolder.get(folder.id) ?? 0}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {renderLevel(childrenByParent.get(null) ?? [], 0, "roots")}
+                    {onNewFolder && (
                         <Button
-                            type="button"
-                            variant="outline"
-                            disabled={saving}
-                            onClick={() => setAction(null)}
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 w-full justify-start"
+                            onClick={onNewFolder}
                         >
-                            {i18n("Cancel")}
+                            <FolderPlus className="size-4" />
+                            {i18n("New folder")}
                         </Button>
-                        <Button
-                            type="button"
-                            disabled={
-                                saving ||
-                                (action?.kind === "move"
-                                    ? !moveParentId
-                                    : !draft.trim())
-                            }
-                            onClick={() => void submitAction()}
-                        >
-                            {saving
-                                ? i18n("Saving…")
-                                : action?.kind === "create"
-                                  ? i18n("Create")
-                                  : action?.kind === "rename"
-                                    ? i18n("Rename")
-                                    : i18n("Move")}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
+                    )}
+                    {matchingIds?.size === 0 && (
+                        <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                            {i18n("No folders match your search.")}
+                        </p>
+                    )}
+                </div>
+            </CardContent>
+        </Card>
     );
 }

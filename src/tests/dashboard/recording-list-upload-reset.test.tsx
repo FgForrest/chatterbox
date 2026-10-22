@@ -54,7 +54,6 @@ describe("RecordingList upload reset", () => {
             initialDateTimeFormat: "relative" as const,
             initialSortOrder: "name" as const,
             initialChunkSize: 50,
-            onOrganize: vi.fn(),
         };
         const { rerender } = render(
             <RecordingList {...props} resetToRecentKey={0} />,

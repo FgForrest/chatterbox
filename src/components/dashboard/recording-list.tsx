@@ -25,6 +25,10 @@ import { RecordingRow } from "@/components/dashboard/recording-row";
 import { Card, CardContent } from "@/components/ui/card";
 import { dateGroupLabel } from "@/lib/format-date";
 import type { DateTimeFormat } from "@/types/common";
+import type {
+    RecordingFolder,
+    RecordingFolderAssignment,
+} from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
 export type { PendingUpload } from "@/components/dashboard/pending-upload-row";
@@ -56,7 +60,26 @@ interface RecordingListProps {
     initialSortOrder: SortOrder;
     initialKindFilter?: KindFilter;
     initialChunkSize: number;
-    onOrganize: () => void;
+    locationKey?: string;
+    header?: React.ReactNode;
+    navigationContent?: React.ReactNode;
+    onFolderSettings?: () => void;
+    canCurate?: boolean;
+    isOrgAccount?: boolean;
+    onFolderCreated?: (folder: RecordingFolder) => void;
+    folder?: RecordingFolder | null;
+    folders?: RecordingFolder[];
+    rowLocations?: Map<string, RecordingFolder[]>;
+    assignments?: RecordingFolderAssignment[];
+    onAssignRecording?: (
+        recordingId: string,
+        folderId: string,
+    ) => Promise<void>;
+    onMoveRecording?: (
+        recordingId: string,
+        from: string,
+        to: string,
+    ) => Promise<void>;
     /** The library the list shows, which the server search reads. */
     searchView?: "private" | "org";
     emptyState?: React.ReactNode;
@@ -106,7 +129,19 @@ export function RecordingList({
     initialSortOrder,
     initialKindFilter = "all",
     initialChunkSize,
-    onOrganize,
+    locationKey = "recent",
+    header,
+    navigationContent,
+    onFolderSettings,
+    canCurate,
+    isOrgAccount = false,
+    onFolderCreated,
+    folder = null,
+    folders = [],
+    rowLocations = new Map(),
+    assignments = [],
+    onAssignRecording,
+    onMoveRecording,
     searchView = "private",
     emptyState,
     resetToRecentKey = 0,
@@ -190,6 +225,8 @@ export function RecordingList({
     );
     const [visibleCount, setVisibleCount] = useState(initialChunkSize);
     const searchRef = useRef<HTMLInputElement>(null);
+    const previousLocation = useRef(locationKey);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const sentinelRef = useRef<HTMLDivElement>(null);
     const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
@@ -209,6 +246,16 @@ export function RecordingList({
         },
         [],
     );
+
+    const assignedByRecording = useMemo(() => {
+        const result = new Map<string, Set<string>>();
+        for (const assignment of assignments) {
+            const ids = result.get(assignment.recordingId) ?? new Set<string>();
+            ids.add(assignment.folderId);
+            result.set(assignment.recordingId, ids);
+        }
+        return result;
+    }, [assignments]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -265,6 +312,18 @@ export function RecordingList({
                         new Date(b.startTime).getTime(),
                 );
                 break;
+            case "duration":
+                sorted.sort(
+                    (a, b) =>
+                        b.duration - a.duration || a.id.localeCompare(b.id),
+                );
+                break;
+            case "size":
+                sorted.sort(
+                    (a, b) =>
+                        b.filesize - a.filesize || a.id.localeCompare(b.id),
+                );
+                break;
             case "name":
                 sorted.sort((a, b) => a.filename.localeCompare(b.filename));
                 break;
@@ -286,7 +345,11 @@ export function RecordingList({
     const visible = filtered.slice(0, visibleCount);
 
     const grouped = useMemo(() => {
-        if (sortOrder === "name") {
+        if (
+            sortOrder === "name" ||
+            sortOrder === "duration" ||
+            sortOrder === "size"
+        ) {
             return [{ label: null as string | null, items: visible }];
         }
         const groups: { label: string; items: Recording[] }[] = [];
@@ -314,8 +377,11 @@ export function RecordingList({
     // Reset visibleCount when the filter changes so search results
     // aren't accidentally truncated.
     useEffect(() => {
+        if (previousLocation.current !== locationKey)
+            scrollRef.current?.scrollTo?.({ top: 0 });
+        previousLocation.current = locationKey;
         setVisibleCount(initialChunkSize);
-    }, [initialChunkSize]);
+    }, [initialChunkSize, locationKey]);
     useEffect(() => {
         if (resetToRecentKey === 0) return;
         setQuery("");
@@ -337,20 +403,30 @@ export function RecordingList({
     useEffect(() => {
         const el = sentinelRef.current;
         if (!el) return;
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const e of entries) {
-                    if (e.isIntersecting) {
-                        setVisibleCount((c) =>
-                            Math.min(c + initialChunkSize, filtered.length),
+        const media = window.matchMedia?.("(min-width: 1024px)");
+        let observer: IntersectionObserver;
+        const observe = () => {
+            observer?.disconnect();
+            observer = new IntersectionObserver(
+                (entries) => {
+                    if (entries.some((entry) => entry.isIntersecting))
+                        setVisibleCount((count) =>
+                            Math.min(count + initialChunkSize, filtered.length),
                         );
-                    }
-                }
-            },
-            { rootMargin: "200px" },
-        );
-        observer.observe(el);
-        return () => observer.disconnect();
+                },
+                {
+                    root: media?.matches ? scrollRef.current : null,
+                    rootMargin: "200px",
+                },
+            );
+            observer.observe(el);
+        };
+        observe();
+        media?.addEventListener("change", observe);
+        return () => {
+            observer.disconnect();
+            media?.removeEventListener("change", observe);
+        };
     }, [filtered.length, initialChunkSize]);
 
     useImperativeHandle(
@@ -366,6 +442,9 @@ export function RecordingList({
                 const nextIdx = Math.min(idx + 1, list.length - 1);
                 const target = list[Math.max(0, nextIdx)];
                 if (target) {
+                    setVisibleCount((count) =>
+                        Math.max(count, list.indexOf(target) + 1),
+                    );
                     onSelect(target);
                     rowRefs.current
                         .get(target.id)
@@ -381,6 +460,9 @@ export function RecordingList({
                 const prevIdx = Math.max(0, idx - 1);
                 const target = list[prevIdx];
                 if (target) {
+                    setVisibleCount((count) =>
+                        Math.max(count, list.indexOf(target) + 1),
+                    );
                     onSelect(target);
                     rowRefs.current
                         .get(target.id)
@@ -393,10 +475,20 @@ export function RecordingList({
 
     const rowPadding = "px-4 py-3";
 
+    let emptyMessage = i18n("No recordings yet.");
+    if (folder) emptyMessage = i18n("This folder is empty");
+    if (query) emptyMessage = i18n("No recordings match your search.");
+
     return (
-        <Card hasNoPadding>
-            <CardContent className="p-0">
+        <Card
+            hasNoPadding
+            className="flex h-full min-h-0 flex-col overflow-hidden"
+        >
+            <div className="shrink-0">
+                {header}
                 <RecordingListToolbar
+                    includesSubfolders={!!folder}
+                    onFolderSettings={onFolderSettings}
                     query={query}
                     onQueryChange={setQuery}
                     onEnterSelectFirst={() => {
@@ -407,7 +499,6 @@ export function RecordingList({
                     channelCounts={channelCounts}
                     sortOrder={sortOrder}
                     onSortOrderChange={setSortOrderPersisted}
-                    onOrganize={onOrganize}
                     reviewCount={reviewCount}
                     needsReviewOnly={needsReviewOnly && reviewCount > 0}
                     onNeedsReviewOnlyChange={setNeedsReviewOnly}
@@ -417,6 +508,13 @@ export function RecordingList({
                     searchScopes={searchScopes}
                     onSearchScopesChange={setSearchScopes}
                 />
+            </div>
+            <CardContent
+                ref={scrollRef}
+                className="min-h-0 flex-1 p-0 lg:overflow-y-auto"
+                data-library-scroll="true"
+            >
+                {navigationContent}
 
                 {pendingUploads.length > 0 && (
                     <div className="divide-y bg-muted/30">
@@ -474,6 +572,19 @@ export function RecordingList({
                                             recording.id,
                                         )}
                                         registerRef={registerRowRef}
+                                        folderLocations={rowLocations.get(
+                                            recording.id,
+                                        )}
+                                        sourceFolder={folder}
+                                        folders={folders}
+                                        assignedIds={assignedByRecording.get(
+                                            recording.id,
+                                        )}
+                                        canCurate={canCurate}
+                                        isOrgAccount={isOrgAccount}
+                                        onFolderCreated={onFolderCreated}
+                                        onAssignRecording={onAssignRecording}
+                                        onMoveRecording={onMoveRecording}
                                     />
                                 ))}
                             </div>
@@ -484,10 +595,15 @@ export function RecordingList({
                         <div className="flex flex-col items-center justify-center py-10 text-center">
                             <MessagesSquare className="mb-2 size-8 text-muted-foreground" />
                             <p className="text-sm text-muted-foreground">
-                                {query
-                                    ? i18n("No recordings match your search.")
-                                    : i18n("No recordings yet.")}
+                                {emptyMessage}
                             </p>
+                            {folder && !query && (
+                                <p className="mt-2 px-4 text-xs text-muted-foreground">
+                                    {i18n(
+                                        "Drag a recording onto this folder, or add it from its detail view. Recordings can appear in more than one folder.",
+                                    )}
+                                </p>
+                            )}
                             {emptyState}
                         </div>
                     )}

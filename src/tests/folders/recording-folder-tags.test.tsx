@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -16,7 +16,21 @@ const folder: RecordingFolder = {
 };
 
 describe("recording folder tags", () => {
-    afterEach(cleanup);
+    beforeEach(() => {
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                disconnect() {}
+                unobserve() {}
+            },
+        );
+        Element.prototype.scrollIntoView = vi.fn();
+    });
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
 
     it("opens the assigned folder and removes only that assignment", async () => {
         const onSelectFolder = vi.fn();
@@ -85,7 +99,7 @@ describe("recording folder tags", () => {
         version: 0,
     };
 
-    it("lets another member refile but not withdraw a shared recording", () => {
+    it("lets a curator refile but not withdraw a shared recording", () => {
         render(
             <RecordingFolderTags
                 recordingId="rec-1"
@@ -96,6 +110,7 @@ describe("recording folder tags", () => {
                 onRemove={vi.fn()}
                 onMove={vi.fn()}
                 isOwn={false}
+                canCurate
                 organizationOnly
             />,
         );
@@ -112,6 +127,111 @@ describe("recording folder tags", () => {
         expect(screen.getByRole("button", { name: /Move to/ })).toBeTruthy();
         // Private folders of the owner are not the member's to see.
         expect(screen.queryByRole("button", { name: "Meetings" })).toBeNull();
+    });
+
+    it.each([
+        {
+            role: "owner",
+            isOwn: true,
+            canCurate: false,
+            canWithdraw: true,
+        },
+        {
+            role: "curator",
+            isOwn: false,
+            canCurate: true,
+            canWithdraw: false,
+        },
+        {
+            role: "organization account",
+            isOwn: false,
+            canCurate: false,
+            canWithdraw: true,
+        },
+        {
+            role: "member",
+            isOwn: false,
+            canCurate: false,
+            canWithdraw: false,
+        },
+    ])("allows the Organization picker for $role and moves non-owned items", async ({
+        isOwn,
+        canCurate,
+        canWithdraw,
+    }) => {
+        const onAdd = vi.fn().mockResolvedValue(undefined);
+        const onMove = vi.fn().mockResolvedValue(undefined);
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[folder, orgRoot, sales]}
+                assignments={[{ recordingId: "rec-1", folderId: orgRoot.id }]}
+                onSelectFolder={vi.fn()}
+                onAdd={onAdd}
+                onRemove={vi.fn()}
+                onMove={onMove}
+                isOwn={isOwn}
+                canCurate={canCurate}
+                canWithdraw={canWithdraw}
+                organizationOnly
+            />,
+        );
+        const action = screen.getByRole("button", {
+            name: isOwn ? "Add to folder" : "Move to…",
+        });
+        if (!canWithdraw)
+            expect(
+                screen.queryByRole("button", {
+                    name: "Remove from Organization",
+                }),
+            ).toBeNull();
+        fireEvent.click(action);
+        expect(screen.queryByRole("option", { name: "Meetings" })).toBeNull();
+        expect(screen.queryByText("Private")).toBeNull();
+        fireEvent.click(screen.getByRole("option", { name: "Sales" }));
+        await vi.waitFor(() =>
+            isOwn
+                ? expect(onAdd).toHaveBeenCalledWith("rec-1", sales.id)
+                : expect(onMove).toHaveBeenCalledWith(
+                      "rec-1",
+                      orgRoot.id,
+                      sales.id,
+                  ),
+        );
+        if (!isOwn) expect(onAdd).not.toHaveBeenCalled();
+    });
+
+    it("hides Move when every Organization destination is already assigned", () => {
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[folder, sales]}
+                assignments={[{ recordingId: "rec-1", folderId: sales.id }]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={vi.fn()}
+                onMove={vi.fn()}
+                isOwn={false}
+                canCurate
+                organizationOnly
+            />,
+        );
+        expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull();
+    });
+
+    it("labels Organization destinations as sharing for a private item", () => {
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[folder, orgRoot, sales]}
+                assignments={[]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={vi.fn()}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add to folder" }));
+        expect(screen.getByText("Share with the Organization")).toBeTruthy();
     });
 
     it("lets the owner withdraw a shared recording, once confirmed with what their retention will delete", async () => {

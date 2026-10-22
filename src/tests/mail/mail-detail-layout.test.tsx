@@ -46,12 +46,14 @@ vi.mock("@/components/mail/mail-learn-card", () => ({
 vi.mock("@/components/pipeline/item-workflow", () => ({
     ItemWorkflow: ({
         initialData,
+        canCurate,
     }: {
+        canCurate?: boolean;
         initialData?: ItemProcessingPresentation | null;
     }) => (
         <>
             <div data-testid="workflow-strip" />
-            <div data-testid="folder-row" />
+            <div data-testid="folder-row" data-can-curate={canCurate} />
             {initialData?.intents.map((intent) => (
                 <span key={intent.folderId}>
                     {intent.path}
@@ -77,7 +79,7 @@ const mail: Recording = {
     deviceSn: "mail",
     kind: "mail",
     mail: {
-        from: "Alice <alice@example.test>",
+        from: "Velnira <velnira@example.test>",
         senderVerified: true,
         hasAttachments: false,
         waitingToShare: false,
@@ -169,6 +171,54 @@ afterEach(() => {
 });
 
 describe("mail detail layout", () => {
+    it("passes curation permissions to the mail folder workflow", async () => {
+        render(
+            <MailDetailPane
+                mail={{ ...mail, view: "org", isOwn: false }}
+                canCurate
+                dateTimeFormat="absolute"
+                onBackToList={vi.fn()}
+                hiddenOnMobile={false}
+                onChanged={vi.fn()}
+                folders={[]}
+                folderAssignments={[]}
+                onSelectFolder={vi.fn()}
+                onAddToFolder={vi.fn()}
+                onRemoveFromFolder={vi.fn()}
+                onMoveBetweenFolders={vi.fn()}
+            />,
+        );
+        expect(
+            screen.getByTestId("folder-row").getAttribute("data-can-curate"),
+        ).toBe("true");
+        await screen.findByTestId("mail-summary");
+    });
+    it.each([
+        "Recent",
+        "Private",
+        "Invented folder",
+    ])("names the current location on the phone mail back button: %s", async (backLabel) => {
+        render(
+            <MailDetailPane
+                mail={mail}
+                backLabel={backLabel}
+                dateTimeFormat="absolute"
+                onBackToList={vi.fn()}
+                hiddenOnMobile={false}
+                onChanged={vi.fn()}
+                folders={[]}
+                folderAssignments={[]}
+                onSelectFolder={vi.fn()}
+                onAddToFolder={vi.fn()}
+                onRemoveFromFolder={vi.fn()}
+                onMoveBetweenFolders={vi.fn()}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: backLabel }).className,
+        ).toContain("lg:hidden");
+        await screen.findByTestId("mail-summary");
+    });
     it("keeps captured mail evidence after consuming the URL and clears it on traversal", async () => {
         const scroll = vi.fn();
         const originalScroll = Element.prototype.scrollIntoView;
@@ -273,7 +323,7 @@ describe("mail detail layout", () => {
                 name: "Regenerate title for {name}",
             }),
         ).toBeTruthy();
-        expect(screen.getByText("Alice <alice@example.test>")).toBeTruthy();
+        expect(screen.getByText("Velnira <velnira@example.test>")).toBeTruthy();
         expect(screen.getByText("512 B")).toBeTruthy();
         const spend = await screen.findByRole("button", {
             name: "Estimated AI spend: $0.0123",
@@ -446,7 +496,7 @@ describe("mail detail layout", () => {
                     ...mail,
                     view: "org",
                     isOwn: false,
-                    ownerName: "Eva",
+                    ownerName: "Zorven",
                 }}
                 dateTimeFormat="absolute"
                 onBackToList={vi.fn()}

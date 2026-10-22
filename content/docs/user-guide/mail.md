@@ -11,14 +11,14 @@ Mail needs single sign-on: you get addresses once you sign in with your organiza
 
 **Settings → Mail** lists them.
 
-- Your **mailbox** (`jan@…`) puts mail in your pile, unfiled. Its workflow strip starts with **Receive** as **Done** and **Categorize** as **Next**. The inline **Categorize email** card asks for **Folder** and **Profile**, or **Nothing automatic**. No paid AI step runs until you click **Categorize email**.
-- Every folder has an address (`jan+weekly@…`) that files mail straight into it. The mail skips the wait and uses the folder's default mail profile.
+- Your **mailbox** (`zorven@…`) puts mail in your pile, unfiled. Its workflow strip starts with **Receive** as **Done** and **Categorize** as **Next**. The inline **Categorize email** card asks for **Folder** and **Profile**, or **Nothing automatic**. No paid AI step runs until you click **Categorize email**.
+- Every folder has an address (`zorven+weekly@…`) that files mail straight into it. The mail skips the wait and uses the folder's default mail profile.
 
 Only mail you send yourself, from the account you sign in with, is accepted on these addresses: forward a mail to one, or put it in **To**, **Cc** or **Bcc** when you write. Chatterbox checks the mail's signature, so nobody can send in your name.
 
 ## Folder addresses
 
-A folder's header shows its address. Copy it, or give the folder an address of your own: the old one keeps working as a secondary address until you remove it. An address that was ever given out is never given to anyone else. Mail to any of these addresses is filed and can start the profile automatically.
+Open **Folder settings** from the folder name or **⋯** to see its addresses under **Mail to folder**, with a copy button and the time of the last mail. Copy the current address, or give the folder an address of your own: the old one keeps working as a secondary address until you remove it. An address that was ever given out is never given to anyone else. Mail to any of these addresses is filed and can start the profile automatically.
 
 Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox shows when each last received mail before you confirm.
 
@@ -30,7 +30,7 @@ You can also share any of your mail by filing it into an Organization folder. Co
 
 ## Secret addresses
 
-For mail you do not send yourself, create a **secret address** in **Settings → Mail**. It extends your mailbox or a folder address with a random part (`jan.k3x9…@…`) and files mail the same way, from any sender. A secret address extending the mailbox leaves mail waiting for filing; one extending a folder skips the wait. Anyone who knows it can send to it, so give it a name you recognize, and **replace** or **stop** it when it leaks.
+For mail you do not send yourself, create a **secret address** in **Settings → Mail**. It extends your mailbox or a folder address with a random part (`zorven.k3x9…@…`) and files mail the same way, from any sender. A secret address extending the mailbox leaves mail waiting for filing; one extending a folder skips the wait. Anyone who knows it can send to it, so give it a name you recognize, and **replace** or **stop** it when it leaks.
 
 ### Gmail filters and automatic forwarding
 

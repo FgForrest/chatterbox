@@ -136,8 +136,13 @@ describe("localized plural content", () => {
             forms: ["1 položka", "2 položky", "1,5 položky", "5 položek"],
         },
         {
-            source: "{count, plural, one {# folder} other {# folders}}",
-            forms: ["1 složka", "2 složky", "1,5 složky", "5 složek"],
+            source: "{count, plural, one {All # folder} other {All # folders}}",
+            forms: [
+                "1 složka celkem",
+                "2 složky celkem",
+                "1,5 složky celkem",
+                "5 složek celkem",
+            ],
         },
     ])("uses every Czech CLDR form for $source", ({ source, forms }) => {
         expect(

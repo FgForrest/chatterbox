@@ -42,10 +42,25 @@ import {
 import { followJob } from "@/lib/jobs/client";
 import type { RecordingFolder } from "@/types/folder";
 
+export interface FolderExportStatus {
+    configured: FolderExportConfigurationDto[];
+    loading: boolean;
+    failed: boolean;
+    inheritedFolderId: string | null;
+}
+
 interface FolderExportActionsProps {
+    ancestors?: RecordingFolder[];
     folder: RecordingFolder;
     providers: ExportProvidersAvailability;
     privateTree: boolean;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    onPickerChange?: (picking: boolean) => void;
+    hideTrigger?: boolean;
+    reopen?: "form" | "list";
+    onReopenHandled?: () => void;
+    onStatusChange?: (status: FolderExportStatus) => void;
 }
 
 interface FormState {
@@ -61,10 +76,8 @@ interface FormState {
     exportMail: boolean;
 }
 
-/**
- * Query parameter that reopens this dialog after Google's consent screen:
- * `<folderId>` on a new Drive export, `<folderId>.list` on the list.
- */
+const NO_ANCESTORS: RecordingFolder[] = [];
+
 const REOPEN_PARAM = "googleExport";
 
 function emptyForm(provider: FolderExportProviderType): FormState {
@@ -107,15 +120,37 @@ export function FolderExportActions({
     folder,
     providers,
     privateTree,
+    open: controlledOpen,
+    onOpenChange,
+    onPickerChange,
+    hideTrigger = false,
+    reopen,
+    onReopenHandled,
+    onStatusChange,
+    ancestors = NO_ANCESTORS,
 }: FolderExportActionsProps) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
     const name = useProductName();
-    const [open, setOpen] = useState(false);
+    const [localOpen, setLocalOpen] = useState(false);
+    const open = controlledOpen ?? localOpen;
+    const setOpen = useCallback(
+        (next: boolean) => {
+            setLocalOpen(next);
+            onOpenChange?.(next);
+        },
+        [onOpenChange],
+    );
     const [configurations, setConfigurations] = useState<
         FolderExportConfigurationDto[]
     >([]);
     const [applicableIds, setApplicableIds] = useState<string[]>([]);
+    const [status, setStatus] = useState<FolderExportStatus>({
+        configured: [],
+        loading: true,
+        failed: false,
+        inheritedFolderId: null,
+    });
     const [form, setForm] = useState<FormState | null>(null);
     const [saving, setSaving] = useState(false);
     const [syncing, setSyncing] = useState(false);
@@ -124,34 +159,90 @@ export function FolderExportActions({
     const google = useGoogleConnection(providers.googleDrive && open);
 
     const load = useCallback(async () => {
+        setStatus({
+            configured: [],
+            loading: available && privateTree,
+            failed: false,
+            inheritedFolderId: null,
+        });
         if (!available || !privateTree) {
             setConfigurations([]);
             setApplicableIds([]);
             return;
         }
-        const response = await fetch(`/api/folders/${folder.id}/exports`);
-        if (!response.ok) return;
-        const data = (await response.json()) as {
-            configured: FolderExportConfigurationDto[];
-            applicableIds: string[];
-        };
-        setConfigurations(data.configured);
-        setApplicableIds(data.applicableIds);
-    }, [available, folder.id, privateTree]);
+        try {
+            const response = await fetch(`/api/folders/${folder.id}/exports`);
+            if (!response.ok) throw new Error("folder exports unavailable");
+            const data = (await response.json()) as {
+                configured: FolderExportConfigurationDto[];
+                applicableIds: string[];
+            };
+            setConfigurations(data.configured);
+            setApplicableIds(data.applicableIds);
+            const ownIds = new Set(
+                data.configured.map((configuration) => configuration.id),
+            );
+            const inheritedIds = new Set(
+                data.applicableIds.filter((id) => !ownIds.has(id)),
+            );
+            const inherited =
+                inheritedIds.size === 0
+                    ? []
+                    : await Promise.all(
+                          ancestors.map(async (ancestor) => {
+                              const response = await fetch(
+                                  `/api/folders/${ancestor.id}/exports`,
+                              );
+                              if (!response.ok) return null;
+                              const body = (await response.json()) as {
+                                  configured: FolderExportConfigurationDto[];
+                              };
+                              return body.configured.some((configuration) =>
+                                  inheritedIds.has(configuration.id),
+                              )
+                                  ? ancestor.id
+                                  : null;
+                          }),
+                      );
+            const inheritedFolderId =
+                inherited.find((id) => id !== null) ?? null;
+            if (
+                inheritedIds.size > 0 &&
+                ancestors.length > 0 &&
+                !inheritedFolderId
+            ) {
+                throw new Error("inherited folder export unavailable");
+            }
+            setStatus({
+                configured: data.configured,
+                loading: false,
+                failed: false,
+                inheritedFolderId,
+            });
+        } catch {
+            setStatus({
+                configured: [],
+                loading: false,
+                failed: true,
+                inheritedFolderId: null,
+            });
+        }
+    }, [available, folder.id, privateTree, ancestors]);
 
     useEffect(() => {
         void load();
     }, [load]);
 
     useEffect(() => {
-        const url = new URL(window.location.href);
-        const reopen = url.searchParams.get(REOPEN_PARAM);
-        if (reopen !== folder.id && reopen !== `${folder.id}.list`) return;
-        url.searchParams.delete(REOPEN_PARAM);
-        window.history.replaceState(window.history.state, "", url);
-        setForm(reopen === folder.id ? emptyForm("google-drive") : null);
+        if (!reopen) return;
+        setForm(reopen === "form" ? emptyForm("google-drive") : null);
         setOpen(true);
-    }, [folder.id]);
+        onReopenHandled?.();
+    }, [reopen, setOpen, onReopenHandled]);
+
+    useEffect(() => {
+        onStatusChange?.(status);
+    }, [status, onStatusChange]);
 
     const update = (patch: Partial<FormState>) =>
         setForm((current) => (current ? { ...current, ...patch } : current));
@@ -193,6 +284,7 @@ export function FolderExportActions({
             }
             const credentials = (await response.json()) as PickerCredentials;
             // The dialog is modal: it would block the Picker's own frame.
+            onPickerChange?.(true);
             setOpen(false);
             const picked = await pickDriveFolder(
                 credentials,
@@ -205,6 +297,7 @@ export function FolderExportActions({
         } finally {
             setOpen(true);
             setPicking(false);
+            onPickerChange?.(false);
         }
     };
 
@@ -345,7 +438,7 @@ export function FolderExportActions({
 
     return (
         <>
-            {applicableIds.length > 0 && (
+            {!hideTrigger && applicableIds.length > 0 && (
                 <Button
                     type="button"
                     variant="outline"
@@ -360,15 +453,17 @@ export function FolderExportActions({
                     {syncing ? i18n("Synchronizing…") : i18n("Synchronize")}
                 </Button>
             )}
-            <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9"
-                onClick={() => setOpen(true)}
-            >
-                <CloudUpload /> {i18n("Export")}
-            </Button>
+            {!hideTrigger && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => setOpen(true)}
+                >
+                    <CloudUpload /> {i18n("Export")}
+                </Button>
+            )}
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="max-w-xl">
                     <DialogHeader>
@@ -655,6 +750,25 @@ export function FolderExportActions({
                                 </p>
                             )}
                             <div className="flex flex-wrap gap-2">
+                                {hideTrigger && applicableIds.length > 0 && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        disabled={syncing}
+                                        onClick={() => void synchronize()}
+                                    >
+                                        <RefreshCw
+                                            className={
+                                                syncing
+                                                    ? "animate-spin"
+                                                    : undefined
+                                            }
+                                        />
+                                        {syncing
+                                            ? i18n("Synchronizing…")
+                                            : i18n("Synchronize")}
+                                    </Button>
+                                )}
                                 {providers.filesystem && (
                                     <Button
                                         type="button"

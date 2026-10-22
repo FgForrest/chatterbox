@@ -1,8 +1,7 @@
 "use client";
 
-import { Workflow } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,8 +55,15 @@ function profileName(
         : profile.name;
 }
 
-export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
+export function FolderDefaultProfiles({
+    folderId,
+    readOnly = false,
+}: {
+    folderId: string;
+    readOnly?: boolean;
+}) {
     const i18n = useExtracted();
+    const [failed, setFailed] = useState(false);
     const [defaults, setDefaults] = useState<DefaultsResponse | null>(null);
     const [profiles, setProfiles] = useState<
         Record<ProfileChannel, ProfileOption[]>
@@ -67,36 +73,37 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     );
 
     const load = useCallback(async () => {
-        const [defaultsResponse, audioResponse, mailResponse] =
-            await Promise.all([
-                fetch(
-                    `/api/folders/${encodeURIComponent(folderId)}/default-profiles`,
-                ),
-                fetch("/api/settings/profiles?channel=audio&pageSize=100"),
-                fetch("/api/settings/profiles?channel=mail&pageSize=100"),
-            ]);
-        if (!defaultsResponse.ok || !audioResponse.ok || !mailResponse.ok) {
+        const defaultsRequest = fetch(
+            `/api/folders/${encodeURIComponent(folderId)}/default-profiles`,
+        );
+        const profilesRequest = readOnly
+            ? null
+            : Promise.all([
+                  fetch("/api/settings/profiles?channel=audio&pageSize=100"),
+                  fetch("/api/settings/profiles?channel=mail&pageSize=100"),
+              ]);
+        const [defaultsResponse, profileResponses] = await Promise.all([
+            defaultsRequest,
+            profilesRequest,
+        ]);
+        if (
+            !defaultsResponse.ok ||
+            profileResponses?.some((response) => !response.ok)
+        ) {
             throw new Error("folder default profiles unavailable");
         }
-        const [nextDefaults, audio, mail] = (await Promise.all([
-            defaultsResponse.json(),
-            audioResponse.json(),
-            mailResponse.json(),
-        ])) as [
-            DefaultsResponse,
-            { profiles: ProfileOption[] },
-            { profiles: ProfileOption[] },
-        ];
-        setDefaults(nextDefaults);
-        setProfiles({ audio: audio.profiles, mail: mail.profiles });
-    }, [folderId]);
+        setDefaults((await defaultsResponse.json()) as DefaultsResponse);
+        if (profileResponses) {
+            const [audio, mail] = (await Promise.all(
+                profileResponses.map((response) => response.json()),
+            )) as { profiles: ProfileOption[] }[];
+            setProfiles({ audio: audio.profiles, mail: mail.profiles });
+        }
+    }, [folderId, readOnly]);
 
-    const openChanged = (open: boolean) => {
-        if (!open || defaults) return;
-        void load().catch(() => {
-            toast.error(i18n("Could not load folder profile defaults."));
-        });
-    };
+    useEffect(() => {
+        void load().catch(() => setFailed(true));
+    }, [load]);
 
     const save = async (channel: ProfileChannel, value: string) => {
         setSavingChannel(channel);
@@ -136,7 +143,8 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
 
     const currentLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
-        if (!value) return i18n("None");
+        if (failed) return i18n("Could not load folder profile defaults.");
+        if (!value) return i18n("Loading…");
         const accountDefaultUnavailable = accountDefaultUnavailableApplies(
             value.accountDefaultUnavailable,
             value.effectiveManualOnly || value.effective !== null,
@@ -165,7 +173,7 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
             value.accountDefault?.name ??
             (defaults?.scope === "org"
                 ? i18n("Each person's default")
-                : i18n("None"))
+                : i18n("According to settings"))
         );
     };
 
@@ -237,7 +245,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     <DropdownMenuRadioItem
                         value={INHERIT_VALUE}
                         disabled={
-                            !defaults?.canEdit || savingChannel === channel
+                            readOnly ||
+                            !defaults?.canEdit ||
+                            savingChannel === channel
                         }
                     >
                         {inheritLabel(channel)}
@@ -247,7 +257,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                             key={profile.id}
                             value={profile.id}
                             disabled={
-                                !defaults?.canEdit || savingChannel === channel
+                                readOnly ||
+                                !defaults?.canEdit ||
+                                savingChannel === channel
                             }
                         >
                             {profileName(profile, i18n("Organization"))}
@@ -256,7 +268,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     <DropdownMenuRadioItem
                         value={MANUAL_ONLY_VALUE}
                         disabled={
-                            !defaults?.canEdit || savingChannel === channel
+                            readOnly ||
+                            !defaults?.canEdit ||
+                            savingChannel === channel
                         }
                     >
                         {i18n("Nothing automatic")}
@@ -279,22 +293,43 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     );
 
     return (
-        <DropdownMenu onOpenChange={openChanged}>
-            <DropdownMenuTrigger asChild>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9"
-                    aria-label={i18n("Processing")}
-                >
-                    <Workflow /> {i18n("Processing")}
-                </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-72">
-                {channelPicker("audio", i18n("Default profile for recordings"))}
-                {channelPicker("mail", i18n("Default profile for mail"))}
-            </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 text-sm">
+                <h3 className="font-medium">
+                    {i18n("Default processing profile")}
+                </h3>
+                <p className="text-muted-foreground">
+                    {i18n("Recordings")}: {currentLabel("audio")}
+                </p>
+                <p className="text-muted-foreground">
+                    {i18n("Mail")}: {currentLabel("mail")}
+                </p>
+            </div>
+            {!readOnly && defaults?.canEdit && (
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9"
+                            aria-label={i18n("Change")}
+                        >
+                            {i18n("Change")}
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-72">
+                        {channelPicker(
+                            "audio",
+                            i18n("Default profile for recordings"),
+                        )}
+                        {channelPicker(
+                            "mail",
+                            i18n("Default profile for mail"),
+                        )}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            )}
+        </div>
     );
 }

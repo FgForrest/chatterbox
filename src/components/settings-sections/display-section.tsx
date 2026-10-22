@@ -62,6 +62,8 @@ export function DisplaySection() {
         { label: t("Newest first"), value: "newest" },
         { label: t("Oldest first"), value: "oldest" },
         { label: t("By name"), value: "name" },
+        { label: t("Duration, longest first"), value: "duration" },
+        { label: t("Size, largest first"), value: "size" },
     ];
     const themeOptions = [
         { label: t("Light"), value: "light" },

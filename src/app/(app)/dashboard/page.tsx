@@ -396,6 +396,7 @@ export default async function DashboardPage() {
 
     return (
         <Workstation
+            userId={session.user.id}
             recordings={[...recordingsData, ...mailRows]}
             transcriptions={transcriptionMap}
             transcriptVariants={transcriptVariants}

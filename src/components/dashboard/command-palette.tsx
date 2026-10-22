@@ -1,7 +1,7 @@
 "use client";
 
 import { Command, defaultFilter } from "cmdk";
-import { Search } from "lucide-react";
+import { Folder, Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,13 @@ import {
 } from "@/components/dashboard/command-palette-parts";
 import { PaletteSearchResults } from "@/components/dashboard/palette-search-results";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useFolderLabel } from "@/hooks/use-folder-label";
+import { useLibraryPreferences } from "@/hooks/use-library-preferences";
+import {
+    type FolderMatch,
+    matchFolderEntries,
+    matchFolders,
+} from "@/lib/folders/navigation";
 import type { DateTimeFormat } from "@/lib/format-date";
 import type {
     AppSearchResults,
@@ -24,6 +31,7 @@ import type {
     PageSearchScope,
 } from "@/lib/search/types";
 import { cn } from "@/lib/utils";
+import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import "@/components/dashboard/command-palette.css";
 
@@ -45,6 +53,9 @@ const EMPTY_RESULTS: AppSearchResults = {
 const noop = () => {};
 
 interface CommandPaletteProps {
+    folders?: RecordingFolder[];
+    folderEntries?: FolderMatch[];
+    onSelectFolder?: (folder: RecordingFolder) => void;
     pageScope?: PageSearchScope;
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -65,6 +76,9 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({
+    folders = [],
+    folderEntries,
+    onSelectFolder,
     pageScope = "chatter",
     open,
     onOpenChange,
@@ -85,8 +99,25 @@ export function CommandPalette({
 }: CommandPaletteProps) {
     const i18n = useExtracted();
     const { push } = useRouter();
+    const folderLabel = useFolderLabel();
+    const { recentFolders } = useLibraryPreferences();
     const [scope, setScope] = useState<AppSearchScope>(pageScope);
     const [query, setQuery] = useState("");
+    const indexedFolders = useMemo(
+        () => folderEntries ?? matchFolders(folders, "", folderLabel),
+        [folderEntries, folders, folderLabel],
+    );
+    const folderResults = useMemo(() => {
+        const entries = matchFolderEntries(indexedFolders, query, folderLabel);
+        return query.trim()
+            ? entries.slice(0, 8)
+            : recentFolders.flatMap(
+                  (folder) =>
+                      entries.find((entry) => entry.folder.id === folder.id) ??
+                      [],
+              );
+    }, [indexedFolders, query, folderLabel, recentFolders]);
+
     const [response, setResponse] = useState<{
         key: string;
         results: AppSearchResults;
@@ -196,7 +227,7 @@ export function CommandPalette({
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
-                className="max-w-xl gap-0 overflow-hidden p-0"
+                className="top-[15vh] max-h-[80dvh] -translate-y-0 max-w-xl gap-0 overflow-hidden p-0"
                 showCloseButton={false}
                 aria-describedby={undefined}
             >
@@ -302,6 +333,39 @@ export function CommandPalette({
 
                         {showChatter && (
                             <>
+                                {onSelectFolder && (
+                                    <Command.Group heading={i18n("Folders")}>
+                                        {folderResults.map((entry) => (
+                                            <Command.Item
+                                                key={entry.folder.id}
+                                                value={`folder:${entry.folder.id}`}
+                                                keywords={["server-match"]}
+                                                onSelect={runAction(() =>
+                                                    onSelectFolder(
+                                                        entry.folder,
+                                                    ),
+                                                )}
+                                            >
+                                                {entry.folder.scope ===
+                                                "org" ? (
+                                                    <Users className="size-4 text-blue-600" />
+                                                ) : (
+                                                    <Folder className="size-4 text-primary" />
+                                                )}
+                                                <span className="cmd-body">
+                                                    <span className="cmd-title">
+                                                        {folderLabel(
+                                                            entry.folder,
+                                                        )}
+                                                    </span>
+                                                    <span className="cmd-subtitle">
+                                                        {entry.path}
+                                                    </span>
+                                                </span>
+                                            </Command.Item>
+                                        ))}
+                                    </Command.Group>
+                                )}
                                 <RecordingsGroup
                                     query={query}
                                     serverMatches={

@@ -56,7 +56,6 @@ function list(
                 initialDateTimeFormat="relative"
                 initialSortOrder="newest"
                 initialChunkSize={50}
-                onOrganize={vi.fn()}
             />
         </ConfirmDialogProvider>,
     );

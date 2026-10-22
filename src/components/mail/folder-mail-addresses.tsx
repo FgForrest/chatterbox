@@ -55,7 +55,13 @@ function useLastReceived() {
  * A folder's mail addresses in its header: the current one to copy or
  * change, and the old ones that still work until removed.
  */
-export function FolderMailAddresses({ folderId }: { folderId: string }) {
+export function FolderMailAddresses({
+    folderId,
+    readOnly = false,
+}: {
+    folderId: string;
+    readOnly?: boolean;
+}) {
     const i18n = useExtracted();
     const lastReceived = useLastReceived();
     const [data, setData] = useState<FolderAddresses | null>(null);
@@ -138,7 +144,8 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
     if (!current) return null;
 
     return (
-        <div className="mt-2 space-y-1 text-sm">
+        <section className="space-y-1 border-t pt-3 text-sm">
+            <h3 className="font-medium">{i18n("Mail to folder")}</h3>
             <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
                 <Mail className="size-4 shrink-0" />
                 <span className="font-mono text-foreground">
@@ -155,7 +162,7 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
                 >
                     <Copy className="size-3.5" />
                 </Button>
-                {data?.writable && (
+                {data?.writable && !readOnly && (
                     <Button
                         type="button"
                         variant="ghost"
@@ -170,6 +177,9 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
                     </Button>
                 )}
             </div>
+            <p className="text-xs text-muted-foreground">
+                {lastReceived(current)}
+            </p>
             {older.map((address) => (
                 <div
                     key={address.id}
@@ -178,7 +188,7 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
                     <span>{i18n("Also")}</span>
                     <span className="font-mono">{address.address}</span>
                     <span>· {lastReceived(address)}</span>
-                    {data?.writable && (
+                    {data?.writable && !readOnly && (
                         <Button
                             type="button"
                             variant="ghost"
@@ -240,7 +250,7 @@ export function FolderMailAddresses({ folderId }: { folderId: string }) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </section>
     );
 }
 
