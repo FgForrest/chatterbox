@@ -182,9 +182,8 @@ export function learnMarksFrom(
                 onlyFirstName: payload.onlyFirstName === true,
                 recorder: payload.recorder === true,
                 ...(payload.source ? { source: payload.source } : {}),
-                ...(payload.guess
-                    ? { guess: payload.guess, reason: payload.reason }
-                    : {}),
+                ...(payload.reason ? { reason: payload.reason } : {}),
+                ...(payload.guess ? { guess: payload.guess } : {}),
             };
         } else if (item.kind === "correction") {
             const payload = item.payload as {
