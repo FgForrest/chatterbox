@@ -689,6 +689,163 @@ withDatabase("curator duplicate queue and compare-and-join", () => {
                 .where(eq(personEmails.personId, left.id)),
         ).toEqual([]);
     });
+    it("refuses an email conflict without partial moves and joins after the third person is removed", async () => {
+        const keeper = await createPerson({
+            userId: "org",
+            displayName: "Veylo Talnix",
+            primaryEmail: "veylo@invented.example",
+        });
+        const loser = await createPerson({
+            userId: "org",
+            displayName: "Veylo Talnik",
+            primaryEmail: "v.talnik@invented.example",
+        });
+        const third = await createPerson({
+            userId: "org",
+            displayName: "Nuvra Pelvix",
+        });
+        await db()
+            .insert(personEmails)
+            .values(
+                [
+                    [keeper.id, "keeper-extra@invented.example"],
+                    [loser.id, "loser-extra@invented.example"],
+                    [third.id, "v.talnik@invented.example"],
+                ].map(([personId, email]) => ({
+                    userId: "org",
+                    personId,
+                    email: encryptText(email),
+                    emailHash: lookupHash(email),
+                })),
+            );
+        await db()
+            .insert(knowledgeAliases)
+            .values(
+                [
+                    [keeper.id, "Talnix"],
+                    [loser.id, "Talnik"],
+                    [third.id, "Pelvix"],
+                ].map(([personId, text]) => ({
+                    userId: "org",
+                    personId,
+                    kind: "alias" as const,
+                    text: encryptText(text),
+                    textHmac: domainLookupHash("alias", text),
+                })),
+            );
+        await fact(loser.id, "Coordinator");
+        await insertRecording(db(), { id: "conflict-rec", userId: "member" });
+        await shareRecording(db(), "conflict-rec", "org");
+        const transcriptionId = await insertTranscript(
+            db(),
+            "conflict-rec",
+            "member",
+        );
+        await attributeSpeaker(db(), {
+            userId: "member",
+            transcriptionId,
+            label: "speaker_0",
+            personId: loser.id,
+        });
+        await insertTask(db(), {
+            recordingId: "conflict-rec",
+            userId: "member",
+            assigneePersonId: loser.id,
+        });
+        const snapshot = async () => ({
+            people: await db()
+                .select()
+                .from(people)
+                .where(eq(people.userId, "org"))
+                .orderBy(people.id),
+            emails: await db()
+                .select()
+                .from(personEmails)
+                .where(eq(personEmails.userId, "org"))
+                .orderBy(personEmails.emailHash),
+            aliases: await db()
+                .select()
+                .from(knowledgeAliases)
+                .where(eq(knowledgeAliases.userId, "org"))
+                .orderBy(knowledgeAliases.id),
+            facts: await db()
+                .select()
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, "org"))
+                .orderBy(knowledgeFacts.id),
+            speakers: await db()
+                .select()
+                .from(transcriptSpeakers)
+                .where(eq(transcriptSpeakers.userId, "member"))
+                .orderBy(transcriptSpeakers.id),
+            tasks: await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.userId, "member"))
+                .orderBy(recordingTasks.id),
+            generations: await db()
+                .select()
+                .from(knowledgeScopeGenerations)
+                .where(eq(knowledgeScopeGenerations.userId, "org")),
+        });
+        const data = await comparison("person", keeper.id, loser.id);
+        const body = choices(data, {
+            survivorId: keeper.id,
+            loserId: loser.id,
+            nameSourceId: loser.id,
+        });
+        const before = await snapshot();
+        const refused = await call(join, "curator", body);
+        expect(refused.status).toBe(409);
+        expect(await refused.json()).toMatchObject({
+            code: "CONFLICT",
+            details: { reason: "email_conflict" },
+        });
+        expect(await snapshot()).toEqual(before);
+        for (const personId of [keeper.id, loser.id, third.id]) {
+            expect(await getPerson("member", personId)).toMatchObject({
+                mergedIntoId: null,
+            });
+        }
+
+        await db()
+            .delete(people)
+            .where(and(eq(people.userId, "org"), eq(people.id, third.id)));
+        expect((await call(join, "curator", body)).status).toBe(200);
+        expect(await getPerson("member", keeper.id)).toMatchObject({
+            displayName: loser.displayName,
+            primaryEmail: keeper.primaryEmail,
+            mergedIntoId: null,
+        });
+        expect(await getPerson("member", loser.id)).toMatchObject({
+            mergedIntoId: keeper.id,
+        });
+        const after = await snapshot();
+        expect(
+            after.emails.map((row) => ({
+                personId: row.personId,
+                email: decryptText(row.email),
+            })),
+        ).toEqual(
+            expect.arrayContaining(
+                [
+                    "keeper-extra@invented.example",
+                    "loser-extra@invented.example",
+                    loser.primaryEmail,
+                ].map((email) => ({ personId: keeper.id, email })),
+            ),
+        );
+        expect(after.emails).toHaveLength(3);
+        expect(after.aliases.map((row) => decryptText(row.text))).toEqual(
+            expect.arrayContaining(["Talnix", "Talnik", keeper.displayName]),
+        );
+        expect(after.aliases.every((row) => row.personId === keeper.id)).toBe(
+            true,
+        );
+        expect(after.facts).toMatchObject([{ subjectPersonId: keeper.id }]);
+        expect(after.speakers).toMatchObject([{ personId: keeper.id }]);
+        expect(after.tasks).toMatchObject([{ assigneePersonId: keeper.id }]);
+    });
     it("cleans retained names through the existing alias writer", async () => {
         const left = await createPerson({
             userId: "org",
