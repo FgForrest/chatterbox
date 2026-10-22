@@ -3,6 +3,7 @@
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { getAppHistoryState } from "@/lib/history-state";
 
 export interface GoogleConnectionInfo {
     email: string;
@@ -127,7 +128,7 @@ export function useGoogleConnectOutcome(onConnected?: () => void) {
         const outcome = url.searchParams.get("google");
         if (!outcome) return;
         url.searchParams.delete("google");
-        window.history.replaceState(window.history.state, "", url);
+        window.history.replaceState(getAppHistoryState(), "", url);
         // A tick later: the Toaster renders after the page, so it is not
         // listening yet while the page's effects run.
         window.setTimeout(() => announce(outcome), 0);

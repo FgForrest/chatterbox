@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAppChrome } from "@/components/app-chrome-provider";
 import { AppHeader } from "@/components/app-header";
+import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
@@ -54,6 +55,7 @@ import {
     folderRowLocations,
     libraryNavigation,
 } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -255,6 +257,17 @@ export function Workstation({
         selectionRevision: number;
         historyMethod: "push" | "replace";
     } | null>(null);
+    const seenArrivalIds = useRef(
+        new Set([...recordings, ...orgRecordings].map((item) => item.id)),
+    );
+    const resumedArrivalIds = useRef(new Set<string>());
+    const [arrival, setArrival] = useState<{ id: string; more: number } | null>(
+        null,
+    );
+    const closeArrival = useCallback(() => {
+        setArrival(null);
+        toast.dismiss("new-item");
+    }, []);
 
     useMailRefresh(mailEnabled);
     const listRef = useRef<RecordingListHandle>(null);
@@ -290,7 +303,7 @@ export function Workstation({
             )
                 return;
             window.history[method === "push" ? "pushState" : "replaceState"](
-                { ...window.history.state, mobileView: intendedMobileView },
+                { mobileView: intendedMobileView },
                 "",
                 dashboardLocation(params),
             );
@@ -439,7 +452,7 @@ export function Workstation({
                 }
                 params.delete("googleExport");
                 window.history.replaceState(
-                    window.history.state,
+                    { mobileView: window.history.state?.mobileView },
                     "",
                     dashboardLocation(params),
                 );
@@ -449,7 +462,7 @@ export function Workstation({
             handledLocationQuery.current = params.toString();
             if (traversing)
                 window.history.replaceState(
-                    window.history.state,
+                    { mobileView: window.history.state?.mobileView },
                     "",
                     dashboardLocation(params),
                 );
@@ -741,6 +754,105 @@ export function Workstation({
         setPendingUploadSelection(null);
     }, [pendingUploadSelection, recordings, selectRecording]);
 
+    useEffect(() => {
+        const selectedId = currentRecording?.id;
+        const linkedId = new URLSearchParams(window.location.search).get(
+            "recording",
+        );
+        const autoOpeningId = pendingUploadSelection?.recordingId;
+        const arrivals = visibleRecordings.filter(
+            (item) =>
+                !seenArrivalIds.current.has(item.id) &&
+                (isOrgAccount ? item.isOwn === true : item.isOwn !== false) &&
+                item.id !== selectedId &&
+                item.id !== linkedId &&
+                item.id !== autoOpeningId &&
+                !resumedArrivalIds.current.has(item.id),
+        );
+        for (const item of [...recordings, ...orgRecordings]) {
+            seenArrivalIds.current.add(item.id);
+            resumedArrivalIds.current.delete(item.id);
+        }
+        const latest = arrivals.reduce<Recording | null>(
+            (newest, item) =>
+                !newest ||
+                Date.parse(item.startTime) > Date.parse(newest.startTime)
+                    ? item
+                    : newest,
+            null,
+        );
+        setArrival((previous) => {
+            const kept =
+                previous &&
+                previous.id !== selectedId &&
+                previous.id !== linkedId &&
+                visibleRecordings.some((item) => item.id === previous.id)
+                    ? previous
+                    : null;
+            return latest
+                ? {
+                      id: latest.id,
+                      more: (kept ? kept.more + 1 : 0) + arrivals.length - 1,
+                  }
+                : kept;
+        });
+    }, [
+        currentRecording?.id,
+        isOrgAccount,
+        orgRecordings,
+        pendingUploadSelection,
+        recordings,
+        visibleRecordings,
+    ]);
+
+    const arrivalRecording = arrival
+        ? visibleRecordings.find((item) => item.id === arrival.id)
+        : undefined;
+    useEffect(() => {
+        if (
+            !arrivalRecording ||
+            !arrival ||
+            arrival.id === currentRecording?.id
+        ) {
+            toast.dismiss("new-item");
+            return;
+        }
+        toast.custom(
+            () => (
+                <ArrivalNotice
+                    recording={arrivalRecording}
+                    more={arrival.more}
+                    dateTimeFormat={initialSettings.dateTimeFormat}
+                    onClose={closeArrival}
+                    onOpen={() => {
+                        selectRecordingByUser(arrivalRecording);
+                        closeArrival();
+                    }}
+                />
+            ),
+            {
+                id: "new-item",
+                duration: Infinity,
+                dismissible: false,
+                className: "w-[var(--width)]",
+            },
+        );
+    }, [
+        arrival,
+        arrivalRecording,
+        closeArrival,
+        currentRecording?.id,
+        initialSettings.dateTimeFormat,
+        selectRecordingByUser,
+    ]);
+
+    useEffect(
+        () => () => {
+            toast.dismiss("new-item");
+        },
+        [],
+    );
+
     const handleUploadStarted = useCallback(
         ({ uploadId }: { uploadId: string }) => {
             uploadSelectionRevisionsRef.current.set(
@@ -760,6 +872,7 @@ export function Workstation({
             const uploadSelection =
                 uploadSelectionRevisionsRef.current.get(uploadId);
             uploadSelectionRevisionsRef.current.delete(uploadId);
+            if (resumed) resumedArrivalIds.current.add(recordingId);
             refresh();
             const selectUploadedRecording = (
                 selectionRevision: number,
@@ -1517,12 +1630,14 @@ export function Workstation({
         recordings: treeRecordings,
         navigation,
         canCurate,
+        isOrgAccount,
         folder: selectedFolder,
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
         onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
         onNewFolder: () =>
-            selectedFolder && (selectedFolder.scope !== "org" || canCurate)
+            selectedFolder &&
+            canCreateSubfolder(selectedFolder, canCurate, isOrgAccount)
                 ? openFolderSettings(selectedFolder, "create")
                 : setFirstLevelFolderOpen(true),
         onAssign: assignRecording,
@@ -1577,11 +1692,10 @@ export function Workstation({
                                 onAssignRecording={assignRecording}
                                 onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
+                                isOrgAccount={isOrgAccount}
                                 navigation={navigation}
                                 recentCount={visibleRecordings.length}
-                                onSettings={(folder) =>
-                                    openFolderSettings(folder)
-                                }
+                                onSettings={openFolderSettings}
                                 onCollapse={() =>
                                     libraryPreferences.setPreferences(
                                         (value) => ({

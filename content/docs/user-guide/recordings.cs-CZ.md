@@ -24,7 +24,9 @@ Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, sesk
 Nahrávky přibývají dvěma způsoby:
 
 - **Z Vašeho záznamníku.** Klepna stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
-- **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. Nová nahrávka bude vybraná vpravo a pracovní postup bude na začátku. U videa si Klepna ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+- **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. V Klepech se nahrávka otevře vpravo, pokud jste od začátku nahrávání nepřešli jinam. Jinak upozornění nabídne **Otevřít** a ponechá právě čtenou položku na místě. U videa si Klepna ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+
+Když máte otevřené **Klepy** a dorazí Vaše nová nahrávka nebo pošta, upozornění vpravo dole ukáže název a podrobnosti. Na telefonu je u spodního okraje. Výběr ani složka se nezmění. **Otevřít** otevře položku a tlačítko Zpět Vás vrátí. Novější příchozí položka upozornění nahradí; **+N dalších** počítá ostatní od jeho zobrazení. Upozornění zůstane, dokud ho nezavřete, neotevřete jeho položku nebo položka nezmizí. Položky, které v Klepech byly už při jejich otevření, a položky, které kolegové sdílejí do Organizace, upozornění nevyvolají. Volba **Zobrazovat oznámení o synchronizaci** ho nevypíná.
 
 Účet bez vlastních položek začíná v **Organizaci**, pokud už kolegové něco sdíleli. V detailu se otevře nejnovější sdílená položka a nad seznamem jsou akce pro synchronizaci a nahrání. Pokud jsou obě knihovny prázdné, začněte pomocí **Nová složka**, **Synchronizovat zařízení** nebo **Nahrát**.
 
@@ -106,7 +108,7 @@ Výběr složky otevře rovnou vyhledávací pole. Před psaním ukazuje naposle
 
 Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky. Zobrazuje se tu také zamýšlená složka Organizace; položka s volbou **Bez automatického zpracování** u ní nabízí **Sdílet nyní**, dokud ji nenasdílíte nebo umístění nezrušíte.
 
-Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
+Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Volbou **Nová podsložka** v nabídce **⋯** vytvoříte podsložku; stejnou nabídku otevřete kliknutím pravým tlačítkem na řádek složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
 
 Kliknutím na složku zobrazíte její položky v seznamu. Název aktuální složky v drobečkové navigaci nebo **⋯** vedle počtu položek otevře přejmenování, poštovní adresy, výchozí profily, novou podsložku, přesun a smazání:
 

@@ -19,7 +19,38 @@ describe("Google connect outcome", () => {
         toastMock.error.mockReset();
     });
 
-    afterEach(() => cleanup());
+    afterEach(() => {
+        cleanup();
+        vi.restoreAllMocks();
+    });
+
+    it("keeps dashboard state while removing Next's keys from the cleanup write", async () => {
+        const appState = { mobileView: "detail", draft: "draft-velno" };
+        window.history.replaceState(
+            {
+                ...appState,
+                __NA: true,
+                _N: true,
+                __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] },
+            },
+            "",
+            "/dashboard?folder=folder-fenra&recording=item-velno&google=connected#notes",
+        );
+        const replace = vi.spyOn(window.history, "replaceState");
+        const historyLength = window.history.length;
+        render(<Probe />);
+        expect(replace).toHaveBeenLastCalledWith(appState, "", expect.any(URL));
+        expect(window.history.state).toEqual(appState);
+        expect(`${window.location.search}${window.location.hash}`).toBe(
+            "?folder=folder-fenra&recording=item-velno#notes",
+        );
+        expect(window.history.length).toBe(historyLength);
+        await waitFor(() =>
+            expect(toastMock.success).toHaveBeenCalledWith(
+                "Google account connected",
+            ),
+        );
+    });
 
     it("announces a connection once and drops the parameter", async () => {
         window.history.replaceState(

@@ -987,6 +987,21 @@ async function seedTaskGraph(
                 },
             }),
         );
+        const proposalRows = await db
+            .select({ id: recordingTasks.id })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.itemId, itemId),
+                    eq(recordingTasks.userId, scope.userId),
+                    eq(recordingTasks.status, "proposed"),
+                ),
+            );
+        await acceptReview(viewers[fixture.owner], itemId, {
+            proposals: proposalRows.map((row) => row.id),
+            updates: [],
+            matches: [],
+        });
         const rows = await db
             .select({
                 id: recordingTasks.id,
@@ -1090,6 +1105,31 @@ async function seedTaskGraph(
             },
         }),
     );
+    const [mailMatch] = await db
+        .select({ id: taskMentions.id })
+        .from(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.taskId, harborTaskId),
+                eq(taskMentions.itemId, mailId),
+                eq(taskMentions.matchDecision, "suggested"),
+            ),
+        )
+        .limit(1);
+    if (!mailMatch) throw new Error("Mail task match was not created");
+    await tickUpdateProposal(
+        viewers.alex,
+        mailId,
+        mailMatch.id,
+        true,
+        await targetVersion(harborTaskId),
+    );
+    await acceptReview(viewers.alex, mailId, {
+        proposals: [],
+        updates: [],
+        matches: [mailMatch.id],
+    });
+
     const priyaTaskId = requiredTaskId(taskIds, "next-prototype-test");
     await db.transaction((tx) =>
         writeTaskProposalsInTx(tx, {

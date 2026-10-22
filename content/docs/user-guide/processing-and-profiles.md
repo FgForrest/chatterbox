@@ -17,7 +17,7 @@ You can also drag an item onto a folder in the folder tree. Items addressed or u
 
 After categorizing, the row under the title shows the folder chips, **Add to folder**, any intended Organization folders, and the profile chip on the right. Open the profile chip to change the profile or choose **Nothing automatic**.
 
-Choosing an Organization folder records an intended placement. The item remains private while it is processed. Chatterbox shares it automatically after the transcript, speaker, Learn, and task-review gates pass. With **Nothing automatic**, it waits instead: the intended folder in the folder row offers **Share now** and a cancel button.
+Choosing an Organization folder records an intended placement. The item remains private while it is processed. Chatterbox shares it automatically after the transcript, speaker, and Learn checks pass. Task review does not delay sharing. With **Nothing automatic**, it waits instead: the intended folder in the folder row offers **Share now** and a cancel button.
 
 <span id="profiles-are-processing-recipes" />
 

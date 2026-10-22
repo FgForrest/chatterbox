@@ -1,16 +1,46 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+});
 beforeEach(() => {
     localStorage.clear();
     window.history.replaceState({}, "", "/almanac");
 });
 
 describe("settings URL history", () => {
+    it("preserves dashboard state without forwarding Next's internal keys", () => {
+        const appState = { mobileView: "detail", draft: "draft-velno" };
+        window.history.replaceState(
+            {
+                ...appState,
+                __NA: true,
+                _N: true,
+                __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] },
+            },
+            "",
+            "/dashboard?folder=folder-fenra&recording=item-velno",
+        );
+        const replace = vi.spyOn(window.history, "replaceState");
+        const historyLength = window.history.length;
+        const { result } = renderHook(() =>
+            useSettingsNav(true, () => {}, false),
+        );
+        act(() => result.current.setActiveSection("storage"));
+        expect(replace).toHaveBeenLastCalledWith(appState, "", expect.any(URL));
+        expect(window.history.state).toEqual(appState);
+        expect(window.location.search).toBe(
+            "?folder=folder-fenra&recording=item-velno&section=storage",
+        );
+        expect(window.location.hash).toBe("#storage");
+        expect(window.history.length).toBe(historyLength);
+    });
+
     it("keeps legacy hash actions working after a previous dialog visit", () => {
         const { result, rerender } = renderHook(
             ({ open }) => useSettingsNav(open, () => {}, false),

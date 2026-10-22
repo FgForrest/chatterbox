@@ -317,6 +317,7 @@ async function unfiledCandidates(
     reviewer: TaskViewer,
     participantPersonIds: readonly string[],
 ): Promise<CandidateTask[]> {
+    if (participantPersonIds.length === 0) return [];
     const rows = await db
         .select({
             id: recordingTasks.id,
@@ -344,15 +345,10 @@ async function unfiledCandidates(
         .where(
             and(
                 eq(recordingTasks.status, "open"),
-                or(
-                    and(
-                        eq(recordingTasks.itemId, recording.id),
-                        eq(recordingTasks.userId, recording.userId),
-                    ),
-                    inArray(recordingTasks.assigneePersonId, [
-                        ...participantPersonIds,
-                    ]),
-                ),
+                inArray(recordingTasks.assigneePersonId, [
+                    ...participantPersonIds,
+                ]),
+                ne(recordingTasks.itemId, recording.id),
                 isNull(chatterItems.deletedAt),
                 taskClosable(reviewer, ANY_TASK_ITEM),
             ),
@@ -966,7 +962,7 @@ export async function loadTasksPromptContext({
     );
     const eligible =
         scopeFolderIds.length > 0
-            ? await scopedCandidates(recording, reviewer, scopeFolderIds, false)
+            ? await scopedCandidates(recording, reviewer, scopeFolderIds)
             : await unfiledCandidates(recording, reviewer, [...labelOf.keys()]);
     const rows = await rankedCandidates(
         eligible,

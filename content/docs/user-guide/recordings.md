@@ -19,7 +19,9 @@ The Chatter list on the left shows your newest recordings and mail first, groupe
 Recordings arrive in two ways:
 
 - **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
-- **By upload.** Click **Upload** on Recordings, Tasks, Almanac, or Settings and pick an audio or a video file. You can choose a folder before the upload; that recording skips the categorization wait and uses the folder's default profile. Without a folder it opens at **Categorize**. The new recording is selected on the right with its workflow at the start. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
+- **By upload.** Click **Upload** on Recordings, Tasks, Almanac, or Settings and pick an audio or a video file. You can choose a folder before the upload; that recording skips the categorization wait and uses the folder's default profile. Without a folder it opens at **Categorize**. On the dashboard, the upload opens on the right if you have not moved on since starting it. Otherwise a notice offers **Open** and leaves what you are reading in place. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
+
+When your own recording or mail arrives while the dashboard is open, a notice at the bottom right shows its title and details. On phones it sits along the bottom. Your selection and folder stay in place. **Open** opens the item, and Back returns. A newer arrival replaces the notice; **+N more** counts the others since it appeared. The notice stays until you close it, open its item, or the item disappears. Items already present when you open the dashboard and items colleagues share to the Organization do not trigger it. The **Show sync notifications** setting does not silence it.
 
 An account with no items of its own starts at **Organization** when colleagues have shared items. The newest shared item opens in the detail, with sync and upload actions above the list. When both libraries are empty, use **New folder**, **Sync device**, or **Upload** to get started.
 
@@ -91,7 +93,7 @@ The picker focuses its search field. Before typing, it shows recently used folde
 
 A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder. An intended Organization folder also appears here; a **Nothing automatic** item offers **Share now** beside it until you share or cancel the placement.
 
-To manage folders, use **⋯ → Folder settings** next to a folder. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
+To manage folders, use **⋯ → Folder settings** next to a folder. Choose **New subfolder** from the folder’s **⋯** menu to create a child folder, or right-click the folder row to open the same menu. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
 
 Click a folder to show its items in the list. Use the current folder name in the breadcrumb or the **⋯** beside the list count to rename it, manage its mail addresses, change defaults, create a subfolder, move it, or delete it:
 

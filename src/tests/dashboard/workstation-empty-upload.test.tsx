@@ -9,8 +9,11 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { type ComponentProps, type Ref, useImperativeHandle } from "react";
+import type { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import type { CommandPalette as CommandPaletteComponent } from "@/components/dashboard/command-palette";
 import type { FolderSettingsPanel as FolderSettingsPanelComponent } from "@/components/dashboard/folder-settings-panel";
 import type { RecordingListHandle } from "@/components/dashboard/recording-list";
@@ -22,6 +25,8 @@ const mocks = vi.hoisted(() => ({
     inFlightActions: new Map<string, "transcribing" | "summarizing">(),
     refresh: vi.fn(),
     error: vi.fn(),
+    custom: vi.fn<typeof toast.custom>(() => "new-item"),
+    dismiss: vi.fn<typeof toast.dismiss>(() => "new-item"),
     settingsProps: null as ComponentProps<
         typeof FolderSettingsPanelComponent
     > | null,
@@ -47,10 +52,22 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useExtracted: () => (text: string) => text,
+    useExtracted:
+        () => (text: string, values?: Record<string, string | number>) =>
+            text.replace(/\{(\w+)\}/g, (match, key: string) =>
+                String(values?.[key] ?? match),
+            ),
+    useLocale: () => "en",
 }));
 
-vi.mock("sonner", () => ({ toast: { error: mocks.error, success: vi.fn() } }));
+vi.mock("sonner", () => ({
+    toast: {
+        error: mocks.error,
+        success: vi.fn(),
+        custom: mocks.custom,
+        dismiss: mocks.dismiss,
+    },
+}));
 
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
 
@@ -125,6 +142,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         recordings,
         currentRecording,
         onSelect,
+        onDelete,
         header,
         navigationContent,
         locationKey,
@@ -135,6 +153,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         recordings: Recording[];
         currentRecording: Recording | null;
         onSelect: (recording: Recording) => void;
+        onDelete: (recording: Recording) => Promise<void>;
         header?: React.ReactNode;
         navigationContent?: React.ReactNode;
         locationKey: string;
@@ -175,14 +194,22 @@ vi.mock("@/components/dashboard/recording-list", () => ({
                 {header}
                 {navigationContent}
                 {recordings.map((recording) => (
-                    <button
-                        type="button"
-                        key={recording.id}
-                        aria-pressed={currentRecording?.id === recording.id}
-                        onClick={() => onSelect(recording)}
-                    >
-                        {recording.filename}
-                    </button>
+                    <div key={recording.id}>
+                        <button
+                            type="button"
+                            key={recording.id}
+                            aria-pressed={currentRecording?.id === recording.id}
+                            onClick={() => onSelect(recording)}
+                        >
+                            {recording.filename}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void onDelete(recording)}
+                        >
+                            Delete {recording.filename}
+                        </button>
+                    </div>
                 ))}
                 {recordings.length === 0 ? (
                     <>
@@ -367,10 +394,403 @@ function recording(id: string, filename: string): Recording {
 
 afterEach(cleanup);
 
+function arrivalCard() {
+    const call = mocks.custom.mock.calls.at(-1);
+    if (!call) throw new Error("Expected an arrival notice");
+    expect(call[1]).toMatchObject({ id: "new-item", duration: Infinity });
+    return call[0]("new-item") as ReactElement<
+        ComponentProps<typeof ArrivalNotice>
+    >;
+}
+
+describe("Dashboard arrival notices", () => {
+    const first = recording("first", "First recording");
+    const arrived = {
+        ...recording("arrived", "Orbit notes"),
+        duration: 65_000,
+        startTime: "2026-10-22T10:00:00Z",
+    };
+    const later = {
+        ...recording("later", "Meadow notes"),
+        startTime: "2026-10-22T11:00:00Z",
+    };
+    const props = {
+        ...baseProps,
+        recordings: [first],
+        initialSettings: { ...settings, dateTimeFormat: "iso" as const },
+    };
+
+    it("does not announce items present at mount", () => {
+        render(<Workstation {...props} />);
+        expect(mocks.custom).not.toHaveBeenCalled();
+    });
+
+    it("shows a recording's title and row metadata without changing selection, folder or URL", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=private-root&recording=first",
+        );
+        const { rerender } = render(<Workstation {...props} />);
+        const url = window.location.href;
+        const push = vi.spyOn(window.history, "pushState");
+        const replace = vi.spyOn(window.history, "replaceState");
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        expect(window.location.href).toBe(url);
+        expect(push).not.toHaveBeenCalled();
+        expect(replace).not.toHaveBeenCalled();
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        const card = render(arrivalCard());
+        expect(card.getByText("New recording")).toBeTruthy();
+        expect(card.getByTitle(arrived.filename)).toBeTruthy();
+        expect(card.getByText("1:05 · 2026-10-22T10:00:00.000Z")).toBeTruthy();
+        expect(
+            card.getByRole("button", { name: 'Open "Orbit notes"' }),
+        ).toBeTruthy();
+        push.mockRestore();
+        replace.mockRestore();
+    });
+
+    it("chooses the newest of a batch and accumulates later arrivals in one slot", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(
+            <Workstation {...props} recordings={[arrived, later, first]} />,
+        );
+        expect(arrivalCard().props).toMatchObject({
+            recording: later,
+            more: 1,
+        });
+        const third = { ...arrived, id: "third" };
+        rerender(
+            <Workstation
+                {...props}
+                recordings={[third, arrived, later, first]}
+            />,
+        );
+        expect(arrivalCard().props).toMatchObject({
+            recording: third,
+            more: 2,
+        });
+        const card = render(arrivalCard());
+        expect(card.getByText("+2 more")).toBeTruthy();
+        expect(
+            mocks.custom.mock.calls.every((call) => call[1]?.id === "new-item"),
+        ).toBe(true);
+    });
+
+    it("Open pushes history, switches the phone to detail, closes, and Back returns", async () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        const push = vi.spyOn(window.history, "pushState");
+        const card = render(arrivalCard());
+        mocks.dismiss.mockClear();
+        fireEvent.click(
+            card.getByRole("button", { name: 'Open "Orbit notes"' }),
+        );
+        expect(screen.getByText("Selected: Orbit notes")).toBeTruthy();
+        expect(push).toHaveBeenCalledTimes(1);
+        expect(window.history.state.mobileView).toBe("detail");
+        expect(mocks.dismiss).toHaveBeenCalledWith("new-item");
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        push.mockRestore();
+    });
+
+    it("opens an arrival outside the current folder through normal row selection", () => {
+        const folderProps = {
+            ...props,
+            initialFolderOrganization: {
+                folders: [rootFolder, personalChildFolder],
+                assignments: [
+                    { recordingId: first.id, folderId: personalChildFolder.id },
+                ],
+            },
+        };
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=first",
+        );
+        const { rerender } = render(<Workstation {...folderProps} />);
+        rerender(
+            <Workstation {...folderProps} recordings={[arrived, first]} />,
+        );
+        expect(screen.getByTestId("location").textContent).toBe(
+            "personal-child",
+        );
+        act(() => arrivalCard().props.onOpen());
+        expect(screen.getByTestId("location").textContent).toBe("recent");
+        expect(window.location.search).toBe("?recording=arrived");
+    });
+
+    it("close preserves selection and resets the count without announcing seen ids again", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(
+            <Workstation {...props} recordings={[arrived, later, first]} />,
+        );
+        const card = render(arrivalCard());
+        fireEvent.click(card.getByRole("button", { name: "Close notice" }));
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        const count = mocks.custom.mock.calls.length;
+        rerender(
+            <Workstation {...props} recordings={[arrived, later, first]} />,
+        );
+        expect(mocks.custom).toHaveBeenCalledTimes(count);
+        const third = { ...arrived, id: "third" };
+        rerender(
+            <Workstation
+                {...props}
+                recordings={[third, arrived, later, first]}
+            />,
+        );
+        expect(arrivalCard().props.more).toBe(0);
+    });
+
+    it.each([
+        "row",
+        "keyboard",
+        "palette",
+        "search",
+    ])("closes when the arrival is opened via %s", (source) => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[first, arrived]} />);
+        mocks.dismiss.mockClear();
+        if (source === "row")
+            fireEvent.click(
+                screen.getByRole("button", { name: arrived.filename }),
+            );
+        else if (source === "keyboard") fireEvent.keyDown(window, { key: "j" });
+        else
+            act(() => {
+                if (source === "palette")
+                    mocks.paletteProps?.onSelectRecording?.(arrived);
+                else
+                    mocks.paletteProps?.onOpenSearchHit?.({
+                        id: arrived.id,
+                        title: arrived.filename,
+                        snippet: null,
+                        href: "/dashboard?recording=arrived",
+                    });
+            });
+        expect(mocks.dismiss).toHaveBeenCalledWith("new-item");
+    });
+
+    it("closes for a removed item and never reannounces it if it returns", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        const count = mocks.custom.mock.calls.length;
+        mocks.dismiss.mockClear();
+        rerender(<Workstation {...props} />);
+        expect(mocks.dismiss).toHaveBeenCalledWith("new-item");
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        expect(mocks.custom).toHaveBeenCalledTimes(count);
+    });
+
+    it("closes for an optimistically hidden item", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ ok: true })),
+        );
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        mocks.dismiss.mockClear();
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("button", {
+                    name: `Delete ${arrived.filename}`,
+                }),
+            ),
+        );
+        expect(mocks.dismiss).toHaveBeenCalledWith("new-item");
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        vi.unstubAllGlobals();
+    });
+
+    it("updates a title in place without counting another arrival", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        const renamed = { ...arrived, filename: "Revised orbit notes" };
+        rerender(<Workstation {...props} recordings={[renamed, first]} />);
+        expect(arrivalCard().props).toMatchObject({
+            recording: renamed,
+            more: 0,
+        });
+        const card = render(arrivalCard());
+        expect(
+            card.getByRole("button", { name: 'Open "Revised orbit notes"' }),
+        ).toBeTruthy();
+    });
+
+    it.each([
+        false,
+        true,
+    ])("ignores colleagues' Organization shares: organization account=%s", (isOrgAccount) => {
+        const own = { ...first, view: "org" as const, isOwn: true };
+        const orgProps = {
+            ...props,
+            isOrgAccount,
+            organizationLibrary: {
+                recordings: [own],
+                transcriptions: new Map(),
+                transcriptVariants: new Map(),
+            },
+        };
+        const { rerender } = render(<Workstation {...orgProps} />);
+        const url = window.location.href;
+        rerender(
+            <Workstation
+                {...orgProps}
+                organizationLibrary={{
+                    ...orgProps.organizationLibrary,
+                    recordings: [
+                        own,
+                        { ...arrived, view: "org", isOwn: false },
+                    ],
+                }}
+            />,
+        );
+        expect(mocks.custom).not.toHaveBeenCalled();
+        expect(window.location.href).toBe(url);
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+    });
+
+    it("announces the Organization account's own new items", () => {
+        const own = { ...first, view: "org" as const, isOwn: true };
+        const orgProps = {
+            ...props,
+            recordings: [],
+            isOrgAccount: true,
+            organizationLibrary: {
+                recordings: [own],
+                transcriptions: new Map(),
+                transcriptVariants: new Map(),
+            },
+        };
+        const { rerender } = render(<Workstation {...orgProps} />);
+        rerender(
+            <Workstation
+                {...orgProps}
+                organizationLibrary={{
+                    ...orgProps.organizationLibrary,
+                    recordings: [own, { ...arrived, view: "org", isOwn: true }],
+                }}
+            />,
+        );
+        expect(arrivalCard().props.recording.id).toBe(arrived.id);
+    });
+
+    it("shows mail's subject, sender and time without moving selection", () => {
+        const mail = {
+            ...arrived,
+            kind: "mail" as const,
+            mail: {
+                from: "Zorven",
+                senderVerified: true,
+                hasAttachments: false,
+                waitingToShare: false,
+                autoGenerated: false,
+            },
+        };
+        const { rerender } = render(<Workstation {...props} />);
+        const url = window.location.href;
+        rerender(<Workstation {...props} recordings={[mail, first]} />);
+        expect(window.location.href).toBe(url);
+        const card = render(arrivalCard());
+        expect(card.getByText("New email")).toBeTruthy();
+        expect(
+            card.getByText("Zorven · 2026-10-22T10:00:00.000Z"),
+        ).toBeTruthy();
+    });
+
+    it.each([
+        "automatic",
+        "moved",
+        "resumed",
+    ])("handles an own upload: %s", (mode) => {
+        const second = recording("second", "Second recording");
+        const { rerender } = render(
+            <Workstation {...props} recordings={[first, second]} />,
+        );
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
+        act(() =>
+            mocks.uploadOptions?.onUploadStarted?.({
+                uploadId: "upload",
+                filename: arrived.filename,
+            }),
+        );
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
+        if (mode === "moved")
+            fireEvent.click(
+                screen.getByRole("button", { name: second.filename }),
+            );
+        let action: UploadCompletionAction | undefined;
+        act(() => {
+            action = mocks.uploadOptions?.onUploadComplete({
+                uploadId: "upload",
+                recordingId: arrived.id,
+                filename: arrived.filename,
+                resumed: mode === "resumed",
+            });
+        });
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
+        rerender(
+            <Workstation {...props} recordings={[arrived, first, second]} />,
+        );
+        if (mode === "moved") {
+            expect(arrivalCard().props.recording.id).toBe(arrived.id);
+            expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        } else {
+            expect(mocks.custom).not.toHaveBeenCalled();
+            expect(
+                screen.getByText(
+                    `Selected: ${mode === "automatic" ? arrived.filename : first.filename}`,
+                ),
+            ).toBeTruthy();
+        }
+        if (mode === "resumed") expect(action?.label).toBe("Open");
+        if (mode === "automatic") {
+            rerender(
+                <Workstation
+                    {...props}
+                    recordings={[arrived, first, second]}
+                />,
+            );
+            expect(mocks.custom).not.toHaveBeenCalled();
+            fireEvent.click(
+                screen.getByRole("button", { name: first.filename }),
+            );
+            expect(screen.getByText("Selected: First recording")).toBeTruthy();
+            expect(mocks.custom).not.toHaveBeenCalled();
+        }
+    });
+
+    it("never announces the currently selected arrival", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        window.history.replaceState({}, "", "/dashboard?recording=arrived");
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        expect(mocks.custom).not.toHaveBeenCalled();
+    });
+
+    it("dismisses the slot when the dashboard unmounts", () => {
+        const { rerender, unmount } = render(<Workstation {...props} />);
+        rerender(<Workstation {...props} recordings={[arrived, first]} />);
+        mocks.dismiss.mockClear();
+        unmount();
+        expect(mocks.dismiss).toHaveBeenCalledWith("new-item");
+    });
+});
+
 beforeEach(() => {
     mocks.inFlightActions = new Map();
     mocks.refresh.mockClear();
     mocks.error.mockClear();
+    mocks.custom.mockClear();
+    mocks.dismiss.mockClear();
     mocks.uploadOptions = null;
     mocks.paletteProps = null;
     mocks.settingsProps = null;

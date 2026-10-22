@@ -82,6 +82,48 @@ describe("server-provided workflow states", () => {
             waitingFor,
         });
     });
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("shows Task review after Summary for %s proposals", (kind) => {
+        const result = deriveWorkflowStatus(
+            processing({
+                kind,
+                taskReviewWaiting: 2,
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("done", "transcribed"),
+                    learn: phase("done", "finished"),
+                    summary: phase("done", "finished"),
+                    taskReview: phase("waiting", "needs_review"),
+                },
+            }),
+            kind,
+        );
+        const ids = result.steps.map((step) => step.id);
+        expect(ids.indexOf("taskReview")).toBe(ids.indexOf("summary") + 1);
+        expect(
+            result.steps.find((step) => step.id === "taskReview"),
+        ).toMatchObject({
+            state: "review",
+            current: true,
+            actions: ["reviewTasks"],
+        });
+        expect(result.status).toMatchObject({
+            message: "taskReview",
+            action: "reviewTasks",
+            params: { count: 2 },
+        });
+    });
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("keeps the completed Task review step for %s", (kind) => {
+        const result = deriveWorkflowStatus(processing({ kind }), kind);
+        expect(
+            result.steps.find((step) => step.id === "taskReview")?.state,
+        ).toBe("done");
+    });
     it("does not infer a queued step from automatic profile flags or a Learn run", () => {
         const data = processing({
             phases: { categorize: phase("done") },

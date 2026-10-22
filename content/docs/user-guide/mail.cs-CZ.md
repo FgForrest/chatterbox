@@ -5,6 +5,8 @@ description: Posílání pošty do vašich Klepů.
 
 Když to váš správce nastaví, může se k nahrávkám přidat i pošta. Pošta poslaná na vaše adresy přistane zašifrovaná ve vašich **Klepech** vedle nahrávek. Přepínač nad seznamem ukazuje **Vše**, **Zvuk** nebo **Pošta**.
 
+Když máte otevřené **Klepy** a dorazí pošta, upozornění **Nový e-mail** ukáže předmět, odesílatele a čas. Výběr ani složka se nezmění. **Otevřít** otevře zprávu a tlačítko Zpět vás vrátí. Upozornění můžete zavřít a poštu si přečíst později v **Nedávných**. Novější příchozí položka upozornění nahradí. Pošta, kterou kolegové sdílejí do Organizace, ho nevyvolá.
+
 Pošta vyžaduje jednotné přihlášení: adresy dostanete, jakmile se přihlásíte účtem své organizace. Když se tak dlouho nepřihlásíte, adresy se pozastaví a obnoví se při dalším přihlášení.
 
 ## Vaše adresy
@@ -24,7 +26,7 @@ Smazání složky natrvalo zastaví její adresy i adresy podsložek. Klepna př
 
 ## Složky Organizace
 
-Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává nejprve soukromý a daná složka je jeho zamýšleným umístěním v Organizaci. Profil Organizace proběhne v soukromém pohledu a Klepna e-mail automaticky nasdílí po dokončení kontrol Učení a úkolů. Při volbě **Bez automatického zpracování** nabízí řádek složek místo toho **Sdílet nyní** a pruh pracovního postupu čeká na Vás.
+Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává nejprve soukromý a daná složka je jeho zamýšleným umístěním v Organizaci. Profil Organizace proběhne v soukromém pohledu a Klepna e-mail automaticky nasdílí po dokončení kontroly Učení. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** nabízí řádek složek místo toho **Sdílet nyní** a pruh pracovního postupu čeká na Vás.
 
 Sdílet můžete i jakýkoli jiný svůj e-mail, když ho zařadíte do složky Organizace. Kolegové sdílený e-mail čtou i s přílohami a formátovanou podobou; smazat ho nebo stáhnout původní zprávu můžete jen vy.
 

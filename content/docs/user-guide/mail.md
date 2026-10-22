@@ -5,6 +5,8 @@ description: Sending mail into your Chatter pile.
 
 When your administrator has set it up, mail can join your recordings. Mail sent to your addresses lands in your **Chatter** pile, encrypted, beside your recordings. The type filter above the list shows **All**, **Audio** or **Mail**.
 
+When mail arrives while the dashboard is open, a **New email** notice shows its subject, sender and time. It leaves your selection and folder in place. **Open** opens the message; Back returns. You can close the notice and read the mail later in **Recent**. A newer arrival replaces the notice. Mail colleagues share to the Organization does not trigger it.
+
 Mail needs single sign-on: you get addresses once you sign in with your organization's account. They pause if you have not signed in that way for a long time, and resume at your next sign-in.
 
 ## Your addresses
@@ -24,7 +26,7 @@ Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox
 
 ## Organization folders
 
-Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn and task reviews pass. With **Nothing automatic**, the folder row offers **Share now** instead and the workflow strip waits for you.
+Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn review passes. Task review does not delay sharing. With **Nothing automatic**, the folder row offers **Share now** instead and the workflow strip waits for you.
 
 You can also share any of your mail by filing it into an Organization folder. Colleagues read a shared mail, its attachments and its formatted version; only you delete it or download the original message.
 

@@ -208,7 +208,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
             .where(eq(recordingTasks.itemId, ITEM_ID));
         expect(first).toHaveLength(2);
         expect(first.every((task) => task.source === "plaud")).toBe(true);
-        expect(first.every((task) => task.status === "open")).toBe(true);
+        expect(first.every((task) => task.status === "proposed")).toBe(true);
         expect(await db().select().from(taskUpdateProposals)).toHaveLength(0);
         const mentions = await db().select().from(taskMentions);
         expect(mentions).toHaveLength(2);
@@ -241,7 +241,6 @@ describeWithDatabase("Plaud summary task proposals", () => {
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, ITEM_ID));
         expect(replaced.map((task) => task.text).sort()).toEqual([
-            "Draft the report",
             "Keep the signed decision",
             "Send the final report",
         ]);
@@ -370,7 +369,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
         });
     });
 
-    it("keeps accepted Plaud tasks when an AI summary adds tasks", async () => {
+    it("replaces untouched Plaud proposals when an AI summary adds tasks", async () => {
         const items = ["Plaud-only suggestion"];
         await storePlaudSummary(items);
         const fingerprint = plaudActionItemsFingerprint(items);
@@ -417,12 +416,9 @@ describeWithDatabase("Plaud summary task proposals", () => {
             })
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, ITEM_ID));
-        expect(rows).toEqual(
-            expect.arrayContaining([
-                { source: "plaud", text: "Plaud-only suggestion" },
-                { source: "riffado", text: "AI-validated task" },
-            ]),
-        );
+        expect(rows).toEqual([
+            { source: "riffado", text: "AI-validated task" },
+        ]);
     });
 
     it("does not duplicate a task when Plaud and AI summary writers run concurrently", async () => {
@@ -471,8 +467,9 @@ describeWithDatabase("Plaud summary task proposals", () => {
         expect(tasks).toHaveLength(1);
         expect(tasks[0]).toMatchObject({
             text,
-            status: "open",
-            acceptedByUserId: USER_ID,
+            status: "proposed",
+            acceptedByUserId: null,
+            ticked: true,
         });
         expect(await db().select().from(taskMentions)).toHaveLength(1);
     });

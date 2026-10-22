@@ -32,8 +32,16 @@ export function useItemProcessing({
     if (currentKey.current !== key) versionRef.current++;
     currentKey.current = key;
     const version = versionRef.current;
-    const [data, setData] = useState<ItemProcessingPresentation | null>(
-        initialData ?? null,
+    const [dataState, setDataState] = useState<{
+        key: string;
+        data: ItemProcessingPresentation | null;
+    }>({ key, data: initialData ?? null });
+    const data = dataState.key === key ? dataState.data : null;
+    const setData = useCallback(
+        (next: ItemProcessingPresentation | null) => {
+            setDataState({ key, data: next });
+        },
+        [key],
     );
     const [failures, setFailures] = useState(0);
     const [schedule, setSchedule] = useState(() => ({
@@ -72,7 +80,7 @@ export function useItemProcessing({
         stoppedVersion.current = null;
         setUnavailableVersion(null);
         setSchedule({ delay: initialData?.nextCheckInMs ?? 60_000 });
-    }, [initialData, itemId, key]);
+    }, [initialData, itemId, key, setData]);
 
     const refresh = useCallback((): Promise<void> => {
         if (
@@ -134,7 +142,7 @@ export function useItemProcessing({
         })();
         inFlight.current = { key, version, request };
         return request;
-    }, [enabled, itemId, key, kind, version, view]);
+    }, [enabled, itemId, key, kind, setData, version, view]);
 
     useEffect(() => {
         if (!enabled || !pageVisible || initialized.current === key) return;
