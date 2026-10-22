@@ -24,6 +24,14 @@ Pokud má profil zpracování položky u Učení zapnuté **Spouštět automatic
 
 Pokud Učení nenajde nic ke kontrole a je zapnutá volba **Opravit přepis po Učení**, krok Učení zůstane ve stavu **Běží**, zatímco přepis znovu čte a opravuje špatně rozpoznaná slova. U shrnutí se zobrazí, že čeká na tuto opravu, a po jejím dokončení se samo spustí. Kliknutím na **Shrnout** jej můžete spustit ihned.
 
+## Kalendář, Meet a odhady mluvčích
+
+Po připojení Kalendáře používá každý běh Učení nad zvukovou nahrávkou, ruční i automatický, jména pozvaných z kalendáře vlastníka nahrávky. Po udělení přístupu k Meet přidá také jména připojených účastníků. Funguje to i po sdílení s Organizací. Klepna vybere schůzku s největším časovým překryvem; při podobných shodách nechá výběr nerozhodnutý. Při ručním spuštění si můžete vybrat z nabízených událostí.
+
+Učení porovná tato jména s přepisem a známými rolemi a fakty v Almanachu a navrhne pravděpodobné mluvčí. Návrhy mají **?** a uvedený původ: **Zazněl v přepisu**, **Pozván v Kalendáři**, **Připojen v Google Meet** nebo **Odhad** s krátkým vysvětlením. Odhady začínají nezaškrtnuté. Správný odhad přijmete jedním zaškrtnutím; dokončení bez zaškrtnutí nechá mluvčího nepotvrzeného. Nového účastníka lze současně přidat do Almanachu.
+
+Jména účastníků také pomáhají podporovaným poskytovatelům přepisu a následné opravě správně psát jména. Tím se mluvčí nepojmenuje. Nepotvrzené odhady se jako jména nikdy nedostanou do textu přepisu, shrnutí, exportů ani API. K určování identity se nepoužívají hlasová data, hlasové otisky ani biometrie; e-maily účastníků se nevyžadují.
+
 <span id="reviewing" />
 
 ## Kontrola návrhů
@@ -66,7 +74,7 @@ Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení p
 ## Důležité vědět
 
 - Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
-- Mluvčí označený pouze křestním jménem je podle toho označen. Křestní jméno, které sdílí dvě osoby v Almanachu, nepřiřadí žádné z nich.
+- Mluvčí označený pouze křestním jménem je podle toho označen. Shodné křestní jméno vyžaduje rozlišující důkaz nebo výslovně označený odhad.
 - Zařazení nového záznamu jako toho, který už máte, naučí Klepna nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
 - Profil zpracování může Učení přiřadit vlastního poskytovatele a model, například výkonnější než pro shrnutí. Viz [Zpracování a profily](processing-and-profiles.md).
 

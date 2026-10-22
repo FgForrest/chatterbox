@@ -28,7 +28,7 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 **Timings matter.** Topics, Learn, playing a sentence and following along all need to know when each line was said. A transcript without timings is shown as plain text.
 
-**Names from the Almanac.** ElevenLabs Scribe v2 and Speechmatics are sent up to 500 names from your [Almanac](almanac.md) with each recording: your own first, then people and things mentioned recently. They spell those names right much more often. The names are sent for every recording, including people who are not in it.
+**Names from the Almanac.** ElevenLabs Scribe v2 and Speechmatics are sent up to 500 names from your [Almanac](almanac.md) with each recording: your own first, then meeting attendees from Calendar and Meet when connected, then people and things mentioned recently. They spell those names right much more often. The names are sent for every recording, including people who are not in it.
 
 **Recorder transcripts.** If your recorder's service made its own transcript and summary, Chatterbox can import them (Settings → Transcription → **Import Plaud transcripts and summaries**). A recording with both shows a switch between **Plaud** and **Custom**.
 
@@ -48,6 +48,8 @@ The chips above the transcript are the speakers.
 - Every chip has a coloured **▶**, including an unanswered one. Click it to hear that speaker’s next turn. Right-click remains a shortcut. Click a confirmed name to choose another person or **Open in Almanac**, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
+
+Speaker suggestions show their source and, for a guess, the model's reason in the tooltip. Calendar and Meet are used on automatic and manual runs. Confirm a **?** suggestion with one click; leaving it unticked never names the speaker. Identity uses invitations, attendance and transcript clues, never voice data.
 
 ### Topics
 

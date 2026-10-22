@@ -9,6 +9,7 @@ import type {
     LearnSpeakerMark,
 } from "@/components/learn/learn-marks";
 import { useLearnApiErrorMessage } from "@/components/learn/review-error";
+import { useSpeakerSource } from "@/components/learn/speaker-source";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { PlayAtIcon, usePlayAt } from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ export function SpeakerGuesses({
 }) {
     const i18n = useExtracted();
     const getApiErrorMessage = useLearnApiErrorMessage();
+    const speakerSource = useSpeakerSource();
     const speakerLabel = useSpeakerLabel();
     const [busy, setBusy] = useState<string | null>(null);
     // Accepted here, until the strip has read them back.
@@ -79,7 +81,7 @@ export function SpeakerGuesses({
         .sort((a, b) =>
             a.label.localeCompare(b.label, undefined, { numeric: true }),
         );
-    const guesses = shown.filter((guess) => !guess.declined);
+    const guesses = shown.filter((guess) => !guess.declined && !guess.guess);
     if (shown.length === 0) return null;
 
     /** Name the speaker now, then tick the guess in the review. */
@@ -200,24 +202,28 @@ export function SpeakerGuesses({
                             )}
                             <span
                                 className="inline-flex h-full items-center gap-1 px-3"
-                                title={
+                                title={[
+                                    speakerSource(guess),
+                                    guess.onlyFirstName
+                                        ? i18n(
+                                              "Only the first name was heard: someone else of that name may be speaking.",
+                                          )
+                                        : null,
                                     guess.recorder
                                         ? i18n(
                                               "You made this recording, and this speaker leads it.",
                                           )
-                                        : guess.onlyFirstName
-                                          ? i18n(
-                                                "Only the first name was heard: someone else of that name may be speaking.",
-                                            )
-                                          : undefined
-                                }
+                                        : null,
+                                ]
+                                    .filter(Boolean)
+                                    .join(" ")}
                             >
                                 <span className="text-muted-foreground">
                                     {speaker}
                                 </span>
                                 →
                                 <span>
-                                    {guess.onlyFirstName
+                                    {guess.onlyFirstName || guess.guess
                                         ? i18n("{name}?", { name: guess.name })
                                         : guess.name}
                                 </span>

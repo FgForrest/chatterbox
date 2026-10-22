@@ -1595,6 +1595,12 @@ function finishInTx(
                         ...transcript,
                         label: payload.label,
                         answer,
+                        proposalSource:
+                            !choice &&
+                            (payload.source === "calendar" ||
+                                payload.source === "meet")
+                                ? payload.source
+                                : undefined,
                     },
                     scopes,
                 );

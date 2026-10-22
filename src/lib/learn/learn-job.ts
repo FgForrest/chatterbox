@@ -73,7 +73,7 @@ export function parseLearnJobPayload(
     }
     return {
         runId: raw.runId,
-        ...(raw.calendarEventId
+        ...(raw.calendarEventId !== undefined
             ? { calendarEventId: raw.calendarEventId }
             : {}),
     };
@@ -115,18 +115,6 @@ export async function startLearnRun(input: {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
             "Calendar event ID is too long",
-            400,
-        );
-    }
-    if (
-        input.calendarEventId &&
-        (trigger !== "manual" ||
-            access.view !== "private" ||
-            actorUserId !== access.ownerUserId)
-    ) {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "Calendar context is only available to the recording owner",
             400,
         );
     }
@@ -289,6 +277,9 @@ export async function startLearnRun(input: {
                     ...(input.requestLocale
                         ? { requestLocale: input.requestLocale }
                         : {}),
+                    ...(input.calendarEventId !== undefined
+                        ? { calendarEventId: input.calendarEventId }
+                        : {}),
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },
@@ -374,7 +365,7 @@ export async function startLearnRun(input: {
                     },
                     payload: {
                         runId,
-                        ...(input.calendarEventId
+                        ...(input.calendarEventId !== undefined
                             ? { calendarEventId: input.calendarEventId }
                             : {}),
                     },

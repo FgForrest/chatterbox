@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useSpeakerSource } from "@/components/learn/speaker-source";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import type { PlayAtTarget } from "@/components/playback/play-at-button";
@@ -17,6 +18,7 @@ import {
     type SpeakerAttributions,
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
+import type { SpeakerProposalContext } from "@/lib/learn/output";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
 export interface TranscriptSpeakerTag {
@@ -66,12 +68,18 @@ export interface SpeakerResponseRow {
     personId: string | null;
     personName: string | null;
     status: string;
+    source?: string;
+    confidence?: number | null;
+    proposal?: SpeakerProposalContext & { reason: string };
     markedUnknown?: boolean;
     evidenceStartMs?: number | null;
 }
 
 /** A name a machine proposed for a label, waiting for a person's answer. */
 export interface SpeakerSuggestion {
+    proposal?: SpeakerProposalContext & { reason?: string };
+    /** A name carried from an older transcript, awaiting confirmation. */
+    carried?: boolean;
     personId: string;
     name: string;
     evidenceStartMs: number | null;
@@ -86,9 +94,25 @@ export function suggestedSpeakers(
         if (speaker.status !== "suggested") continue;
         if (!speaker.personId || !speaker.personName) continue;
         suggestions[speaker.label] = {
+            carried: speaker.source === "heuristic",
             personId: speaker.personId,
             name: speaker.personName,
             evidenceStartMs: speaker.evidenceStartMs ?? null,
+            proposal: speaker.proposal ?? {
+                source:
+                    speaker.source === "calendar" || speaker.source === "meet"
+                        ? speaker.source
+                        : "transcript",
+                ...(speaker.source === "heuristic" ||
+                (speaker.confidence != null && speaker.confidence < 0.5)
+                    ? {
+                          guess: {
+                              confidence: speaker.confidence ?? 0.49,
+                              clues: [],
+                          },
+                      }
+                    : {}),
+            },
         };
     }
     return suggestions;
@@ -157,6 +181,7 @@ export function SpeakerTags({
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
     const productName = useProductName();
+    const speakerSource = useSpeakerSource();
     const speakersUrl = withRecordingView(
         `/api/recordings/${recordingId}/speakers?source=${encodeURIComponent(source)}`,
         view,
@@ -455,10 +480,19 @@ export function SpeakerTags({
                                     }}
                                     title={
                                         suggestion
-                                            ? i18n(
-                                                  "Suggested for {speaker}. Pick someone else",
-                                                  { speaker: speaker.label },
-                                              )
+                                            ? [
+                                                  speakerSource(
+                                                      suggestion.proposal ?? {},
+                                                  ),
+                                                  suggestion.carried
+                                                      ? i18n(
+                                                            "Suggested from the previous transcript.",
+                                                        )
+                                                      : null,
+                                                  i18n("Pick someone else"),
+                                              ]
+                                                  .filter(Boolean)
+                                                  .join(" ")
                                             : undefined
                                     }
                                 >

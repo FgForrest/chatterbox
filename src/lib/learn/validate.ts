@@ -47,6 +47,7 @@
  * never named by a fact of the same run (no circular evidence).
  */
 
+import type { MeetingAttendee } from "@/lib/integrations/google/meeting-roster";
 import {
     anchorMatches,
     anchorsOverlap,
@@ -71,12 +72,14 @@ import type {
     LearnObject,
     LearnOutput,
     LearnSubject,
+    SpeakerProposalContext,
 } from "@/lib/learn/output";
 import {
     type NewRecordCandidate,
     type NewRecordDrop,
     validateNewRecords,
 } from "@/lib/learn/validate-new-records";
+import { appendSpeakerGuesses } from "@/lib/learn/validate-speaker-guesses";
 import { parseClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -128,6 +131,10 @@ export interface LearnRunFrame {
      * email), when the run's scopes have them.
      */
     recorderPersonId?: string | null;
+    /** Untrusted names from this recording owner's selected meeting. */
+    speakerCandidates?: readonly MeetingAttendee[];
+    /** Label/person pairs explicitly rejected on this transcript. */
+    rejectedSpeakers?: readonly { label: string; personId: string }[];
     /** `heardAsKey` of every heard-as form a person confirmed. */
     confirmedHeardAs: ReadonlySet<string>;
     /** Current facts in the run's own scope: `factKey` -> fact id. */
@@ -196,7 +203,7 @@ export type ReviewCandidate =
           kind: "speaker";
           fingerprint: string;
           preTicked: false;
-          payload: {
+          payload: SpeakerProposalContext & {
               label: string;
               personId: string | null;
               /** A person the same run proposes to add, when it is them. */
@@ -412,6 +419,11 @@ export function validateLearnOutput(
         }[]
     >();
     for (const speaker of output.speakers) {
+        if (speaker.guess) continue;
+        if (speaker.rosterName) {
+            drop("doesNotFit");
+            continue;
+        }
         if (!labels.has(speaker.label)) {
             drop("unknownLabel");
             continue;
@@ -472,6 +484,16 @@ export function validateLearnOutput(
         const kept = named.length > 0 ? named : suggestions;
         const personId = kept[0]?.personId ?? null;
         const newRef = personId === null ? kept[0]?.newRef : undefined;
+        if (
+            personId &&
+            frame.rejectedSpeakers?.some(
+                (rejected) =>
+                    rejected.label === label && rejected.personId === personId,
+            )
+        ) {
+            drop("dismissed");
+            continue;
+        }
         const evidenceMs = [
             ...new Set(kept.flatMap((one) => one.evidenceMs)),
         ].sort((a, b) => a - b);
@@ -539,6 +561,8 @@ export function validateLearnOutput(
             drop("conflicting");
         }
     }
+
+    appendSpeakerGuesses(output, frame, items, { dismissed, drop });
 
     // Corrections: exact anchors, in scope, grouped per target and words.
     const taken: AnchorPosition[] = [...(frame.corrected ?? [])];
