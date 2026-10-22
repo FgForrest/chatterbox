@@ -1,15 +1,15 @@
 ---
 title: Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
 date: 2026-10-19
-updated: 2026-10-22 17:00
-status: accepted
+updated: 2026-10-22 22:30
+status: superseded
 kind: feature
 issues: []
 prs: [134, 135, 138, 139, 140, 141, 145, 156, 159]
 areas: [src/lib/pipeline, src/lib/profiles, src/components/pipeline, src/hooks/use-item-processing.ts, src/lib/tasks, src/lib/recordings/title-after-summary.ts, src/lib/folders/permissions.ts, src/db/schema.ts]
-supersedes: []
-superseded-by: []
-relates: [2026-09-13-durable-job-queue, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-10-19-provider-defaults-and-no-fallback, 2026-10-07-tasks-from-summaries, 2026-10-02-almanac-guided-transcript-correction, 2026-09-23-shared-organization-scope, 2026-10-14-identity-provider-authorization, 2026-10-22-summary-reads-the-preferred-transcript]
+supersedes: [2026-10-07-tasks-from-summaries, 2026-09-23-shared-organization-scope, 2026-10-18-inbound-mail]
+superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs]
+relates: [2026-09-13-durable-job-queue, 2026-10-02-almanac-guided-transcript-correction, 2026-10-14-identity-provider-authorization, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
 # Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
@@ -25,6 +25,14 @@ recording and mail filed in the same folders. The item detail became a wizard: a
 strip under the title, categorization as its first inline step, and widgets that open as the
 workflow reaches them. The campaign ran from a proposal on 2026-10-14 to the last fixes after first
 real use, merged on 2026-10-19.
+
+**Superseded in part.** Three rules changed later: Organization providers are members' defaults, not
+reachable only through profile pins ([provider defaults](../2026-10-19-provider-defaults-and-no-fallback.md));
+unreviewed task proposals no longer block the share ([tasks accepted automatically](../2026-10-21-tasks-accepted-automatically.md),
+kept by [owner reviews tasks, sharing ungated](../2026-10-22-owner-reviews-tasks-sharing-ungated.md));
+and steps settle their jobs through one binding and one reconciler instead of per-handler writes and
+sweeps ([pipeline steps settle their jobs](../2026-10-22-pipeline-steps-settle-their-jobs.md)). The
+rest of the campaign still holds.
 
 ## Why
 
@@ -80,7 +88,7 @@ after first use.
 | 2026-10-16 | The item detail is a wizard while the workflow runs: a one-row strip that never wraps, inline categorization, widgets that open in order; one widget body serves inline and dialog frames | The maintainer rejected the merged dialog-based detail: "clear state communication is the key" | PR #135 |
 | 2026-10-16 | A "Nothing automatic" item's workflow ends at categorization; filed into an Organization folder it waits for an explicit Share now | Nothing after filing runs by itself, so there is no wizard to show | |
 | 2026-10-16 | The dashboard's first load opens only the person's own items; an Organization item opens from the list or a link | A new member landing on the newest Organization item sees "a random recording from his point of view" | |
-| 2026-10-16 | Members create subfolders inside existing Organization folders and file into them; creating top-level Organization folders, renaming, moving, reordering, deleting and changing a folder mail address are curator-only, enforced by the server (403) | Before, only the UI hid these actions; the server checked only that the scope was enabled | PR #135 |
+| 2026-10-16 | Members create subfolders inside existing Organization folders and file into them; creating top-level Organization folders, renaming, moving, reordering, deleting and changing a folder mail address are curator-only, enforced by the server (403) | The maintainer: a new subfolder helps people share information together, while restructuring existing folders (moving, renaming, deleting) confuses everyone, so it stays with curators, who do it carefully. Before, only the UI hid these actions; the server checked only that the scope was enabled | PR #135 |
 | 2026-10-18 | A manual Transcribe, Summarize, Learn or Detect topics never opens a dialog; the button and the strip show the run, and a dialog opens only on an explicit click. Replaces "dialogs for re-runs" of 2026-10-16 | In first real use, dialogs popped up when a card was toggled or a step was started by hand | PR #156 |
 | 2026-10-18 | Re-transcription needs an explicit confirmation and `retranscribe: true`; the route joins an active job and refuses to replace an item's own transcript otherwise | In first real use one item was transcribed three times, paid, by clicks on the transcript card while a server job ran | PR #156 |
 | 2026-10-18 | The title is generated automatically exactly once, from the first completed summary, and never overwritten automatically; the manual regenerate icon uses the summary, else the transcript | In first real use one item changed its title four to six times while it was processed | PR #159 |
@@ -121,7 +129,7 @@ else") shipped as extensions; a "reopen" outcome did not.
 | Dialogs for steps run again after the workflow finished | Popped up on toggles and manual starts; replaced on 2026-10-18 | |
 | A new automatic title after every summary, or after every new transcript | The latter was offered on 2026-10-18 and lost to "once, never overwrite": every regeneration renamed an item the person had already seen | |
 | Open the newest Organization item for a member with no own items | Shows a stranger's recording on first load | |
-| Organization folders changeable by any member (the server as it was), or by curators only | Any member could restructure or delete the shared tree, which the UI already hid from them (inferred); curators only would stop members organizing their work under existing Organization folders (inferred) | |
+| Organization folders changeable by any member (the server as it was), or by curators only | Restructuring the shared tree (moving, renaming, deleting existing folders) confuses everyone, so it is left to curators, who do it carefully; curators only would block the subfolders that help members share information together (the maintainer) | |
 
 ## Key technical details
 
@@ -218,9 +226,11 @@ else") shipped as extensions; a "reopen" outcome did not.
 - [2026-10-19-provider-defaults-and-no-fallback](../2026-10-19-provider-defaults-and-no-fallback.md):
   replaced this campaign's pins-only rule for Organization providers.
 - [2026-10-07-tasks-from-summaries](../2026-10-07-tasks-from-summaries.md): the task model this
-  campaign generalized across items and folders.
+  campaign generalized across items and folders, superseding its lifetime, candidate and shared-edit
+  rules.
 - [2026-10-02-almanac-guided-transcript-correction](../2026-10-02-almanac-guided-transcript-correction.md): processing profiles now carry the correction-pass setting.
-- [2026-09-23-shared-organization-scope](../2026-09-23-shared-organization-scope/README.md): the Organization scope whose folder-editing rule this work narrowed.
+- [2026-09-23-shared-organization-scope](../2026-09-23-shared-organization-scope/README.md): the Organization scope whose folder-editing rule this work narrowed (superseded in that part).
+- [2026-10-18-inbound-mail](../2026-10-18-inbound-mail/README.md): its D9 let any member delete an Organization folder after a confirmation; deleting became curator-only here (superseded in that part).
 - [2026-10-14-identity-provider-authorization](../2026-10-14-identity-provider-authorization.md): defines `access.manage` and `org.curate`, which gate Organization providers and profiles.
 - [2026-10-22-summary-reads-the-preferred-transcript](../2026-10-22-summary-reads-the-preferred-transcript.md): made summaries and titles read the transcript a profile chooses, Plaud's included.
 

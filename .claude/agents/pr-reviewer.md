@@ -127,7 +127,9 @@ report unless asked to post it.
 - User-facing strings through next-intl, with the Czech (`cs-CZ`) messages
   filled in; Czech copy names the product Klepna, never Chatterbox.
 - Toasts via `sonner`; no `alert()`.
-- JSDoc on exported APIs only; no narrative comments in source.
+- JSDoc on exported APIs only; no narrative comments in source. A one-line
+  comment stating why a line must stay as it is (a constraint a future
+  change could silently break) is allowed.
 - No real company or person names in code, fixtures, docs or examples; use
   neutral placeholders (`example.com`, `acme`).
 - No emojis in code, commits or PR text.

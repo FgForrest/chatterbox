@@ -1,15 +1,15 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-10-22 17:05
-status: accepted
+updated: 2026-10-22 22:30
+status: superseded
 kind: feature
 issues: []
 prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
-supersedes: []
-superseded-by: []
-relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-14-speaker-identity-without-biometrics, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-almanac-and-new-records, 2026-10-01-name-matching-across-word-forms, 2026-10-02-almanac-guided-transcript-correction, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
+supersedes: [2026-09-14-speaker-identity-without-biometrics]
+superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction]
+relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
 ---
 
 # Learn: knowledge from recordings, proposed by a model and confirmed by a person
@@ -22,6 +22,12 @@ Knowledge has two layers: a shared one owned by the Organization account and a p
 user, chosen by whether the recording is shared. PR #69 built the whole plan in six phases, each
 reviewed by two independent model reviewers and fixed before the next; a follow-up, PR #79, fixed what
 the first real automatic run exposed.
+
+**Superseded in part** for two rules: the operator flag `LEARN_AUTO` that gated automatic Learn was
+dropped a day later ([Almanac and new records](../2026-10-01-almanac-and-new-records.md)), and the
+rejection of sending knowledge to the transcription provider was partly revisited, so a ranked
+subset of names now goes as key terms ([Almanac-guided transcript correction](../2026-10-02-almanac-guided-transcript-correction.md)).
+Everything else here still holds.
 
 ## Why
 
@@ -80,7 +86,20 @@ answers were on the table for what happens to evidence that points into it:
 The same overlap technique replaced the old rule that kept speaker names only when the speaker
 count matched (`src/lib/knowledge/label-mapping.ts`). Measured on the two recordings that had both a
 Plaud and a Riffado transcript: one timeline, median offset +0.1 s and +0.26 s, no drift (0.16 s per
-hour).
+hour). Between the two transcripts the 10th-to-90th percentile spread of matched turn times was
+-0.9 s to +3.3 s. The spread comes from turn segmentation, not from the clocks: the Riffado
+transcripts split the same speech into about 1.5 times as many turns. Matching labels by speech
+overlap therefore applies no offset correction.
+
+This assumes the audio under a transcript does not change, but it can: a recording trimmed in the
+Plaud app comes back from the next sync with new audio. Every transcript therefore stores the md5 of
+the audio its maker began on (`transcriptions.audio_md5`, migrations 0081 and 0082). When a sync
+replaces the audio, or a rewrite runs over audio that differs from the stamp, speaker names are
+carried only as suggestions and speaker-dependent evidence goes to review (`audioReplacedInTx` and
+`madeFrom` in `src/lib/knowledge/transcript-rewrite.ts`). Any new transcript writer must pass the md5
+it read when it began, and any path that replaces a recording's audio must call `audioReplacedInTx`
+under the recording lock. Stamping null when the audio moved during transcription was rejected: null
+reads as unknown, which counts as no change, so every later trim would go unnoticed.
 
 ### Two review defaults
 
@@ -147,6 +166,8 @@ share would bring it back; the refusal lifts when the Organization has a type of
 | Learn on the hosted service | The maintainer cannot speak for the hosted service's plans | Upstream decides to adopt it |
 | Withholding the Organization's summary until regenerated, for unpublishable private corrections | Replaced by auto-adopt, so every correction publishes | Auto-adopted types prove too noisy for curators |
 | Holding title and summary only until the Learn pass ends | Titles and summaries would still read the uncorrected names | None given |
+| Proposing Organization facts heard again on a private recording, unticked, as "also yours" | Confirming one writes a private duplicate of a fact the Organization already holds and only its curator changes. The first build pre-ticked them and copied them into the owner's scope without asking; the maintainer kept dropping them (2026-09-29) | None given |
+| Re-checking a pre-tick at Finish and silently unticking it when its grounds were taken back | The reviewer finishes what the dialog showed as ticked; a silent untick would apply something other than what they confirmed. The maintainer kept it as shown (2026-09-29); the case is rare | Pre-ticked correction precision falls below the 95% threshold |
 
 ## Key technical details
 
@@ -175,6 +196,11 @@ share would bring it back; the refusal lifts when the Organization has a type of
   `transcription.completed`; Organization facts mentioned again on a private recording are dropped,
   not proposed; a pre-tick whose grounds were taken back while the review waited stays ticked
   (rare, accepted); renaming a linked record marks summaries stale without regenerating them (cost).
+- **Titles of recordings that existed before PR #69 count as set by a person** (migration 0060). The
+  migration could not tell a person's rename from a generated or Plaud title, so the maintainer
+  chose to protect every existing title rather than risk overwriting a rename. For those recordings
+  neither a re-transcription nor a rename in the Plaud app changes the title any more. Only
+  recordings with no transcript at the upgrade were left unprotected (migration 0063).
 
 ## Verification
 
@@ -204,11 +230,19 @@ share would bring it back; the refusal lifts when the Organization has a type of
 - The last commit of PR #69 fixed the final review round and was not reviewed again; the maintainer
   chose not to.
 - `LEARN_AUTO` (the operator flag in PR #69) was removed a day later; see the Almanac record.
+- **Account deletion prunes no knowledge.** The only code that deletes a user is hosted billing's
+  `deleteUser` (`src/db/queries/billing.ts`), and hosted has no Learn, so its cascade from the user
+  through transcripts to fact evidence runs without `pruneUnsupportedFactsInTx` and without a
+  scope-generation bump. Turning Learn on for hosted, or giving self-host a way to delete accounts,
+  must add both; otherwise Organization facts whose only evidence sat on that account's transcripts
+  stay with no evidence, and other processes keep serving them from memory until their cache
+  reloads (inferred from the code; noted in the implementation plan).
 
 ## Related work
 
 - [2026-09-14-speaker-identity-without-biometrics](../2026-09-14-speaker-identity-without-biometrics.md):
-  the non-biometric boundary Learn inherits.
+  the non-biometric boundary Learn inherits; this record supersedes its plaintext knowledge-base
+  names.
 - [2026-09-28-agent-bridge-cli-providers](../2026-09-28-agent-bridge-cli-providers.md): the bridge the
   tool path runs through.
 - [2026-09-30-self-hosted-embeddings](../2026-09-30-self-hosted-embeddings.md): the optional embedding
@@ -218,9 +252,11 @@ share would bring it back; the refusal lifts when the Organization has a type of
   change a shared recording, decided during this work.
 - [2026-10-01-almanac-and-new-records](../2026-10-01-almanac-and-new-records.md) and
   [2026-10-01-name-matching-across-word-forms](../2026-10-01-name-matching-across-word-forms.md): the
-  cold start and the lookups that followed the first real runs.
+  cold start and the lookups that followed the first real runs; the Almanac record also dropped
+  `LEARN_AUTO`.
 - [2026-10-02-almanac-guided-transcript-correction](../2026-10-02-almanac-guided-transcript-correction.md):
-  the correction pass after Learn.
+  the correction pass after Learn, and key terms that partly revisit the "not to the transcription
+  provider" rejection.
 - [2026-10-12-calendar-meet-speaker-candidates](../2026-10-12-calendar-meet-speaker-candidates.md): the
   follow-up assignment for calendar context.
 - [2026-10-20-learn-review-one-column](../2026-10-20-learn-review-one-column.md): the later review

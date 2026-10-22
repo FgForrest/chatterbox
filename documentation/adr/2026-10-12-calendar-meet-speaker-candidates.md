@@ -1,7 +1,7 @@
 ---
 title: Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
 date: 2026-10-12
-updated: 2026-10-22 21:10
+updated: 2026-10-22 22:30
 status: superseded
 kind: feature
 issues: []
@@ -132,7 +132,8 @@ Checked on 2026-10-22, the integration helped little in practice:
 - only the owner's primary calendar, only the private view, Meet data only for 30 days.
 
 [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250) addressed all but the e-mail link, which
-it dropped on purpose.
+is allowed and tracked in issue #256 (an early reading that it had been ruled out was corrected by
+the maintainer on 2026-10-22).
 
 ## Related work
 

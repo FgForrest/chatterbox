@@ -1,15 +1,15 @@
 ---
 title: A summary's tasks are accepted automatically and sharing no longer waits for a task review
 date: 2026-10-21
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: superseded
 kind: feature
 issues: []
 prs: [224]
 areas: [src/lib/tasks, src/lib/sharing/share-gate.ts]
-supersedes: []
+supersedes: [2026-10-07-tasks-from-summaries, 2026-10-19-processing-profiles-and-workflow]
 superseded-by: [2026-10-22-owner-reviews-tasks-sharing-ungated]
-relates: [2026-10-07-tasks-from-summaries]
+relates: []
 ---
 
 # A summary's tasks are accepted automatically and sharing no longer waits for a task review
@@ -99,7 +99,10 @@ assignee) kept their review.
 ## Related work
 
 - [2026-10-07-tasks-from-summaries](2026-10-07-tasks-from-summaries.md): the review and share gate
-  this removed.
+  this removed; superseded in that part.
+- [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md):
+  the pipeline whose share-gate task rule (unreviewed proposals block the share) this removed;
+  superseded in that part.
 - [2026-10-22-owner-reviews-tasks-sharing-ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md):
   the correction that superseded it.
 
