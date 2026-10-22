@@ -14,7 +14,11 @@ import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-pa
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
 import { Workstation } from "@/components/dashboard/workstation";
 import type { useOrgEvents } from "@/hooks/use-org-events";
-import type { FolderKnowledgeResponse } from "@/lib/knowledge/folder-knowledge";
+import { translatedSourceMessage } from "@/lib/i18n/messages";
+import {
+    FOLDER_KNOWLEDGE_PAGE_SIZE,
+    type FolderKnowledgeResponse,
+} from "@/lib/knowledge/folder-knowledge";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
@@ -422,6 +426,96 @@ describe("folder knowledge panel", () => {
             screen.getByText(`${total} of ${total} terms sent`),
         ).toBeTruthy();
     });
+    it.each([
+        [1, "1 term", "1 record"],
+        [3, "3 terms", "3 records"],
+    ] as const)("uses response limits with limit %s", async (limit, terms, records) => {
+        const models = response("models");
+        if (models.tab !== "models") throw new Error("Expected models");
+        mocks.fetch.mockImplementation(
+            async () =>
+                new Response(
+                    JSON.stringify({
+                        ...models,
+                        transcription: { ...models.transcription, limit },
+                        correction: { ...models.correction, limit },
+                    }),
+                ),
+        );
+        render(<FolderKnowledgePanel folder={folder} onBack={vi.fn()} />);
+        fireEvent.click(screen.getAllByRole("tab")[4]);
+        const below = await screen.findByText("Below limit");
+        expect(below.parentElement?.firstElementChild?.textContent).toBe(
+            String(limit + 1),
+        );
+        expect(screen.getByText(new RegExp(`Up to ${terms}\\.`))).toBeTruthy();
+        expect(
+            screen.getByText(new RegExp(`Up to ${records}\\.`)),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                `${limit}-term cut line: transcription does not receive terms below this limit.`,
+            ),
+        ).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "MCP" })).toBeTruthy();
+    });
+    it.each([
+        [1, "1 výraz", "1 záznam"],
+        [3, "3 výrazy", "3 záznamy"],
+        [7, "7 výrazů", "7 záznamů"],
+    ] as const)("uses Czech plurals with limit %s", (limit, terms, records) => {
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "Up to {limit, plural, one {# term} other {# terms}}. The folder only ranks them; it never filters the Almanac.",
+                { limit },
+            ),
+        ).toBe(`Až ${terms}. Složka je jen řadí, nikdy nefiltruje Almanach.`);
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "Names, aliases and mishearings, no facts. Transcript mentions come first, then folder usage. Up to {limit, plural, one {# record} other {# records}}.",
+                { limit },
+            ),
+        ).toContain(`Až ${records}.`);
+    });
+    it("returns to the previous page using the shared page size", async () => {
+        mocks.fetch.mockImplementation(async (input) => {
+            const offset = Number(
+                new URL(String(input), "http://localhost").searchParams.get(
+                    "offset",
+                ),
+            );
+            return new Response(
+                JSON.stringify({
+                    ...response("people"),
+                    nextOffset:
+                        offset === 0 ? FOLDER_KNOWLEDGE_PAGE_SIZE : null,
+                }),
+            );
+        });
+        render(<FolderKnowledgePanel folder={folder} onBack={vi.fn()} />);
+        await screen.findByText("Vesna Kulra");
+        fireEvent.click(screen.getByRole("button", { name: "Next" }));
+        await screen.findByText("Vesna Kulra");
+        expect(String(mocks.fetch.mock.lastCall?.[0])).toContain(
+            `offset=${FOLDER_KNOWLEDGE_PAGE_SIZE}`,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+        await screen.findByText("Vesna Kulra");
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "Previous",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        expect(
+            (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+                .disabled,
+        ).toBe(false);
+        expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    });
     it("uses custom vocabulary labels and includes the Organization icon", async () => {
         const things = response("things");
         if (!("records" in things)) throw new Error("Expected things");
@@ -475,20 +569,41 @@ const workstationProps: ComponentProps<typeof Workstation> = {
 };
 
 describe("dashboard folder knowledge navigation", () => {
-    it("does not add history when Knowledge is pressed again", async () => {
+    it("toggles Knowledge closed, restores the list and item, and can reopen it", async () => {
         render(<Workstation {...workstationProps} />);
         const push = vi.spyOn(window.history, "pushState");
         try {
-            fireEvent.click(
-                screen.getAllByRole("button", { name: "Knowledge" })[0],
+            const knowledgeButton = () =>
+                screen.getAllByRole("button", { name: "Knowledge" })[0];
+            expect(knowledgeButton().getAttribute("aria-pressed")).toBe(
+                "false",
             );
+            fireEvent.click(knowledgeButton());
             await screen.findByText("Vesna Kulra");
+            expect(knowledgeButton().getAttribute("aria-pressed")).toBe("true");
+            expect(window.location.search).toContain("knowledge=1");
+            expect(screen.queryByText("Item detail")).toBeNull();
             expect(push).toHaveBeenCalledTimes(1);
             window.history.replaceState({}, "", window.location.href);
-            fireEvent.click(
-                screen.getAllByRole("button", { name: "Knowledge" })[0],
+            fireEvent.click(knowledgeButton());
+            expect(knowledgeButton().getAttribute("aria-pressed")).toBe(
+                "false",
             );
+            expect(
+                screen.queryByRole("region", { name: "Folder knowledge" }),
+            ).toBeNull();
+            expect(window.location.search).not.toContain("knowledge");
+            expect(window.history.state.mobileView).toBe("list");
+            expect(
+                screen.getByRole("region", { name: "Item list" }).parentElement
+                    ?.className,
+            ).not.toContain("hidden");
+            expect(screen.getByText("Item detail")).toBeTruthy();
             expect(push).toHaveBeenCalledTimes(1);
+            fireEvent.click(knowledgeButton());
+            await screen.findByText("Vesna Kulra");
+            expect(knowledgeButton().getAttribute("aria-pressed")).toBe("true");
+            expect(push).toHaveBeenCalledTimes(2);
         } finally {
             push.mockRestore();
         }

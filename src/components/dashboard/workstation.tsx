@@ -1655,6 +1655,11 @@ export function Workstation({
     };
     const assignRecording = (id: string, folderId: string) =>
         handleFolderAssignment(id, folderId, true);
+    const closeKnowledge = () => {
+        setKnowledgeFolderId(null);
+        setMobileView("list");
+        writeSelection(selectedRecording, selectedFolderId, "replace", "list");
+    };
     const headerProps = {
         organization: { ...folderOrganization, folders: navigationFolders },
         recordings: treeRecordings,
@@ -1667,7 +1672,10 @@ export function Workstation({
         onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
         knowledgeOpen: knowledgeFolderId === selectedFolderId,
         onKnowledge: (folder: RecordingFolder) => {
-            if (knowledgeFolderId === folder.id) return;
+            if (knowledgeFolderId === folder.id) {
+                closeKnowledge();
+                return;
+            }
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             setItemLinkQuery("");
@@ -1940,16 +1948,7 @@ export function Workstation({
                                 key={knowledgeFolderId}
                                 folder={selectedFolder}
                                 contentRevision={orgContentRevision}
-                                onBack={() => {
-                                    setKnowledgeFolderId(null);
-                                    setMobileView("list");
-                                    writeSelection(
-                                        selectedRecording,
-                                        selectedFolderId,
-                                        "replace",
-                                        "list",
-                                    );
-                                }}
+                                onBack={closeKnowledge}
                             />
                         ) : visibleRecordings.length === 0 &&
                           visibleOrgRecordings.length === 0 &&

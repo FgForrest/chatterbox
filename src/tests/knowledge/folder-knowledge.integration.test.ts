@@ -30,12 +30,10 @@ import {
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";
-import {
-    type FolderKnowledgeResponse,
-    folderModelPreview,
-} from "@/lib/knowledge/folder-knowledge";
+import type { FolderKnowledgeResponse } from "@/lib/knowledge/folder-knowledge";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash, lookupHash } from "@/lib/knowledge/lookup-hash";
+import { folderModelPreview } from "@/lib/knowledge/read-folder-knowledge";
 import {
     almanacRecordsFor,
     correctionAlmanacJson,
@@ -119,7 +117,7 @@ withDatabase("folder knowledge API (PostgreSQL)", () => {
     async function item(
         id: string,
         userId = "member",
-        folderId = "private-folder",
+        folderId: string | null = "private-folder",
     ) {
         await insertRecordings(db(), {
             id,
@@ -136,9 +134,10 @@ withDatabase("folder knowledge API (PostgreSQL)", () => {
             storagePath: `${userId}/${id}.mp3`,
             plaudVersion: "1",
         });
-        await db()
-            .insert(recordingFolderAssignments)
-            .values({ itemId: id, userId, folderId });
+        if (folderId)
+            await db()
+                .insert(recordingFolderAssignments)
+                .values({ itemId: id, userId, folderId });
         await db()
             .insert(transcriptions)
             .values({
@@ -399,6 +398,41 @@ withDatabase("folder knowledge API (PostgreSQL)", () => {
         const things = await read("private-folder", "things");
         expect(things).toMatchObject({
             records: [{ name: "Nulvaro", typeKey: "project", itemCount: 3 }],
+        });
+    });
+    it("includes unfiled items and items in other owned folders in Private root knowledge", async () => {
+        await item("unfiled", "member", null);
+        await speaker("unfiled", "own-person");
+        await speaker("unfiled", "suggested-person");
+        await correction("unfiled");
+        await correction("outside");
+        await item("other-private", "other", "other-root");
+        await speaker("other-private", "own-person", "other");
+        await speaker("other-private", "org-person", "other");
+        await correction("other-private", "org");
+
+        const peopleResult = await read("private-root", "people");
+        expect(peopleResult).toMatchObject({
+            itemCount: 5,
+            subfolderCount: 3,
+            total: 3,
+        });
+        if (!("records" in peopleResult)) throw new Error("Expected people");
+        expect(
+            peopleResult.records
+                .map(({ id, itemCount }) => ({ id, itemCount }))
+                .sort((left, right) => left.id.localeCompare(right.id)),
+        ).toEqual([
+            { id: "org-person", itemCount: 2 },
+            { id: "own-person", itemCount: 4 },
+            { id: "suggested-person", itemCount: 1 },
+        ]);
+        const thingsResult = await read("private-root", "things");
+        expect(thingsResult).toMatchObject({
+            itemCount: 5,
+            subfolderCount: 3,
+            total: 1,
+            records: [{ id: "org-thing", name: "Nulvaro", itemCount: 5 }],
         });
     });
     it("shows Organization knowledge only, including colleagues' shared items", async () => {

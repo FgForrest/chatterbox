@@ -5,9 +5,10 @@ import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import type {
-    FolderKnowledgeResponse,
-    FolderKnowledgeTab,
+import {
+    FOLDER_KNOWLEDGE_PAGE_SIZE,
+    type FolderKnowledgeResponse,
+    type FolderKnowledgeTab,
 } from "@/lib/knowledge/folder-knowledge";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 import type { RankedAlmanacTerm } from "@/lib/transcription/almanac-terms";
@@ -339,7 +340,11 @@ export function FolderKnowledgePanel({
                                         disabled={offset === 0}
                                         onClick={() =>
                                             setOffset((value) =>
-                                                Math.max(0, value - 50),
+                                                Math.max(
+                                                    0,
+                                                    value -
+                                                        FOLDER_KNOWLEDGE_PAGE_SIZE,
+                                                ),
                                             )
                                         }
                                     >
@@ -387,7 +392,8 @@ export function FolderKnowledgePanel({
                                     </h3>
                                     <p className="text-xs text-muted-foreground">
                                         {i18n(
-                                            "Up to 500 terms. The folder only ranks them; it never filters the Almanac.",
+                                            "Up to {limit, plural, one {# term} other {# terms}}. The folder only ranks them; it never filters the Almanac.",
+                                            { limit: data.transcription.limit },
                                         )}
                                     </p>
                                     {data.transcription.terms.map(
@@ -428,7 +434,11 @@ export function FolderKnowledgePanel({
                                         data.transcription.limit && (
                                         <p className="border-t-2 border-dashed border-primary pt-2 text-xs font-semibold text-primary">
                                             {i18n(
-                                                "500-term cut line: transcription does not receive terms below this limit.",
+                                                "{limit, number}-term cut line: transcription does not receive terms below this limit.",
+                                                {
+                                                    limit: data.transcription
+                                                        .limit,
+                                                },
                                             )}
                                         </p>
                                     )}
@@ -438,7 +448,11 @@ export function FolderKnowledgePanel({
                                                 key={term.text}
                                                 className="flex flex-wrap gap-x-3 text-sm text-muted-foreground"
                                             >
-                                                <span>{501 + index}</span>
+                                                <span>
+                                                    {data.transcription.limit +
+                                                        1 +
+                                                        index}
+                                                </span>
                                                 <span>{term.text}</span>
                                                 <span className="text-xs">
                                                     {reasons(term)}
@@ -462,7 +476,8 @@ export function FolderKnowledgePanel({
                                     </h3>
                                     <p className="text-sm">
                                         {i18n(
-                                            "Names, aliases and mishearings, no facts. Transcript mentions come first, then folder usage. Up to 500 records.",
+                                            "Names, aliases and mishearings, no facts. Transcript mentions come first, then folder usage. Up to {limit, plural, one {# record} other {# records}}.",
+                                            { limit: data.correction.limit },
                                         )}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
@@ -501,7 +516,9 @@ export function FolderKnowledgePanel({
                                     </p>
                                 </div>
                                 <div className="space-y-2 rounded-lg border p-3">
-                                    <h3 className="font-semibold">MCP</h3>
+                                    <h3 className="font-semibold">
+                                        {i18n("MCP")}
+                                    </h3>
                                     <p className="text-sm">
                                         {i18n(
                                             "MCP reads the authorized Organization and private Almanac without a folder filter. This folder has no effect.",

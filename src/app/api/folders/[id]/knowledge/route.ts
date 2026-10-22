@@ -4,8 +4,8 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     FOLDER_KNOWLEDGE_TABS,
     type FolderKnowledgeTab,
-    readFolderKnowledge,
 } from "@/lib/knowledge/folder-knowledge";
+import { readFolderKnowledge } from "@/lib/knowledge/read-folder-knowledge";
 
 type IdContext = { params: Promise<{ id: string }> };
 
