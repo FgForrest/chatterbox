@@ -1,13 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { audioItemColumns, recordingItemJoin } from "@/db/items";
-import {
-    chatterItems,
-    recordings,
-    transcriptions,
-    userSettings,
-    users,
-} from "@/db/schema";
+import { chatterItems, recordings, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
@@ -56,6 +50,7 @@ import {
     resolveTaskProposals,
 } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
 import { resolveMultiPass } from "./multi-pass-resolution";
@@ -129,33 +124,6 @@ export interface GenerateSummaryResult {
          */
         detail: string;
     };
-}
-
-/** Which transcript an Organization summary is made from, most preferred first. */
-const ORG_SUMMARY_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
-
-/**
- * The transcript an Organization summary is made from, of those its owner
- * holds: a provider's output over an edit, and both over an import.
- */
-async function findOrgSummarySource(
-    recordingId: string,
-    ownerUserId: string,
-): Promise<typeof transcriptions.$inferSelect | undefined> {
-    const rows = await db
-        .select()
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, ownerUserId),
-            ),
-        );
-    for (const source of ORG_SUMMARY_SOURCE_ORDER) {
-        const row = rows.find((item) => item.source === source);
-        if (row) return row;
-    }
-    return undefined;
 }
 
 /** Coarse length bucket -- never send raw transcript length or content. */
@@ -251,23 +219,7 @@ export async function generateSummaryForRecording(
         );
     }
 
-    // A recording shared before sharing needed a named transcript may hold
-    // only an import; the Organization summarizes what it has.
-    const transcription = orgView
-        ? await findOrgSummarySource(recordingId, userId)
-        : (
-              await db
-                  .select()
-                  .from(transcriptions)
-                  .where(
-                      and(
-                          eq(transcriptions.recordingId, recordingId),
-                          eq(transcriptions.userId, userId),
-                          eq(transcriptions.source, "riffado"),
-                      ),
-                  )
-                  .limit(1)
-          )[0];
+    const transcription = await readPreferredTranscript(recordingId, userId);
 
     if (!transcription) {
         throw new AppError(

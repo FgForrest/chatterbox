@@ -9,7 +9,6 @@ import {
     chatterItems,
     itemProcessing,
     mailContents,
-    transcriptions,
 } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { pipelineDriver } from "@/lib/pipeline/driver";
@@ -28,6 +27,7 @@ import type {
     ProfileStepName,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -724,24 +724,15 @@ export async function markLearnReleasedInTx(
             )
             .limit(1);
         if (item?.kind === "audio") {
-            const [transcript] = await tx
-                .select({
-                    id: transcriptions.id,
-                    revision: transcriptions.revision,
-                })
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, input.itemId),
-                        eq(transcriptions.userId, input.userId),
-                        eq(transcriptions.source, "riffado"),
-                    ),
-                )
-                .limit(1);
+            const transcript = await readPreferredTranscript(
+                input.itemId,
+                input.userId,
+                tx,
+            );
             if (transcript) {
                 content = {
                     contentId: transcript.id,
-                    contentSourceId: "riffado",
+                    contentSourceId: transcript.source,
                     contentRevision: transcript.revision,
                 };
             }

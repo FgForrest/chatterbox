@@ -515,7 +515,11 @@ export async function loadPrivateItemProcessing(
                       and(
                           eq(transcriptions.recordingId, itemId),
                           eq(transcriptions.userId, ownerUserId),
-                          inArray(transcriptions.source, ["riffado", "plaud"]),
+                          inArray(transcriptions.source, [
+                              "riffado",
+                              "mixed",
+                              "plaud",
+                          ]),
                       ),
                   )
             : Promise.resolve([]),

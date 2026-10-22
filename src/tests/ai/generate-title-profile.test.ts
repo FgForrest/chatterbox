@@ -65,8 +65,12 @@ describe("profile-backed title generation", () => {
         });
     });
 
-    it("uses a resolved Czech directive and Czech capitalization for ces", async () => {
-        selectRows([{ detectedLanguage: "ces" }]);
+    it.each([
+        "riffado",
+        "mixed",
+        "plaud",
+    ])("uses a resolved Czech directive and Czech capitalization for ces from %s", async (source) => {
+        selectRows([{ source, detectedLanguage: "ces" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
 
         await generateTitleFromTranscription(
@@ -88,7 +92,7 @@ describe("profile-backed title generation", () => {
     });
 
     it("fails loudly when an explicit account title provider is disabled", async () => {
-        selectRows([{ detectedLanguage: "cs" }]);
+        selectRows([{ source: "riffado", detectedLanguage: "cs" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
         const error = new Error(
             "The provider OpenAI is disabled. Enable it or choose another provider.",
@@ -107,7 +111,7 @@ describe("profile-backed title generation", () => {
     });
 
     it("logs the provider id when automatic title generation has no model", async () => {
-        selectRows([{ detectedLanguage: "en" }]);
+        selectRows([{ source: "riffado", detectedLanguage: "en" }]);
         selectRows([{ uiLocale: "en" }]);
         mocks.resolveStepProvider.mockResolvedValueOnce({
             kind: "credential",

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, itemProcessing, transcriptions } from "@/db/schema";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
@@ -6,6 +6,7 @@ import {
     AssignedProfileUnavailableError,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 
 export type PipelineQueueStep = "summary" | "topics";
 
@@ -54,16 +55,21 @@ export async function pipelineMayQueue(
         return false;
     }
 
-    const [transcript] = await db
-        .select({ turns: transcriptions.turns })
+    const usesPlaudTranscript =
+        "transcribe" in profile.settings.steps &&
+        profile.settings.steps.transcribe.plaudTranscript === "use";
+    const sources = usesPlaudTranscript ? ["riffado", "plaud"] : ["riffado"];
+    const transcripts = await db
+        .select({ source: transcriptions.source, turns: transcriptions.turns })
         .from(transcriptions)
         .where(
             and(
                 eq(transcriptions.recordingId, itemId),
                 eq(transcriptions.userId, userId),
-                eq(transcriptions.source, "riffado"),
+                inArray(transcriptions.source, sources),
             ),
         )
-        .limit(1);
+        .limit(sources.length);
+    const transcript = preferredTranscript(transcripts);
     return transcript !== undefined && transcript.turns !== null;
 }

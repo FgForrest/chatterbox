@@ -11,16 +11,22 @@ import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
-const { summaryOptions, transcriptSources, speakerTagMounts } = vi.hoisted(
-    () => ({
-        summaryOptions: [] as Array<{ summarySource?: string }>,
+const { summaryOptions, transcriptSources, speakerTagMounts, summarize } =
+    vi.hoisted(() => ({
+        summarize: vi.fn(),
+        summaryOptions: [] as Array<{
+            summarySource?: string;
+            transcriptionText?: string;
+        }>,
         transcriptSources: [] as string[],
         speakerTagMounts: [] as string[],
-    }),
-);
+    }));
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
-    useTranscriptionSummary: (options: { summarySource?: string }) => {
+    useTranscriptionSummary: (options: {
+        summarySource?: string;
+        transcriptionText?: string;
+    }) => {
         summaryOptions.push(options);
         return {
             summaryData: null,
@@ -32,7 +38,9 @@ vi.mock("@/hooks/use-transcription-summary", () => ({
             summaryPreset: "general",
             setSummaryPreset: vi.fn(),
             summaryPromptOptions: [{ id: "general", name: "General" }],
-            handleSummarize: vi.fn(),
+            summaryProfileId: "profile-1",
+            summaryProfileOptions: [{ id: "profile-1", name: "Notes" }],
+            handleSummarize: summarize,
             handleDeleteSummary: vi.fn(),
         };
     },
@@ -256,6 +264,46 @@ describe("independent transcript and summary pipelines", () => {
                 ),
             );
         });
+    });
+
+    it.each([
+        "plaud",
+        "mixed",
+    ])("summarizes a %s-only transcript from the custom view", (source) => {
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "mira-recording",
+                    filename: "Planning.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "mira-device",
+                }}
+                transcripts={[{ source, text: "Mira's planning transcript" }]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        if (source === "plaud") {
+            fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+        }
+        expect(summaryOptions.at(-1)).toMatchObject({
+            summarySource: "riffado",
+            transcriptionText: "Mira's planning transcript",
+        });
+        expect(
+            screen.getByText(
+                'No custom summary yet. Click "Summarize" to generate one.',
+            ),
+        ).toBeTruthy();
+        const button = screen.getByRole<HTMLButtonElement>("button", {
+            name: "Summarize",
+        });
+        expect(button.disabled).toBe(false);
+        summarize.mockClear();
+        fireEvent.click(button);
+        expect(summarize).toHaveBeenCalledOnce();
     });
 
     it("switches the summary without changing the visible transcript", () => {

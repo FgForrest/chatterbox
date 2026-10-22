@@ -73,6 +73,7 @@ import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
@@ -569,9 +570,10 @@ export function TranscriptionPanel({
         summarySelection.recordingId === recording.id
             ? summarySelection.source
             : defaultSummarySource;
-    const summaryTranscript = transcriptList.find(
-        (candidate) => candidate.source === summarySource,
-    );
+    const summaryTranscript =
+        summarySource === "riffado"
+            ? preferredTranscript(transcriptList)
+            : transcriptList.find((candidate) => candidate.source === "plaud");
     const summarySpeakerTags = useMemo(
         () => transcriptSpeakerTags(summaryTranscript),
         [summaryTranscript],
