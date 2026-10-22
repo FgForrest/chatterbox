@@ -157,7 +157,7 @@ const props: ComponentProps<typeof Workstation> = {
 beforeEach(() => window.history.replaceState({}, "", "/dashboard"));
 afterEach(async () => {
     cleanup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
 });
 

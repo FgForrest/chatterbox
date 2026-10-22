@@ -61,6 +61,8 @@ Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, t
 
 Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
 
+Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. V pohledu Organizace Učení uvádí **Naučeno z kontroly vlastníka** a počty použitých a přeskočených návrhů. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
+
 <span id="where-reviews-wait" />
 
 ## Kde čekají kontroly

@@ -379,3 +379,13 @@ input[type="checkbox"] {
 .field[hidden] {
     display: none;
 }
+
+.meeting-prompt-offer {
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--primary) 10%, var(--surface));
+}
+.meeting-prompt-offer[hidden] { display: none; }
+#meeting-prompt-news { font-weight: 600; }
+#meeting-prompt-offer-status:empty { display: none; }

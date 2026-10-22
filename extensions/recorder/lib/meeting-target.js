@@ -29,10 +29,10 @@ export function meetingTarget(urlString) {
     return { origin: url.origin, platformId: platform?.id ?? null, meetingId };
 }
 
-/** Whether navigation kept the same meeting, or origin for an ordinary tab. */
+/** Compare URLs or stored meeting identities, using origin for an ordinary tab. */
 export function sameMeetingTarget(before, after) {
-    const first = meetingTarget(before);
-    const second = meetingTarget(after);
+    const first = typeof before === "string" ? meetingTarget(before) : before;
+    const second = typeof after === "string" ? meetingTarget(after) : after;
     if (!first || !second || first.platformId !== second.platformId) return false;
     if (!first.platformId) return first.origin === second.origin;
     return Boolean(first.meetingId && first.meetingId === second.meetingId);

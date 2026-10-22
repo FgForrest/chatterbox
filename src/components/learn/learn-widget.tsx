@@ -138,7 +138,17 @@ interface ItemView {
 }
 
 interface ReviewState {
-    run: { id: string; status: string; errorCode?: string | null } | null;
+    run: {
+        id: string;
+        status: string;
+        errorCode?: string | null;
+        /** Counts carried from the owner’s finished private review on share. */
+        sharedReview?: {
+            applied: number | null;
+            skipped: number | null;
+            dismissed: number | null;
+        };
+    } | null;
     items: ItemView[];
     /** A finished run that found nothing: what it had to go on. */
     known?: { people: number; things: number };
@@ -824,6 +834,7 @@ export function LearnWidget({
     const status = state?.run?.status;
     const ready = status === "ready";
     const finished = status === "finished";
+    const sharedReview = finished ? state?.run?.sharedReview : undefined;
     const failed = status === "failed";
     const count = state?.items?.length ?? 0;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
@@ -1069,6 +1080,22 @@ export function LearnWidget({
         finishedFacts = failure(state?.run?.errorCode);
         finishedTriggerLabel = i18n("Learn failed");
         finishedIcon = <AlertTriangle className="size-4 text-destructive" />;
+    } else if (
+        sharedReview?.applied === 0 &&
+        sharedReview.skipped === 0 &&
+        sharedReview.dismissed === 0
+    ) {
+        finishedFacts = i18n("Learn found nothing new");
+        finishedTriggerLabel = i18n("Learned: nothing new");
+    } else if (sharedReview) {
+        finishedTitle = i18n("Learned from the owner's review");
+        finishedTriggerLabel = finishedTitle;
+        if (sharedReview.applied !== null && sharedReview.skipped !== null) {
+            finishedFacts = i18n("{applied} applied, {skipped} skipped", {
+                applied: String(sharedReview.applied),
+                skipped: String(sharedReview.skipped),
+            });
+        }
     } else if (count === 0) {
         finishedFacts = i18n("Nothing was applied");
         finishedTriggerLabel = i18n("Learned: nothing new");
@@ -1850,6 +1877,7 @@ export function LearnWidget({
                     errorCode={state?.run?.errorCode ?? null}
                     items={state?.items ?? []}
                     known={state?.known}
+                    sharedReview={sharedReview}
                     describe={(item) => describeResult(item as ItemView)}
                     onRelearn={
                         state?.available
