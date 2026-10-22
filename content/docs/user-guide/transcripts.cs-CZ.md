@@ -32,7 +32,7 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 **Na časování záleží.** Témata, Učení, přehrávání jedné věty a navigace v přepisu vyžadují informaci o tom, kdy byla která replika řečena. Přepis bez časování se zobrazí jako prostý text.
 
-**Jména z Almanachu.** ElevenLabs Scribe v2 a Speechmatics dostanou s každou nahrávkou až 500 jmen z vašeho [Almanachu](almanac.md): nejprve vaše, pak osoby a věci zmíněné nedávno. Jména pak napíšou správně mnohem častěji. Jména jsou odesílána u každé nahrávky, včetně osob, jež se v ní nevyskytují.
+**Jména z Almanachu.** ElevenLabs Scribe v2 a Speechmatics dostanou s každou nahrávkou až 500 jmen z vašeho [Almanachu](almanac.md): nejprve vaše, pak účastníky schůzky z připojeného Kalendáře a Meet a potom nedávno zmíněné osoby a věci. Jména pak napíšou správně mnohem častěji. Jména jsou odesílána u každé nahrávky, včetně osob, jež se v ní nevyskytují.
 
 **Přepisy z diktafonu.** Pokud služba vašeho diktafonu vytvořila vlastní přepis a shrnutí, Klepna je dokáže importovat (Nastavení → Přepis → **Importovat přepisy a shrnutí Plaud**). Nahrávka, která má oba, zobrazí přepínač mezi **Plaud** a **Vlastní**.
 
@@ -66,6 +66,8 @@ Změna jazyka sama nic znovu nespouští. Pokud se existující výstup jazykov�
 - Barevné **▶** má každý štítek, i ten, u kterého jste mluvčího ještě neurčili. Přehraje další promluvu tohoto mluvčího. Pravé tlačítko myši zůstává zkratkou. Kliknutím na potvrzené jméno vyberete jinou osobu nebo zvolíte **Otevřít v Almanachu**, **×** jméno odpojíte. Kliknutí na jméno neznámého mluvčího otevře stejný výběr.
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.
+
+Návrhy mluvčích ukazují původ a u odhadu také vysvětlení modelu v nápovědě. Kalendář a Meet se používají při automatickém i ručním běhu. Návrh s **?** potvrdíte jedním kliknutím; nezaškrtnutý návrh mluvčího nikdy nepojmenuje. Identita vychází z pozvánek, účasti a vodítek v přepisu, nikdy z hlasových dat.
 
 <span id="topics" />
 

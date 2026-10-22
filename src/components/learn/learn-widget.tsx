@@ -79,6 +79,7 @@ import type {
     MailTextAnchor,
 } from "@/lib/learn/mail-candidates";
 import { refsIn } from "@/lib/learn/new-refs";
+import type { SpeakerProposalContext } from "@/lib/learn/output";
 import type { MailDetail } from "@/lib/mail/detail";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
@@ -95,7 +96,7 @@ type Target =
     | { newRef: string };
 type Side = Target | { speakerLabel: string } | { literal: string };
 
-interface SpeakerPayload {
+interface SpeakerPayload extends SpeakerProposalContext {
     label: string;
     personId: string | null;
     newRef?: string;
@@ -357,7 +358,7 @@ export function LearnWidget({
             }
             const learnPath =
                 kind === "audio"
-                    ? `learn?source=${source}${selectedEventId ? `&calendarEventId=${encodeURIComponent(selectedEventId)}` : ""}`
+                    ? `learn?source=${source}${selectedEventId !== undefined ? `&calendarEventId=${encodeURIComponent(selectedEventId)}` : ""}`
                     : "learn";
             const response = await fetch(
                 withRecordingView(
@@ -1514,6 +1515,8 @@ export function LearnWidget({
                                                         payload.personId,
                                                 )}
                                                 reason={payload.reason}
+                                                source={payload.source}
+                                                guess={payload.guess}
                                                 evidence={distinctPlayTimes(
                                                     payload.evidenceMs,
                                                 ).map((ms) => (

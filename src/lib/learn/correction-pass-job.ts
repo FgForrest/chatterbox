@@ -29,6 +29,7 @@ import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import {
@@ -133,7 +134,12 @@ async function runPass({
         throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
     }
     const [learnRun] = await db
-        .select({ profileRevisionId: learnRuns.profileRevisionId })
+        .select({
+            profileRevisionId: learnRuns.profileRevisionId,
+            inputs: learnRuns.inputs,
+            view: learnRuns.view,
+            actorUserId: learnRuns.actorUserId,
+        })
         .from(learnRuns)
         .where(
             and(
@@ -277,6 +283,17 @@ async function runPass({
             contentLanguage,
         );
         reportProgress({ phase: "reading" });
+        const roster = await resolveMeetingRoster({
+            ownerUserId: pass.userId,
+            itemId: pass.recordingId,
+            calendarEventId:
+                ((learnRun.view === "private" &&
+                    learnRun.actorUserId === pass.userId) ||
+                    learnRun.inputs?.calendarEventAutoSelected === true) &&
+                typeof learnRun.inputs?.calendarEventId === "string"
+                    ? learnRun.inputs.calendarEventId
+                    : undefined,
+        });
         const result = await runCorrectionPass({
             path,
             bridge,
@@ -287,6 +304,8 @@ async function runPass({
             reviewLocale,
             almanac,
             corrected,
+            attendeeNames:
+                roster?.attendees.map((attendee) => attendee.name) ?? [],
             signal,
         });
         reportProgress({ phase: "writing" });

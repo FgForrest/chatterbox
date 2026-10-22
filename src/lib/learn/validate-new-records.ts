@@ -37,7 +37,11 @@ import {
     nameWords,
 } from "@/lib/learn/name-match";
 import { type RecordTarget, recordNameKey } from "@/lib/learn/new-refs";
-import type { LearnCorrection, LearnNewRecord } from "@/lib/learn/output";
+import type {
+    LearnCorrection,
+    LearnNewRecord,
+    SpeakerProposalContext,
+} from "@/lib/learn/output";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 export const MAX_NEW_RECORDS = 20;
@@ -55,7 +59,7 @@ const MAYBE_REASONS: Record<"person" | "entity", ReadonlySet<MatchReason>> = {
     entity: new Set(["exact", "token", "edit", "stem"]),
 };
 
-export interface NewRecordPayload {
+export interface NewRecordPayload extends SpeakerProposalContext {
     ref: string;
     kind: "person" | "entity";
     /** The thing's type; null for a person. */

@@ -1,7 +1,7 @@
 ---
 title: Speakers are identified from names and calendar rosters, never from voiceprints
 date: 2026-09-14
-updated: 2026-10-22 16:00
+updated: 2026-10-22 21:10
 status: accepted
 kind: feature
 issues: []
@@ -135,7 +135,7 @@ Drive export's choice, see its record).
   implements the roster this record chose as the identity source.
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): the Google connection the
   roster's scopes are added to, and the `drive.file` plus Picker choice.
-- [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): calendar rosters as the identity source; automatic guesses are the planned next step.
+- [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): calendar rosters as the identity source on every Learn run, with model guesses for the user to confirm (PR #250).
 
 ## Timeline
 
