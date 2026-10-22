@@ -1,7 +1,7 @@
 import { attendeeNameKey } from "@/lib/integrations/google/meeting-roster-names";
 import type { LearnOutput } from "./output";
 import type { DropReason, LearnRunFrame, ReviewCandidate } from "./validate";
-import { newRecordFingerprint } from "./validate-new-records";
+import { MAX_NEW_RECORDS, newRecordFingerprint } from "./validate-new-records";
 
 /** Adds bounded, unticked speaker guesses after evidence-backed proposals. */
 export function appendSpeakerGuesses(
@@ -13,6 +13,9 @@ export function appendSpeakerGuesses(
         drop: (reason: DropReason) => void;
     },
 ): void {
+    let newRecordCount = items.filter(
+        (item) => item.kind === "new_record",
+    ).length;
     const labels = new Set(frame.turns.map((turn) => turn.speaker));
     const assignedLabels = new Set(frame.answeredLabels.keys());
     const assignedPeople = new Set(
@@ -166,6 +169,10 @@ export function appendSpeakerGuesses(
                     name,
                 );
                 if (checks.dismissed(recordFingerprint)) continue;
+                if (newRecordCount >= MAX_NEW_RECORDS) {
+                    checks.drop("budget");
+                    continue;
+                }
                 newRef = `roster:${speaker.label}`;
                 items.push({
                     kind: "new_record",
@@ -183,6 +190,7 @@ export function appendSpeakerGuesses(
                         guess: metadataForRoster,
                     },
                 });
+                newRecordCount++;
             }
         }
         const unresolved = items.find(

@@ -6,7 +6,10 @@ import { learnMarksFrom } from "@/components/learn/learn-marks";
 import { ReviewSpeaker } from "@/components/learn/review-speaker";
 import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { speakerAccent } from "@/components/people/speaker-accents";
-import { SpeakerTags } from "@/components/people/speaker-tags";
+import {
+    SpeakerTags,
+    suggestedSpeakers,
+} from "@/components/people/speaker-tags";
 import type { SpeakerProposalContext } from "@/lib/learn/output";
 
 vi.mock("next-intl", () => ({
@@ -259,7 +262,10 @@ it("appends first-name and recorder notes to the strip source", () => {
     ).toBeTruthy();
 });
 
-it("shows why a carried name needs confirmation and how to pick someone else", async () => {
+it.each([
+    null,
+    undefined,
+])("shows a carried name without a guess label (confidence: %s)", async (confidence) => {
     vi.stubGlobal(
         "fetch",
         vi.fn(async () =>
@@ -273,6 +279,7 @@ it("shows why a carried name needs confirmation and how to pick someone else", a
                         personName: "Nera Veln",
                         status: "suggested",
                         source: "heuristic",
+                        confidence,
                     },
                 ],
             }),
@@ -287,10 +294,48 @@ it("shows why a carried name needs confirmation and how to pick someone else", a
             onAttributionsChange={vi.fn()}
         />,
     );
+    expect(await screen.findByText("Nera Veln")).toBeTruthy();
+    expect(
+        screen.getByTitle(
+            "Suggested from the previous transcript. Pick someone else",
+        ),
+    ).toBeTruthy();
+});
+
+it.each([
+    ["calendar", "Invited in Calendar"],
+    ["meet", "Joined in Google Meet"],
+    ["transcript", ""],
+] as const)("shows a low-confidence %s suggestion as a guess without stored proposal metadata", async (source, origin) => {
+    const speaker = {
+        label: "speaker_0",
+        personId: "p1",
+        personName: "Nera Veln",
+        status: "suggested",
+        source,
+        confidence: 0.3,
+    };
+    expect(suggestedSpeakers([speaker]).speaker_0?.proposal).toEqual({
+        source,
+        guess: { confidence: 0.3, clues: [] },
+    });
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ speakers: [speaker] })),
+    );
+    render(
+        <SpeakerTags
+            recordingId="recording"
+            source="riffado"
+            speakers={[{ speaker: "speaker_0", label: "Speaker 0" }]}
+            attributions={{}}
+            onAttributionsChange={vi.fn()}
+        />,
+    );
     expect(await screen.findByText("Nera Veln?")).toBeTruthy();
     expect(
         screen.getByTitle(
-            "Guess Suggested from the previous transcript. Pick someone else",
+            `${origin ? `${origin} · ` : ""}Guess Pick someone else`,
         ),
     ).toBeTruthy();
 });

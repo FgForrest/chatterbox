@@ -175,6 +175,77 @@ describe("meeting speaker guesses", () => {
             ).items,
         ).toHaveLength(1);
     });
+    it.each([
+        0, 18, 20,
+    ])("shares the new-record budget with %s evidence-backed records", (existingCount) => {
+        const names = Array.from(
+            { length: 22 },
+            (_, index) => `Tera Vosk${String.fromCharCode(65 + index)}`,
+        );
+        const newRecords: LearnOutput["newRecords"] = Array.from(
+            { length: existingCount },
+            (_, index) => ({
+                ref: `n${index}`,
+                kind: "person",
+                typeKey: null,
+                name: `Ruva Seln${String.fromCharCode(65 + index)}`,
+                speakerLabel: null,
+                evidence: ["00:00"],
+                reason: "Named in the transcript.",
+            }),
+        );
+        const result = validateLearnOutput(
+            {
+                ...answer([
+                    ...names.map((rosterName, index) => ({
+                        ...knownGuess(`speaker_${index}`),
+                        personId: null,
+                        rosterName,
+                    })),
+                    knownGuess("speaker_22"),
+                ]),
+                newRecords,
+            },
+            {
+                ...frame,
+                turns: Array.from({ length: 23 }, (_, index) => ({
+                    speaker: `speaker_${index}`,
+                    startMs: index * 5000,
+                    endMs: (index + 1) * 5000,
+                    text:
+                        index === 0
+                            ? newRecords.map((record) => record.name).join(", ")
+                            : "I worked on the design.",
+                })),
+                speakerCandidates: names.map((name) => ({
+                    name,
+                    source: "meet",
+                })),
+            },
+        );
+        const records = result.items.filter(
+            (item) => item.kind === "new_record",
+        );
+        expect(records).toHaveLength(20);
+        expect(
+            new Set(
+                records
+                    .slice(0, existingCount)
+                    .map((item) => item.payload.name),
+            ),
+        ).toEqual(new Set(newRecords.map((record) => record.name)));
+        const speakers = result.items.filter((item) => item.kind === "speaker");
+        expect(speakers).toHaveLength(20 - existingCount + 1);
+        expect(speakers.at(-1)?.payload.personId).toBe("p1");
+        for (const speaker of speakers.slice(0, -1)) {
+            expect(
+                records.some(
+                    (record) => record.payload.ref === speaker.payload.newRef,
+                ),
+            ).toBe(true);
+        }
+        expect(result.dropped).toEqual({ budget: 22 - (20 - existingCount) });
+    });
     it("still requires evidence for an evidence-backed proposal", () => {
         const speaker = {
             label: "speaker_0",

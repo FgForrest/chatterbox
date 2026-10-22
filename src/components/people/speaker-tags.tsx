@@ -103,11 +103,10 @@ export function suggestedSpeakers(
                     speaker.source === "calendar" || speaker.source === "meet"
                         ? speaker.source
                         : "transcript",
-                ...(speaker.source === "heuristic" ||
-                (speaker.confidence != null && speaker.confidence < 0.5)
+                ...(speaker.confidence != null && speaker.confidence < 0.5
                     ? {
                           guess: {
-                              confidence: speaker.confidence ?? 0.49,
+                              confidence: speaker.confidence,
                               clues: [],
                           },
                       }
@@ -406,7 +405,9 @@ export function SpeakerTags({
                     const label =
                         attribution?.name ??
                         (suggestion
-                            ? i18n("{name}?", { name: suggestion.name })
+                            ? suggestion.carried
+                                ? suggestion.name
+                                : i18n("{name}?", { name: suggestion.name })
                             : unknown
                               ? i18n("{speaker}: unknown", {
                                     speaker: speaker.label,
@@ -481,9 +482,11 @@ export function SpeakerTags({
                                     title={
                                         suggestion
                                             ? [
-                                                  speakerSource(
-                                                      suggestion.proposal ?? {},
-                                                  ),
+                                                  !suggestion.carried &&
+                                                      speakerSource(
+                                                          suggestion.proposal ??
+                                                              {},
+                                                      ),
                                                   suggestion.carried
                                                       ? i18n(
                                                             "Suggested from the previous transcript.",
