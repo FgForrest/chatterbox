@@ -194,7 +194,9 @@ beforeEach(() => {
         .mockReset()
         .mockResolvedValue([]);
     chrome.scripting.unregisterContentScripts.mockClear();
-    chrome.permissions.contains.mockReset().mockResolvedValue(true);
+    chrome.permissions.contains
+        .mockReset()
+        .mockImplementation(async ({ origins }) => origins.length === 1);
     chrome.action.setBadgeText.mockClear();
     delete harness.sessionValues.recorderStartRequest;
     delete harness.sessionValues.armedTabs;
@@ -1025,7 +1027,7 @@ describe("meeting notification actions", () => {
         expect(chrome.notifications.create).toHaveBeenCalledWith(
             "nudge:7",
             expect.objectContaining({
-                title: "meetingRecordQuestion",
+                title: "meetingPromptTitle",
                 contextMessage: expect.any(String),
                 buttons: [{ title: "recordWithConsent" }, { title: "notNow" }],
             }),
@@ -1185,10 +1187,16 @@ describe("review recording lifecycle fixes", () => {
             autoModeAcknowledgedAt: "2026-10-19T00:00:00Z",
         });
         harness.readToken.mockResolvedValue("token");
-        harness.listeners.actionClicked({
+        const tab = {
             id: 7,
             url: "https://meet.google.com/abc-defg-hij",
+        };
+        harness.platformModes.mockReturnValue({
+            "google-meet": { mode: "auto" },
         });
+        chrome.tabs.get.mockResolvedValue(tab);
+        await harness.listeners.tabUpdated(7, { status: "complete" }, tab);
+        harness.listeners.actionClicked(tab);
         await vi.waitFor(() =>
             expect(harness.sessionValues.recorderStartRequest).toBeDefined(),
         );
@@ -1434,12 +1442,11 @@ describe("badge and notification review", () => {
         await harness.listeners.tabUpdated(7, { status: "complete" }, meeting);
         expect(chrome.action.setBadgeText).not.toHaveBeenCalled();
     });
-    it("focuses the meeting on notification body click without opening a recording window", async () => {
+    it("opens the meeting prompt switch on notification body click without opening a recording window", async () => {
         chrome.tabs.get.mockResolvedValue(meeting);
         await harness.listeners.notificationClicked("nudge:7");
-        expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
-        expect(chrome.windows.update).toHaveBeenCalledWith(3, {
-            focused: true,
+        expect(chrome.tabs.create).toHaveBeenCalledWith({
+            url: "chrome-extension://test/options/options.html#meeting-prompt",
         });
         expect(chrome.windows.create).not.toHaveBeenCalled();
         expect(harness.sessionValues.recorderStartRequest).toBeUndefined();

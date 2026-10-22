@@ -1,5 +1,6 @@
 import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
 import { localizeDocument, t } from "../lib/i18n.js";
+import { bindMeetingPromptSwitches } from "../lib/meeting-prompt-ui.js";
 import {
     microphoneError,
     microphonePermission,
@@ -799,7 +800,14 @@ async function restore() {
         el("grant-mic").scrollIntoView();
     }
     if (settings.dataUseAcknowledgedAt) await loadMicList();
+    if (location.hash === "#meeting-prompt" && !el("recorder-settings").hidden) {
+        el("meeting-prompt").scrollIntoView();
+        el("meeting-prompt-switch").focus();
+    }
 }
+
+void bindMeetingPromptSwitches([el("meeting-prompt-switch"), el("setup-meeting-prompt")], el("meeting-prompt-status"))
+    .catch(() => { el("meeting-prompt-status").textContent = t("meetingPromptAccessDenied"); });
 
 await loadSetupTarget();
 scheduleFallback();
