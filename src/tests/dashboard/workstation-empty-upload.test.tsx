@@ -716,12 +716,14 @@ describe("Dashboard arrival notices", () => {
         const { rerender } = render(
             <Workstation {...props} recordings={[first, second]} />,
         );
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
         act(() =>
             mocks.uploadOptions?.onUploadStarted?.({
                 uploadId: "upload",
                 filename: arrived.filename,
             }),
         );
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
         if (mode === "moved")
             fireEvent.click(
                 screen.getByRole("button", { name: second.filename }),
@@ -735,6 +737,7 @@ describe("Dashboard arrival notices", () => {
                 resumed: mode === "resumed",
             });
         });
+        if (mode === "automatic") expect(mocks.custom).not.toHaveBeenCalled();
         rerender(
             <Workstation {...props} recordings={[arrived, first, second]} />,
         );
@@ -750,6 +753,20 @@ describe("Dashboard arrival notices", () => {
             ).toBeTruthy();
         }
         if (mode === "resumed") expect(action?.label).toBe("Open");
+        if (mode === "automatic") {
+            rerender(
+                <Workstation
+                    {...props}
+                    recordings={[arrived, first, second]}
+                />,
+            );
+            expect(mocks.custom).not.toHaveBeenCalled();
+            fireEvent.click(
+                screen.getByRole("button", { name: first.filename }),
+            );
+            expect(screen.getByText("Selected: First recording")).toBeTruthy();
+            expect(mocks.custom).not.toHaveBeenCalled();
+        }
     });
 
     it("never announces the currently selected arrival", () => {

@@ -758,11 +758,7 @@ export function Workstation({
         const linkedId = new URLSearchParams(window.location.search).get(
             "recording",
         );
-        const autoOpeningId =
-            pendingUploadSelection?.selectionRevision ===
-            selectionRevisionRef.current
-                ? pendingUploadSelection.recordingId
-                : null;
+        const autoOpeningId = pendingUploadSelection?.recordingId;
         const arrivals = visibleRecordings.filter(
             (item) =>
                 !seenArrivalIds.current.has(item.id) &&
@@ -812,7 +808,11 @@ export function Workstation({
         ? visibleRecordings.find((item) => item.id === arrival.id)
         : undefined;
     useEffect(() => {
-        if (!arrivalRecording || !arrival) {
+        if (
+            !arrivalRecording ||
+            !arrival ||
+            arrival.id === currentRecording?.id
+        ) {
             toast.dismiss("new-item");
             return;
         }
@@ -840,6 +840,7 @@ export function Workstation({
         arrival,
         arrivalRecording,
         closeArrival,
+        currentRecording?.id,
         initialSettings.dateTimeFormat,
         selectRecordingByUser,
     ]);
