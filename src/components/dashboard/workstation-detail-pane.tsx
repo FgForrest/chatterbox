@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
@@ -16,10 +16,12 @@ import {
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { openWidget } from "@/components/pipeline/workflow-widget";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { hasAudio } from "@/lib/recordings/audio-availability";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 import type {
@@ -51,6 +53,7 @@ interface Props {
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
     onTranscriptStale?: () => void;
     onFolderCreated?: (folder: CreatedFolder) => void;
+    canCurate?: boolean;
     /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
     transcriptReadOnly?: boolean;
     /** Whether the recording is in the Organization: erasing it withdraws it. */
@@ -60,6 +63,7 @@ interface Props {
     onDelete: (recording: Recording) => Promise<void>;
     onArtifactsChanged: () => void;
     onBackToList: () => void;
+    backLabel?: string;
     /** When true, the pane is hidden (mobile list view active). */
     hiddenOnMobile: boolean;
     initialPlaybackSpeed: number | undefined;
@@ -108,6 +112,7 @@ export function WorkstationDetailPane({
     onTranscribeComplete,
     onTranscriptStale,
     onFolderCreated,
+    canCurate,
     transcriptReadOnly,
     recordingShared = false,
     onSelectRecording,
@@ -115,6 +120,7 @@ export function WorkstationDetailPane({
     onDelete,
     onArtifactsChanged,
     onBackToList,
+    backLabel,
     hiddenOnMobile,
     initialPlaybackSpeed,
     initialVolume,
@@ -130,6 +136,11 @@ export function WorkstationDetailPane({
 }: Props) {
     const i18n = useExtracted();
     const playerRef = useRef<RecordingPlayerHandle>(null);
+    const audioAvailable = hasAudio(currentRecording);
+    const playback = useMemo(
+        () => (audioAvailable ? transcriptPlayback(playerRef) : null),
+        [audioAvailable],
+    );
     const playedLink = useRef<string | null>(null);
     const [processingState, setProcessingState] = useState<{
         itemId: string;
@@ -148,12 +159,7 @@ export function WorkstationDetailPane({
         [currentRecordingId],
     );
     useEffect(() => {
-        if (
-            !currentRecording ||
-            currentRecording.kind === "mail" ||
-            currentRecording.audioReaped
-        )
-            return;
+        if (!currentRecording || !playback) return;
         const params = new URLSearchParams(
             itemLinkQuery ?? window.location.search,
         );
@@ -175,8 +181,8 @@ export function WorkstationDetailPane({
         if (playedLink.current === link) return;
         if (!playerRef.current) return;
         playedLink.current = link;
-        playerRef.current.playFrom(startMs / 1000);
-    }, [currentRecording, itemLinkQuery]);
+        playback.play(startMs);
+    }, [currentRecording, itemLinkQuery, playback]);
     const hasTranscript =
         currentRecording?.hasTranscript ??
         Boolean(
@@ -185,172 +191,151 @@ export function WorkstationDetailPane({
         );
 
     return (
-        <div
-            className={cn(
-                "space-y-6 lg:col-span-2 lg:block lg:self-start",
-                hiddenOnMobile && "hidden",
-            )}
-        >
-            {/*
+        <PlaybackProvider playback={playback}>
+            <div
+                className={cn(
+                    "min-w-0 space-y-6 lg:block lg:self-start",
+                    hiddenOnMobile && "hidden",
+                )}
+            >
+                {/*
               Mobile back affordance. Returns to the list view without
               dropping the selected recording -- reopening shows the
               same detail. Hidden on lg+ where both panes are visible
               at once.
             */}
-            <Button
-                variant="ghost"
-                size="sm"
-                onClick={onBackToList}
-                className="-ml-2 h-9 gap-1 px-2 lg:hidden"
-            >
-                <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
-            </Button>
-            {currentRecording ? (
-                <>
-                    <RecordingPlayerHeader
-                        recording={currentRecording}
-                        onRenamed={onRenamed}
-                        shared={recordingShared}
-                        // The title follows the transcript's rule: the
-                        // organization account renames it on the
-                        // Organization view, the owner on their own.
-                        titleReadOnly={transcriptReadOnly}
-                        action={
-                            // Erasing and deleting are the owner's, on their
-                            // own view; a shared recording leaves the
-                            // Organization first.
-                            currentRecording.view === "org" ? undefined : (
-                                <EraseRecordingMenu
-                                    recording={currentRecording}
-                                    shared={recordingShared}
-                                    onDeleteLocal={onDelete}
-                                    onChanged={onArtifactsChanged}
-                                />
-                            )
-                        }
-                    />
-                    <ItemWorkflow
-                        itemId={currentRecording.id}
-                        kind="audio"
-                        folders={folders}
-                        folderAssignments={folderAssignments}
-                        onSelectFolder={onSelectFolder}
-                        onAddToFolder={onAddToFolder}
-                        onRemoveFromFolder={onRemoveFromFolder}
-                        isOwn={currentRecording.isOwn !== false}
-                        canWithdraw={
-                            currentRecording.isOwn !== false ||
-                            (currentRecording.view === "org" &&
-                                transcriptReadOnly === false)
-                        }
-                        view={
-                            currentRecording.view === "org" ? "org" : "private"
-                        }
-                        onMoveBetweenFolders={onMoveBetweenFolders}
-                        onChanged={onArtifactsChanged}
-                        onFolderCreated={onFolderCreated}
-                        onTranscribe={(retranscribe) =>
-                            onTranscribe(undefined, retranscribe)
-                        }
-                        onLearn={() =>
-                            openWidget(
-                                `recording-learn-review-${currentRecording.id}`,
-                            )
-                        }
-                        onSummary={() =>
-                            openWidget(
-                                `recording-summary-${currentRecording.id}`,
-                            )
-                        }
-                        onReviewLearn={() =>
-                            openWidget(
-                                `recording-learn-review-${currentRecording.id}`,
-                            )
-                        }
-                        onReviewTasks={() =>
-                            openWidget(
-                                `recording-task-review-${currentRecording.id}`,
-                            )
-                        }
-                        onProcessingChange={handleProcessingChange}
-                    />
-                    {!currentRecording.audioReaped && (
-                        <RecordingPlayer
-                            ref={playerRef}
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onBackToList}
+                    className="-ml-2 h-9 gap-1 px-2 lg:hidden"
+                >
+                    <ArrowLeft className="size-4" />{" "}
+                    {backLabel ?? i18n("Recent")}
+                </Button>
+                {currentRecording ? (
+                    <>
+                        <RecordingPlayerHeader
                             recording={currentRecording}
-                            initialPlaybackSpeed={initialPlaybackSpeed}
-                            initialVolume={initialVolume}
-                            initialAutoPlayNext={initialAutoPlayNext}
-                            scrubberStyle={scrubberStyle}
-                            onEnded={() => {
-                                const currentIndex =
-                                    visibleRecordings.findIndex(
-                                        (r) => r.id === currentRecording.id,
-                                    );
-                                if (
-                                    currentIndex >= 0 &&
-                                    currentIndex < visibleRecordings.length - 1
-                                ) {
-                                    onSelectRecording(
-                                        visibleRecordings[currentIndex + 1],
-                                    );
-                                }
-                            }}
-                        />
-                    )}
-                    {(!currentRecording.audioReaped || hasTranscript) && (
-                        <TranscriptionPanel
-                            key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
-                            recording={currentRecording}
-                            transcription={currentTranscription}
-                            transcripts={transcripts}
-                            isTranscribing={isCurrentTranscribing}
-                            onTranscribe={onTranscribe}
-                            onTranscribeComplete={onTranscribeComplete}
-                            onTranscriptStale={onTranscriptStale}
-                            readOnly={transcriptReadOnly}
+                            onRenamed={onRenamed}
                             shared={recordingShared}
-                            processing={processing}
-                            onSeekToTurn={
-                                currentRecording.audioReaped
-                                    ? undefined
-                                    : (startMs) =>
-                                          playerRef.current?.seekTo(
-                                              startMs / 1000,
-                                          )
-                            }
-                            onPlayFromTurn={
-                                currentRecording.audioReaped
-                                    ? undefined
-                                    : (startMs, endMs) =>
-                                          playerRef.current?.playFrom(
-                                              startMs / 1000,
-                                              endMs === undefined
-                                                  ? undefined
-                                                  : endMs / 1000,
-                                          )
-                            }
-                            playback={
-                                currentRecording.audioReaped
-                                    ? undefined
-                                    : transcriptPlayback(playerRef)
-                            }
-                            getPlaybackMs={() =>
-                                (playerRef.current?.getCurrentTime() ?? 0) *
-                                1000
+                            // The title follows the transcript's rule: the
+                            // organization account renames it on the
+                            // Organization view, the owner on their own.
+                            titleReadOnly={transcriptReadOnly}
+                            action={
+                                // Erasing and deleting are the owner's, on their
+                                // own view; a shared recording leaves the
+                                // Organization first.
+                                currentRecording.view === "org" ? undefined : (
+                                    <EraseRecordingMenu
+                                        recording={currentRecording}
+                                        shared={recordingShared}
+                                        onDeleteLocal={onDelete}
+                                        onChanged={onArtifactsChanged}
+                                    />
+                                )
                             }
                         />
-                    )}
-                </>
-            ) : (
-                <Card>
-                    <CardContent className="py-16 text-center">
-                        <p className="text-muted-foreground">
-                            {i18n("Select an item to view its details")}
-                        </p>
-                    </CardContent>
-                </Card>
-            )}
-        </div>
+                        <ItemWorkflow
+                            itemId={currentRecording.id}
+                            kind="audio"
+                            folders={folders}
+                            folderAssignments={folderAssignments}
+                            onSelectFolder={onSelectFolder}
+                            onAddToFolder={onAddToFolder}
+                            onRemoveFromFolder={onRemoveFromFolder}
+                            isOwn={currentRecording.isOwn !== false}
+                            canWithdraw={
+                                currentRecording.isOwn !== false ||
+                                (currentRecording.view === "org" &&
+                                    transcriptReadOnly === false)
+                            }
+                            view={
+                                currentRecording.view === "org"
+                                    ? "org"
+                                    : "private"
+                            }
+                            onMoveBetweenFolders={onMoveBetweenFolders}
+                            onChanged={onArtifactsChanged}
+                            onFolderCreated={onFolderCreated}
+                            canCurate={canCurate}
+                            onTranscribe={(retranscribe) =>
+                                onTranscribe(undefined, retranscribe)
+                            }
+                            onLearn={() =>
+                                openWidget(
+                                    `recording-learn-review-${currentRecording.id}`,
+                                )
+                            }
+                            onSummary={() =>
+                                openWidget(
+                                    `recording-summary-${currentRecording.id}`,
+                                )
+                            }
+                            onReviewLearn={() =>
+                                openWidget(
+                                    `recording-learn-review-${currentRecording.id}`,
+                                )
+                            }
+                            onReviewTasks={() =>
+                                openWidget(
+                                    `recording-task-review-${currentRecording.id}`,
+                                )
+                            }
+                            onProcessingChange={handleProcessingChange}
+                        />
+                        {audioAvailable && (
+                            <RecordingPlayer
+                                ref={playerRef}
+                                recording={currentRecording}
+                                initialPlaybackSpeed={initialPlaybackSpeed}
+                                initialVolume={initialVolume}
+                                initialAutoPlayNext={initialAutoPlayNext}
+                                scrubberStyle={scrubberStyle}
+                                onEnded={() => {
+                                    const currentIndex =
+                                        visibleRecordings.findIndex(
+                                            (r) => r.id === currentRecording.id,
+                                        );
+                                    if (
+                                        currentIndex >= 0 &&
+                                        currentIndex <
+                                            visibleRecordings.length - 1
+                                    ) {
+                                        onSelectRecording(
+                                            visibleRecordings[currentIndex + 1],
+                                        );
+                                    }
+                                }}
+                            />
+                        )}
+                        {(!currentRecording.audioReaped || hasTranscript) && (
+                            <TranscriptionPanel
+                                key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                recording={currentRecording}
+                                transcription={currentTranscription}
+                                transcripts={transcripts}
+                                isTranscribing={isCurrentTranscribing}
+                                onTranscribe={onTranscribe}
+                                onTranscribeComplete={onTranscribeComplete}
+                                onTranscriptStale={onTranscriptStale}
+                                readOnly={transcriptReadOnly}
+                                shared={recordingShared}
+                                processing={processing}
+                            />
+                        )}
+                    </>
+                ) : (
+                    <Card>
+                        <CardContent className="py-16 text-center">
+                            <p className="text-muted-foreground">
+                                {i18n("Select an item to view its details")}
+                            </p>
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+        </PlaybackProvider>
     );
 }

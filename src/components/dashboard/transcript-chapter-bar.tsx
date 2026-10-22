@@ -3,10 +3,10 @@
 import { useExtracted } from "next-intl";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
+import { usePlayback } from "@/components/playback/playback-context";
 import { Switch } from "@/components/ui/switch";
 import {
     type PlaybackState,
-    type TranscriptPlayback,
     transcriptReadingLine,
 } from "@/hooks/use-transcript-follow";
 import { activeTopicIndex, type TranscriptTopic } from "@/lib/topics/timeline";
@@ -23,8 +23,6 @@ interface TranscriptChapterBarProps {
     showOriginal: boolean;
     onShowOriginalChange: (show: boolean) => void;
     widgetId: string;
-    playback?: TranscriptPlayback;
-    getPlaybackMs?: () => number;
     expanded?: boolean;
 }
 
@@ -41,31 +39,25 @@ export function TranscriptChapterBar({
     showOriginal,
     onShowOriginalChange,
     widgetId,
-    playback,
-    getPlaybackMs,
     expanded = true,
 }: TranscriptChapterBarProps) {
+    const playback = usePlayback();
     const i18n = useExtracted();
     const switchId = useId();
     const barRef = useRef<HTMLDivElement>(null);
     const [readingIndex, setReadingIndex] = useState(0);
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [playbackState, setPlaybackState] = useState<PlaybackState>({
-        ms: getPlaybackMs?.() ?? 0,
+        ms: 0,
         playing: false,
     });
 
-    const playbackRef = useRef(playback);
-    playbackRef.current = playback;
-    const subscribed = playback !== undefined;
-
     useEffect(() => {
-        if (!subscribed) return;
-        return playbackRef.current?.subscribe((state) => {
+        return playback?.subscribe((state) => {
             setPlaybackState(state);
             if (state.playing) setSelectedIndex(null);
         });
-    }, [subscribed]);
+    }, [playback]);
 
     useEffect(() => {
         const box = scrollRef.current;
@@ -133,13 +125,7 @@ export function TranscriptChapterBar({
     const activeIndex =
         selectedIndex ??
         (playbackState.playing
-            ? Math.max(
-                  0,
-                  activeTopicIndex(
-                      topics ?? [],
-                      getPlaybackMs?.() ?? playbackState.ms,
-                  ),
-              )
+            ? Math.max(0, activeTopicIndex(topics ?? [], playbackState.ms))
             : readingIndex);
 
     if (!topics?.length && !canDetect && !hasCorrections) return null;

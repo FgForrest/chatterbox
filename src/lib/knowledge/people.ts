@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertAlmanacOwner } from "@/lib/knowledge/almanac-access";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
@@ -36,8 +37,8 @@ export const MAX_DISPLAY_NAME_LENGTH = 200;
 
 /**
  * `personal` people belong to one account. `org` people are the
- * Organization's: one record everyone names speakers with, curated by the
- * organization account.
+ * Organization's: one record everyone names speakers with, curated by
+ * Organization curators.
  */
 export type PersonScope = "personal" | "org";
 
@@ -298,7 +299,7 @@ function hasInternalPrimaryEmail(row: {
 function curatorOnly(): AppError {
     return new AppError(
         ErrorCode.FORBIDDEN,
-        "Only the organization account can change an Organization person",
+        "Only an Organization curator can change an Organization person",
         403,
     );
 }
@@ -307,11 +308,6 @@ function personNotFound(): AppError {
     return new AppError(ErrorCode.NOT_FOUND, "Person not found", 404);
 }
 
-/**
- * A person `actorId` may change: their own, which for the organization
- * account are the Organization's people. Everyone else may see an
- * Organization person but not change it.
- */
 async function requireManageable(
     executor: Executor,
     actorId: string,
@@ -319,9 +315,8 @@ async function requireManageable(
 ): Promise<PersonRow> {
     const row = await readPersonRow(executor, personId);
     if (!row) throw personNotFound();
-    if (row.userId === actorId) return row;
-    if (row.ownerRole === "org") throw curatorOnly();
-    throw personNotFound();
+    await assertAlmanacOwner(actorId, row.userId, personNotFound());
+    return row;
 }
 
 /**
@@ -329,7 +324,7 @@ async function requireManageable(
  *
  * An Organization person is renamed for everyone, in every recording that
  * names them -- private recordings included -- which is why only the
- * organization account may do it.
+ * Organization curators may do it.
  */
 export async function updatePerson(
     actorId: string,
@@ -378,7 +373,7 @@ async function updatePersonInTx(
         const email = changes.primaryEmail?.trim() || null;
         assertPersonEmail(email);
         if (email) {
-            const holder = await findPersonByEmail(actorId, email);
+            const holder = await findPersonByEmail(row.userId, email);
             if (holder && holder.id !== personId) {
                 throw new AppError(
                     ErrorCode.CONFLICT,
@@ -395,7 +390,7 @@ async function updatePersonInTx(
     await tx
         .update(people)
         .set(set)
-        .where(and(eq(people.id, personId), eq(people.userId, actorId)));
+        .where(and(eq(people.id, personId), eq(people.userId, row.userId)));
 }
 
 /**
@@ -614,8 +609,8 @@ async function settleContradictions(tx: Tx, personId: string): Promise<void> {
  * id that was merged away since the caller read it -- so it is resolved to
  * the person it redirects to before anything moves.
  *
- * `actorId` must be able to change the loser: their own person, or, for the
- * organization account, an Organization person. The target may be the
+ * `actorId` must be able to change the loser: their own person, or, for
+ * a curator, an Organization person. The target may be the
  * actor's own or an Organization person, so anyone can fold a private
  * duplicate into the shared record, but never the reverse.
  */

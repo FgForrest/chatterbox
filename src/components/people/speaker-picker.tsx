@@ -1,9 +1,11 @@
 "use client";
 
-import { Check, Loader2, Play, Search, UserPlus, X } from "lucide-react";
+import { Check, Loader2, Search, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { PlayTurnButton } from "@/components/playback/play-turn-button";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -50,7 +52,7 @@ export interface SpeakerPickerProps {
     }[];
     activeVoice?: string;
     onVoiceChange?: (label: string) => void;
-    onPlayVoice?: (label: string) => boolean;
+    nextVoiceTurn?: (label: string) => PlayAtTarget | null;
     onUnlinkVoice?: (label: string) => Promise<boolean>;
 }
 
@@ -72,7 +74,7 @@ export function SpeakerPicker({
     voices,
     activeVoice,
     onVoiceChange,
-    onPlayVoice,
+    nextVoiceTurn,
     onUnlinkVoice,
 }: SpeakerPickerProps) {
     const i18n = useExtracted();
@@ -172,18 +174,19 @@ export function SpeakerPicker({
                                 key={voice.speaker}
                                 className="flex items-center gap-1"
                             >
-                                <Button
-                                    size="icon-sm"
-                                    variant="ghost"
-                                    disabled={submitting || !onPlayVoice}
-                                    aria-label={i18n(
+                                <PlayTurnButton
+                                    className="grid size-8 place-items-center"
+                                    disabled={submitting}
+                                    label={i18n(
                                         "Play the next turn of {name}",
                                         { name: voice.label },
                                     )}
-                                    onClick={() => onPlayVoice?.(voice.speaker)}
-                                >
-                                    <Play className="size-3 fill-current" />
-                                </Button>
+                                    nextTurn={
+                                        nextVoiceTurn
+                                            ? () => nextVoiceTurn(voice.speaker)
+                                            : undefined
+                                    }
+                                />
                                 <Button
                                     size="sm"
                                     variant={

@@ -31,7 +31,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import {
     type SummarySource,
     useTranscriptionSummary,
@@ -61,8 +60,6 @@ interface SummaryWidgetProps {
     sourceLabel?: string;
     speakerAttributions?: SpeakerAttributions;
     speakerLabels?: readonly string[];
-    onPlay?: (startMs: number) => void;
-    playback?: TranscriptPlayback;
     widget?: WorkflowWidgetState;
     taskWidget?: WorkflowWidgetState;
     workflowVisible: boolean;
@@ -87,8 +84,6 @@ export function SummaryWidget({
     sourceLabel,
     speakerAttributions = {},
     speakerLabels = [],
-    onPlay,
-    playback,
     widget,
     taskWidget,
     workflowVisible,
@@ -265,8 +260,6 @@ export function SummaryWidget({
             state={taskState}
             speakers={taskSpeakers}
             organizationOnly={view === "org"}
-            onPlay={onPlay}
-            playback={playback}
             frame={taskWidget?.frame ?? "dialog"}
             widgetId={taskWidgetId}
             showTrigger={false}
@@ -636,7 +629,6 @@ export function SummaryWidget({
                         state={taskState}
                         speakers={taskSpeakers}
                         organizationOnly={view === "org"}
-                        onPlay={onPlay}
                         fallback={actionItemFallback}
                         allowAdd={hasSummary}
                     />

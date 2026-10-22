@@ -50,6 +50,11 @@ import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
 import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
+import {
+    distinctPlayTimes,
+    PlayAtButton,
+    type PlayAtTarget,
+} from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -78,7 +83,6 @@ import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events"
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
-import { formatClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 
@@ -164,8 +168,7 @@ export function LearnWidget({
     source = "riffado",
     turns = [],
     mailDetail,
-    onSeek,
-    onPlaySpeaker,
+    nextSpeakerTurn,
     onFinished,
     onMarks,
     pollMs = POLL_MS,
@@ -181,9 +184,8 @@ export function LearnWidget({
     source?: "plaud" | "riffado";
     turns?: readonly TranscriptTurn[];
     mailDetail?: MailDetail;
-    onSeek?: (ms: number) => void;
-    /** Play a speaker's next turn; false when it has none to play. */
-    onPlaySpeaker?: (label: string) => boolean;
+    /** Select a speaker's next turn and reveal it in the transcript. */
+    nextSpeakerTurn?: (label: string) => PlayAtTarget | null;
     /** The transcript's speakers and corrections changed: reload them. */
     onFinished?: () => void;
     /** The ready review's proposals, for the transcript to show in place. */
@@ -774,15 +776,8 @@ export function LearnWidget({
     const buttonClass =
         "h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary";
 
-    const seek = (ms: number, label?: string) => (
-        <button
-            type="button"
-            className="font-mono text-xs text-primary hover:underline"
-            onClick={() => onSeek?.(ms)}
-            aria-label={i18n("Play from {time}", { time: formatClock(ms) })}
-        >
-            {label ?? `▸${formatClock(ms)}`}
-        </button>
+    const playAt = (ms: number) => (
+        <PlayAtButton ms={ms} withoutAudio="label" />
     );
 
     /** The new records an item refers to that are not ticked, by name. */
@@ -1277,7 +1272,7 @@ export function LearnWidget({
                                             person && "unknown" in person,
                                         );
                                         const playable =
-                                            onPlaySpeaker &&
+                                            nextSpeakerTurn &&
                                             turns.some(
                                                 (turn) =>
                                                     speakerKey(turn.speaker) ===
@@ -1301,16 +1296,16 @@ export function LearnWidget({
                                                         payload.personId,
                                                 )}
                                                 reason={payload.reason}
-                                                evidence={payload.evidenceMs.map(
-                                                    (ms) => (
-                                                        <span
-                                                            key={ms}
-                                                            className="mr-1"
-                                                        >
-                                                            {seek(ms)}
-                                                        </span>
-                                                    ),
-                                                )}
+                                                evidence={distinctPlayTimes(
+                                                    payload.evidenceMs,
+                                                ).map((ms) => (
+                                                    <span
+                                                        key={ms}
+                                                        className="mr-1"
+                                                    >
+                                                        {playAt(ms)}
+                                                    </span>
+                                                ))}
                                                 waits={waitsNote(item)}
                                                 onTick={(checked) =>
                                                     void decide(
@@ -1336,10 +1331,10 @@ export function LearnWidget({
                                                               },
                                                           ))
                                                 }
-                                                onPlay={
+                                                nextTurn={
                                                     playable
                                                         ? () =>
-                                                              onPlaySpeaker(
+                                                              nextSpeakerTurn(
                                                                   speakerKey(
                                                                       payload.label,
                                                                   ),
@@ -1367,7 +1362,6 @@ export function LearnWidget({
                                             entityTypes={
                                                 state?.entityTypes ?? []
                                             }
-                                            seek={(ms) => seek(ms)}
                                             quote={audioWords(
                                                 newRecordView(item)
                                                     .evidenceMs[0],
@@ -1459,25 +1453,25 @@ export function LearnWidget({
                                                             ? `↔ ${nameOf(payload.target)} (${i18n("link, word kept")})`
                                                             : `→ ${payload.replacement ?? nameOf(payload.target)}`}{" "}
                                                         <div className="text-xs text-muted-foreground">
-                                                            {payload.anchors
+                                                            {distinctPlayTimes(
+                                                                payload.anchors.map(
+                                                                    (anchor) =>
+                                                                        turnStart(
+                                                                            anchor.turnIndex,
+                                                                        ),
+                                                                ),
+                                                            )
                                                                 .slice(0, 3)
-                                                                .map(
-                                                                    (
-                                                                        anchor,
-                                                                        index,
-                                                                    ) => (
-                                                                        <span
-                                                                            key={`${anchor.turnIndex}:${index}`}
-                                                                            className="mr-1"
-                                                                        >
-                                                                            {seek(
-                                                                                turnStart(
-                                                                                    anchor.turnIndex,
-                                                                                ),
-                                                                            )}
-                                                                        </span>
-                                                                    ),
-                                                                )}
+                                                                .map((ms) => (
+                                                                    <span
+                                                                        key={ms}
+                                                                        className="mr-1"
+                                                                    >
+                                                                        {playAt(
+                                                                            ms,
+                                                                        )}
+                                                                    </span>
+                                                                ))}
                                                         </div>
                                                         {waitsNote(item)}
                                                     </div>
@@ -1579,7 +1573,7 @@ export function LearnWidget({
                                                                     />
                                                                 ) : (
                                                                     <div className="text-xs text-muted-foreground">
-                                                                        {seek(
+                                                                        {playAt(
                                                                             payload.startMs,
                                                                         )}
                                                                     </div>
@@ -1666,7 +1660,7 @@ export function LearnWidget({
                                                             {typeof item.payload
                                                                 .startMs ===
                                                                 "number" &&
-                                                                seek(
+                                                                playAt(
                                                                     item.payload
                                                                         .startMs,
                                                                 )}

@@ -44,6 +44,7 @@ import { nudge } from "@/lib/jobs/nudge";
 import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { hasAudio } from "@/lib/recordings/audio-availability";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
@@ -86,6 +87,7 @@ export interface TaskView {
     recordingId: string;
     evidenceItemId: string;
     evidenceItemKind: "audio" | "mail";
+    evidenceAudioAvailable: boolean;
     status: TaskStatus;
     text: string;
     assignee: { personId: string; name: string } | null;
@@ -179,6 +181,7 @@ export interface TaskMatchView {
             id: string;
             kind: "audio" | "mail";
             title: string;
+            audioAvailable: boolean;
         };
         quote: string | null;
         evidenceStartMs: number | null;
@@ -246,7 +249,12 @@ function iso(value: Date | null): string | null {
     return value ? value.toISOString() : null;
 }
 
+const taskAudio = alias(recordings, "task_audio");
+
 const taskColumns = {
+    homeAudioId: taskAudio.id,
+    homeAudioReapedAt: taskAudio.audioReapedAt,
+    homeAudioDeletedAt: taskAudio.deletedAt,
     id: recordingTasks.id,
     recordingId: recordingTasks.itemId,
     status: recordingTasks.status,
@@ -293,6 +301,14 @@ function toView(
         evidenceItemId: mention?.itemId ?? (row.recordingId as string),
         evidenceItemKind:
             mention?.kind ?? (row.homeItemKind as "audio" | "mail"),
+        evidenceAudioAvailable:
+            mention?.audioAvailable ??
+            hasAudio({
+                kind: row.homeItemKind,
+                audioId: row.homeAudioId,
+                audioReapedAt: row.homeAudioReapedAt,
+                audioDeletedAt: row.homeAudioDeletedAt,
+            }),
         status: row.status as TaskStatus,
         text: decryptText(row.text as string),
         assignee:
@@ -361,11 +377,21 @@ export async function listRecordingTasks(
             ownerUserId: chatterItems.userId,
             kind: chatterItems.kind,
             title: chatterItems.title,
+            audioId: recordings.id,
+            audioReapedAt: recordings.audioReapedAt,
+            audioDeletedAt: recordings.deletedAt,
             occurredAt: chatterItems.occurredAt,
             canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
+        .leftJoin(
+            recordings,
+            and(
+                eq(recordings.id, chatterItems.id),
+                eq(recordings.userId, chatterItems.userId),
+            ),
+        )
         .where(
             and(
                 eq(chatterItems.id, recordingId),
@@ -408,6 +434,13 @@ export async function listRecordingTasks(
         })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(
+            taskAudio,
+            and(
+                eq(taskAudio.id, chatterItems.id),
+                eq(taskAudio.userId, chatterItems.userId),
+            ),
+        )
         .leftJoin(people, assigneeJoin())
         .where(
             and(
@@ -433,6 +466,7 @@ export async function listRecordingTasks(
         mentions.latest.set(mention.taskId, {
             ...mention,
             kind: recording.kind,
+            audioAvailable: hasAudio(recording),
             title: decryptText(recording.title),
             occurredAt: recording.occurredAt,
             ownerUserId: recording.ownerUserId,
@@ -610,6 +644,9 @@ async function listSuggestedMatches(
             homeItemId: matchCandidateHome.id,
             homeItemKind: matchCandidateHome.kind,
             homeItemTitle: matchCandidateHome.title,
+            homeAudioId: taskAudio.id,
+            homeAudioReapedAt: taskAudio.audioReapedAt,
+            homeAudioDeletedAt: taskAudio.deletedAt,
             candidateQuote: recordingTasks.quote,
             candidateStartMs: recordingTasks.evidenceStartMs,
             candidateSegmentIndex: recordingTasks.evidenceSegmentIndex,
@@ -621,6 +658,13 @@ async function listSuggestedMatches(
         .innerJoin(
             matchCandidateHome,
             eq(matchCandidateHome.id, recordingTasks.itemId),
+        )
+        .leftJoin(
+            taskAudio,
+            and(
+                eq(taskAudio.id, matchCandidateHome.id),
+                eq(taskAudio.userId, matchCandidateHome.userId),
+            ),
         )
         .leftJoin(people, eq(people.id, recordingTasks.assigneePersonId))
         .where(
@@ -673,6 +717,12 @@ async function listSuggestedMatches(
                     id: row.homeItemId,
                     kind: row.homeItemKind,
                     title: decryptText(row.homeItemTitle),
+                    audioAvailable: hasAudio({
+                        kind: row.homeItemKind,
+                        audioId: row.homeAudioId,
+                        audioReapedAt: row.homeAudioReapedAt,
+                        audioDeletedAt: row.homeAudioDeletedAt,
+                    }),
                 },
                 quote: decryptOptional(row.candidateQuote),
                 evidenceStartMs: row.candidateStartMs,
@@ -2456,6 +2506,13 @@ async function requireTaskView(
         })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(
+            taskAudio,
+            and(
+                eq(taskAudio.id, chatterItems.id),
+                eq(taskAudio.userId, chatterItems.userId),
+            ),
+        )
         .leftJoin(people, assigneeJoin())
         .where(
             and(
@@ -2640,6 +2697,7 @@ export interface TaskListItem extends TaskView {
         kind: "audio" | "mail";
     };
     evidence: {
+        audioAvailable: boolean;
         id: string;
         title: string;
         startTime: string;
@@ -2840,6 +2898,13 @@ async function loadTaskListItems(
         })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(
+            taskAudio,
+            and(
+                eq(taskAudio.id, chatterItems.id),
+                eq(taskAudio.userId, chatterItems.userId),
+            ),
+        )
         // Conditions over `recordings` (the MCP tools') keep to recordings.
         .leftJoin(recordings, eq(recordings.id, recordingTasks.itemId))
         .leftJoin(people, assigneeJoin())
@@ -2873,6 +2938,14 @@ async function loadTaskListItems(
                 kind: row.recordingKind,
             },
             evidence: {
+                audioAvailable:
+                    evidence?.audioAvailable ??
+                    hasAudio({
+                        kind: row.recordingKind,
+                        audioId: row.homeAudioId,
+                        audioReapedAt: row.homeAudioReapedAt,
+                        audioDeletedAt: row.homeAudioDeletedAt,
+                    }),
                 id: evidence?.itemId ?? (row.recordingId as string),
                 title: evidence?.title ?? decryptText(row.recordingTitle),
                 startTime: (

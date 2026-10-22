@@ -116,13 +116,11 @@ describe("folder navigation", () => {
                         { recordingId: "rec-2", folderId: "planning" },
                     ]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={vi.fn()}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={vi.fn()}
                 />
             </ConfirmDialogProvider>,
@@ -154,13 +152,11 @@ describe("folder navigation", () => {
                     folders={folders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={onMoveFolder}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={vi.fn()}
                 />
             </ConfirmDialogProvider>,
@@ -210,13 +206,11 @@ describe("folder navigation", () => {
                     folders={folders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={vi.fn()}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={onAssignRecording}
                 />
             </ConfirmDialogProvider>,
@@ -252,19 +246,17 @@ describe("folder navigation", () => {
                     folders={folders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={onRecent}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={vi.fn()}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={vi.fn()}
                 />
             </ConfirmDialogProvider>,
         );
 
-        fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+        fireEvent.click(screen.getByRole("button", { name: "Recent2" }));
         expect(onRecent).toHaveBeenCalledOnce();
     });
 
@@ -275,13 +267,11 @@ describe("folder navigation", () => {
                     folders={organizationFolders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={vi.fn()}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={vi.fn()}
                     canCurate={false}
                 />
@@ -293,22 +283,13 @@ describe("folder navigation", () => {
         });
         expect(orgFolder.getAttribute("draggable")).toBe("false");
 
-        expect(
-            screen
-                .getByRole("button", {
-                    name: "Folder actions for Organization",
-                })
-                .hasAttribute("disabled"),
-        ).toBe(true);
-        expect(screen.queryByText("New subfolder")).toBeNull();
-
         fireEvent.pointerDown(
             screen.getByRole("button", {
                 name: "Folder actions for Organization planning",
             }),
             { button: 0, ctrlKey: false },
         );
-        expect(screen.getByText("New subfolder")).toBeTruthy();
+        expect(screen.getByText("Folder settings")).toBeTruthy();
         expect(screen.queryByText("Rename")).toBeNull();
         expect(screen.queryByText("Move to…")).toBeNull();
         expect(screen.queryByText("Delete")).toBeNull();
@@ -321,13 +302,11 @@ describe("folder navigation", () => {
                     folders={organizationFolders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={vi.fn()}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={vi.fn()}
                     canCurate
                 />
@@ -344,9 +323,7 @@ describe("folder navigation", () => {
             }),
             { button: 0, ctrlKey: false },
         );
-        expect(screen.getByText("Rename")).toBeTruthy();
-        expect(screen.getByText("Move to…")).toBeTruthy();
-        expect(screen.getByText("Delete")).toBeTruthy();
+        expect(screen.getByText("Folder settings")).toBeTruthy();
     });
 
     it("refuses Organization folder drop targets to members but accepts recordings", () => {
@@ -358,13 +335,11 @@ describe("folder navigation", () => {
                     folders={organizationFolders}
                     assignments={[]}
                     recordings={recordings}
-                    selectedFolderId={null}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
                     onRecent={vi.fn()}
                     onSelectFolder={vi.fn()}
-                    onCreateFolder={vi.fn()}
-                    onRenameFolder={vi.fn()}
                     onMoveFolder={onMoveFolder}
-                    onDeleteFolder={vi.fn()}
                     onAssignRecording={onAssignRecording}
                     canCurate={false}
                 />
@@ -423,8 +398,7 @@ describe("folder navigation", () => {
         expect(onAssignRecording).toHaveBeenCalledWith("rec-1", "org-planning");
     });
 
-    it("replaces density controls with Organize in the recent toolbar", () => {
-        const onOrganize = vi.fn();
+    it("keeps mode switching out of the list toolbar", () => {
         render(
             <RecordingListToolbar
                 query=""
@@ -435,7 +409,6 @@ describe("folder navigation", () => {
                 channelCounts={{ audio: 2, mail: 0 }}
                 sortOrder="newest"
                 onSortOrderChange={vi.fn()}
-                onOrganize={onOrganize}
                 showMail={false}
                 kindFilter="all"
                 onKindFilterChange={vi.fn()}
@@ -445,7 +418,6 @@ describe("folder navigation", () => {
         );
 
         expect(screen.queryByRole("button", { name: "Density" })).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
-        expect(onOrganize).toHaveBeenCalledOnce();
+        expect(screen.queryByRole("button", { name: "Organize" })).toBeNull();
     });
 });

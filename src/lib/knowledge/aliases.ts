@@ -21,6 +21,10 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    almanacTargetScope,
+    assertAlmanacOwner,
+} from "@/lib/knowledge/almanac-access";
 import { entitiesVisibleTo } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { matchNames } from "@/lib/knowledge/name-match";
@@ -161,7 +165,15 @@ export async function addAlias(
 ): Promise<string> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const id = await addAliasInTx(tx, actorUserId, target, text);
+        const resolved = await resolveTargetInTx(tx, actorUserId, target);
+        const scopeUserId = await almanacTargetScope(tx, actorUserId, resolved);
+        const id = await addAliasInTx(
+            tx,
+            scopeUserId,
+            resolved,
+            text,
+            actorUserId,
+        );
         if (!id) {
             throw new AppError(
                 ErrorCode.CONFLICT,
@@ -170,7 +182,7 @@ export async function addAlias(
                 { field: "text" },
             );
         }
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
         return id;
     });
 }
@@ -213,18 +225,32 @@ export async function removeAlias(
     aliasId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
+        const [row] = await tx
+            .select({ userId: knowledgeAliases.userId })
+            .from(knowledgeAliases)
+            .where(
+                and(
+                    eq(knowledgeAliases.id, aliasId),
+                    aliasesVisibleTo(actorUserId),
+                    eq(knowledgeAliases.kind, "alias"),
+                ),
+            )
+            .limit(1);
+        if (!row) throw aliasNotFound();
+        await assertAlmanacOwner(actorUserId, row.userId);
         const deleted = await tx
             .delete(knowledgeAliases)
             .where(
                 and(
                     eq(knowledgeAliases.id, aliasId),
-                    eq(knowledgeAliases.userId, actorUserId),
+                    eq(knowledgeAliases.userId, row.userId),
                     eq(knowledgeAliases.kind, "alias"),
                 ),
             )
             .returning({ id: knowledgeAliases.id });
         if (deleted.length === 0) throw aliasNotFound();
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [row.userId]);
     });
 }
 

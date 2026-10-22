@@ -8,7 +8,7 @@ import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
-import { FolderRecordingPane } from "@/components/dashboard/folder-recording-pane";
+import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import {
     UploadDialog,
@@ -90,6 +90,48 @@ afterEach(() => {
 });
 
 describe("localized folder labels", () => {
+    it.each([
+        [
+            1,
+            "1 položka, i z podsložek",
+            "1 položka, 1 složka",
+            "1 složka celkem",
+        ],
+        [
+            3,
+            "3 položky, i z podsložek",
+            "3 položky, 3 složky",
+            "3 složky celkem",
+        ],
+        [
+            8,
+            "8 položek, i z podsložek",
+            "8 položek, 8 složek",
+            "8 složek celkem",
+        ],
+    ] as const)("keeps Czech count messages whole and pluralizes %s", (count, items, combined, all) => {
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
+                { count },
+            ),
+        ).toBe(items);
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{items, plural, one {# item} other {# items}}, {folders, plural, one {# folder} other {# folders}}",
+                { items: count, folders: count },
+            ),
+        ).toBe(combined);
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{count, plural, one {All # folder} other {All # folders}}",
+                { count },
+            ),
+        ).toBe(all);
+    });
     it("shows and searches the Czech root label, including accessible actions, without allowing rename", () => {
         render(
             <FolderTree
@@ -97,12 +139,10 @@ describe("localized folder labels", () => {
                 assignments={[]}
                 recordings={[]}
                 selectedFolderId={null}
+                onSettings={vi.fn()}
                 onRecent={vi.fn()}
                 onSelectFolder={vi.fn()}
-                onCreateFolder={vi.fn()}
-                onRenameFolder={vi.fn()}
                 onMoveFolder={vi.fn()}
-                onDeleteFolder={vi.fn()}
                 onAssignRecording={vi.fn()}
             />,
             { wrapper: Czech },
@@ -118,7 +158,7 @@ describe("localized folder labels", () => {
         });
         fireEvent.pointerDown(actions, { button: 0, ctrlKey: false });
         expect(
-            screen.getByRole("menuitem", { name: cs("New subfolder") }),
+            screen.getByRole("menuitem", { name: cs("Folder settings") }),
         ).toBeTruthy();
         expect(
             screen.queryByRole("menuitem", { name: cs("Rename") }),
@@ -131,7 +171,7 @@ describe("localized folder labels", () => {
             },
         );
         expect(screen.getByRole("button", { name: /^Soukromé,/ })).toBeTruthy();
-        expect(screen.queryByRole("button", { name: /^Private,/ })).toBeNull();
+        expect(screen.getByRole("button", { name: /^Private,/ })).toBeTruthy();
     });
 
     it.each([
@@ -139,17 +179,16 @@ describe("localized folder labels", () => {
         nested,
     ])("localizes the folder pane and breadcrumb for $id", (folder) => {
         render(
-            <FolderRecordingPane
+            <FolderSettingsPanel
                 folder={folder}
                 folders={folders}
-                assignments={[]}
-                recordings={[]}
-                dateTimeFormat="relative"
-                onSelectRecording={vi.fn()}
-                onRenameFolder={vi.fn()}
-                onDeleteFolder={vi.fn()}
-                hiddenOnMobile={false}
-                onBackToFolders={vi.fn()}
+                count={0}
+                open
+                onOpenChange={vi.fn()}
+                onRename={vi.fn()}
+                onDelete={vi.fn()}
+                onCreate={vi.fn()}
+                onMove={vi.fn()}
                 exportProviders={{
                     filesystem: false,
                     googleDrive: false,
@@ -163,21 +202,15 @@ describe("localized folder labels", () => {
                 name: folder === privateRoot ? "Soukromé" : "Notes",
             }),
         ).toBeTruthy();
-        expect(screen.getAllByText("Soukromé")).toHaveLength(
-            folder === privateRoot ? 2 : 1,
-        );
-        if (folder === nested) {
-            expect(
-                screen.getByText("Private").parentElement?.parentElement
-                    ?.textContent,
-            ).toMatch(/^Soukromé\/Private\/Notes/);
-        } else {
+        expect(
+            screen.getByText(/Soukromé.*items|Soukromé.*polož/),
+        ).toBeTruthy();
+        if (folder === privateRoot)
             expect(
                 screen.queryByRole("button", { name: cs("Rename") }),
             ).toBeNull();
-        }
-        fireEvent.click(screen.getByRole("button", { name: cs("Export") }));
-        expect(screen.getByRole("dialog").textContent).toContain(
+        fireEvent.click(screen.getByRole("button", { name: cs("Configure") }));
+        expect(screen.getAllByRole("dialog").at(-1)?.textContent).toContain(
             folder === privateRoot ? "Soukromé" : "Notes",
         );
     });

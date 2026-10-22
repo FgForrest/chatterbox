@@ -8,6 +8,10 @@ import {
 } from "@/components/almanac/record-picker";
 import { LearnEvidence, LearnReviewRow } from "@/components/learn/review-parts";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
+import {
+    distinctPlayTimes,
+    PlayAtButton,
+} from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -93,7 +97,6 @@ export function NewRecordItem({
     disabled,
     names,
     entityTypes,
-    seek,
     evidence,
     quote,
     onDecide,
@@ -112,7 +115,6 @@ export function NewRecordItem({
     names: Record<string, string>;
     /** The types a new thing may take. */
     entityTypes: { key: string; label: string }[];
-    seek: (ms: number) => ReactNode;
     evidence?: ReactNode;
     quote?: ReactNode;
     onDecide: (
@@ -345,9 +347,12 @@ export function NewRecordItem({
                             {payload.reason}
                             {payload.speakerLabel &&
                                 ` · ${i18n("speaks as {label}", { label: speakerLabel(payload.speakerLabel) })}`}{" "}
-                            {payload.evidenceMs.map((ms) => (
+                            {distinctPlayTimes(payload.evidenceMs).map((ms) => (
                                 <span key={ms} className="mr-1">
-                                    {seek(ms)}
+                                    <PlayAtButton
+                                        ms={ms}
+                                        withoutAudio="label"
+                                    />
                                 </span>
                             ))}
                         </div>

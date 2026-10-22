@@ -16,6 +16,7 @@ import {
     transcriptPlayback,
 } from "@/components/dashboard/recording-player";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { installFakeMedia } from "@/tests/helpers/fake-media";
 import type { Recording } from "@/types/recording";
@@ -65,7 +66,7 @@ function PlayerAndTranscript({
     playerRef: RefObject<RecordingPlayerHandle | null>;
 }) {
     return (
-        <>
+        <PlaybackProvider playback={transcriptPlayback(playerRef)}>
             <RecordingPlayer ref={playerRef} recording={recording} />
             <TranscriptionPanel
                 recording={recording}
@@ -81,26 +82,18 @@ function PlayerAndTranscript({
                 ]}
                 isTranscribing={false}
                 onTranscribe={vi.fn()}
-                onSeekToTurn={(ms) => playerRef.current?.seekTo(ms / 1000)}
-                onPlayFromTurn={(start, end) =>
-                    playerRef.current?.playFrom(
-                        start / 1000,
-                        end === undefined ? undefined : end / 1000,
-                    )
-                }
-                playback={transcriptPlayback(playerRef)}
             />
             <TaskEvidenceLink
                 currentItemId={recording.id}
-                playback={transcriptPlayback(playerRef)}
                 evidence={{
                     itemId: recording.id,
                     itemKind: "audio",
+                    audioAvailable: true,
                     startMs: 9000,
                     text: null,
                 }}
             />
-        </>
+        </PlaybackProvider>
     );
 }
 
@@ -172,12 +165,14 @@ describe("audio playback after speaker and transcript controls", () => {
         expect(media().paused).toBe(false);
         expect(media().element.muted).toBe(false);
         expect(media().element.volume).toBe(0.75);
-        expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
+        expect(
+            screen.getAllByRole("button", { name: "Pause" }).length,
+        ).toBeGreaterThan(0);
     }
     async function clickMain() {
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("button", { name: /^(Play|Pause)$/ }),
+                screen.getAllByRole("button", { name: /^(Play|Pause)$/ })[0],
             ),
         );
     }
@@ -260,21 +255,21 @@ describe("audio playback after speaker and transcript controls", () => {
         errors.mockClear();
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("button", { name: "Play evidence at 00:09" }),
+                screen.getByRole("button", { name: "Play from 00:09" }),
             ),
         );
         await act(async () => media().interrupt("NotAllowedError"));
         expect(screen.getByRole("button", { name: "Play" })).toBeDefined();
         expect(
             screen
-                .getByRole("button", { name: "Play evidence at 00:09" })
+                .getByRole("button", { name: "Play from 00:09" })
                 .getAttribute("aria-pressed"),
         ).toBe("false");
         expect(errorLog).toHaveBeenCalledTimes(1);
         expect(errors).toHaveBeenCalledTimes(1);
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("button", { name: "Play evidence at 00:09" }),
+                screen.getByRole("button", { name: "Play from 00:09" }),
             ),
         );
         act(() => media().finishPlay());
@@ -426,10 +421,17 @@ describe("audio playback after speaker and transcript controls", () => {
                 screen.getByText(text).closest("[data-sentence]")?.className,
             ).toContain("bg-primary/20");
             audible();
+            act(() => media().advance(seconds + 1));
+            audible();
+            expect(
+                screen
+                    .getByRole("button", {
+                        name: "Play the next turn of Speaker 0",
+                    })
+                    .getAttribute("aria-pressed"),
+            ).toBe("false");
         }
         expect(Element.prototype.scrollTo).toHaveBeenCalled();
-        await clickMain();
-        await clickMain();
         act(() => media().advance(20));
         audible();
     });
@@ -472,7 +474,7 @@ describe("audio playback after speaker and transcript controls", () => {
             () =>
                 fireEvent.click(
                     screen.getByRole("button", {
-                        name: "Play evidence at 00:09",
+                        name: "Play from 00:09",
                     }),
                 ),
             () => fireEvent.keyDown(document.body, { key: "ArrowRight" }),

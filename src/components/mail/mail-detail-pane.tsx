@@ -52,6 +52,7 @@ interface Props {
     shared?: boolean;
     dateTimeFormat: DateTimeFormat;
     onBackToList: () => void;
+    backLabel?: string;
     hiddenOnMobile: boolean;
     /** The mail was deleted or shared: reload the pile. */
     onChanged: () => void;
@@ -125,6 +126,7 @@ export function MailDetailPane({
     shared = false,
     dateTimeFormat,
     onBackToList,
+    backLabel,
     hiddenOnMobile,
     onChanged,
     onFolderCreated,
@@ -297,7 +299,7 @@ export function MailDetailPane({
     return (
         <div
             className={cn(
-                "space-y-6 lg:col-span-2 lg:block lg:self-start",
+                "min-w-0 space-y-6 lg:block lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -307,7 +309,7 @@ export function MailDetailPane({
                 onClick={onBackToList}
                 className="-ml-2 h-9 gap-1 px-2 lg:hidden"
             >
-                <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
+                <ArrowLeft className="size-4" /> {backLabel ?? i18n("Recent")}
             </Button>
             <ItemHeader
                 itemId={mail.id}
@@ -338,6 +340,7 @@ export function MailDetailPane({
             <ItemWorkflow
                 itemId={mail.id}
                 kind="mail"
+                canCurate={canCurate}
                 initialData={processing}
                 onProcessingChange={setProcessing}
                 folders={folders}

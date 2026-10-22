@@ -2,6 +2,9 @@
 
 import {
     Download,
+    Folder,
+    FolderInput,
+    FolderPlus,
     Loader2,
     Mail,
     MoreHorizontal,
@@ -14,6 +17,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
+import { FolderPicker } from "@/components/recordings/folder-picker";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -22,11 +26,19 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useFolderLabel } from "@/hooks/use-folder-label";
+import {
+    RECORDING_DRAG_TYPE,
+    RECORDING_OTHER_OWNER_DRAG_TYPE,
+    RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+    RECORDING_SOURCE_SCOPE_DRAG_TYPES,
+} from "@/lib/folders/drag";
 import { formatDateTime } from "@/lib/format-date";
 import { formatDurationMs } from "@/lib/format-duration";
 import { recordingAudioDownloadPath } from "@/lib/recordings/filename";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
+import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
 export function RecordingRow({
@@ -41,6 +53,15 @@ export function RecordingRow({
     onDelete,
     shared = false,
     registerRef,
+    folderLocations = [],
+    sourceFolder,
+    folders = [],
+    assignedIds = new Set(),
+    canCurate,
+    isOrgAccount = false,
+    onFolderCreated,
+    onAssignRecording,
+    onMoveRecording,
 }: {
     recording: Recording;
     isSelected: boolean;
@@ -53,10 +74,43 @@ export function RecordingRow({
     onDelete: (recording: Recording) => Promise<void>;
     shared?: boolean;
     registerRef: (id: string, el: HTMLButtonElement | null) => void;
+    folderLocations?: RecordingFolder[];
+    sourceFolder?: RecordingFolder | null;
+    folders?: RecordingFolder[];
+    assignedIds?: ReadonlySet<string>;
+    canCurate?: boolean;
+    isOrgAccount?: boolean;
+    onFolderCreated?: (folder: RecordingFolder) => void;
+    onAssignRecording?: (
+        recordingId: string,
+        folderId: string,
+    ) => Promise<void>;
+    onMoveRecording?: (
+        recordingId: string,
+        from: string,
+        to: string,
+    ) => Promise<void>;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
     const confirm = useConfirm();
+    const label = useFolderLabel();
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const source =
+        sourceFolder?.kind === "custom"
+            ? (folderLocations.find(
+                  (folder) => folder.id === sourceFolder?.id,
+              ) ?? folderLocations[0])
+            : null;
+    const subfolders = folderLocations.filter(
+        (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
+    );
+    const sharedBy =
+        recording.view === "org" && recording.ownerName
+            ? recording.isOwn
+                ? i18n("Shared by you")
+                : i18n("Shared by {owner}", { owner: recording.ownerName })
+            : null;
     const [mailDeleteOpen, setMailDeleteOpen] = useState(false);
     return (
         <div
@@ -72,6 +126,31 @@ export function RecordingRow({
                     registerRef(recording.id, el);
                 }}
                 type="button"
+                draggable={!!onAssignRecording}
+                onDragStart={(event) => {
+                    if (recording.isOwn === false)
+                        event.dataTransfer.setData(
+                            RECORDING_OTHER_OWNER_DRAG_TYPE,
+                            "true",
+                        );
+                    event.dataTransfer.setData(
+                        RECORDING_DRAG_TYPE,
+                        recording.id,
+                    );
+                    if (source) {
+                        event.dataTransfer.setData(
+                            RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+                            source.id,
+                        );
+                        event.dataTransfer.setData(
+                            RECORDING_SOURCE_SCOPE_DRAG_TYPES[source.scope],
+                            source.scope,
+                        );
+                    }
+                    event.dataTransfer.effectAllowed = source
+                        ? "copyMove"
+                        : "copy";
+                }}
                 onClick={() => onSelect(recording)}
                 className={cn(
                     "w-full text-left transition-colors hover:bg-accent/60",
@@ -116,34 +195,55 @@ export function RecordingRow({
                             </span>
                         )}
                     </div>
-                    {snippet ? (
-                        <p
-                            className={cn(
-                                "truncate text-xs text-muted-foreground",
-                                isCompact ? "mt-0.5" : "mt-1",
+                    {(subfolders.length > 0 || sharedBy) && (
+                        <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                            {subfolders.length > 0 && (
+                                <>
+                                    <Folder
+                                        className={cn(
+                                            "size-3 shrink-0",
+                                            sourceFolder?.scope === "org"
+                                                ? "text-blue-600"
+                                                : "text-primary",
+                                        )}
+                                    />
+                                    <span className="truncate">
+                                        {subfolders.map(label).join(", ")}
+                                    </span>
+                                </>
                             )}
-                        >
-                            {snippet}
+                            {subfolders.length > 0 && sharedBy && (
+                                <span>·</span>
+                            )}
+                            {sharedBy && (
+                                <span className="truncate">{sharedBy}</span>
+                            )}
                         </p>
-                    ) : (
-                        <p
-                            className={cn(
-                                "text-xs text-muted-foreground",
-                                isCompact ? "mt-0.5" : "mt-1",
+                    )}
+                    <div
+                        className={cn(
+                            "flex items-center gap-2 text-xs text-muted-foreground",
+                            isCompact ? "mt-0.5" : "mt-1",
+                        )}
+                    >
+                        {(snippet || recording.kind === "mail") && (
+                            <span className="min-w-0 flex-1 truncate">
+                                {snippet ??
+                                    recording.mail?.from ??
+                                    i18n("Unknown sender")}
+                            </span>
+                        )}
+                        <span className="shrink-0 text-[11px]">
+                            {recording.kind !== "mail" && (
+                                <>{formatDurationMs(recording.duration)} · </>
                             )}
-                        >
-                            {recording.kind === "mail"
-                                ? (recording.mail?.from ??
-                                  i18n("Unknown sender"))
-                                : formatDurationMs(recording.duration)}
-                            {" \u00b7 "}
                             {formatDateTime(
                                 recording.startTime,
                                 dateTimeFormat,
                                 locale,
                             )}
-                        </p>
-                    )}
+                        </span>
+                    </div>
                 </div>
             </button>
             <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
@@ -162,70 +262,105 @@ export function RecordingRow({
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
-                        {(recording.kind !== "mail" ||
-                            recording.isOwn !== false) && (
+                        {onAssignRecording && (
                             <DropdownMenuItem
-                                onSelect={() => {
-                                    window.location.assign(
-                                        recording.kind === "mail"
-                                            ? `/api/mail/${encodeURIComponent(recording.id)}/raw`
-                                            : recordingAudioDownloadPath(
-                                                  recording.id,
-                                              ),
-                                    );
-                                }}
+                                onSelect={() => setPickerOpen(true)}
                             >
-                                <Download />{" "}
-                                {recording.kind === "mail"
-                                    ? i18n("Download the message")
-                                    : i18n("Download audio")}
+                                {source ? <FolderInput /> : <FolderPlus />}
+                                {source
+                                    ? i18n("Move to…")
+                                    : i18n("Add to folder")}
                             </DropdownMenuItem>
                         )}
-                        {recording.isOwn !== false && (
-                            <>
-                                <DropdownMenuSeparator />
+                        {!recording.audioReaped &&
+                            (recording.kind !== "mail" ||
+                                recording.isOwn !== false) && (
                                 <DropdownMenuItem
-                                    variant="destructive"
-                                    onSelect={(e) => {
-                                        // Keep menu mounted so confirm dialog can take focus.
-                                        e.preventDefault();
-                                        if (recording.kind === "mail") {
-                                            setMailDeleteOpen(true);
-                                            return;
-                                        }
-                                        void confirm({
-                                            title: i18n(
-                                                "Delete this recording?",
-                                            ),
-                                            description: (
-                                                <>
-                                                    <span className="font-medium text-foreground">
-                                                        {recording.filename}
-                                                    </span>
-                                                    <br />{" "}
-                                                    {i18n(
-                                                        "The audio file and any transcript or summary will be removed. If the file is still on your Plaud device, the next sync will re-download it.",
-                                                    )}
-                                                </>
-                                            ),
-                                            confirmLabel: i18n("Delete"),
-                                            pendingLabel: i18n("Deleting…"),
-                                            destructive: true,
-                                            onConfirm: () =>
-                                                onDelete(recording),
-                                        });
+                                    onSelect={() => {
+                                        window.location.assign(
+                                            recording.kind === "mail"
+                                                ? `/api/mail/${encodeURIComponent(recording.id)}/raw`
+                                                : recordingAudioDownloadPath(
+                                                      recording.id,
+                                                  ),
+                                        );
                                     }}
                                 >
-                                    <Trash2 />
+                                    <Download />{" "}
                                     {recording.kind === "mail"
-                                        ? i18n("Delete mail")
-                                        : i18n("Delete")}
+                                        ? i18n("Download the message")
+                                        : i18n("Download audio")}
                                 </DropdownMenuItem>
-                            </>
-                        )}
+                            )}
+                        {recording.isOwn !== false &&
+                            (recording.view !== "org" || isOrgAccount) && (
+                                <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            if (recording.kind === "mail") {
+                                                setMailDeleteOpen(true);
+                                                return;
+                                            }
+                                            void confirm({
+                                                title: i18n(
+                                                    "Delete this recording?",
+                                                ),
+                                                description: (
+                                                    <>
+                                                        <span className="font-medium text-foreground">
+                                                            {recording.filename}
+                                                        </span>
+                                                        <br />{" "}
+                                                        {shared && (
+                                                            <p>
+                                                                {i18n(
+                                                                    "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
+                                                                )}
+                                                            </p>
+                                                        )}
+                                                        {i18n(
+                                                            "The audio file and any transcript or summary will be removed. If the file is still on your Plaud device, the next sync will re-download it.",
+                                                        )}
+                                                    </>
+                                                ),
+                                                confirmLabel: i18n("Delete"),
+                                                pendingLabel: i18n("Deleting…"),
+                                                destructive: true,
+                                                onConfirm: () =>
+                                                    onDelete(recording),
+                                            });
+                                        }}
+                                    >
+                                        <Trash2 />
+                                        {recording.kind === "mail"
+                                            ? i18n("Delete mail")
+                                            : i18n("Delete")}
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
+            {onAssignRecording && pickerOpen && (
+                <FolderPicker
+                    folders={folders}
+                    canCurate={canCurate}
+                    onCreated={onFolderCreated}
+                    assignedIds={assignedIds}
+                    open={pickerOpen}
+                    onOpenChange={setPickerOpen}
+                    organizationOnly={recording.isOwn === false}
+                    scope={source?.scope}
+                    onSelect={(folderId) =>
+                        source && onMoveRecording
+                            ? onMoveRecording(recording.id, source.id, folderId)
+                            : onAssignRecording(recording.id, folderId)
+                    }
+                />
+            )}
             {recording.kind === "mail" && (
                 <MailDeleteDialog
                     mail={recording}

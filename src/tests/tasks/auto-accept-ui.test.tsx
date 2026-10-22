@@ -42,6 +42,7 @@ const task: TaskView = {
     duePhrase: null,
     quote: null,
     evidenceStartMs: null,
+    evidenceAudioAvailable: true,
     evidenceText: null,
     evidenceProvenance: null,
     source: "riffado",

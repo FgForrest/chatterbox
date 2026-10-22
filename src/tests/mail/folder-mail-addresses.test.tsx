@@ -70,6 +70,6 @@ describe("folder mail addresses", () => {
                 name: "Stop {address}",
             }),
         ).toBeNull();
-        expect(screen.queryByText(/last mail/)).toBeNull();
+        expect(screen.getByText("last mail {when}")).toBeTruthy();
     });
 });

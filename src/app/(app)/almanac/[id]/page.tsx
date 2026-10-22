@@ -10,6 +10,7 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { listAliases } from "@/lib/knowledge/aliases";
 import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
@@ -42,6 +43,7 @@ export default async function PersonPage({ params }: Params) {
     // The viewer's own recordings, and the shared ones, which everyone may
     // open; nobody else's private transcripts are read.
     const orgUserId = await getOrgUserId();
+    const organization = await userCuratesOrganizationNow(userId);
     const [facts, otherNames, vocabulary] = await Promise.all([
         factsForPage(userId, orgUserId, { personId: id }),
         listAliases(userId, { personId: id }),
@@ -94,9 +96,7 @@ export default async function PersonPage({ params }: Params) {
                     notes: person.notes,
                     scope: person.scope,
                 }}
-                // Private people are their owner's to erase; the
-                // Organization's are the organization account's.
-                canManage={person.scope === "personal" || userId === orgUserId}
+                canManage={person.scope === "personal" || organization}
                 accountEmail={session.user.email}
                 facts={facts}
                 otherNames={otherNames.map((name) => ({
@@ -113,7 +113,7 @@ export default async function PersonPage({ params }: Params) {
                     },
                     relations: almanac.relations,
                     typeLabels: almanac.typeLabels,
-                    ownScope: userId === orgUserId ? "org" : "personal",
+                    canCurateOrganization: organization,
                 }}
                 appearances={appearances
                     .map((row) => ({

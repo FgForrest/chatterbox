@@ -1088,6 +1088,7 @@ describeWithDatabase("task merges", () => {
                     id: "notice-source-item",
                     kind: "mail",
                     title: "notice-source-item",
+                    audioAvailable: false,
                 },
                 proposedBy: {
                     id: ALICE,

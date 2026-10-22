@@ -2,8 +2,8 @@
 
 import {
     ChevronDown,
-    FolderTree,
     GraduationCap,
+    MoreHorizontal,
     Search,
     X,
 } from "lucide-react";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 
-export type SortOrder = "newest" | "oldest" | "name";
+export type SortOrder = "newest" | "oldest" | "name" | "duration" | "size";
 
 /** Which kinds of item the pile shows. */
 export type KindFilter = "all" | "audio" | "mail";
@@ -39,7 +39,6 @@ export function RecordingListToolbar({
     channelCounts,
     sortOrder,
     onSortOrderChange,
-    onOrganize,
     reviewCount = 0,
     needsReviewOnly = false,
     onNeedsReviewOnlyChange,
@@ -48,7 +47,11 @@ export function RecordingListToolbar({
     onKindFilterChange,
     searchScopes,
     onSearchScopesChange,
+    includesSubfolders = false,
+    onFolderSettings,
 }: {
+    includesSubfolders?: boolean;
+    onFolderSettings?: () => void;
     query: string;
     onQueryChange: (next: string) => void;
     onEnterSelectFirst: () => void;
@@ -57,7 +60,6 @@ export function RecordingListToolbar({
     channelCounts: Record<Exclude<KindFilter, "all">, number>;
     sortOrder: SortOrder;
     onSortOrderChange: (next: SortOrder) => void;
-    onOrganize: () => void;
     /** Recordings a Learn review waits on; the toggle shows when there are any. */
     reviewCount?: number;
     needsReviewOnly?: boolean;
@@ -114,6 +116,8 @@ export function RecordingListToolbar({
     let sortLabel = nameLabel;
     if (sortOrder === "newest") sortLabel = i18n("Newest");
     if (sortOrder === "oldest") sortLabel = i18n("Oldest");
+    if (sortOrder === "duration") sortLabel = i18n("Duration");
+    if (sortOrder === "size") sortLabel = i18n("Size");
     const menuLabel = showChannelChoice
         ? `${channelLabel} · ${sortLabel}`
         : sortLabel;
@@ -144,7 +148,7 @@ export function RecordingListToolbar({
     };
     return (
         <div className="flex flex-col gap-2 border-b p-3">
-            <div className="relative">
+            <div className="relative order-2">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     ref={searchRef}
@@ -171,11 +175,17 @@ export function RecordingListToolbar({
                     </button>
                 )}
             </div>
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="order-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                    {i18n("{count, plural, one {# item} other {# items}}", {
-                        count: filteredCount,
-                    })}
+                    {includesSubfolders
+                        ? i18n(
+                              "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
+                              { count: filteredCount },
+                          )
+                        : i18n(
+                              "{count, plural, one {# item} other {# items}}",
+                              { count: filteredCount },
+                          )}
                 </span>
                 <div className="flex items-center gap-1">
                     <DropdownMenu>
@@ -285,17 +295,25 @@ export function RecordingListToolbar({
                                 <DropdownMenuRadioItem value="name">
                                     {nameLabel}
                                 </DropdownMenuRadioItem>
+                                <DropdownMenuRadioItem value="duration">
+                                    {i18n("Duration")}
+                                </DropdownMenuRadioItem>
+                                <DropdownMenuRadioItem value="size">
+                                    {i18n("Size")}
+                                </DropdownMenuRadioItem>
                             </DropdownMenuRadioGroup>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={onOrganize}
-                    >
-                        <FolderTree className="size-3.5" /> {i18n("Organize")}
-                    </Button>
+                    {onFolderSettings && (
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={i18n("Folder settings")}
+                            onClick={onFolderSettings}
+                        >
+                            <MoreHorizontal className="size-4" />
+                        </Button>
+                    )}
                 </div>
             </div>
         </div>

@@ -19,8 +19,10 @@ import type { PropsWithChildren } from "react";
 import { IntlProvider } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import type * as JobClient from "@/lib/jobs/client";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
@@ -157,20 +159,25 @@ function renderPanel(
     props: {
         onSeekToTurn?: (ms: number) => void;
         recording?: Recording;
-        getPlaybackMs?: () => number;
         readOnly?: boolean;
     } = {},
 ) {
     return render(
-        <TranscriptionPanel
-            recording={props.recording ?? RECORDING}
-            transcripts={[transcript]}
-            isTranscribing={false}
-            onTranscribe={vi.fn()}
-            onSeekToTurn={props.onSeekToTurn}
-            getPlaybackMs={props.getPlaybackMs}
-            readOnly={props.readOnly}
-        />,
+        <PlaybackProvider
+            playback={
+                props.onSeekToTurn
+                    ? createTestPlayback({ seek: props.onSeekToTurn }).playback
+                    : null
+            }
+        >
+            <TranscriptionPanel
+                recording={props.recording ?? RECORDING}
+                transcripts={[transcript]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                readOnly={props.readOnly}
+            />
+        </PlaybackProvider>,
     );
 }
 

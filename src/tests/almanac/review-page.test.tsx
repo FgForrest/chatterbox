@@ -31,7 +31,15 @@ vi.mock("@/lib/knowledge/vocabulary", () => ({
     })),
 }));
 vi.mock("@/lib/learn/pending", () => ({ reviewQueue: vi.fn() }));
-vi.mock("@/lib/org/config", () => ({ isOrgAccount: vi.fn() }));
+vi.mock("@/lib/org/config", () => ({ getOrgUserId: vi.fn(async () => "org") }));
+vi.mock("@/lib/authz/curator", () => ({ userCuratesOrganizationNow: vi.fn() }));
+vi.mock("@/db", () => ({
+    db: {
+        select: () => ({
+            from: () => ({ where: async () => [{ id: "rec-1" }] }),
+        }),
+    },
+}));
 vi.mock("@/lib/tasks/access", () => ({
     taskViewer: vi.fn(async () => ({ kind: "user", userId: "user-1" })),
 }));
@@ -40,13 +48,13 @@ vi.mock("@/lib/tasks/tasks", () => ({
 }));
 
 import ReviewQueuePage from "@/app/(app)/almanac/review/page";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { reviewQueue } from "@/lib/learn/pending";
-import { isOrgAccount } from "@/lib/org/config";
 import { recordingsAwaitingTaskReview } from "@/lib/tasks/tasks";
 
 describe("Waiting for review links", () => {
     beforeEach(() => {
-        vi.mocked(isOrgAccount).mockResolvedValue(false);
+        vi.mocked(userCuratesOrganizationNow).mockResolvedValue(false);
         vi.mocked(reviewQueue).mockResolvedValue([]);
         vi.mocked(recordingsAwaitingTaskReview).mockResolvedValue([]);
     });
@@ -69,10 +77,19 @@ describe("Waiting for review links", () => {
     });
 
     it("deep-links both Organization review sections to their items", async () => {
-        vi.mocked(isOrgAccount).mockResolvedValue(true);
-        vi.mocked(reviewQueue).mockResolvedValue([
-            { id: "mail-1", filename: "Shared mail", startTime: new Date() },
-        ]);
+        vi.mocked(userCuratesOrganizationNow).mockResolvedValue(true);
+        vi.mocked(reviewQueue).mockImplementation(
+            async (_userId, organization) =>
+                organization
+                    ? [
+                          {
+                              id: "mail-1",
+                              filename: "Shared mail",
+                              startTime: new Date(),
+                          },
+                      ]
+                    : [],
+        );
         vi.mocked(recordingsAwaitingTaskReview).mockResolvedValue([
             {
                 recordingId: "rec-1",
@@ -94,5 +111,41 @@ describe("Waiting for review links", () => {
             "/dashboard?recording=mail-1&view=org",
             "/dashboard?recording=rec-1&view=org",
         ]);
+    });
+    it("keeps a curator's private reviews and task links alongside shared ones", async () => {
+        vi.mocked(userCuratesOrganizationNow).mockResolvedValue(true);
+        vi.mocked(reviewQueue).mockImplementation(
+            async (_userId, organization) => [
+                {
+                    id: organization ? "shared" : "private",
+                    filename: organization ? "Shared review" : "Private review",
+                    startTime: new Date(),
+                },
+            ],
+        );
+        vi.mocked(recordingsAwaitingTaskReview).mockResolvedValue([
+            {
+                recordingId: "private-task",
+                title: "Private tasks",
+                proposals: 1,
+                kind: "audio",
+            },
+        ]);
+        render(await ReviewQueuePage());
+        expect(
+            screen
+                .getByRole("link", { name: "Open the Organization library" })
+                .getAttribute("href"),
+        ).toBe("/dashboard?recording=shared&view=org");
+        expect(
+            screen
+                .getAllByRole("link", { name: "Review" })
+                .map((link) => link.getAttribute("href")),
+        ).toEqual([
+            "/dashboard?recording=private",
+            "/dashboard?recording=private-task",
+        ]);
+        expect(reviewQueue).toHaveBeenCalledWith("user-1", false);
+        expect(reviewQueue).toHaveBeenCalledWith("org", true);
     });
 });

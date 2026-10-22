@@ -36,6 +36,10 @@ import {
     type KnowledgeTarget,
     resolveTargetInTx,
 } from "@/lib/knowledge/aliases";
+import {
+    almanacTargetScope,
+    assertAlmanacOwner,
+} from "@/lib/knowledge/almanac-access";
 import { deleteFactsInTx } from "@/lib/knowledge/fact-chains";
 import { pruneUnsupportedFactsInTx } from "@/lib/knowledge/fact-evidence";
 import {
@@ -655,13 +659,16 @@ export async function confirmManualFact(
     assertTextAllowed(args.subject, args.object);
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
+        const subject = await resolveTargetInTx(tx, actorUserId, args.subject);
+        const scopeUserId = await almanacTargetScope(tx, actorUserId, subject);
         const factId = await confirmFactInTx(tx, {
             ...args,
-            scopeUserId: actorUserId,
+            subject,
+            scopeUserId,
             actorUserId,
             origin: "manual",
         });
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
         return factId;
     });
 }
@@ -707,6 +714,26 @@ export async function withdrawEvidence(args: {
     });
 }
 
+async function manageableFactOwner(
+    tx: Tx,
+    actorUserId: string,
+    factId: string,
+): Promise<string> {
+    const [row] = await tx
+        .select({ userId: knowledgeFacts.userId })
+        .from(knowledgeFacts)
+        .where(
+            and(
+                eq(knowledgeFacts.id, factId),
+                visibleOwnerCondition(knowledgeFacts.userId, actorUserId),
+            ),
+        )
+        .limit(1);
+    if (!row) throw factNotFound();
+    await assertAlmanacOwner(actorUserId, row.userId);
+    return row.userId;
+}
+
 /**
  * Delete a fact of the actor's own scope, evidence and all. 404 alike for
  * a missing fact and another scope's.
@@ -720,9 +747,10 @@ export async function deleteFact(
         // fact, which merges, other deletions and confirmations (shared)
         // change too, each in its own order.
         await lockOrgPeople(tx);
+        const scopeUserId = await manageableFactOwner(tx, actorUserId, factId);
         const ownFact = and(
             eq(knowledgeFacts.id, factId),
-            eq(knowledgeFacts.userId, actorUserId),
+            eq(knowledgeFacts.userId, scopeUserId),
         );
         const [mine] = await tx
             .select({ id: knowledgeFacts.id })
@@ -738,7 +766,7 @@ export async function deleteFact(
             .for("update");
         if (!own) throw factNotFound();
         await deleteFactsInTx(tx, [factId]);
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
     });
 }
 
@@ -756,9 +784,10 @@ export async function replaceFact(
     return db.transaction(async (tx) => {
         // Exclusive, as deleteFact: the old fact goes.
         await lockOrgPeople(tx);
+        const scopeUserId = await manageableFactOwner(tx, actorUserId, factId);
         const ownFact = and(
             eq(knowledgeFacts.id, factId),
-            eq(knowledgeFacts.userId, actorUserId),
+            eq(knowledgeFacts.userId, scopeUserId),
         );
         const [mine] = await tx
             .select({ id: knowledgeFacts.id })
@@ -779,7 +808,7 @@ export async function replaceFact(
         const subject = nodeOf(old.subjectPersonId, old.subjectEntityId);
         assertTextAllowed(subject, object);
         const replacement = await confirmFactInTx(tx, {
-            scopeUserId: actorUserId,
+            scopeUserId,
             actorUserId,
             origin: "manual",
             subject,
@@ -788,7 +817,7 @@ export async function replaceFact(
             expectedCurrentFactId: factId,
         });
         if (replacement !== factId) await deleteFactsInTx(tx, [factId]);
-        await bumpScopeInTx(tx, [actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
         return replacement;
     });
 }

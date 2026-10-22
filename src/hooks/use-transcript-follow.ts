@@ -13,7 +13,7 @@ export interface PlaybackState {
 /** The player, as a transcript drives and follows it. */
 export interface TranscriptPlayback {
     /** Seek to `ms` and play, optionally owned by one playback control. */
-    play: (ms: number, owner?: string) => void;
+    play: (ms: number, owner?: string, untilMs?: number) => void;
     pause: () => void;
     /** Seek to `ms`, playing or not as before. */
     seek: (ms: number) => void;
@@ -138,7 +138,7 @@ export function useTranscriptFollow({
     rootRef: RefObject<HTMLElement | null>;
     /** The scroll box the transcript sits in, if any. */
     scrollRef?: RefObject<HTMLElement | null>;
-    playback?: TranscriptPlayback;
+    playback?: TranscriptPlayback | null;
     /** When each rendered sentence starts playing, by sentence index. */
     startsMs: readonly number[];
     /** Another scroll is in flight (a topic or speaker jump): do not follow. */
@@ -157,7 +157,7 @@ export function useTranscriptFollow({
     const activeRef = useRef<number | null>(null);
     activeRef.current = state.active;
     const readerScrollingRef = useRef(false);
-    const subscribed = playback !== undefined;
+    const subscribed = playback != null;
 
     useEffect(() => {
         if (!subscribed) return;

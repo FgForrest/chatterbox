@@ -332,7 +332,7 @@ describe.each(
     });
 
     it("renders the Google Drive export hint", async () => {
-        window.history.replaceState(null, "", "/?googleExport=folder-1");
+        window.history.replaceState(null, "", "/");
         renderFor(
             <FolderExportActions
                 folder={{
@@ -350,6 +350,7 @@ describe.each(
                     mail: false,
                 }}
                 privateTree
+                reopen="form"
             />,
             isHosted,
             locale,
