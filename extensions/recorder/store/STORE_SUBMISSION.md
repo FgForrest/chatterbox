@@ -25,7 +25,12 @@ privacy-policy link. **I understand and agree** saves the consent timestamp;
 there is no checkbox. The next step separately offers microphone permission,
 with a persistent-option example and a saved **Not now** choice. The third step
 separately requests access to the chosen server. One click never triggers both
-browser permission dialogs. Other settings appear after setup.
+browser permission dialogs. Other settings appear after setup. The ready screen offers the optional
+**In-meeting prompt** switch; setup remains three steps. Enabling it separately
+requests the five meeting platforms (seven origins) in one Chrome permission
+prompt. Chrome shows the generic warning **Read and change your data on a
+number of websites** (Czech: **Čtení a úprava dat na různých webech**), rather
+than a per-site list.
 
 The address comes from the toolbar's current tab, a marked open recorder setup
 tab (`?section=recorder`), or a typed HTTPS address. With several marked tabs,
@@ -46,9 +51,9 @@ how to finish there. Manual address-and-key pairing stays available.
 | `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Finds marked recorder setup tabs and shows their host and title for the user's connection choice. Tab URLs and titles are not uploaded. |
 | `notifications` | Tells the user when a meeting is detected, when recording stops, and when an upload completes or needs attention. |
 | `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
-| `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes, so the selected setup tab can send a recorder key automatically, or the user can click Connect on older servers. |
+| `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes. After the user turns on In-meeting prompt and grants meeting-site access, registers and injects a top-frame isolated recording banner on supported meeting sites. The banner reads no page content and makes no network requests. |
 | `alarms` | Refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
-| Optional `https://*/*` host access | Allows the user to pair a self-hosted Chatterbox server at a chosen HTTPS origin. Access is requested for that specific origin during pairing. |
+| Optional `https://*/*` host access | Allows pairing and uploads to the Chatterbox HTTPS server origin chosen by the user. Separately, when the user turns on In-meeting prompt, requests Google Meet, Zoom web, Microsoft Teams, Webex and Whereby together to show recording instructions and controls inside supported meetings. The isolated banner reads no page content, makes no network requests and sends no page content anywhere. Turning the switch off removes that meeting-site access. No new required permissions. |
 | Optional `http://localhost/*` host access | Allows pairing a Chatterbox instance on the user's own computer for local development. Remote HTTP is not supported. |
 | `externally_connectable` for `localhost` | Allows a local Chatterbox page to message the extension for setup without a pairing relay. Other origins use the relay after the user grants access. |
 
@@ -63,6 +68,39 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.7.0
+
+- Optional **In-meeting prompt** replaces system meeting notifications with a
+  banner in Google Meet, Zoom web, Teams, Webex and Whereby. It reads no page
+  content. Its instructions reflect whether the extension icon is pinned and
+  show the actual assigned shortcut.
+- While the notice is visible, the toolbar icon or shortcut records the meeting
+  tab directly. **Share through Chrome’s dialog** keeps the existing picker.
+- The in-page recording pill shows elapsed time and target folder, supports the
+  same searchable folder changes as the popup, and offers Stop. Older servers
+  keep the start folder read-only. No server update is needed.
+- A one-time popup offer, Options switch and setup-ready switch request optional
+  access only after a user click. Turning it off removes that access. Updates
+  open no announcement tab. Existing system notifications remain the fallback;
+  their body opens the new Options switch only when meeting-site access is
+  missing. If access exists but the banner cannot mount, the plain notification
+  focuses the meeting tab.
+- No new manifest permissions, no additional web-accessible resources and no
+  remote code. The banner and shared folder control are packaged locally.
+
+### Dashboard update for 0.7.0
+
+Replace the `scripting` and optional `https://*/*` explanations with the exact
+text in the table above. Review the updated English and Czech privacy policies
+at their existing URLs after publication. Keep the existing data-use disclosures;
+the banner adds no collection of page content.
+
+Take a new English and Czech Store screenshot of the in-meeting banner in a
+supported meeting, using invented participant names only. Also capture the
+recording pill with timer, editable folder and Stop. Verify pinned and unpinned
+instructions, light/dark appearance and a narrow window in Chrome before
+submission. Existing 0.6.0 screenshots do not show the new banner.
 
 ## What changed in 0.6.0
 

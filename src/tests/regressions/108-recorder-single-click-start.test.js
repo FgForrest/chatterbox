@@ -29,6 +29,9 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
                 replaceChildren(...children) {
                     this.children = children;
                 },
+                append(...children) {
+                    this.children.push(...children);
+                },
             });
         }
         return nodes.get(id);

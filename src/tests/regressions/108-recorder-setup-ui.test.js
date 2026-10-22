@@ -86,6 +86,8 @@ const h = vi.hoisted(() => {
             onChanged: { addListener: vi.fn() },
         },
         permissions: {
+            onAdded: { addListener: vi.fn() },
+            onRemoved: { addListener: vi.fn() },
             request: vi.fn(async () => true),
             contains: vi.fn(async () => true),
         },

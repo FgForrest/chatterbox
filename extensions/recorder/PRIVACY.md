@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 19 October 2026
+Last updated: 22 October 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -13,6 +13,27 @@ Setup asks for microphone access and briefly opens then stops a test stream. Thi
 - It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is shared after data-use consent only with the current setup site or paired server, including to retire older recorder keys from this installation; localhost development pages can also use the declared direct setup channel. It is not a device fingerprint or a secret. The recorder API token can create recordings and look up folder names to file them, but cannot read recordings. It is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
 - It encrypts each five-second audio segment with a key issued by your server before writing that segment to Chrome's private file system. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Encrypted segments remain on this device until the server confirms completion or you explicitly discard them. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
 - It does not automatically download a playable local copy. Once the server finishes the recording, you can download one from the authenticated Chatterbox recording page. A file you download remains until you delete it.
+
+## Optional in-meeting banner
+
+Only after you turn on **In-meeting prompt** and grant Chrome's optional site
+access, an isolated banner script runs on Google Meet (`meet.google.com`), Zoom
+web (`zoom.us`), Microsoft Teams (`teams.microsoft.com`, `teams.live.com`,
+`teams.cloud.microsoft`), Webex (`webex.com`) and Whereby (`whereby.com`),
+including their subdomains. For these seven origins, Chrome shows the generic
+warning **Read and change your data on a number of websites**, rather than a
+per-site list. It displays UI only in supported meeting rooms.
+It reads no page content, makes no network requests, and sends no page content
+or meeting-site data anywhere. It communicates only with this extension's
+background worker for recording controls and folder selection. Folder searches
+use your existing paired server; no recorder key is exposed to the meeting
+page. Turning the switch off removes access to those meeting sites, unregisters
+the script and hides its UI. Without this optional access, the existing system
+notification remains available. Clicking the toolbar icon while the banner
+notice is visible records your acknowledgement of the participant notice; it
+does not obtain other participants' consent.
+
+The meeting page can observe keystrokes typed into the pill's folder search through its capture-phase keyboard listeners.
 
 ## Where data goes
 

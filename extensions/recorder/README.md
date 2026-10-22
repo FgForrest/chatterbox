@@ -14,6 +14,13 @@ system audio to extensions.
 
 ## How it works
 
+With **In-meeting prompt** turned on, an audible meeting shows a banner at the
+top of the meeting page. Read the participant notice, then click the recorder
+icon at the top right to record that tab directly. The banner shows your actual
+keyboard shortcut if assigned. If the icon is hidden, it explains how to pin it
+from Chrome's extensions menu. The banner itself does not start direct tab
+capture: **Share through Chrome’s dialog** keeps the existing picker path.
+
 1. In the popup, read the short participant reminder and click
    **Consent confirmed · Record this tab**. This records the current tab directly,
    whether or not a meeting platform is detected.
@@ -36,10 +43,13 @@ system audio to extensions.
    You can download a playable copy from that authenticated recording page.
 
 Choose **Target folder in Chatterbox** before starting, or change it while
-recording in the popup or recorder window. **File later** leaves it unfiled.
-The selected folder survives interrupted uploads and is remembered for the next
-recording. Older servers show the start folder read-only. If a changed folder
-is unavailable when saving, the server uses the start folder instead.
+recording in the popup, recorder window, or in-page recording pill. **File later**
+leaves it unfiled. The selected folder survives interrupted uploads and is
+remembered for the next recording. Older servers show the start folder read-only.
+The pill also shows elapsed time and **Stop**, and its red dot collapses or
+expands the controls. When capture stops, it briefly confirms that upload
+continues in the extension. If a changed folder is unavailable when saving, the
+server uses the start folder instead.
 
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
@@ -91,9 +101,25 @@ installation with no saved platform choice. Existing choices and server
 defaults keep precedence. Other platforms remain **Off** until you or the server
 choose otherwise. Updating from 0.2.1 changes the old implicit Off default to
 Prompt for Meet, Teams and Zoom web. When a meeting becomes audible, the
-notification asks whether to record it. **Record** opens the participant notice
-and microphone check, followed by Chrome's audio picker. Choose the meeting tab
-and enable **Share tab audio**. **Not now** dismisses the prompt for that tab.
+in-page banner offers recording instructions if you have enabled it; otherwise
+the existing system notification appears. Its **Consent confirmed · Record**
+button uses Chrome's audio picker (with the microphone check first if needed).
+Choose the meeting tab and enable **Share tab audio**. Clicking the notification
+body opens Options at **In-meeting prompt** when meeting-site access is missing;
+if access exists but the banner cannot mount, it focuses the meeting tab. **Not now** or the banner's close
+button dismisses the prompt for that meeting.
+
+**In-meeting prompt** is optional. Enable it from the one-time popup card,
+Options, or the ready screen after the same three setup steps. Chrome requests
+access to Google Meet, Zoom web, Microsoft Teams (including
+`teams.cloud.microsoft`), Webex and Whereby together. For these seven origins,
+Chrome shows the generic warning **Read and change your data on a number of
+websites**, rather than a per-site list. The banner reads no page
+content and makes no network requests. Turning the switch off removes that
+site access and hides the banner. Slack huddles and Jitsi keep their existing
+notification path; their access is not requested. Updates open no announcement
+tab and add no manifest permissions. Dismissing the popup card hides it for good;
+the Options switch stays available.
 
 If the microphone is not allowed, recording waits for you to allow it or choose
 **Record without my microphone**. The popup and toolbar badge warn beforehand.
@@ -115,8 +141,11 @@ The unpacked build uses a different ID from the published extension. Set
 `NEXT_PUBLIC_RECORDER_EXTENSION_ID=hiipabbdnlhdkgldhkdndmohejoaecnh` when running
 Chatterbox against this development build.
 
-No build step is required: the extension is plain ES-module JavaScript loaded
-directly by Chrome.
+No build step is required: Chrome loads the extension's JavaScript directly.
+Extension pages use ES modules. The meeting banner and shared folder combobox
+use classic scripts in Chrome's isolated world. A static ES-module wrapper
+exports the same combobox to the popup and recorder window. This avoids dynamic
+imports and keeps banner resources out of `web_accessible_resources`.
 
 ## Pairing
 
@@ -166,8 +195,8 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `tabs` | Detects meeting URLs, finds marked recorder setup tabs and their titles for connection, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
 | `storage` | Stores settings, an encrypted recorder token, and recording state. Encrypted audio chunks use the browser's private file system. |
-| `scripting` | Registers the pairing relay on your Chatterbox origin. |
-| optional host access | Granted per server origin so the extension can upload only there. |
+| `scripting` | Registers the pairing relay on your Chatterbox origin and, after optional site access is granted, the isolated meeting banner. |
+| optional host access | Granted per server origin for pairing and uploads. The in-meeting prompt separately requests the five meeting platforms together, only when you turn it on. |
 
 Suggested Chrome Web Store explanations for every manifest permission are in
 [STORE_SUBMISSION.md](store/STORE_SUBMISSION.md).

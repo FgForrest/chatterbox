@@ -159,6 +159,12 @@ export interface ReviewView {
         finishedAt: string | null;
         /** Why a failed run failed (`ErrorCode`). */
         errorCode: string | null;
+        /** Counts carried from the owner’s finished private review on share. */
+        sharedReview?: {
+            applied: number | null;
+            skipped: number | null;
+            dismissed: number | null;
+        };
     } | null;
     /** A ready run's items to decide, or a finished run's with outcomes. */
     items: ReviewItemView[];
@@ -290,6 +296,16 @@ export async function loadReview(
         createdAt: run.createdAt.toISOString(),
         finishedAt: run.finishedAt?.toISOString() ?? null,
         errorCode: run.errorCode,
+        ...(run.view === "org" &&
+        typeof run.inputs?.promotedFromRunId === "string"
+            ? {
+                  sharedReview: {
+                      applied: run.stats?.applied ?? null,
+                      skipped: run.stats?.skipped ?? null,
+                      dismissed: run.stats?.dismissed ?? null,
+                  },
+              }
+            : {}),
     };
     if (run.status !== "ready" && run.status !== "finished") {
         return { run: summary, items: [], names: {}, types: {}, relations: {} };
@@ -1319,6 +1335,7 @@ function finishInTx(
         // New people and things first: the items that refer to one by its
         // ref are applied to the record it became.
         const refs = new Map<string, RecordTarget>();
+        const createdRecords: RecordTarget[] = [];
         const records = items.filter(
             (item) => item.kind === "new_record" && item.accepted,
         );
@@ -1462,6 +1479,7 @@ function finishInTx(
                 }
             });
             if (added && made.target) {
+                createdRecords.push(made.target);
                 refs.set(payload.ref, made.target);
                 continue;
             }
@@ -2000,10 +2018,22 @@ function finishInTx(
             .update(learnRuns)
             .set({
                 status: "finished",
+                inputs: {
+                    ...run.inputs,
+                    confirmedRecords: createdRecords,
+                },
+                stats: {
+                    ...run.stats,
+                    applied,
+                    skipped: skipped.length,
+                    dismissed: rejected.length,
+                },
                 finishedAt: new Date(),
                 updatedAt: new Date(),
             })
-            .where(eq(learnRuns.id, run.id));
+            .where(
+                and(eq(learnRuns.id, run.id), eq(learnRuns.userId, run.userId)),
+            );
         // Once, after every type the finish made (`createOwnTypeInTx`).
         if (typesCreated) await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);

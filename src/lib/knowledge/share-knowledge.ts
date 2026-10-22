@@ -80,6 +80,7 @@ import {
     adoptTypesForShareInTx,
     dropUnusedAdoptionsInTx,
 } from "@/lib/knowledge/vocabulary";
+import { publishFinishedPrivateLearnInTx } from "@/lib/learn/share-finished";
 import { cancelPrivateLearnAtShareInTx } from "@/lib/learn/sharing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -186,13 +187,26 @@ export async function publishKnowledgeInTx(
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<PublishedKnowledge> {
-    await cancelPrivateLearnAtShareInTx(tx, recordingId, ownerUserId);
+    const cancelled = await cancelPrivateLearnAtShareInTx(
+        tx,
+        recordingId,
+        ownerUserId,
+    );
     const result: PublishedKnowledge = {
         corrections: 0,
         facts: 0,
         privateCorrections: 0,
         privateFacts: 0,
         scopes: new Set([ownerUserId, orgUserId]),
+    };
+    const settleLearn = async () => {
+        if (cancelled) return;
+        for (const scope of await publishFinishedPrivateLearnInTx(tx, {
+            itemId: recordingId,
+            ownerUserId,
+            orgUserId,
+        }))
+            result.scopes.add(scope);
     };
     const transcriptIds = await transcriptIdsOf(tx, recordingId);
     const onItem = evidenceOnItem(recordingId, transcriptIds);
@@ -240,7 +254,10 @@ export async function publishKnowledgeInTx(
                 eq(knowledgeFactEvidence.status, "supported"),
             ),
         );
-    if (corrections.length === 0 && facts.length === 0) return result;
+    if (corrections.length === 0 && facts.length === 0) {
+        await settleLearn();
+        return result;
+    }
 
     // The owner's private types what it names needs become the
     // Organization's first (Johnny, 2026-09-29), so it all publishes.
@@ -331,6 +348,7 @@ export async function publishKnowledgeInTx(
     }
     // A type adopted for what then stayed private is not the curator's.
     await dropUnusedAdoptionsInTx(tx, adopted);
+    await settleLearn();
     return result;
 }
 

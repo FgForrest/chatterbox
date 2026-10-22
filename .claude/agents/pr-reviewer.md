@@ -45,7 +45,9 @@ report unless asked to post it.
 ## Procedure
 
 1. **Context.** `gh pr view <N> --json title,body,baseRefName,headRefName,files,additions,deletions,commits`.
-   Read the title, description and commit log; find linked issues.
+   Read the title, description and commit log; find linked issues. Then
+   read `AGENTS.md` and, for the changed paths, the `.claude/rules/` files
+   its "Area rules" table names: area rules live there, not in `AGENTS.md`.
 2. **Prior review rounds (mandatory before forming opinions).** PRs are
    re-reviewed on every push. Fetch:
    - `gh api repos/<owner>/<repo>/pulls/<N>/reviews`
@@ -103,7 +105,8 @@ report unless asked to post it.
   Mode checks read `env.IS_HOSTED`, not `process.env`.
 - **Deploy surface.** New env vars validated in `src/lib/env.ts`, listed in
   `.env.example`, passed through `docker-compose.yml`; renames keep the old
-  name for a release. Compose structure changes are flagged.
+  name for a release. Compose structure changes are flagged, and the PR
+  description has an "Upgrading an existing installation" section.
 - **Local AI path.** Browser transcription and local OpenAI-compatible
   servers keep working; no silent fallback to a cloud provider.
 - **Tests.** New behavior has tests; a bug fix has a regression test
@@ -112,7 +115,7 @@ report unless asked to post it.
 - **Performance.** No request waterfalls; no unbounded scans of encrypted
   data without a limit; no N+1 queries in list views.
 
-### Minor (project rules from AGENTS.md)
+### Minor (project rules from AGENTS.md and `.claude/rules/`)
 
 - No `any` without a reason; check `node_modules` types instead of guessing.
 - No inline imports (`await import()`, `import("x").Type`).
@@ -122,12 +125,16 @@ report unless asked to post it.
 - Env through the validated `env` object, never `process.env.X` in feature
   code (build-time `NEXT_PUBLIC_*` constants are the exception).
 - User-facing strings through next-intl, with the Czech (`cs-CZ`) messages
-  filled in.
+  filled in; Czech copy names the product Klepna, never Chatterbox.
 - Toasts via `sonner`; no `alert()`.
 - JSDoc on exported APIs only; no narrative comments in source.
 - No real company or person names in code, fixtures, docs or examples; use
   neutral placeholders (`example.com`, `acme`).
 - No emojis in code, commits or PR text.
+- A decision that clears the ADR bar (`.claude/rules/adr.md`) ships its
+  record in `documentation/adr/` with the index table updated; a change
+  that reverses a recorded decision supersedes that record. Most PRs need
+  no record: do not ask for one by default.
 
 ### Commits and PR
 
@@ -142,7 +149,7 @@ report unless asked to post it.
 | **BLOCKER** | Security hole, data loss or corruption, broken build or migration. Must fix. |
 | **CRITICAL** | Likely bug, missing user scoping or error handling, race. Must fix. |
 | **MAJOR** | Missing tests, a mode broken, deploy-surface or performance problem. Should fix. |
-| **MINOR** | A project rule from AGENTS.md. This PR or a follow-up. |
+| **MINOR** | A project rule from AGENTS.md or `.claude/rules/`. This PR or a follow-up. |
 | **NIT** | Preference. Optional. |
 
 Unsure whether it is wrong? Phrase it as a question.

@@ -103,6 +103,7 @@ export function LearnResults({
     errorCode,
     items,
     known,
+    sharedReview,
     describe,
     onRelearn,
 }: {
@@ -114,6 +115,12 @@ export function LearnResults({
     items: readonly LearnResultItem[];
     /** A run that found nothing: what it had to go on. */
     known?: { people: number; things: number };
+    /** Counts carried from the owner’s finished private review on share. */
+    sharedReview?: {
+        applied: number | null;
+        skipped: number | null;
+        dismissed: number | null;
+    };
     /** An item in a few words, as the review lists it. */
     describe: (item: LearnResultItem) => ReactNode;
     /**
@@ -128,7 +135,13 @@ export function LearnResults({
     const skipReason = useSkipReason();
     const failure = useLearnFailure();
     let description = failure(errorCode);
-    if (status === "finished" && items.length === 0) {
+    const foundNothing =
+        sharedReview?.applied === 0 &&
+        sharedReview.skipped === 0 &&
+        sharedReview.dismissed === 0;
+    if (status === "finished" && sharedReview && !foundNothing) {
+        description = i18n("Learned from the owner's review");
+    } else if (status === "finished" && items.length === 0) {
         description =
             kind === "mail"
                 ? i18n("Learn found nothing new in this message.")
@@ -192,35 +205,50 @@ export function LearnResults({
                     <DialogDescription>{description}</DialogDescription>
                 </DialogHeader>
 
-                {status === "finished" && items.length === 0 && known && (
-                    <div className="space-y-2 text-sm">
-                        <p>
-                            {kind === "mail"
-                                ? i18n(
-                                      "Learn proposes people, things and facts from the message using what {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
-                                      {
-                                          name,
-                                          people: known.people,
-                                          things: known.things,
-                                      },
-                                  )
-                                : i18n(
-                                      "Learn names speakers, corrects misheard names and proposes facts about the people and things {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
-                                      {
-                                          name,
-                                          people: known.people,
-                                          things: known.things,
-                                      },
-                                  )}
+                {status === "finished" &&
+                    sharedReview &&
+                    !foundNothing &&
+                    sharedReview.applied !== null &&
+                    sharedReview.skipped !== null && (
+                        <p className="text-sm">
+                            {i18n("{applied} applied, {skipped} skipped", {
+                                applied: String(sharedReview.applied),
+                                skipped: String(sharedReview.skipped),
+                            })}
                         </p>
-                        <Link
-                            href="/almanac/things"
-                            className="font-medium text-primary hover:underline"
-                        >
-                            {i18n("Add people and things")}
-                        </Link>
-                    </div>
-                )}
+                    )}
+                {status === "finished" &&
+                    !sharedReview &&
+                    items.length === 0 &&
+                    known && (
+                        <div className="space-y-2 text-sm">
+                            <p>
+                                {kind === "mail"
+                                    ? i18n(
+                                          "Learn proposes people, things and facts from the message using what {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                          {
+                                              name,
+                                              people: known.people,
+                                              things: known.things,
+                                          },
+                                      )
+                                    : i18n(
+                                          "Learn names speakers, corrects misheard names and proposes facts about the people and things {name} already knows. It knows {people, plural, =0 {no people} one {# person} other {# people}} and {things, plural, =0 {no things} one {# thing} other {# things}}.",
+                                          {
+                                              name,
+                                              people: known.people,
+                                              things: known.things,
+                                          },
+                                      )}
+                            </p>
+                            <Link
+                                href="/almanac/things"
+                                className="font-medium text-primary hover:underline"
+                            >
+                                {i18n("Add people and things")}
+                            </Link>
+                        </div>
+                    )}
 
                 {status === "finished" &&
                     sections.map((section) => {
