@@ -702,6 +702,11 @@ export async function gatherFacts(
                     mailShareProblems(tx, itemId, userId),
                 )
               : await loadShareGate(db, itemId, userId);
+    const learnContent =
+        content ??
+        (profile?.transcribe?.plaudTranscript === "use"
+            ? plaudTranscript
+            : null);
     const summaryExists = summary !== undefined;
     const staleFingerprint = summary
         ? await staleReadingFingerprint(summary)
@@ -805,8 +810,8 @@ export async function gatherFacts(
         learnRunReadyForReview: openLearnRun?.status === "ready",
         learnCorrectionInFlight: activeCorrectionPasses.some(
             (pass) =>
-                pass.transcriptionId === content?.id &&
-                pass.transcriptRevision === content.revision,
+                pass.transcriptionId === learnContent?.id &&
+                pass.transcriptRevision === learnContent.revision,
         ),
         plaudTasks:
             plaudTaskSource && plaudTaskSource.actionItems.length > 0

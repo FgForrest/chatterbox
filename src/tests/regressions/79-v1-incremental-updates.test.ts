@@ -332,6 +332,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                             id: "tr-1",
                             userId,
                             recordingId,
+                            source: "riffado",
+                            revision: 0,
                             text: "Transcript",
                         },
                     ],
@@ -373,6 +375,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
             select: vi
                 .fn()
                 .mockReturnValueOnce(lockedRecordingRows([{ deletedAt: null }]))
+                .mockReturnValueOnce(selectRows([]))
+                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }]))
                 .mockReturnValueOnce(selectRows([])),
             insert: vi.fn().mockReturnValue({ values: txInsertValues }),
             update: vi.fn().mockReturnValue({ set: recordingBumpSet }),
@@ -420,6 +424,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                         id: "tr-1",
                         userId,
                         recordingId,
+                        source: "riffado",
+                        revision: 0,
                         text: "Transcript",
                     },
                 ]),
@@ -463,6 +469,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
             select: vi
                 .fn()
                 .mockReturnValueOnce(lockedRecordingRows([{ deletedAt: null }]))
+                .mockReturnValueOnce(selectRows([]))
+                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }]))
                 .mockReturnValueOnce(selectRows([{ id: "enh-1", userId }])),
             insert: vi.fn(),
             update: vi
@@ -501,7 +509,9 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
     it("bumps recording updatedAt when a summary row is deleted", async () => {
         // The access check: the caller owns the recording.
         (db.select as Mock).mockReturnValueOnce(
-            selectRows([{ id: recordingId, userId }]),
+            selectRows([
+                { id: recordingId, userId, kind: "audio", deletedAt: null },
+            ]),
         );
         const recordingBumpSet = vi.fn().mockReturnValue({
             where: vi.fn().mockResolvedValue(undefined),
@@ -542,7 +552,9 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
 
     it("does not bump recording updatedAt when no summary row is deleted", async () => {
         (db.select as Mock).mockReturnValueOnce(
-            selectRows([{ id: recordingId, userId }]),
+            selectRows([
+                { id: recordingId, userId, kind: "audio", deletedAt: null },
+            ]),
         );
         const tx = {
             select: vi

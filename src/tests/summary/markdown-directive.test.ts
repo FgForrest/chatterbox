@@ -184,6 +184,7 @@ async function summarize(
             {
                 recordingId: "rec-1",
                 userId: "user-1",
+                source: "riffado",
                 text: "a transcript",
                 detectedLanguage: settings.detectedLanguage ?? null,
             },

@@ -1,7 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { transcriptions, users } from "@/db/schema";
+import { users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
@@ -9,6 +9,7 @@ import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { ProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/view";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import {
     getAiOutputLanguageDirective,
@@ -51,17 +52,10 @@ export async function generateTitleFromTranscription(
     const settings = profile.settings as ProfileSettings;
     let contentLanguage = detectedLanguage;
     if (contentLanguage === undefined) {
-        const [transcript] = await db
-            .select({ detectedLanguage: transcriptions.detectedLanguage })
-            .from(transcriptions)
-            .where(
-                and(
-                    eq(transcriptions.recordingId, recordingId),
-                    eq(transcriptions.userId, ownerUserId),
-                    eq(transcriptions.source, "riffado"),
-                ),
-            )
-            .limit(1);
+        const transcript = await readPreferredTranscript(
+            recordingId,
+            ownerUserId,
+        );
         contentLanguage = transcript?.detectedLanguage ?? null;
     }
     const [owner] = await db

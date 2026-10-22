@@ -47,7 +47,7 @@ describe("pipeline pending profile automation", () => {
                     Promise.resolve(
                         "summaryDueAt" in fields
                             ? [{ summaryDueAt: null, manualOnly }]
-                            : [{ turns: [{ startMs: 0 }] }],
+                            : [{ source: "riffado", turns: [{ startMs: 0 }] }],
                     ),
             };
             return chain;

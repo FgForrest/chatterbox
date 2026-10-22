@@ -189,9 +189,11 @@ function stage(settings: Settings) {
                 revision: 4,
                 recordingId: "rec-1",
                 userId: "user-1",
+                source: "riffado",
                 text: "a transcript",
             },
         ],
+        [{ id: "transcription-1", revision: 4 }],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null, ...settings }],
