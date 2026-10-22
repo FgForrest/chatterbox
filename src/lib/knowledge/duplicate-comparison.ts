@@ -42,7 +42,7 @@ export async function compareDuplicates(
         kind === "person"
             ? knowledgeAliases.personId
             : knowledgeAliases.entityId;
-    const [aliases, emails, appearances, tasks] = await Promise.all([
+    const [aliases, emails, appearancePages, taskPages] = await Promise.all([
         db
             .select({
                 recordId: column,
@@ -72,70 +72,92 @@ export async function compareDuplicates(
                   .limit(1001)
             : [],
         kind === "person"
-            ? db
-                  .selectDistinct({
-                      personId: transcriptSpeakers.personId,
-                      itemId: chatterItems.id,
-                      title: chatterItems.title,
-                  })
-                  .from(transcriptSpeakers)
-                  .innerJoin(
-                      transcriptions,
-                      eq(transcriptions.id, transcriptSpeakers.transcriptionId),
-                  )
-                  .innerJoin(
-                      chatterItems,
-                      and(
-                          eq(chatterItems.id, transcriptions.recordingId),
-                          eq(chatterItems.userId, transcriptions.userId),
-                      ),
-                  )
-                  .where(
-                      and(
-                          inArray(transcriptSpeakers.personId, ids),
-                          eq(transcriptSpeakers.status, "confirmed"),
-                          or(
-                              eq(transcriptSpeakers.userId, scope),
+            ? Promise.all(
+                  ids.map((id) =>
+                      db
+                          .selectDistinct({
+                              personId: transcriptSpeakers.personId,
+                              itemId: chatterItems.id,
+                              title: chatterItems.title,
+                          })
+                          .from(transcriptSpeakers)
+                          .innerJoin(
+                              transcriptions,
                               eq(
-                                  transcriptSpeakers.userId,
-                                  transcriptions.userId,
+                                  transcriptions.id,
+                                  transcriptSpeakers.transcriptionId,
                               ),
-                          ),
-                          isNull(chatterItems.deletedAt),
-                          sharedItemCondition(scope),
-                      ),
-                  )
-                  .orderBy(chatterItems.id)
-                  .limit(201)
+                          )
+                          .innerJoin(
+                              chatterItems,
+                              and(
+                                  eq(
+                                      chatterItems.id,
+                                      transcriptions.recordingId,
+                                  ),
+                                  eq(
+                                      chatterItems.userId,
+                                      transcriptions.userId,
+                                  ),
+                              ),
+                          )
+                          .where(
+                              and(
+                                  eq(transcriptSpeakers.personId, id),
+                                  eq(transcriptSpeakers.status, "confirmed"),
+                                  or(
+                                      eq(transcriptSpeakers.userId, scope),
+                                      eq(
+                                          transcriptSpeakers.userId,
+                                          transcriptions.userId,
+                                      ),
+                                  ),
+                                  isNull(chatterItems.deletedAt),
+                                  sharedItemCondition(scope),
+                              ),
+                          )
+                          .orderBy(chatterItems.id)
+                          .limit(101),
+                  ),
+              )
             : [],
         kind === "person"
-            ? db
-                  .select({
-                      id: recordingTasks.id,
-                      personId: recordingTasks.assigneePersonId,
-                      itemId: chatterItems.id,
-                      text: recordingTasks.text,
-                  })
-                  .from(recordingTasks)
-                  .innerJoin(
-                      chatterItems,
-                      and(
-                          eq(chatterItems.id, recordingTasks.itemId),
-                          eq(chatterItems.userId, recordingTasks.userId),
-                      ),
-                  )
-                  .where(
-                      and(
-                          inArray(recordingTasks.assigneePersonId, ids),
-                          eq(recordingTasks.status, "open"),
-                          isNull(chatterItems.deletedAt),
-                          sharedItemCondition(scope),
-                      ),
-                  )
-                  .orderBy(recordingTasks.id)
-                  .limit(201)
+            ? Promise.all(
+                  ids.map((id) =>
+                      db
+                          .select({
+                              id: recordingTasks.id,
+                              personId: recordingTasks.assigneePersonId,
+                              itemId: chatterItems.id,
+                              text: recordingTasks.text,
+                          })
+                          .from(recordingTasks)
+                          .innerJoin(
+                              chatterItems,
+                              and(
+                                  eq(chatterItems.id, recordingTasks.itemId),
+                                  eq(
+                                      chatterItems.userId,
+                                      recordingTasks.userId,
+                                  ),
+                              ),
+                          )
+                          .where(
+                              and(
+                                  eq(recordingTasks.assigneePersonId, id),
+                                  eq(recordingTasks.status, "open"),
+                                  isNull(chatterItems.deletedAt),
+                                  sharedItemCondition(scope),
+                              ),
+                          )
+                          .orderBy(recordingTasks.id)
+                          .limit(101),
+                  ),
+              )
             : [],
     ]);
+    const appearances = appearancePages.flat();
+    const tasks = taskPages.flat();
     if (aliases.length > 1000 || emails.length > 1000)
         throw new AppError(
             ErrorCode.CONFLICT,
@@ -250,14 +272,14 @@ export async function compareDuplicates(
                 })),
             appearances: appearances
                 .filter((item) => item.personId === id)
-                .slice(0, 200)
+                .slice(0, 100)
                 .map((item) => ({
                     itemId: item.itemId,
                     title: decryptText(item.title),
                 })),
             tasks: tasks
                 .filter((task) => task.personId === id)
-                .slice(0, 200)
+                .slice(0, 100)
                 .map((task) => ({
                     id: task.id,
                     itemId: task.itemId,
@@ -280,7 +302,9 @@ export async function compareDuplicates(
         clashes: state.clashes,
         relationLabels,
         version: state.version,
-        itemsLimited: appearances.length > 200 || tasks.length > 200,
+        itemsLimited:
+            appearancePages.some((rows) => rows.length > 100) ||
+            taskPages.some((rows) => rows.length > 100),
     };
 }
 

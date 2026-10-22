@@ -28,6 +28,7 @@ interface MergeCandidate {
 }
 
 interface PersonActionsProps {
+    canCurateOrganization?: boolean;
     person: {
         id: string;
         displayName: string;
@@ -48,7 +49,11 @@ interface PersonActionsProps {
  * Organization person the organization account, whose edits reach every
  * recording that names them.
  */
-export function PersonActions({ person, accountEmail }: PersonActionsProps) {
+export function PersonActions({
+    person,
+    accountEmail,
+    canCurateOrganization = false,
+}: PersonActionsProps) {
     const i18n = useExtracted();
     const router = useRouter();
     const [renaming, setRenaming] = useState(false);
@@ -87,7 +92,7 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                 );
             })
             .catch(() => {});
-        if (person.scope === "org") {
+        if (person.scope === "org" && canCurateOrganization) {
             void mergeLikelihoods("person", person.id, controller.signal).then(
                 (scores) => {
                     likelihoods = scores;
@@ -102,7 +107,7 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
             );
         }
         return () => controller.abort();
-    }, [merging, person.id, person.scope]);
+    }, [merging, person.id, person.scope, canCurateOrganization]);
 
     async function rename(
         primaryEmail: string | null = email.trim() || null,

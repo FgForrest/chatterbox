@@ -428,6 +428,7 @@ describe("Almanac curator care", () => {
         render(
             kind === "person" ? (
                 <PersonActions
+                    canCurateOrganization
                     person={{
                         id: "source",
                         displayName: "Zavi Duspektor",
@@ -437,6 +438,7 @@ describe("Almanac curator care", () => {
                 />
             ) : (
                 <EntityActions
+                    canCurateOrganization
                     entity={{
                         id: "source",
                         name: "Zavi Duspektor",

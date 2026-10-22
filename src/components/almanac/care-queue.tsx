@@ -36,7 +36,6 @@ export function CareQueue({
     const [loadError, setLoadError] = useState(false);
     const requestVersion = useRef(0);
     const [hidden, setHidden] = useState<Set<string>>(new Set());
-    const [busy, setBusy] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
     const pendingDismissals = useRef(new Set<string>());
     const firstKind = useRef(initial ? kind : null);
@@ -108,7 +107,6 @@ export function CareQueue({
 
     async function dismiss(candidate: DuplicateCandidate) {
         pendingDismissals.current.add(candidate.key);
-        setBusy((current) => new Set(current).add(candidate.key));
         setHidden((current) => new Set(current).add(candidate.key));
         try {
             const response = await fetch("/api/knowledge/duplicates", {
@@ -141,11 +139,6 @@ export function CareQueue({
             );
         } finally {
             pendingDismissals.current.delete(candidate.key);
-            setBusy((current) => {
-                const next = new Set(current);
-                next.delete(candidate.key);
-                return next;
-            });
         }
     }
 
@@ -340,7 +333,6 @@ export function CareQueue({
                             <Button
                                 size="sm"
                                 variant="outline"
-                                disabled={busy.has(candidate.key)}
                                 onClick={() => void dismiss(candidate)}
                             >
                                 {i18n("Not the same")}
@@ -349,7 +341,6 @@ export function CareQueue({
                                 size="sm"
                                 variant="ghost"
                                 className="ml-auto"
-                                disabled={busy.has(candidate.key)}
                                 onClick={() => later(candidate)}
                             >
                                 {i18n("Later")}

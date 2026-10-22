@@ -38,6 +38,7 @@ type Editing = "edit" | "type" | "merge" | "erase" | "notes" | null;
 export function EntityActions({
     entity,
     canManage,
+    canCurateOrganization = false,
     types,
     relationLabels = {},
 }: {
@@ -50,6 +51,7 @@ export function EntityActions({
         scope: "personal" | "org";
     };
     canManage: boolean;
+    canCurateOrganization?: boolean;
     /** The types it may take. */
     types: { key: string; label: string }[];
     /** Relation labels by key, to name a fact that blocks a type change. */
@@ -98,7 +100,7 @@ export function EntityActions({
                 );
             })
             .catch(() => {});
-        if (entity.scope === "org") {
+        if (entity.scope === "org" && canCurateOrganization) {
             void mergeLikelihoods("entity", entity.id, controller.signal).then(
                 (scores) => {
                     likelihoods = scores;
@@ -113,7 +115,13 @@ export function EntityActions({
             );
         }
         return () => controller.abort();
-    }, [editing, entity.id, entity.scope, entity.typeKey]);
+    }, [
+        editing,
+        entity.id,
+        entity.scope,
+        entity.typeKey,
+        canCurateOrganization,
+    ]);
 
     const open = (next: Editing) => {
         setCandidates([]);
