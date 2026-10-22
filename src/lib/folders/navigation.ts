@@ -9,8 +9,8 @@ import type {
 } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
-export interface FolderMatch {
-    folder: RecordingFolder;
+export interface FolderMatch<T = RecordingFolder> {
+    folder: T;
     path: string;
     depth: number;
     nameMatch: boolean;
@@ -49,11 +49,11 @@ export function joinFolderPath(
     return [parentPath, name].filter(Boolean).join(" › ");
 }
 
-export function matchFolderEntries(
-    entries: FolderMatch[],
+export function matchFolderEntries<T>(
+    entries: FolderMatch<T>[],
     query: string,
-    label: (folder: RecordingFolder) => string,
-): FolderMatch[] {
+    label: (folder: T) => string,
+): FolderMatch<T>[] {
     const normalized = normalizeFolderQuery(query);
     if (!normalized) return entries;
     return entries

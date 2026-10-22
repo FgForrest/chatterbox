@@ -114,7 +114,7 @@ describe("searchable folder picker", () => {
         });
         expect(dialog.className).toContain("top-[15vh]");
         expect(
-            screen.getByRole("option", { name: "VývojPrivate › Porády" }),
+            screen.getByRole("option", { name: "Vývoj Private › Porády" }),
         ).toBeTruthy();
     });
     it("finds names and paths without diacritics", () => {
@@ -123,8 +123,10 @@ describe("searchable folder picker", () => {
             target: { value: "porady" },
         });
         const matches = screen.getAllByRole("option");
-        expect(matches[0].textContent).toBe("PorádyPrivate");
-        expect(matches[1].textContent).toBe("VývojPrivate › Porády");
+        expect(matches[0].getAttribute("aria-label")).toBe("Porády Private");
+        expect(matches[1].getAttribute("aria-label")).toBe(
+            "Vývoj Private › Porády",
+        );
     });
     it("files with arrows and Enter, and closes with Escape", async () => {
         picker();

@@ -7,7 +7,7 @@ Nové nahrávky a pošta čekají na zařazení, než Klepna spustí placený kr
 
 ## Zařazení nové položky
 
-Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zařadit nahrávku** nebo **Zařadit e-mail**. V poli **Složka** vyberte jednu složku, nebo pomocí **Nová složka…** vytvořte složku první úrovně v části **Soukromé** či **Organizace**. V poli **Profil** zvolte **Výchozí profil Organizace**, konkrétní profil Organizace nebo osobní profil, případně **Bez automatického zpracování**.
+Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zařadit nahrávku** nebo **Zařadit e-mail**. V poli **Složka** začněte psát název nebo libovolnou část cesty a vyberte jednu složku, nebo pomocí **Nová složka…** vytvořte složku první úrovně v části **Soukromé** či **Organizace**. V poli **Profil** zvolte **Výchozí profil Organizace**, konkrétní profil Organizace nebo osobní profil, případně **Bez automatického zpracování**.
 
 ![Zařazení nahrávky a výběr profilu zpracování](images/categorize-card.png)
 

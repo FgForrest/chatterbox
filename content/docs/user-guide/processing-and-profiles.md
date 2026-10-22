@@ -7,7 +7,7 @@ New recordings and mail wait for you to file them before Chatterbox starts any p
 
 ## Categorize a new item
 
-Open the item. Its first workflow step is an inline **Categorize recording** or **Categorize email** card. Under **Folder**, choose one folder, or choose **New folder…** to create a first-level folder under **Private** or **Organization**. Under **Profile**, choose **Organization default**, a specific Organization or personal profile, or **Nothing automatic**.
+Open the item. Its first workflow step is an inline **Categorize recording** or **Categorize email** card. Under **Folder**, type to search by folder name or any part of its path and choose one folder, or choose **New folder…** to create a first-level folder under **Private** or **Organization**. Under **Profile**, choose **Organization default**, a specific Organization or personal profile, or **Nothing automatic**.
 
 ![Categorizing a recording and choosing its processing profile](images/categorize-card.png)
 
