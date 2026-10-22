@@ -199,7 +199,7 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
     it("is configured only by the organization account", async () => {
         await expect(
             createFolderExport(MEMBER, orgRootId, selection),
-        ).rejects.toMatchObject({ statusCode: 400 });
+        ).rejects.toMatchObject({ statusCode: 404 });
     });
 
     it("writes the shared recordings' Organization view, audio from the owner's storage", async () => {

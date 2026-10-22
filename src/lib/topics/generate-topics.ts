@@ -16,6 +16,7 @@ import { recordings, transcriptions, users } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
@@ -351,6 +352,7 @@ export async function generateTopicsForTranscript(
     }
 
     const openai = new OpenAI({
+        fetch: providerFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,

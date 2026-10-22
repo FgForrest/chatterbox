@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import { upsertRateLimitBucket } from "@/db/queries/rate-limit";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
+import { configuredClientIp } from "@/lib/net/client-ip";
 
 export type RateLimitResult = {
     allowed: boolean;
@@ -49,6 +51,15 @@ export function getClientIp(request: Request): string {
         return "unknown";
     }
 
+    if (env.RATE_LIMIT_CLIENT_IP_HEADER) {
+        return (
+            configuredClientIp(
+                request.headers,
+                env.RATE_LIMIT_CLIENT_IP_HEADER,
+            ) ?? "unknown"
+        );
+    }
+
     const cloudflareIp = request.headers.get("cf-connecting-ip")?.trim();
     if (cloudflareIp) return cloudflareIp;
 
@@ -57,6 +68,29 @@ export function getClientIp(request: Request): string {
 
     const forwardedFor = request.headers.get("x-forwarded-for");
     return firstForwardedForIp(forwardedFor) ?? "unknown";
+}
+
+/** Reject a consumed bucket through the API error envelope with its retry time. */
+export function assertRateLimitAllowed(result: RateLimitResult): void {
+    if (result.allowed) return;
+    const retryAfter = Math.max(
+        1,
+        Math.ceil((result.resetAt.getTime() - Date.now()) / 1000),
+    );
+    throw new AppError(
+        ErrorCode.RATE_LIMITED,
+        `Too many attempts. Please wait ${retryAfter}s and try again.`,
+        429,
+        undefined,
+        {
+            "Retry-After": String(retryAfter),
+            "X-RateLimit-Limit": String(result.limit),
+            "X-RateLimit-Remaining": String(result.remaining),
+            "X-RateLimit-Reset": String(
+                Math.ceil(result.resetAt.getTime() / 1000),
+            ),
+        },
+    );
 }
 
 export async function consumeRateLimitBucket(

@@ -120,11 +120,8 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    // On hosted, the app process can't reach the user's machine — reject
-    // localhost / loopback baseUrls (e.g. LM Studio, Ollama) with a clear
-    // message. Self-host accepts everything.
     if (baseUrl !== undefined) {
-        const baseUrlCheck = validateAiBaseUrl(baseUrl, {
+        const baseUrlCheck = await validateAiBaseUrl(baseUrl, {
             isHosted: env.IS_HOSTED,
         });
         if (!baseUrlCheck.ok) {

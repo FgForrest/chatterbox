@@ -135,7 +135,7 @@ function filesystemTargetPath(targetPath: string): string {
  * Exports are configured in Private, or by the organization account in the
  * Organization tree, which is its own.
  */
-async function assertExportableFolder(userId: string, folderId: string) {
+export async function assertExportableFolder(userId: string, folderId: string) {
     const folders = await db
         .select({
             id: recordingFolders.id,
@@ -145,6 +145,9 @@ async function assertExportableFolder(userId: string, folderId: string) {
         .from(recordingFolders)
         .where(eq(recordingFolders.userId, userId));
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    if (!byId.has(folderId)) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
+    }
     let current = byId.get(folderId);
     while (current?.parentId) current = byId.get(current.parentId);
     if (current?.kind === "public" && (await isOrgAccount(userId))) {

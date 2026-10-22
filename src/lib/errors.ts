@@ -110,6 +110,7 @@ export class AppError extends Error {
         message: string,
         public statusCode: number = 500,
         public details?: Record<string, unknown>,
+        public headers?: Record<string, string>,
     ) {
         super(message);
         this.name = "AppError";
@@ -143,7 +144,10 @@ export function errorResponse(error: AppError | Error | unknown): NextResponse {
             code: app.code,
         });
     }
-    return NextResponse.json(app.toJSON(), { status: app.statusCode });
+    return NextResponse.json(app.toJSON(), {
+        status: app.statusCode,
+        headers: app.headers,
+    });
 }
 
 type RouteHandler<Ctx> = (
@@ -176,7 +180,10 @@ export function apiHandler<Ctx = unknown>(
                     method: request.method,
                 });
             }
-            return NextResponse.json(app.toJSON(), { status: app.statusCode });
+            return NextResponse.json(app.toJSON(), {
+                status: app.statusCode,
+                headers: app.headers,
+            });
         }
     };
 }

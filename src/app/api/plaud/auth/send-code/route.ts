@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import { plaudSendCode } from "@/lib/plaud/auth";
+import {
+    assertRateLimitAllowed,
+    consumeRateLimitBucket,
+} from "@/lib/rate-limit";
+
+const emailSchema = z.string().email();
 
 /**
  * POST /api/plaud/auth/send-code
@@ -39,6 +46,28 @@ export const POST = apiHandler(async (request: Request) => {
             { field: "email" },
         );
     }
+
+    if (!emailSchema.safeParse(trimmedEmail).success) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Invalid email address",
+            400,
+            { field: "email" },
+        );
+    }
+
+    assertRateLimitAllowed(
+        await consumeRateLimitBucket(`plaud:otp:send:user:${session.user.id}`, {
+            limit: 5,
+            windowMs: 10 * 60_000,
+        }),
+    );
+    assertRateLimitAllowed(
+        await consumeRateLimitBucket(
+            `plaud:otp:send:email:${trimmedEmail.toLowerCase()}`,
+            { limit: 3, windowMs: 10 * 60_000 },
+        ),
+    );
 
     const { token, apiBase } = await plaudSendCode(trimmedEmail);
 

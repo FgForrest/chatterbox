@@ -65,7 +65,11 @@ async function evaluateAdminGate(
     const raw = cookieStore.get(ADMIN_ELEVATED_COOKIE)?.value;
     const payload = verifyElevatedCookie(raw);
 
-    if (!payload || payload.userId !== session.user.id) {
+    if (
+        !payload ||
+        payload.userId !== session.user.id ||
+        payload.sessionId !== session.session.id
+    ) {
         if (opts.mutation) return null;
         return {
             mode: "reauth",

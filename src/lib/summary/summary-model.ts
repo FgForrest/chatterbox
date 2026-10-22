@@ -2,6 +2,7 @@ import { OpenAI } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
@@ -85,6 +86,7 @@ export async function summaryModelFor(
     const credentials = resolved.credential;
 
     const openai = new OpenAI({
+        fetch: providerFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,

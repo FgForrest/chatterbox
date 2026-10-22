@@ -2,7 +2,20 @@ import { type NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { decideHostnameGate } from "@/lib/hosted/hostname-gate";
 
-export function proxy(request: NextRequest) {
+function withSecurityHeaders(response: NextResponse, pathname: string) {
+    if (env.APP_URL?.startsWith("https://")) {
+        response.headers.set("Strict-Transport-Security", "max-age=31536000");
+    }
+    if (!pathname.startsWith("/api/")) {
+        response.headers.set(
+            "Content-Security-Policy",
+            "frame-ancestors 'self'",
+        );
+    }
+    return response;
+}
+
+function gatedResponse(request: NextRequest): NextResponse {
     const { pathname } = request.nextUrl;
 
     /* ── hostname gate (admin host isolation) ── */
@@ -41,6 +54,13 @@ export function proxy(request: NextRequest) {
     }
 
     return NextResponse.next();
+}
+
+export function proxy(request: NextRequest) {
+    return withSecurityHeaders(
+        gatedResponse(request),
+        request.nextUrl.pathname,
+    );
 }
 
 export const config = {
