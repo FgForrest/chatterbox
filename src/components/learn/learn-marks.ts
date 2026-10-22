@@ -8,6 +8,7 @@
 
 import { anchorMatches, wordsAt } from "@/lib/knowledge/correction-anchors";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
+import type { SpeakerProposalContext } from "@/lib/learn/output";
 import type { OverlayCorrection, RenderedSegment } from "@/lib/learn/render";
 
 type Target = { personId: string } | { entityId: string } | { newRef: string };
@@ -32,7 +33,8 @@ export type SpeakerGuessAnswer =
     | { personId: string }
     | { displayName: string; recordItemId?: string };
 
-export interface LearnSpeakerMark {
+export interface LearnSpeakerMark extends SpeakerProposalContext {
+    reason?: string;
     itemId: string;
     /** The transcript's label, as a speaker key (`speaker_0`). */
     label: string;
@@ -125,14 +127,18 @@ export function learnMarksFrom(
             (item.decision ?? (item.preTicked ? "accepted" : "rejected")) ===
             "accepted";
         if (item.kind === "speaker") {
-            const payload = item.payload as {
-                label: string;
-                personId: string | null;
-                newRef?: string;
-                evidenceMs?: number[];
-                onlyFirstName?: boolean;
-                recorder?: boolean;
-            };
+            const payload = item.payload as Partial<
+                SpeakerProposalContext & {
+                    reason?: string;
+                    label: string;
+                    personId: string | null;
+                    newRef?: string;
+                    evidenceMs?: number[];
+                    onlyFirstName?: boolean;
+                    recorder?: boolean;
+                }
+            >;
+            if (!payload.label) continue;
             // As the reviewer chose (someone known, or someone new), else
             // as Learn proposed; answered unknown, nobody is shown.
             const choice = item.choice ?? null;
@@ -175,6 +181,10 @@ export function learnMarksFrom(
                 evidenceMs: payload.evidenceMs ?? [],
                 onlyFirstName: payload.onlyFirstName === true,
                 recorder: payload.recorder === true,
+                ...(payload.source ? { source: payload.source } : {}),
+                ...(payload.guess
+                    ? { guess: payload.guess, reason: payload.reason }
+                    : {}),
             };
         } else if (item.kind === "correction") {
             const payload = item.payload as {

@@ -48,6 +48,14 @@ export function speakerKey(label: string): string {
     return label.trim().slice(0, MAX_SPEAKER_LABEL_LENGTH);
 }
 
+/**
+ * The id of the suggested row a Learn run writes for a guessed speaker, so
+ * finishing the review can find that row again.
+ */
+export function learnGuessRowId(runId: string, label: string): string {
+    return `${runId}:${speakerKey(label)}`;
+}
+
 /** Real labels in the order they first speak, as keys. */
 export function labelsFromTurns(turns: readonly LabelledTurn[]): string[] {
     const labels: string[] = [];

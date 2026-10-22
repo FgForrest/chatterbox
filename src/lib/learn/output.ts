@@ -87,8 +87,30 @@ const speakerSuggestion = z.strictObject({
     label,
     /** Null: nobody known; the review offers to pick or leave unknown. */
     personId: id.nullable(),
-    evidence: z.array(clock).min(1).max(3),
+    evidence: z.array(clock).max(3),
     reason,
+    rosterName: text.nullable().optional(),
+    guess: z
+        .strictObject({
+            confidence: z.number().min(0).max(1),
+            clues: z
+                .array(
+                    z.enum([
+                        "leadership",
+                        "almanac",
+                        "third_person",
+                        "address",
+                        "grammatical_gender",
+                        "elimination",
+                        "calendar",
+                        "meet",
+                    ]),
+                )
+                .min(1)
+                .max(8),
+        })
+        .nullable()
+        .optional(),
 });
 
 const correction = z.strictObject({
@@ -135,6 +157,15 @@ export const learnOutputSchema = z.strictObject({
 export type LearnOutput = z.infer<typeof learnOutputSchema>;
 export type LearnNewRecord = LearnOutput["newRecords"][number];
 export type LearnSpeaker = LearnOutput["speakers"][number];
+/** Confidence and non-biometric clues for an unconfirmed identity guess. */
+export type SpeakerGuess = NonNullable<LearnSpeaker["guess"]>;
+
+/** Provenance and guess metadata displayed with a speaker proposal. */
+export interface SpeakerProposalContext {
+    source?: "calendar" | "meet" | "transcript";
+    guess?: SpeakerGuess;
+}
+
 export type LearnCorrection = LearnOutput["corrections"][number];
 export type LearnFact = LearnOutput["facts"][number];
 export type LearnRelationPhrase = LearnOutput["relationPhrases"][number];
@@ -158,11 +189,19 @@ export function strictJsonSchema(schema: z.ZodType): Record<string, unknown> {
 function withoutDefaults(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(withoutDefaults);
     if (typeof value !== "object" || value === null) return value;
-    return Object.fromEntries(
+    const result = Object.fromEntries(
         Object.entries(value)
             .filter(([key]) => key !== "default" && key !== "learnText")
             .map(([key, inner]) => [key, withoutDefaults(inner)]),
     );
+    if (
+        result.type === "object" &&
+        result.properties &&
+        typeof result.properties === "object"
+    ) {
+        result.required = Object.keys(result.properties);
+    }
+    return result;
 }
 
 /** The JSON object in a reply: the whole text, or the first `{`..last `}`. */

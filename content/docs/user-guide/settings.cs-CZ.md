@@ -97,4 +97,6 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 - **API klíče** a **Webhooky**: propojení Klepny s dalšími nástroji.
 - **Google účet**: propojení Google účtu používaného pro [exporty na Google Drive](exports-backups-retention.md#to-google-drive).
 
+Přístup ke Kalendáři a Meet je volitelný a pouze pro čtení. Po připojení používá každý ruční i automatický běh Učení nad zvukem účastníky schůzky vlastníka pro návrhy mluvčích s **?**. Podporovaní poskytovatelé přepisu a následná oprava používají jejich jména pro správný pravopis. Návrhy potvrzujete Vy; nezaškrtnuté odhady zůstávají nepotvrzené. Kontrola ukazuje pozvání, účast v Meet, důkaz v přepisu nebo odhad s vysvětlením. Nepoužívají se e-maily účastníků ani hlasová data.
+
 Dále: [Klepna v Claude](claude.md)

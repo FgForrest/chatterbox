@@ -22,6 +22,14 @@ When the item's processing profile has **Run automatically** on for Learn, Learn
 
 If Learn finds nothing to review and **Correct the transcript after Learn** is on, the Learn step stays **Running** while it reads the transcript again and corrects misheard words. The summary says that it is waiting for this correction and starts by itself when the pass finishes. You can still click **Summarize** to start it immediately.
 
+## Calendar, Meet and speaker guesses
+
+With Calendar access connected, every audio Learn run, manual or automatic, uses the recording owner's meeting invitees. Meet participants are included when Meet access is granted. This also works after sharing with the Organization. Chatterbox selects the meeting with the strongest time overlap; close matches are left unresolved. On a manual run you can choose an event when several are offered.
+
+Learn combines those names with the transcript and known Almanac roles and facts to suggest likely speakers. Suggestions show **?** and their source: **Named in the transcript**, **Invited in Calendar**, **Joined in Google Meet**, or **Guess**, with a short reason. Guesses start unticked. Tick a correct guess once to accept it; finishing without ticking leaves the speaker unconfirmed. A new attendee can be added to the Almanac at the same time.
+
+Attendee names also help supported transcription providers and the correction pass spell names correctly. This does not name a speaker. Unconfirmed speaker guesses never appear as names in transcript text, summaries, exports or the API. No voice data, voiceprints or biometrics are used for identity; attendee emails are not requested.
+
 ## Reviewing
 
 The review has the same contents inline or in a window. **Review** on the widget and **Review Learn** in the workflow strip open that window explicitly:
@@ -58,7 +66,7 @@ When you share a recording or mail whose Learn review you finished for its curre
 ## Good to know
 
 - Names are recognized in their inflected forms in the transcript's language, with or without accents: "Šimákem" finds Šimák.
-- A speaker named only by a first name is marked as such. A first name two people in your Almanac share names neither of them.
+- A speaker named only by a first name is marked as such. A shared first name needs distinguishing evidence or an explicitly marked guess.
 - Saying a new record is one you already have teaches Chatterbox the misheard form as a nickname, so the next run recognizes it.
 - A processing profile can give Learn its own provider and model, for example a stronger one than the summary uses. See [Processing and profiles](processing-and-profiles.md).
 

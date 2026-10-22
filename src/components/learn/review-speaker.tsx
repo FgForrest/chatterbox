@@ -2,6 +2,7 @@
 
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
+import { useSpeakerSource } from "@/components/learn/speaker-source";
 import { useSpeakerAccent } from "@/components/people/speaker-accent-context";
 import type { SpeakerAccent } from "@/components/people/speaker-accents";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
@@ -11,6 +12,7 @@ import {
     usePlayAt,
 } from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
+import type { SpeakerProposalContext } from "@/lib/learn/output";
 
 /** Whom a speaker of the review is: someone, explicitly nobody, or not yet. */
 export type ReviewSpeakerPerson = { name: string } | { unknown: true } | null;
@@ -30,13 +32,15 @@ export function ReviewSpeaker({
     recorder,
     onlyFirstName,
     reason,
+    source,
+    guess,
     evidence,
     waits,
     onTick,
     onPick,
     onUnknown,
     nextTurn,
-}: {
+}: SpeakerProposalContext & {
     label: string;
     person: ReviewSpeakerPerson;
     accent: SpeakerAccent;
@@ -56,6 +60,7 @@ export function ReviewSpeaker({
     onUnknown: () => void;
     nextTurn?: () => PlayAtTarget | null;
 }) {
+    const speakerSource = useSpeakerSource();
     const play = usePlayAt();
     const i18n = useExtracted();
     const accent = useSpeakerAccent(label, fallbackAccent);
@@ -169,7 +174,8 @@ export function ReviewSpeaker({
                 )}
                 {waits}
                 <div className="text-xs text-muted-foreground">
-                    {reason} {evidence}
+                    <span>{speakerSource({ source, guess })}</span> {reason}{" "}
+                    {evidence}
                 </div>
             </div>
         </div>

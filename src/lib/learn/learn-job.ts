@@ -73,7 +73,7 @@ export function parseLearnJobPayload(
     }
     return {
         runId: raw.runId,
-        ...(raw.calendarEventId
+        ...(raw.calendarEventId !== undefined
             ? { calendarEventId: raw.calendarEventId }
             : {}),
     };
@@ -119,7 +119,7 @@ export async function startLearnRun(input: {
         );
     }
     if (
-        input.calendarEventId &&
+        input.calendarEventId !== undefined &&
         (trigger !== "manual" ||
             access.view !== "private" ||
             actorUserId !== access.ownerUserId)
@@ -289,6 +289,9 @@ export async function startLearnRun(input: {
                     ...(input.requestLocale
                         ? { requestLocale: input.requestLocale }
                         : {}),
+                    ...(input.calendarEventId !== undefined
+                        ? { calendarEventId: input.calendarEventId }
+                        : {}),
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },
@@ -374,7 +377,7 @@ export async function startLearnRun(input: {
                     },
                     payload: {
                         runId,
-                        ...(input.calendarEventId
+                        ...(input.calendarEventId !== undefined
                             ? { calendarEventId: input.calendarEventId }
                             : {}),
                     },
