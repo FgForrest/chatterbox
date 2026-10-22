@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -385,29 +386,11 @@ export function EntityActions({
                                     )}
                                 </DialogDescription>
                             </DialogHeader>
-                            <NativeSelect
+                            <MergeTargetPicker
                                 value={targetId}
-                                onChange={(event) =>
-                                    setTargetId(event.target.value)
-                                }
-                                aria-label={i18n("Merge target")}
-                                className="w-full"
-                            >
-                                <option value="">
-                                    {i18n("Choose a thing")}
-                                </option>
-                                {candidates.map((candidate) => (
-                                    <option
-                                        key={candidate.id}
-                                        value={candidate.id}
-                                    >
-                                        {candidate.name}
-                                        {candidate.scope === "org"
-                                            ? ` · ${i18n("Organization")}`
-                                            : ""}
-                                    </option>
-                                ))}
-                            </NativeSelect>
+                                onChange={setTargetId}
+                                candidates={candidates}
+                            />
                             {footer(
                                 () => void merge(),
                                 i18n("Merge"),

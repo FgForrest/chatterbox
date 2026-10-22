@@ -221,7 +221,7 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
                                                 {person.displayName}
                                             </span>
                                             {person.scope === "org" && (
-                                                <span className="mt-1 inline-block rounded-full border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+                                                <span className="mt-1 inline-block rounded-full border border-organization/20 bg-organization/5 px-1.5 py-0.5 text-[10px] leading-none text-organization">
                                                     {i18n("Organization")}
                                                 </span>
                                             )}

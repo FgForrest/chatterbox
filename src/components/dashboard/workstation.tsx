@@ -1723,7 +1723,7 @@ export function Workstation({
                                         </div>
                                         {newcomer &&
                                             selectedFolder?.scope === "org" && (
-                                                <div className="m-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-xs">
+                                                <div className="m-3 rounded-lg border border-organization/30 bg-organization/10 p-3 text-xs">
                                                     <p>
                                                         {i18n(
                                                             "You have no items of your own yet, so you start in the Organization. Your items will appear in Recent.",

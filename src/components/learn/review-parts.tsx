@@ -18,6 +18,7 @@ interface LearnReviewRowProps {
     checked?: boolean;
     checkboxLabel?: string;
     disabled?: boolean;
+    blockedReason?: string | null;
     onCheckedChange?: (checked: boolean) => void;
     children: ReactNode;
     className?: string;
@@ -29,10 +30,13 @@ export function LearnReviewRow({
     checked,
     checkboxLabel,
     disabled = false,
+    blockedReason,
     onCheckedChange,
     children,
     className,
 }: LearnReviewRowProps) {
+    const [showReason, setShowReason] = useState(false);
+    const reasonId = useId();
     return (
         <div
             className={cn(
@@ -44,14 +48,42 @@ export function LearnReviewRow({
             {onCheckedChange && (
                 <input
                     type="checkbox"
-                    className="mt-1 size-4 shrink-0"
+                    className="mt-1 size-4 shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                     checked={checked ?? false}
                     disabled={disabled}
+                    aria-disabled={blockedReason ? true : undefined}
+                    aria-describedby={
+                        showReason && blockedReason ? reasonId : undefined
+                    }
+                    title={blockedReason ?? undefined}
                     aria-label={checkboxLabel}
-                    onChange={(event) => onCheckedChange(event.target.checked)}
+                    onClick={() => {
+                        if (blockedReason) setShowReason(true);
+                    }}
+                    onKeyDown={(event) => {
+                        if (blockedReason && event.key === " ") {
+                            event.preventDefault();
+                            setShowReason(true);
+                        }
+                    }}
+                    onChange={(event) => {
+                        if (!blockedReason)
+                            onCheckedChange(event.target.checked);
+                    }}
                 />
             )}
-            <div className="min-w-0 flex-1">{children}</div>
+            <div className="min-w-0 flex-1">
+                {children}
+                {showReason && blockedReason && (
+                    <p
+                        id={reasonId}
+                        role="alert"
+                        className="mt-1 text-xs text-destructive"
+                    >
+                        {blockedReason}
+                    </p>
+                )}
+            </div>
         </div>
     );
 }

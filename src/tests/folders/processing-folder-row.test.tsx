@@ -191,6 +191,28 @@ describe("processing folder row", () => {
         expect(screen.queryByText("Change folders")).toBeNull();
     });
 
+    it("uses Organization colour on the profile and intended share, keeping Share now primary", () => {
+        if (!processing.profile) throw new Error("Expected a profile fixture");
+        renderWorkflow({
+            initialData: {
+                ...processing,
+                profile: { ...processing.profile, scope: "organization" },
+            },
+        });
+        const icons = screen.getAllByLabelText("Organization");
+        expect(icons).toHaveLength(2);
+        for (const icon of icons)
+            expect(icon.classList.contains("text-organization")).toBe(true);
+        const intent = screen.getByText("Organization › Sales").parentElement
+            ?.parentElement;
+        expect(intent?.classList.contains("border-organization/40")).toBe(true);
+        expect(intent?.classList.contains("bg-organization/5")).toBe(true);
+        const shareNow = screen
+            .getAllByRole("button", { name: "Share now" })
+            .find((button) => intent?.contains(button));
+        expect(shareNow?.classList.contains("bg-primary")).toBe(true);
+    });
+
     it("opens the profile menu offered by the categorize endpoint", async () => {
         vi.stubGlobal(
             "fetch",

@@ -348,7 +348,7 @@ export function CommandPalette({
                                             >
                                                 {entry.folder.scope ===
                                                 "org" ? (
-                                                    <Users className="size-4 text-blue-600" />
+                                                    <Users className="size-4 text-organization" />
                                                 ) : (
                                                     <Folder className="size-4 text-primary" />
                                                 )}

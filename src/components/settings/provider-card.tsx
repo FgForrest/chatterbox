@@ -382,7 +382,8 @@ export function ProviderCard({
             aria-label={title}
             className={cn(
                 "rounded-lg border bg-card/40 px-4 py-3.5",
-                organization && "border-primary/35 bg-primary/[0.025]",
+                organization &&
+                    "border-organization/35 bg-organization/[0.025]",
             )}
         >
             <div className="flex items-start justify-between gap-4 pb-3">
@@ -391,7 +392,7 @@ export function ProviderCard({
                         <Icon
                             className={cn(
                                 "size-4 text-muted-foreground",
-                                organization && "text-primary",
+                                organization && "text-organization",
                             )}
                             aria-hidden="true"
                             data-testid={`${scope}-provider-icon`}

@@ -138,12 +138,12 @@ export function LibraryLocationHeader({
         >
             <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
                 {item.kind === "public" ? (
-                    <Users className="size-4 shrink-0 text-blue-600" />
+                    <Users className="size-4 shrink-0 text-organization" />
                 ) : (
                     <Folder
                         className={
                             item.scope === "org"
-                                ? "size-4 shrink-0 text-blue-600"
+                                ? "size-4 shrink-0 text-organization"
                                 : "size-4 shrink-0 text-primary"
                         }
                     />
@@ -310,7 +310,7 @@ export function LibraryLocationHeader({
                                     <Folder
                                         className={
                                             item.scope === "org"
-                                                ? "size-3 text-blue-600"
+                                                ? "size-3 text-organization"
                                                 : "size-3 text-primary"
                                         }
                                     />

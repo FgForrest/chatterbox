@@ -60,6 +60,13 @@ function renderList() {
     );
 }
 
+globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+} as unknown as typeof ResizeObserver;
+Element.prototype.scrollIntoView ??= () => {};
+
 type Call = { url: string; method: string; body: unknown };
 
 describe("VocabularyList", () => {
@@ -179,14 +186,12 @@ describe("VocabularyList", () => {
                 name: "Merge into…",
             })[0] as HTMLElement,
         );
-        const select = screen.getByRole("combobox", { name: "Merge target" });
-        // Relations only, not itself.
         expect(
-            Array.from((select as HTMLSelectElement).options).map(
-                (option) => option.value,
-            ),
-        ).toEqual(["", "leads"]);
-        fireEvent.change(select, { target: { value: "leads" } });
+            screen
+                .getAllByRole("option")
+                .map((option) => option.getAttribute("data-value")),
+        ).toEqual(["leads"]);
+        fireEvent.click(screen.getByRole("option", { name: /leads/ }));
         expect(
             await screen.findByText(
                 "1 fact leads does not take will be deleted.",

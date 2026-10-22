@@ -206,6 +206,14 @@ export function LearnWidget({
     const sectionPrefix = useId();
     const [state, setState] = useState<ReviewState | null>(null);
     const [open, setOpen] = useState(false);
+    const [highlightedRecord, setHighlightedRecord] = useState<string | null>(
+        null,
+    );
+    useEffect(() => {
+        if (!highlightedRecord) return;
+        const timer = setTimeout(() => setHighlightedRecord(null), 1800);
+        return () => clearTimeout(timer);
+    }, [highlightedRecord]);
     const resolvedWidgetId = widgetId ?? `${kind}-learn-review-${recordingId}`;
     // The last run's results, once it is over.
     const [resultsOpen, setResultsOpen] = useState(false);
@@ -227,6 +235,7 @@ export function LearnWidget({
     // before it left (a name, then a type, changed at once).
     const queues = useRef(new Map<string, Promise<unknown>>());
     const versions = useRef(new Map<string, number>());
+    const draftChoices = useRef(new Map<string, ItemView["choice"]>());
     // Drafts refused: a Finish waiting for them stops, and shows the
     // review as it is now instead.
     const refused = useRef(0);
@@ -248,6 +257,9 @@ export function LearnWidget({
         const next = (await response.json()) as ReviewState;
         versions.current = new Map(
             (next.items ?? []).map((item) => [item.id, item.version]),
+        );
+        draftChoices.current = new Map(
+            (next.items ?? []).map((item) => [item.id, item.choice]),
         );
         const previousStatus = observedRun.current;
         observedRun.current = next.run?.status ?? null;
@@ -396,11 +408,17 @@ export function LearnWidget({
         (item.decision ?? (item.preTicked ? "accepted" : "rejected")) ===
         "accepted";
 
-    const decide = (
+    const draftChoice = (item: ItemView): Record<string, unknown> | null =>
+        draftChoices.current.has(item.id)
+            ? (draftChoices.current.get(item.id) ?? null)
+            : item.choice;
+
+    const saveDecision = (
         item: ItemView,
         decision: "accepted" | "rejected" | null,
-        choice: Record<string, unknown> | null = item.choice,
+        choice: Record<string, unknown> | null = draftChoice(item),
     ): Promise<void> => {
+        draftChoices.current.set(item.id, choice);
         setSaving((count) => count + 1);
         const before = queues.current.get(item.id) ?? Promise.resolve();
         // After the save before it, however that went: one failure must
@@ -417,6 +435,51 @@ export function LearnWidget({
                 queues.current.delete(item.id);
             }
         });
+    };
+
+    const decide = (
+        item: ItemView,
+        decision: "accepted" | "rejected" | null,
+        choice: Record<string, unknown> | null = draftChoice(item),
+        acceptedRecords = new Set<string>(),
+    ): Promise<void> => {
+        const changes: Promise<void>[] = [];
+        if (decision === "accepted" && item.kind !== "relation_phrase") {
+            const needed = requiredRecords({ ...item, choice });
+            if (
+                needed.some(
+                    (record) => !record || record.decision === "rejected",
+                )
+            ) {
+                return Promise.resolve();
+            }
+            for (const record of needed) {
+                if (
+                    record &&
+                    !ticked(record) &&
+                    !acceptedRecords.has(record.id)
+                ) {
+                    acceptedRecords.add(record.id);
+                    changes.push(saveDecision(record, "accepted"));
+                }
+            }
+        }
+        if (item.kind === "new_record" && decision !== "accepted") {
+            const ref = String(item.payload.ref);
+            for (const other of state?.items ?? []) {
+                if (
+                    other.kind !== "relation_phrase" &&
+                    (ticked(other) || queues.current.has(other.id)) &&
+                    requiredRecords(other).some(
+                        (record) => record?.payload.ref === ref,
+                    )
+                ) {
+                    changes.push(saveDecision(other, "rejected"));
+                }
+            }
+        }
+        changes.push(saveDecision(item, decision, choice));
+        return Promise.all(changes).then(() => undefined);
     };
 
     const keep = async (
@@ -762,14 +825,6 @@ export function LearnWidget({
     const finished = status === "finished";
     const failed = status === "failed";
     const count = state?.items?.length ?? 0;
-    const selected = (state?.items ?? []).filter(ticked).length;
-    const finishFooter = useLearnFinishFooter({
-        selected,
-        total: count,
-        busy: finishing || saving > 0,
-        onFinish: () => void finish(),
-    });
-    if (!state?.available && !ready && !finished && !failed) return null;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
     const pending = status === "queued" || status === "running";
     const working = running || pending;
@@ -780,22 +835,19 @@ export function LearnWidget({
         <PlayAtButton ms={ms} withoutAudio="label" />
     );
 
-    /** The new records an item refers to that are not ticked, by name. */
-    const waitingFor = (item: ItemView): string[] => {
+    function requiredRecords(item: ItemView): (ItemView | undefined)[] {
         const refs =
-            item.kind === "speaker"
-                ? // A speaker the reviewer named otherwise needs no record.
-                  item.choice
-                    ? []
-                    : refsIn(item.payload)
-                : refsIn(item.payload);
-        return refs
-            .filter((ref) => {
-                const record = records.get(ref);
-                return !record || !ticked(record);
-            })
-            .map(recordName);
-    };
+            item.kind === "speaker" && item.choice ? [] : refsIn(item.payload);
+        return refs.map((ref) => records.get(ref));
+    }
+
+    const waitingFor = (item: ItemView) =>
+        requiredRecords(item).filter((record) => !record || !ticked(record));
+
+    const unavailableRecords = (item: ItemView) =>
+        requiredRecords(item).some(
+            (record) => !record || record.decision === "rejected",
+        );
 
     /**
      * Whom a speaker item names: the reviewer's choice, else whom Learn
@@ -844,14 +896,12 @@ export function LearnWidget({
             case "new_record":
                 return item.decision === "rejected";
             case "speaker":
-                return (
-                    speakerPerson(item) === null || waitingFor(item).length > 0
-                );
+                return speakerPerson(item) === null || unavailableRecords(item);
             case "correction":
-                return waitingFor(item).length > 0;
+                return unavailableRecords(item);
             case "known_fact":
             case "fact":
-                return waitsForSpeaker(item) || waitingFor(item).length > 0;
+                return waitsForSpeaker(item) || unavailableRecords(item);
             default:
                 // Relation phrases are decided by their buttons.
                 return true;
@@ -868,10 +918,12 @@ export function LearnWidget({
     /** A group's tick-all: ticks every item that can be, or unticks them. */
     const groupToggle = (items: ItemView[], group: string): GroupToggle => {
         const open = items.filter((item) => !blockedItem(item));
-        const all = open.length > 0 && open.every(ticked);
+        const selected = (item: ItemView) =>
+            ticked(item) && waitingFor(item).length === 0;
+        const all = open.length > 0 && open.every(selected);
         let state: GroupToggle["state"] = "none";
         if (all) state = "all";
-        else if (open.some(ticked)) state = "some";
+        else if (open.some(selected)) state = "some";
         return {
             state,
             disabled: finishing || open.length === 0,
@@ -879,9 +931,15 @@ export function LearnWidget({
                 ? i18n("Untick all: {group}", { group })
                 : i18n("Tick all: {group}", { group }),
             onToggle: () => {
+                const acceptedRecords = new Set<string>();
                 for (const item of open) {
-                    if (ticked(item) !== all) continue;
-                    void decide(item, all ? untickedAs(item) : "accepted");
+                    if (selected(item) !== all) continue;
+                    void decide(
+                        item,
+                        all ? untickedAs(item) : "accepted",
+                        undefined,
+                        acceptedRecords,
+                    );
                 }
             },
         };
@@ -900,24 +958,103 @@ export function LearnWidget({
         );
     };
 
-    /** "waits for …", under an item a new record holds up. */
+    const recordBlockReason = (item: ItemView): string | null => {
+        const needed = requiredRecords(item);
+        if (needed.some((record) => !record)) {
+            return i18n(
+                "A required record is unavailable. Leave this item unticked.",
+            );
+        }
+        const rejected = needed.filter(
+            (record) => record?.decision === "rejected",
+        );
+        if (rejected.length === 0) return null;
+        return i18n(
+            "{names} is rejected. Turn off “Never propose it” for that record, or leave this item unticked.",
+            {
+                names: rejected
+                    .map((record) => recordName(String(record?.payload.ref)))
+                    .join(", "),
+            },
+        );
+    };
+
+    const blockedReason = (item: ItemView): string | null => {
+        if (waitsForSpeaker(item)) {
+            return i18n(
+                "Name and tick {label} in Speakers first, or leave this item unticked.",
+                {
+                    label: speakerLabel(item.dependsOnLabel ?? ""),
+                },
+            );
+        }
+        return recordBlockReason(item);
+    };
+
     const waitsNote = (item: ItemView) => {
-        const names = waitingFor(item);
-        if (names.length === 0) return null;
+        const needed = waitingFor(item);
+        if (needed.length === 0) return null;
         return (
             <div className="text-xs text-muted-foreground">
-                {item.kind === "relation_phrase"
-                    ? // The relation is made anyway; only its first fact
-                      // needs the record.
-                      i18n("its first fact waits for {names} to be added", {
-                          names: names.join(", "),
-                      })
-                    : i18n("waits for {names} to be added", {
-                          names: names.join(", "),
-                      })}
+                {needed.some((record) => !record) && (
+                    <div>{recordBlockReason(item)}</div>
+                )}
+                {needed.map((record) => {
+                    if (!record) return null;
+                    const ref = String(record.payload.ref);
+                    const values = {
+                        name: recordName(ref),
+                        record: (chunks: ReactNode) => (
+                            <button
+                                type="button"
+                                className="underline underline-offset-2 hover:text-foreground"
+                                onClick={() => {
+                                    scrollToSection(
+                                        `${sectionPrefix}-record-${record.id}`,
+                                    );
+                                    setHighlightedRecord(record.id);
+                                }}
+                            >
+                                {chunks}
+                            </button>
+                        ),
+                    };
+                    let note: ReactNode;
+                    if (record.decision === "rejected") {
+                        note = i18n.rich(
+                            "<record>{name}</record> is rejected. Turn off “Never propose it” for that record, or leave this item unticked.",
+                            values,
+                        );
+                    } else if (item.kind === "relation_phrase") {
+                        note = i18n.rich(
+                            "its first fact waits for <record>{name}</record> to be added",
+                            values,
+                        );
+                    } else {
+                        note = i18n.rich(
+                            "also adds <record>{name}</record>",
+                            values,
+                        );
+                    }
+                    return <div key={ref}>{note}</div>;
+                })}
             </div>
         );
     };
+
+    const selected = (state?.items ?? []).filter(
+        (item) =>
+            ticked(item) &&
+            (item.kind === "relation_phrase" ||
+                (!blockedItem(item) && waitingFor(item).length === 0)),
+    ).length;
+    const finishFooter = useLearnFinishFooter({
+        selected,
+        total: count,
+        busy: finishing || saving > 0,
+        onFinish: () => void finish(),
+    });
+    if (!state?.available && !ready && !finished && !failed) return null;
 
     const startLearn = () => {
         void learn();
@@ -1107,7 +1244,8 @@ export function LearnWidget({
             selected: items.filter(
                 (item) =>
                     ticked(item) &&
-                    (item.kind === "relation_phrase" || !blockedItem(item)),
+                    (item.kind === "relation_phrase" ||
+                        (!blockedItem(item) && waitingFor(item).length === 0)),
             ).length,
             sticky: frame === "dialog",
             toggle: key === "phrases" ? undefined : groupToggle(items, title),
@@ -1284,7 +1422,11 @@ export function LearnWidget({
                                                 label={payload.label}
                                                 person={person}
                                                 accent={accentOf(payload.label)}
-                                                ticked={ticked(item)}
+                                                ticked={
+                                                    ticked(item) &&
+                                                    waitingFor(item).length ===
+                                                        0
+                                                }
                                                 blocked={blockedItem(item)}
                                                 disabled={finishing}
                                                 recorder={Boolean(
@@ -1349,56 +1491,69 @@ export function LearnWidget({
                             {groups.records.length > 0 && (
                                 <ReviewSection {...sectionProps("records")}>
                                     {groups.records.map((item) => (
-                                        <NewRecordItem
+                                        <div
                                             key={item.id}
-                                            payload={newRecordView(item)}
-                                            choice={item.choice}
-                                            ticked={ticked(item)}
-                                            rejected={
-                                                item.decision === "rejected"
-                                            }
-                                            disabled={finishing}
-                                            names={state?.names ?? {}}
-                                            entityTypes={
-                                                state?.entityTypes ?? []
-                                            }
-                                            quote={audioWords(
-                                                newRecordView(item)
-                                                    .evidenceMs[0],
+                                            id={`${sectionPrefix}-record-${item.id}`}
+                                            className={cn(
+                                                "scroll-mt-24 rounded-lg transition-shadow motion-reduce:transition-none",
+                                                highlightedRecord === item.id &&
+                                                    "ring-2 ring-primary",
                                             )}
-                                            evidence={
-                                                kind === "mail" ? (
-                                                    <LearnEvidence
-                                                        quote={mailWords(
-                                                            (
-                                                                item.payload as unknown as MailNewRecordPayload
-                                                            ).evidence[0],
-                                                        )}
-                                                    >
-                                                        <div className="text-xs text-muted-foreground">
-                                                            {(
-                                                                item.payload as unknown as MailNewRecordPayload
-                                                            ).address ??
+                                        >
+                                            <NewRecordItem
+                                                payload={newRecordView(item)}
+                                                choice={item.choice}
+                                                ticked={ticked(item)}
+                                                rejected={
+                                                    item.decision === "rejected"
+                                                }
+                                                disabled={finishing}
+                                                names={state?.names ?? {}}
+                                                entityTypes={
+                                                    state?.entityTypes ?? []
+                                                }
+                                                quote={audioWords(
+                                                    newRecordView(item)
+                                                        .evidenceMs[0],
+                                                )}
+                                                evidence={
+                                                    kind === "mail" ? (
+                                                        <LearnEvidence
+                                                            quote={mailWords(
                                                                 (
                                                                     item.payload as unknown as MailNewRecordPayload
-                                                                ).reason}
-                                                        </div>
-                                                    </LearnEvidence>
-                                                ) : undefined
-                                            }
-                                            onDecide={(decision, choice) =>
-                                                decide(item, decision, choice)
-                                            }
-                                            onLinked={async (choice) => {
-                                                await decide(
-                                                    item,
-                                                    "accepted",
-                                                    choice,
-                                                );
-                                                // Names the record chosen.
-                                                await load();
-                                            }}
-                                        />
+                                                                ).evidence[0],
+                                                            )}
+                                                        >
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {(
+                                                                    item.payload as unknown as MailNewRecordPayload
+                                                                ).address ??
+                                                                    (
+                                                                        item.payload as unknown as MailNewRecordPayload
+                                                                    ).reason}
+                                                            </div>
+                                                        </LearnEvidence>
+                                                    ) : undefined
+                                                }
+                                                onDecide={(decision, choice) =>
+                                                    decide(
+                                                        item,
+                                                        decision,
+                                                        choice,
+                                                    )
+                                                }
+                                                onLinked={async (choice) => {
+                                                    await decide(
+                                                        item,
+                                                        "accepted",
+                                                        choice,
+                                                    );
+                                                    // Names the record chosen.
+                                                    await load();
+                                                }}
+                                            />
+                                        </div>
                                     ))}
                                 </ReviewSection>
                             )}
@@ -1423,12 +1578,14 @@ export function LearnWidget({
                                                     kind="correction"
                                                     checked={
                                                         ticked(item) &&
-                                                        !blockedItem(item)
+                                                        !blockedItem(item) &&
+                                                        waitingFor(item)
+                                                            .length === 0
                                                     }
-                                                    disabled={
-                                                        blockedItem(item) ||
-                                                        finishing
-                                                    }
+                                                    disabled={finishing}
+                                                    blockedReason={blockedReason(
+                                                        item,
+                                                    )}
                                                     checkboxLabel={i18n(
                                                         "Correct {heard}",
                                                         {
@@ -1534,12 +1691,16 @@ export function LearnWidget({
                                                         }
                                                         checked={
                                                             ticked(item) &&
-                                                            !blockedItem(item)
+                                                            !blockedItem(
+                                                                item,
+                                                            ) &&
+                                                            waitingFor(item)
+                                                                .length === 0
                                                         }
-                                                        disabled={
-                                                            blockedItem(item) ||
-                                                            finishing
-                                                        }
+                                                        disabled={finishing}
+                                                        blockedReason={blockedReason(
+                                                            item,
+                                                        )}
                                                         checkboxLabel={`${nameOf(payload.subject)} — ${relation} — ${nameOf(payload.object)}`}
                                                         onCheckedChange={(
                                                             checked,
