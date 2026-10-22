@@ -304,6 +304,25 @@ describe("recording row folder metadata", () => {
         expect(row().textContent).not.toContain("Unrelated words. ".repeat(20));
     });
 
+    it("strips bracketed labels and timecodes from the local search excerpt", () => {
+        showList({
+            transcriptions: new Map([
+                [
+                    recording.id,
+                    {
+                        text: "[Speaker 1] [00:01:02] The Talvori plan at 12:30 holds.",
+                    },
+                ],
+            ]),
+        });
+        fireEvent.change(
+            screen.getByRole("textbox", { name: "Search recordings" }),
+            { target: { value: "Talvori" } },
+        );
+        const excerpt = within(row()).getByText(/The Talvori plan/);
+        expect(excerpt.textContent).toBe("The Talvori plan at holds.");
+    });
+
     it("uses only Organization assignments in the Organization view", () => {
         showList({
             searchView: "org",

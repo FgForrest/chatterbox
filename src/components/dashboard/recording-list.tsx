@@ -117,7 +117,14 @@ function searchHitSnippet(
         endOfMatch + 80,
         { start: startOfMatch, end: endOfMatch },
     );
-    return `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ").trim()}${end < text.length ? "…" : ""}`;
+    const excerpt = text
+        .slice(start, end)
+        .replace(/\[[^\]]+\]/g, " ")
+        .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!excerpt) return null;
+    return `${start > 0 ? "…" : ""}${excerpt}${end < text.length ? "…" : ""}`;
 }
 
 export function RecordingList({
