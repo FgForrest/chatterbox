@@ -426,7 +426,16 @@ export function collectRecords(adrDir: string): {
 }
 
 function escapeCell(value: string): string {
-    return value.replace(/\|/g, "\\|");
+    return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
+function readIfExists(path: string): string | null {
+    try {
+        return readFileSync(path, "utf8");
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+    }
 }
 
 /** Renders the index table, newest record first. */
@@ -473,8 +482,9 @@ export function replaceIndex(readme: string, table: string): string | null {
 
 /** The GitHub base URL from package.json's `repository`, or null. */
 export function repositoryUrl(packageJsonPath: string): string | null {
-    if (!existsSync(packageJsonPath)) return null;
-    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+    const text = readIfExists(packageJsonPath);
+    if (text === null) return null;
+    const pkg = JSON.parse(text) as {
         repository?: string | { url?: string };
     };
     const raw =
@@ -494,9 +504,7 @@ export function run(options: {
 }): RunResult {
     const { records, problems } = collectRecords(options.adrDir);
     const readmePath = join(options.adrDir, "README.md");
-    const readme = existsSync(readmePath)
-        ? readFileSync(readmePath, "utf8")
-        : "";
+    const readme = readIfExists(readmePath) ?? "";
     const next = replaceIndex(readme, renderIndex(records, options.repoUrl));
     if (next === null) {
         problems.push({

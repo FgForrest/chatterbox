@@ -82,7 +82,7 @@ describe("generate-adr-index", () => {
     it("renders records newest first with issue and PR links", () => {
         writeRecord("2026-07-24-claim-jobs.md");
         writeRecord("2026-08-01-fair-share.md", {
-            title: "Cap jobs per user | not globally",
+            title: "Cap jobs per user | not globally \\ per process",
             date: "2026-08-01",
             updated: "2026-08-02 09:00",
             issues: "[]",
@@ -99,7 +99,7 @@ describe("generate-adr-index", () => {
             .split("\n")
             .filter((line) => line.startsWith("| 2026"));
         expect(rows).toEqual([
-            `| 2026-08-01 | [Cap jobs per user \\| not globally](2026-08-01-fair-share.md) | infrastructure | accepted | [PR #20](${REPO}/pull/20), [PR #21](${REPO}/pull/21) |`,
+            `| 2026-08-01 | [Cap jobs per user \\| not globally \\\\ per process](2026-08-01-fair-share.md) | infrastructure | accepted | [PR #20](${REPO}/pull/20), [PR #21](${REPO}/pull/21) |`,
             `| 2026-07-24 | [Claim jobs in Postgres](2026-07-24-claim-jobs.md) | infrastructure | accepted | [#12](${REPO}/issues/12), [PR #13](${REPO}/pull/13) |`,
         ]);
         expect(run({ adrDir: dir, repoUrl: REPO, check: true }).stale).toBe(
