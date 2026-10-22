@@ -164,6 +164,7 @@ interface SummarySettings {
     summaryPrompt?: unknown;
     aiOutputLanguage?: string | null;
     detectedLanguage?: string | null;
+    confirmedLanguage?: string | null;
     defaultTranscriptionLanguage?: string | null;
     summaryMultiPass?: boolean;
     summaryMultiPassRounds?: number;
@@ -176,7 +177,14 @@ async function summarize(
 ) {
     profileLegacy.current = settings;
     selectResults.set(recordings, [
-        [{ id: "rec-1", userId: "user-1", deletedAt: null }],
+        [
+            {
+                id: "rec-1",
+                userId: "user-1",
+                deletedAt: null,
+                confirmedLanguage: settings.confirmedLanguage ?? null,
+            },
+        ],
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
@@ -402,6 +410,44 @@ describe("output language under auto", () => {
         expect(system).toContain("every heading, label, and example wording");
     });
 
+    it.each([
+        undefined,
+        "meeting-notes",
+    ])("uses confirmed language on profile and legacy summary paths (%s)", async (presetId) => {
+        await summarize(
+            {
+                detectedLanguage: "hun",
+                confirmedLanguage: "cs",
+                summaryMultiPass: true,
+                summaryMultiPassRounds: 2,
+            },
+            presetId,
+        );
+        for (const system of systemMessages())
+            expect(system).toContain(
+                "Write all natural-language output in Czech",
+            );
+    });
+
+    it("lets explicit output override confirmed language", async () => {
+        await summarize({
+            detectedLanguage: "hun",
+            confirmedLanguage: "cs",
+            aiOutputLanguage: "en",
+        });
+        expect(systemMessages()[0]).toContain(
+            "Write all natural-language output in English",
+        );
+    });
+
+    it("does not infer auto output from a provider language", async () => {
+        await summarize({ detectedLanguage: "hun" });
+        expect(systemMessages()[0]).toContain(
+            "the language the transcription is predominantly spoken in",
+        );
+        expect(systemMessages()[0]).not.toContain("output in Hungarian");
+    });
+
     it("treats an explicit auto the same as no preference", async () => {
         await summarize({ aiOutputLanguage: "auto" });
         expect(systemMessages()[0]).toContain(
@@ -484,7 +530,7 @@ describe("output language under auto", () => {
         expect(userMessages()[0]).toContain("skutečně probíraných témat");
     });
 
-    it("keeps account-language prompt wording with a generic directive when detection returned none", async () => {
+    it("keeps output auto and uses the account language for prompt wording when detection returned none", async () => {
         await summarize({ defaultTranscriptionLanguage: "cs" });
         expect(systemMessages()[0]).toContain(
             "the language the transcription is predominantly spoken in",

@@ -8,13 +8,12 @@ import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { ProfileSettings } from "@/lib/profiles/settings";
+import { recordingOutputLanguage } from "@/lib/recordings/language";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import type { RecordingView } from "@/lib/sharing/view";
 import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { buildChatCompletionParams } from "./chat-completion-params";
-import {
-    explicitAiOutputLanguage,
-    getAiOutputLanguageDirective,
-} from "./summary-presets";
+import { getAiOutputLanguageDirective } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
 function isAbsentProviderSelection(error: unknown): boolean {
@@ -63,8 +62,14 @@ export async function generateTitleFromTranscription(
         .from(users)
         .where(eq(users.id, ownerUserId))
         .limit(1);
-    const outputLanguage = explicitAiOutputLanguage(
+    const confirmedLanguage = await readConfirmedLanguage(
+        ownerUserId,
+        recordingId,
+    );
+    contentLanguage = confirmedLanguage ?? contentLanguage;
+    const outputLanguage = recordingOutputLanguage(
         settings.steps.summary.outputLanguage,
+        confirmedLanguage,
     );
     const promptTemplate = resolveTitlePrompt({
         settings: settings.steps.title,

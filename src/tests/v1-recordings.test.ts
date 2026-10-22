@@ -30,6 +30,7 @@ const recording = {
     deviceSn: "SN-1",
     plaudFileId: "plaud-1",
     kind: "audio" as const,
+    confirmedLanguage: "cs",
     title: "encrypted:Planning Call",
     duration: 120000,
     occurredAt: new Date("2026-05-06T11:00:00.000Z"),
@@ -176,6 +177,7 @@ describe("v1 recordings", () => {
             ),
         ).toEqual({
             id: "rec-1",
+            confirmed_language: "cs",
             title: "Planning Call",
             created_at: now.toISOString(),
             updated_at: now.toISOString(),

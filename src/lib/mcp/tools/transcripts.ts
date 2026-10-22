@@ -153,6 +153,8 @@ const getTranscript = defineTool({
         recording: recordingRef,
         has_transcript: z.boolean(),
         language: z.string().nullable(),
+        confirmed_language: z.string().nullable(),
+        detected_language: z.string().nullable(),
         timed: z.boolean(),
         turns: z.array(turnItem),
         next_cursor: z.string().nullable(),
@@ -186,6 +188,8 @@ const getTranscript = defineTool({
                 ...head,
                 has_transcript: false,
                 language: null,
+                confirmed_language: null,
+                detected_language: null,
                 timed: false,
                 turns: [],
                 next_cursor: null,
@@ -197,6 +201,8 @@ const getTranscript = defineTool({
             ...head,
             has_transcript: true,
             language: transcript.language,
+            confirmed_language: transcript.confirmedLanguage ?? null,
+            detected_language: transcript.detectedLanguage ?? null,
             timed: transcript.timed,
             turns: page.turns.map((turn) => ({
                 speaker: name(turn.label),
@@ -242,7 +248,12 @@ function transcriptMatcher(
         try {
             transcript = await loadReadableTranscript(
                 caller,
-                { id: row.id, ownerUserId: row.userId, view },
+                {
+                    id: row.id,
+                    ownerUserId: row.userId,
+                    view,
+                    confirmedLanguage: row.confirmedLanguage,
+                },
                 { preferredSource },
             );
         } catch (error) {

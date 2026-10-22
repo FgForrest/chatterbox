@@ -769,6 +769,7 @@ export const recordings = pgTable(
         downloadedAt: timestamp("downloaded_at"),
         // Version from Plaud API (for detecting updates)
         plaudVersion: varchar("plaud_version", { length: 50 }).notNull(),
+        confirmedLanguage: varchar("confirmed_language", { length: 2 }),
         // Metadata
         timezone: integer("timezone"),
         zonemins: integer("zonemins"),
@@ -2511,6 +2512,7 @@ export const learnReviewItems = pgTable(
                 | "fact"
                 | "relation_phrase"
                 | "new_record"
+                | "language"
             >()
             .notNull(),
         fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
@@ -2540,7 +2542,7 @@ export const learnReviewItems = pgTable(
         userIdx: index("learn_review_items_user_id_idx").on(table.userId),
         kindCheck: check(
             "learn_review_items_kind_check",
-            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record')`,
+            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record', 'language')`,
         ),
     }),
 );

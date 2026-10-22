@@ -68,6 +68,7 @@ import {
     loadItemProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
@@ -273,10 +274,13 @@ async function runPass({
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
+        const contentLanguage =
+            (await readConfirmedLanguage(pass.userId, pass.recordingId)) ??
+            transcript.detectedLanguage;
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             pass,
-            transcript.detectedLanguage,
+            contentLanguage,
         );
         reportProgress({ phase: "reading" });
         const roster = await resolveMeetingRoster({
@@ -296,7 +300,7 @@ async function runPass({
             chat,
             token: issueCorrectionPassToken(pass.id),
             turns,
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
             reviewLocale,
             almanac,
             corrected,

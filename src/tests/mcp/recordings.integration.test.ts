@@ -113,6 +113,7 @@ interface RecordingOut {
     title: string;
     recorded_at: string;
     duration_ms: number;
+    confirmed_language: string | null;
     view: "private" | "org";
     owner_is_me: boolean;
     speakers: string[];
@@ -451,6 +452,7 @@ describeWithDatabase("MCP recording tools (PostgreSQL)", () => {
                 title: "Pricing call",
                 recorded_at: "2026-09-05T10:00:00.000Z",
                 duration_ms: 60_000,
+                confirmed_language: null,
                 view: "private",
                 owner_is_me: true,
                 speakers: ["Petra Malá"],

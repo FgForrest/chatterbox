@@ -5,6 +5,7 @@ description: Nechte Klepna navrhnout jména mluvčích, opravy a fakta a poté j
 
 Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje nalezené položky:
 
+- **jazyk přepisu**, pokud Učení s vysokou jistotou rozpozná jiný jazyk než poskytovatel přepisu,
 - **jména mluvčích** pro ty, kteří zatím nebyli pojmenováni,
 - **opravy** jmen, která přepis nesprávně rozpoznal („Path finder“ místo Pathfinder),
 - **nové osoby a věci**, které stojí za to přidat do Almanachu,
@@ -40,6 +41,7 @@ Obsah kontroly je stejný, ať je vložený v položce, nebo otevřený v okně.
 
 ![Přehled návrhů Učení](images/learn-review.png)
 
+- **Jazyk přepisu**: jazyk rozpoznaný Učením je předvybraný. Můžete jej ponechat, zachovat jazyk rozpoznaný poskytovatelem nebo vybrat jiný ze seznamu. **Dokončit kontrolu** potvrdí volbu pro tuto nahrávku v soukromém pohledu i v pohledu Organizace. Při shodě nebo nejistotě se jazyk nenabízí ani neukládá. Kontrola platí pro zvukové nahrávky; zacházení s jazykem pošty se nemění.
 - **Mluvčí**: koho Učení považuje za každého nepojmenovaného mluvčího a proč. **▷** přehraje důkaz. **Někdo jiný…** vybere jinou osobu, **Neznámý** označí mluvčího za neznámého.
 - **Nové v Almanachu**: osoby a věci, které Učení rozpoznalo, ale Almanach je nezná. Začínají nezaškrtnuté. Opravte jméno nebo typ před zaškrtnutím, zvolte **Je to něco známého…**, pokud záznam už máte pod jiným jménem, nebo **Nikdy nenavrhovat**, pokud jej nechcete navrhovat v žádné nahrávce.
 - **Opravy**: špatně rozpoznaná jména, četnost a výskyt. Tyto návrhy jsou předem zaškrtnuté.

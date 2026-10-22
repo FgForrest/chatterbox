@@ -12,6 +12,7 @@ export interface AudioContentSource {
     turns?: unknown;
     revision: number;
     detectedLanguage: string | null;
+    confirmedLanguage?: string | null;
 }
 
 /**
@@ -37,7 +38,7 @@ export function audioContentFrom(source: AudioContentSource): ItemContent {
         kind: "audio",
         sourceId: source.id,
         revision: source.revision,
-        language: source.detectedLanguage,
+        language: source.confirmedLanguage ?? source.detectedLanguage,
         participants: refs.map((ref) => ({
             ref,
             roles: ["speaker"],

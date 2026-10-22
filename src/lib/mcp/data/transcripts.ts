@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { transcriptions } from "@/db/schema";
+import { recordings, transcriptions } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError } from "@/lib/errors";
 import { buildNameResolver } from "@/lib/knowledge/attribution";
@@ -37,6 +37,8 @@ export interface ReadableTranscript {
     /** The view the caller reads it in. */
     view: RecordingView;
     language: string | null;
+    confirmedLanguage?: string | null;
+    detectedLanguage?: string | null;
     /** Whether the turns carry timings (stored turns, not parsed text). */
     timed: boolean;
     turns: ReadableTurn[];
@@ -47,6 +49,7 @@ export interface TranscriptRecording {
     id: string;
     ownerUserId: string;
     view: RecordingView;
+    confirmedLanguage?: string | null;
 }
 
 /**
@@ -92,6 +95,20 @@ export async function loadReadableTranscript(
     recording: TranscriptRecording,
     options: { preferredSource?: string } = {},
 ): Promise<ReadableTranscript | null> {
+    let confirmedLanguage = recording.confirmedLanguage;
+    if (confirmedLanguage === undefined) {
+        const [metadata] = await db
+            .select({ confirmedLanguage: recordings.confirmedLanguage })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recording.id),
+                    eq(recordings.userId, recording.ownerUserId),
+                ),
+            )
+            .limit(1);
+        confirmedLanguage = metadata?.confirmedLanguage ?? null;
+    }
     const rows = await db
         .select()
         .from(transcriptions)
@@ -112,6 +129,8 @@ export async function loadReadableTranscript(
         ownerUserId: recording.ownerUserId,
         view: recording.view,
         language: primary.detectedLanguage,
+        confirmedLanguage,
+        detectedLanguage: primary.detectedLanguage,
     };
 
     const stored = readTranscriptTurns(primary);

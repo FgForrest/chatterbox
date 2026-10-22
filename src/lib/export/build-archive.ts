@@ -76,6 +76,7 @@ export interface ArchiveResult {
 
 interface ManifestRecording {
     id: string;
+    confirmedLanguage: string | null;
     /** Whose recording it is: in the Organization's archive only. */
     owner?: { id: string; name: string | null; email: string };
     filename: string;
@@ -425,6 +426,7 @@ export async function buildAndUploadExportArchive(input: {
         const folder = folderName(recording);
         const entry: ManifestRecording = {
             id: recording.id,
+            confirmedLanguage: recording.confirmedLanguage ?? null,
             ...(scope.kind === "organization"
                 ? {
                       owner: {

@@ -4,6 +4,7 @@ import {
     chatterItems,
     mailContents,
     mailParticipants,
+    recordings,
     transcriptions,
 } from "@/db/schema";
 import { audioContentFrom } from "@/lib/content/audio-content";
@@ -132,9 +133,17 @@ async function readAudioContent(
             turns: transcriptions.turns,
             revision: transcriptions.revision,
             detectedLanguage: transcriptions.detectedLanguage,
+            confirmedLanguage: recordings.confirmedLanguage,
             source: transcriptions.source,
         })
         .from(transcriptions)
+        .innerJoin(
+            recordings,
+            and(
+                eq(recordings.id, transcriptions.recordingId),
+                eq(recordings.userId, ownerUserId),
+            ),
+        )
         .where(
             and(
                 eq(transcriptions.recordingId, recordingId),

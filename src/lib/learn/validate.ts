@@ -58,6 +58,7 @@ import {
     relationFits,
 } from "@/lib/knowledge/fact-rules";
 import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
+import type { LanguageReviewCandidate } from "@/lib/learn/language";
 import {
     heardIsFirstNameOnly,
     heardIsTheName,
@@ -198,6 +199,7 @@ type Target = { personId: string } | { entityId: string };
 type TargetOrNew = Target | { newRef: string };
 
 export type ReviewCandidate =
+    | LanguageReviewCandidate
     | NewRecordCandidate
     | {
           kind: "speaker";

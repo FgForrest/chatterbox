@@ -38,6 +38,14 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. **Collapse transcript** at the right end of the header folds it away; **Expand transcript** appears in the same place. The footer shows which provider and model made it, its language and its length.
 
+### Recording language
+
+The footer labels the provider’s estimate **Detected language** until you confirm a language, then shows **Confirmed language**. Anyone allowed to edit the transcript can change it there: the owner, or a curator in the Organization view. The choice belongs to the recording and survives re-transcription. Choose **Automatic** to clear the confirmation and use automatic language handling again.
+
+An explicit output language in the profile or account settings takes precedence. Otherwise, the confirmed language guides summaries, titles and topics, and supplies language context for Learn, corrections and spelling. Without a confirmation, automatic output follows the transcript’s predominant language.
+
+Changing the language does not rerun anything. If existing output differs, the control offers **Re-summarize** using the existing summary action. When provider detection differs from your confirmation, **Re-transcribe in …** asks for the usual replacement confirmation and pins that language for this one run. Ordinary transcription keeps its existing profile or account language choice. Exports and backups preserve the confirmed language separately from provider detection.
+
 ### Naming speakers
 
 The chips above the transcript are the speakers.

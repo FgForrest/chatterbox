@@ -117,6 +117,7 @@ interface CredentialRow {
 function mockDbForCredential(
     credential: CredentialRow,
     accountLanguage = "cs",
+    confirmedLanguage: string | null = null,
 ): void {
     (db.select as Mock)
         // recording lookup
@@ -130,6 +131,7 @@ function mockDbForCredential(
                                 userId: "user-el",
                                 plaudFileId: "plaud-1",
                                 title: "Board meeting",
+                                confirmedLanguage,
                                 storagePath: "rec-el.mp3",
                                 deletedAt: null,
                             },
@@ -371,6 +373,38 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
             "Zefira",
             "Blue Harbor",
         ]);
+    });
+
+    it.each([
+        [undefined, "cs", "cs"],
+        ["sk", "cs", "sk"],
+        [undefined, null, "de"],
+    ])("uses run override %s before confirmation %s for keyterms", async (language, confirmedLanguage, expected) => {
+        mockDbForCredential(
+            {
+                provider: "ElevenLabs",
+                baseUrl: null,
+                defaultModel: "scribe_v2",
+            },
+            "de",
+            confirmedLanguage,
+        );
+        const result = await transcribeRecording("user-el", "rec-el", {
+            trigger: "manual",
+            force: true,
+            ...(language ? { language } : {}),
+        });
+        expect(result.success).toBe(true);
+        expect(almanacTermsFor).toHaveBeenCalledWith(
+            expect.objectContaining({ language: expected }),
+        );
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).get("language_code")).toBe(
+            language ?? "de",
+        );
     });
 
     it("sends roster names once with the Almanac spelling in the provider request", async () => {

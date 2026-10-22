@@ -146,6 +146,36 @@ describe("useTranscribeQueue", () => {
         );
     });
 
+    it("carries a one-run language pin through the existing job path", async () => {
+        vi.mocked(followJob).mockResolvedValue(null);
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(jsonResponse({ jobId: "invented-job" }, 202));
+        vi.stubGlobal("fetch", fetchMock);
+        const hook = renderHook(() =>
+            useTranscribeQueue({ onTranscribeComplete: vi.fn() }),
+        );
+        await act(async () => {
+            await hook.result.current.transcribeById(
+                "invented-rec",
+                "riffado",
+                "org",
+                true,
+                "cs",
+            );
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/invented-rec/transcribe?view=org",
+            expect.objectContaining({
+                body: JSON.stringify({
+                    attributionSource: "riffado",
+                    language: "cs",
+                    retranscribe: true,
+                }),
+            }),
+        );
+    });
+
     it("reloads transcripts instead of showing an error for an existing transcript", async () => {
         vi.stubGlobal(
             "fetch",

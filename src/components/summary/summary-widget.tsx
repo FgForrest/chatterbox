@@ -68,6 +68,9 @@ interface SummaryWidgetProps {
     taskWidgetId: string;
     learnHold?: SummaryLearnHold;
     refreshKey?: string | number;
+    onResummarizeReady?: (
+        action: { run: () => void; disabled: boolean } | null,
+    ) => void;
 }
 
 /** One summary body and action set for recordings and mail. */
@@ -92,6 +95,7 @@ export function SummaryWidget({
     taskWidgetId,
     learnHold = null,
     refreshKey = 0,
+    onResummarizeReady,
 }: SummaryWidgetProps) {
     const i18n = useExtracted();
     const {
@@ -142,6 +146,26 @@ export function SummaryWidget({
     const runSummary = () => {
         void handleSummarize();
     };
+
+    const cannotSummarize =
+        !canChange ||
+        working ||
+        !summaryLoaded ||
+        summaryProfilesLoading ||
+        !summaryProfileId ||
+        !canSummarize ||
+        source !== "riffado";
+    const summarize = useRef(handleSummarize);
+    useEffect(() => {
+        summarize.current = handleSummarize;
+    }, [handleSummarize]);
+    useEffect(() => {
+        onResummarizeReady?.({
+            run: () => void summarize.current(),
+            disabled: cannotSummarize,
+        });
+        return () => onResummarizeReady?.(null);
+    }, [cannotSummarize, onResummarizeReady]);
 
     const summaryStatusLabel = !summaryProgress
         ? i18n("Generating summary…")

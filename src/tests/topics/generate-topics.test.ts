@@ -164,6 +164,7 @@ const TURNS = [
 function stage(
     turns: unknown = TURNS,
     stored?: { topics: unknown; topicsInputFingerprint: string | null },
+    confirmedLanguage: string | null = null,
 ) {
     const transcript = {
         id: "tr-1",
@@ -174,7 +175,7 @@ function stage(
         topics: stored?.topics ?? null,
         topicsInputFingerprint: stored?.topicsInputFingerprint ?? null,
     };
-    selectResults.set(recordings, [[{ id: "rec-1" }]]);
+    selectResults.set(recordings, [[{ id: "rec-1", confirmedLanguage }]]);
     selectResults.set(transcriptions, [[transcript], [transcript]]);
     selectResults.set(users, [[{ uiLocale: "cs-CZ" }]]);
     selectResults.set(userSettings, [
@@ -221,6 +222,35 @@ describe("generateTopicsForTranscript", () => {
     });
     afterEach(() => {
         createMock.mockReset();
+    });
+
+    it.each([
+        false,
+        true,
+    ])("uses the same confirmed language on topics (Organization=%s)", async (organization) => {
+        stage(TURNS, undefined, "cs");
+        runAsCurator.value = organization;
+        reply(
+            JSON.stringify({ topics: [{ start: "00:18", title: "Jízdenka" }] }),
+        );
+        await run();
+        expect(createMock.mock.calls[0]?.[0].messages[0].content).toContain(
+            "Write all natural-language output in Czech",
+        );
+    });
+
+    it("explicit topics output wins over the confirmed language", async () => {
+        stage(TURNS, undefined, "cs");
+        const profile = resolvedAudioProfile();
+        profile.settings.steps.summary.outputLanguage = "en";
+        resolveItemProfile.mockResolvedValue(profile);
+        reply(
+            JSON.stringify({ topics: [{ start: "00:18", title: "Ticket" }] }),
+        );
+        await run();
+        expect(createMock.mock.calls[0]?.[0].messages[0].content).toContain(
+            "Write all natural-language output in English",
+        );
     });
 
     it("runs manual topics when automatic topics are off", async () => {

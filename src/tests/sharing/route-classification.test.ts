@@ -71,6 +71,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     },
     // Learn: whoever may change the recording in the view (the owner on
     // the private view, the organization account on the Organization's).
+    "recordings/[id]/language/route.ts": { GET: "view", PATCH: "view" },
     "recordings/[id]/learn/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/review/route.ts": { GET: "view" },
     "recordings/[id]/review/items/[itemId]/route.ts": { PATCH: "view" },

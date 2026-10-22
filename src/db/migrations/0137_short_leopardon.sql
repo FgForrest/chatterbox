@@ -1,0 +1,3 @@
+ALTER TABLE "learn_review_items" DROP CONSTRAINT "learn_review_items_kind_check";--> statement-breakpoint
+ALTER TABLE "recordings" ADD COLUMN "confirmed_language" varchar(2);--> statement-breakpoint
+ALTER TABLE "learn_review_items" ADD CONSTRAINT "learn_review_items_kind_check" CHECK ("learn_review_items"."kind" in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record', 'language'));

@@ -17,6 +17,7 @@ import {
     type CalendarChoice,
     calendarChoiceFor,
 } from "@/components/learn/calendar-choice";
+import { LearnLanguageItem } from "@/components/learn/language-item";
 import {
     type LearnMarks,
     learnMarksFrom,
@@ -82,6 +83,7 @@ import type { SpeakerProposalContext } from "@/lib/learn/output";
 import type { MailDetail } from "@/lib/mail/detail";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
+import { recordingLanguageName } from "@/lib/recordings/language";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -120,6 +122,7 @@ interface GroupToggle {
 interface ItemView {
     id: string;
     kind:
+        | "language"
         | "new_record"
         | "speaker"
         | "correction"
@@ -745,6 +748,8 @@ export function LearnWidget({
     function describeItem(item: ItemView): string {
         const payload = item.payload as Record<string, unknown>;
         switch (item.kind) {
+            case "language":
+                return i18n("Transcript language");
             case "new_record":
                 return recordName(String(payload.ref));
             case "speaker":
@@ -763,6 +768,12 @@ export function LearnWidget({
     /** A finished item in a few words, with whom a speaker was named. */
     function describeResult(item: ItemView): string {
         const payload = item.payload as Record<string, unknown>;
+        if (item.kind === "language") {
+            return recordingLanguageName(
+                String(item.choice?.language ?? payload.language),
+                locale,
+            );
+        }
         if (item.kind === "speaker") {
             const choice = item.choice;
             const person =
@@ -808,6 +819,7 @@ export function LearnWidget({
     const groups = useMemo(() => {
         const items = state?.items ?? [];
         return {
+            language: items.filter((item) => item.kind === "language"),
             records: items.filter((item) => item.kind === "new_record"),
             speakers: items.filter((item) => item.kind === "speaker"),
             corrections: items.filter((item) => item.kind === "correction"),
@@ -905,6 +917,8 @@ export function LearnWidget({
     /** Whether an item cannot be ticked now, for what it waits for. */
     const blockedItem = (item: ItemView): boolean => {
         switch (item.kind) {
+            case "language":
+                return false;
             case "new_record":
                 return item.decision === "rejected";
             case "speaker":
@@ -1235,6 +1249,11 @@ export function LearnWidget({
 
     const sections = [
         {
+            key: "language",
+            title: i18n("Transcript language"),
+            items: kind === "audio" ? groups.language : [],
+        },
+        {
             key: "speakers",
             title: i18n("Speakers"),
             items: kind === "audio" ? groups.speakers : [],
@@ -1276,7 +1295,10 @@ export function LearnWidget({
                         (!blockedItem(item) && waitingFor(item).length === 0)),
             ).length,
             sticky: frame === "dialog",
-            toggle: key === "phrases" ? undefined : groupToggle(items, title),
+            toggle:
+                key === "phrases" || key === "language"
+                    ? undefined
+                    : groupToggle(items, title),
         };
     };
     const audioWords = (ms: number | undefined) =>
@@ -1428,6 +1450,33 @@ export function LearnWidget({
                                         </button>
                                     ))}
                                 </nav>
+                            )}
+                            {kind === "audio" && groups.language.length > 0 && (
+                                <ReviewSection {...sectionProps("language")}>
+                                    {groups.language.map((item) => (
+                                        <LearnLanguageItem
+                                            key={item.id}
+                                            language={String(
+                                                item.payload.language,
+                                            )}
+                                            detectedLanguage={String(
+                                                item.payload.detectedLanguage,
+                                            )}
+                                            chosen={String(
+                                                ticked(item)
+                                                    ? (item.choice?.language ??
+                                                          item.payload.language)
+                                                    : "",
+                                            )}
+                                            disabled={finishing}
+                                            onChoose={(language) =>
+                                                void decide(item, "accepted", {
+                                                    language,
+                                                })
+                                            }
+                                        />
+                                    ))}
+                                </ReviewSection>
                             )}
                             {kind === "audio" && groups.speakers.length > 0 && (
                                 <ReviewSection {...sectionProps("speakers")}>

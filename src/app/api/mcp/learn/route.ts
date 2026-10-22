@@ -11,6 +11,7 @@ import {
     verifyCorrectionPassToken,
     verifyLearnRunToken,
 } from "@/lib/learn/run-token";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 
 /**
  * Riffado's read-only knowledge tools for a Learn run's model, or a
@@ -61,7 +62,15 @@ async function runOf(token: string): Promise<McpRun | null> {
                 and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")),
             )
             .limit(1);
-        return run ? { ...run, kind: "learn" } : null;
+        return run
+            ? {
+                  ...run,
+                  language:
+                      (await readConfirmedLanguage(run.userId, run.itemId)) ??
+                      run.language,
+                  kind: "learn",
+              }
+            : null;
     }
     const passId = verifyCorrectionPassToken(token);
     if (!passId) return null;
@@ -81,5 +90,13 @@ async function runOf(token: string): Promise<McpRun | null> {
         )
         .where(and(eq(passes.id, passId), eq(passes.status, "running")))
         .limit(1);
-    return pass ? { ...pass, kind: "correction" } : null;
+    return pass
+        ? {
+              ...pass,
+              language:
+                  (await readConfirmedLanguage(pass.userId, pass.itemId)) ??
+                  pass.language,
+              kind: "correction",
+          }
+        : null;
 }

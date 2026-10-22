@@ -15,6 +15,7 @@
 import type { AppLocale } from "@/lib/i18n/config";
 import type { KnowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { LearnOutputUnusable } from "@/lib/learn/errors";
+import { LEARN_LANGUAGE_RULE } from "@/lib/learn/language";
 import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import {
     type LearnOutput,
@@ -91,6 +92,7 @@ const BRIDGE_SYSTEM = [
     "For each unnamed speaker label, inspect adjacent address-and-reply turns and call find_entities for the spoken name or nickname and its base form. Check every returned person with that name before deciding whether the label is identifiable.",
     "Except for explicitly marked speaker guesses, propose only what the transcript itself supports. Everything you propose is reviewed by a person.",
     SPEAKER_RULE,
+    LEARN_LANGUAGE_RULE,
     RECORDER_RULE,
     NEW_RECORDS_RULE,
     "corrections: only for a known record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
