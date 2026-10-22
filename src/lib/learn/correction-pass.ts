@@ -15,6 +15,7 @@
 import { z } from "zod";
 import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
 import type { AppLocale } from "@/lib/i18n/config";
+import { attendeeNameKey } from "@/lib/integrations/google/meeting-roster-names";
 import {
     type AnchorPosition,
     anchorsOverlap,
@@ -153,6 +154,7 @@ const TASK = [
     DATA_RULE,
     "Find the words the transcription misheard, and say what was said: a name or term of the Almanac misheard or misspelled (also inflected: keep the grammatical form the sentence needs), and any other word or short phrase that is clearly misheard (a similar-sounding wrong word that makes no sense there, where the intended word is clear from the context).",
     NAME_SPELLING_RULE,
+    "When a misspelled name in the transcript matches an attendee, use the attendee spelling, keeping the grammatical form. Attendees are spelling hints, not confirmed speaker identities. Never replace speaker labels with attendee names. Use target null for an attendee without an Almanac id. The Almanac spelling wins over Calendar and Meet spelling whenever a name or alias matches.",
     "For Almanac names, use the record's spelling and its heardAs forms, including inflected occurrences of those forms. A restored diacritic must follow the Almanac name when it identifies that record.",
     "Never rephrase. Never fix grammar, word order, fillers, repetitions, false starts or the style of spoken language, never translate, and never change what someone said: only how the transcription heard it. When unsure, leave it.",
     'Each fix: turn is the T number of the line; heard is the words exactly as written in that line (at most 6 words); replacement is what those words should read (at most 6 words, in the transcript\'s language); context is empty when heard occurs once in that line, else a longer exact quote of the line containing it once; target is the Almanac record the replacement names ({"personId"} or {"entityId"}), else null.',
@@ -185,6 +187,8 @@ export interface CorrectionPassInput {
     reviewLocale?: AppLocale | null;
     almanac: readonly AlmanacRecord[];
     corrected: readonly StandingCorrection[];
+    /** Untrusted attendee names used only as spelling hints. */
+    attendeeNames?: readonly string[];
     signal?: AbortSignal;
 }
 
@@ -225,6 +229,14 @@ function contextOf(
     turns: readonly TranscriptTurn[],
 ): string {
     const last = first + turns.length;
+    const almanacNames = new Set(
+        input.almanac
+            .flatMap((record) => [record.name, ...record.aliases])
+            .map(attendeeNameKey),
+    );
+    const attendeeNames = (input.attendeeNames ?? []).filter(
+        (name) => !almanacNames.has(attendeeNameKey(name)),
+    );
     const corrected = input.corrected
         .filter((entry) => entry.turnIndex >= first && entry.turnIndex < last)
         .map((entry) => ({
@@ -235,6 +247,7 @@ function contextOf(
     return [
         `LANGUAGE: ${input.language ?? "unknown"}`,
         `ALMANAC (JSON):\n${JSON.stringify(correctionAlmanacJson(input.almanac))}`,
+        `MEETING ATTENDEES (JSON):\n${JSON.stringify(attendeeNames)}`,
         `ALREADY CORRECTED (JSON):\n${JSON.stringify(corrected)}`,
         `TRANSCRIPT:\n${renderLearnTranscript(turns, first)}`,
     ].join("\n\n");

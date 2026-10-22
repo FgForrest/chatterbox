@@ -67,6 +67,8 @@ Permissions combine, and some fields need two of them:
 A permission never widens what a caller already sees: Chatterbox's usual rules
 choose the rows (see [What callers see](#what-callers-see)).
 
+`get_transcript.language` remains the provider’s detected language. `confirmed_language` is the recording’s user-confirmed ISO 639-1 code, or `null` in Automatic mode; `detected_language` repeats the original provider detection. `list_recordings` also includes `confirmed_language`. These fields do not change the transcript text.
+
 ## Turning it on
 
 ```bash

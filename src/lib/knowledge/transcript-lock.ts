@@ -41,7 +41,10 @@ export async function lockTranscriptForChange(
     provider: string | null;
 }> {
     const [recording] = await tx
-        .select({ id: recordings.id })
+        .select({
+            id: recordings.id,
+            confirmedLanguage: recordings.confirmedLanguage,
+        })
         .from(recordings)
         .innerJoin(
             transcriptions,
@@ -87,7 +90,7 @@ export async function lockTranscriptForChange(
         scopeUserId,
         revision: transcript.revision,
         turns: readTranscriptTurns(transcript),
-        language: transcript.language,
+        language: recording.confirmedLanguage ?? transcript.language,
         provider: transcript.provider,
     };
 }

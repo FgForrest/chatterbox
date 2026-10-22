@@ -1,4 +1,0 @@
-ALTER TABLE "recording_tasks" ADD COLUMN "folder_id" text;--> statement-breakpoint
-ALTER TABLE "recording_tasks" ADD CONSTRAINT "recording_tasks_folder_id_recording_folders_id_fk" FOREIGN KEY ("folder_id") REFERENCES "public"."recording_folders"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "recording_tasks_user_folder_status_idx" ON "recording_tasks" USING btree ("user_id","folder_id","status") WHERE "recording_tasks"."folder_id" is not null;--> statement-breakpoint
-ALTER TABLE "recording_tasks" ADD CONSTRAINT "recording_tasks_personal_folder_check" CHECK ("recording_tasks"."folder_id" is null or "recording_tasks"."source" = 'personal');

@@ -69,6 +69,8 @@ Oprávnění se kombinují a některá pole vyžadují dvě:
 Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla aplikace Klepna
 vybírají řádky (viz [Co volající vidí](#what-callers-see)).
 
+Pole `language` nástroje `get_transcript` zůstává jazykem rozpoznaným poskytovatelem. `confirmed_language` je uživatelem potvrzený jazyk nahrávky jako kód ISO 639-1, nebo `null` při volbě Automaticky; `detected_language` opakuje původní odhad poskytovatele. Také `list_recordings` obsahuje `confirmed_language`. Tato pole nemění text přepisu.
+
 <span id="turning-it-on" />
 
 ## Zapnutí serveru

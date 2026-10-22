@@ -29,6 +29,7 @@ import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import {
@@ -67,6 +68,7 @@ import {
     loadItemProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
@@ -132,7 +134,12 @@ async function runPass({
         throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
     }
     const [learnRun] = await db
-        .select({ profileRevisionId: learnRuns.profileRevisionId })
+        .select({
+            profileRevisionId: learnRuns.profileRevisionId,
+            inputs: learnRuns.inputs,
+            view: learnRuns.view,
+            actorUserId: learnRuns.actorUserId,
+        })
         .from(learnRuns)
         .where(
             and(
@@ -267,22 +274,38 @@ async function runPass({
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
+        const contentLanguage =
+            (await readConfirmedLanguage(pass.userId, pass.recordingId)) ??
+            transcript.detectedLanguage;
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             pass,
-            transcript.detectedLanguage,
+            contentLanguage,
         );
         reportProgress({ phase: "reading" });
+        const roster = await resolveMeetingRoster({
+            ownerUserId: pass.userId,
+            itemId: pass.recordingId,
+            calendarEventId:
+                ((learnRun.view === "private" &&
+                    learnRun.actorUserId === pass.userId) ||
+                    learnRun.inputs?.calendarEventAutoSelected === true) &&
+                typeof learnRun.inputs?.calendarEventId === "string"
+                    ? learnRun.inputs.calendarEventId
+                    : undefined,
+        });
         const result = await runCorrectionPass({
             path,
             bridge,
             chat,
             token: issueCorrectionPassToken(pass.id),
             turns,
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
             reviewLocale,
             almanac,
             corrected,
+            attendeeNames:
+                roster?.attendees.map((attendee) => attendee.name) ?? [],
             signal,
         });
         reportProgress({ phase: "writing" });

@@ -33,7 +33,10 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
     const [recording] = await db
-        .select({ id: recordings.id })
+        .select({
+            id: recordings.id,
+            confirmedLanguage: recordings.confirmedLanguage,
+        })
         .from(recordings)
         .where(
             and(
@@ -85,5 +88,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         },
         { pending: false, ownerAuthoredOnly: true },
     );
-    return NextResponse.json(serializeTranscript(primary, corrections));
+    return NextResponse.json(
+        serializeTranscript(primary, corrections, recording.confirmedLanguage),
+    );
 });

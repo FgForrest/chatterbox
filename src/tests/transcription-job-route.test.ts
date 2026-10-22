@@ -188,6 +188,31 @@ describe("recording transcription jobs route", () => {
         });
     });
 
+    it("pins a language only on an explicitly confirmed re-transcription", async () => {
+        const response = await POST(
+            request("POST", { retranscribe: true, language: "cs" }),
+            context,
+        );
+        expect(response.status).toBe(202);
+        expect(mocks.enqueueTranscriptionJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                force: true,
+                trigger: "manual",
+                language: "cs",
+            }),
+        );
+    });
+
+    it.each([
+        { language: "auto", retranscribe: true },
+        { language: "ces", retranscribe: true },
+        { language: "cs", retranscribe: false },
+    ])("refuses invalid or unconfirmed language override %j", async (body) => {
+        const response = await POST(request("POST", body), context);
+        expect(response.status).toBe(400);
+        expect(mocks.enqueueTranscriptionJob).not.toHaveBeenCalled();
+    });
+
     it("reports an active background job only to its recording owner", async () => {
         mocks.getActiveJob.mockResolvedValue({
             id: "job-sync",

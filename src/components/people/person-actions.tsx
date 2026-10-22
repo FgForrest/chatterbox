@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { mergeLikelihoods } from "@/components/almanac/merge-likelihoods";
 import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,9 +24,11 @@ interface MergeCandidate {
     displayName: string;
     primaryEmail: string | null;
     scope?: "personal" | "org";
+    duplicateScore?: number;
 }
 
 interface PersonActionsProps {
+    canCurateOrganization?: boolean;
     person: {
         id: string;
         displayName: string;
@@ -46,7 +49,11 @@ interface PersonActionsProps {
  * Organization person the organization account, whose edits reach every
  * recording that names them.
  */
-export function PersonActions({ person, accountEmail }: PersonActionsProps) {
+export function PersonActions({
+    person,
+    accountEmail,
+    canCurateOrganization = false,
+}: PersonActionsProps) {
     const i18n = useExtracted();
     const router = useRouter();
     const [renaming, setRenaming] = useState(false);
@@ -59,31 +66,48 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
 
     useEffect(() => {
         if (!merging) return;
-        let cancelled = false;
-        void fetch("/api/people")
-            .then((response) =>
-                response.ok ? response.json() : { people: [] },
-            )
-            .then((body: { people?: MergeCandidate[] }) => {
-                if (cancelled) return;
-                // An Organization person can only fold into another; a
-                // private one into anyone its owner can see.
+        const controller = new AbortController();
+        let likelihoods: Map<string, number> | null = null;
+        setCandidates([]);
+        void fetch("/api/people", { signal: controller.signal })
+            .then(async (response) => {
+                const body: { people?: MergeCandidate[] } = response.ok
+                    ? await response.json()
+                    : {};
+                if (controller.signal.aborted) return;
                 setCandidates(
-                    (body.people ?? []).filter(
-                        (candidate) =>
-                            candidate.id !== person.id &&
-                            (person.scope !== "org" ||
-                                candidate.scope === "org"),
-                    ),
+                    (body.people ?? [])
+                        .filter(
+                            (candidate) =>
+                                candidate.id !== person.id &&
+                                (person.scope !== "org" ||
+                                    candidate.scope === "org"),
+                        )
+                        .map((candidate) => ({
+                            ...candidate,
+                            duplicateScore: likelihoods
+                                ? (likelihoods.get(candidate.id) ?? 0)
+                                : undefined,
+                        })),
                 );
             })
-            .catch(() => {
-                if (!cancelled) setCandidates([]);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [merging, person.id, person.scope]);
+            .catch(() => {});
+        if (person.scope === "org" && canCurateOrganization) {
+            void mergeLikelihoods("person", person.id, controller.signal).then(
+                (scores) => {
+                    likelihoods = scores;
+                    if (!controller.signal.aborted && scores)
+                        setCandidates((current) =>
+                            current.map((candidate) => ({
+                                ...candidate,
+                                duplicateScore: scores.get(candidate.id) ?? 0,
+                            })),
+                        );
+                },
+            );
+        }
+        return () => controller.abort();
+    }, [merging, person.id, person.scope, canCurateOrganization]);
 
     async function rename(
         primaryEmail: string | null = email.trim() || null,
@@ -246,6 +270,12 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                         </DialogDescription>
                     </DialogHeader>
                     <MergeTargetPicker
+                        source={{
+                            id: person.id,
+                            name: person.displayName,
+                            email: person.primaryEmail,
+                            kind: "person",
+                        }}
                         value={targetId}
                         onChange={setTargetId}
                         candidates={candidates.map((candidate) => ({
@@ -253,6 +283,7 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                             name: candidate.displayName,
                             email: candidate.primaryEmail,
                             scope: candidate.scope ?? "personal",
+                            duplicateScore: candidate.duplicateScore,
                         }))}
                     />
                     <DialogFooter>

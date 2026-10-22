@@ -93,6 +93,7 @@ describe("Calendar event candidates", () => {
         expect(events).toEqual([
             {
                 id: "meeting",
+                meetingCode: null,
                 title: "Team meeting",
                 start: "2026-10-07T09:45:00.000Z",
                 end: "2026-10-07T11:15:00.000Z",

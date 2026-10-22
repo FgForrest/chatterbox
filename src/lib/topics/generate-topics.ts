@@ -33,6 +33,7 @@ import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import { recordingOutputLanguage } from "@/lib/recordings/language";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
 import {
@@ -143,7 +144,10 @@ export async function generateTopicsForTranscript(
     // The owner's rows in either view.
     const userId = ctx.ownerUserId;
     const [recording] = await db
-        .select({ id: recordings.id })
+        .select({
+            id: recordings.id,
+            confirmedLanguage: recordings.confirmedLanguage,
+        })
         .from(recordings)
         .where(
             and(
@@ -215,8 +219,13 @@ export async function generateTopicsForTranscript(
         .limit(1);
     const resolvedPrompt = resolveTopicPrompt({
         settings: settings.steps.topics,
-        outputLanguage: settings.steps.summary.outputLanguage,
-        contentLanguage: transcript.detectedLanguage,
+        outputLanguage:
+            recordingOutputLanguage(
+                settings.steps.summary.outputLanguage,
+                recording.confirmedLanguage,
+            ) ?? "auto",
+        contentLanguage:
+            recording.confirmedLanguage ?? transcript.detectedLanguage,
         uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
     });
     const templateId = settings.steps.topics.preset;
@@ -243,7 +252,11 @@ export async function generateTopicsForTranscript(
         profileRevisionId: profile.revisionId || null,
         templateId,
         promptTemplate,
-        outputLanguage: settings.steps.summary.outputLanguage,
+        outputLanguage:
+            recordingOutputLanguage(
+                settings.steps.summary.outputLanguage,
+                recording.confirmedLanguage,
+            ) ?? "auto",
     };
     const systemContent = [
         TOPIC_SYSTEM_PROMPT,

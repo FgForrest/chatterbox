@@ -34,6 +34,7 @@ import {
     mailParticipants,
     people,
     personEmails,
+    recordings,
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
@@ -44,6 +45,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { nudge } from "@/lib/jobs/nudge";
 import {
     addAliasInTx,
@@ -71,6 +73,10 @@ import {
     answerSpeakerInTx,
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
+import {
+    learnGuessRowId,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
 import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import {
@@ -108,19 +114,23 @@ import {
     loadItemProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { recordingLanguage } from "@/lib/recordings/language";
 import type { RecordingViewContext } from "@/lib/sharing/access";
+import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     contentWriterScope,
     sharingOrgUserId,
     writerRefusalError,
 } from "@/lib/sharing/writer";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { emitEvent } from "@/lib/webhooks/emit";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type ItemKind = ReviewCandidate["kind"];
 
 /** What a person chose along with a decision, where the kind needs one. */
 export type ReviewChoice =
+    | { language: string }
     | { personId: string }
     | { entityId: string }
     | { displayName: string }
@@ -549,6 +559,10 @@ function validChoice(
     if (choice === null || choice === undefined) return null;
     if (typeof choice !== "object") return invalidChoice();
     const value = choice as Record<string, unknown>;
+    if (kind === "language") {
+        const language = recordingLanguage(value.language);
+        return language ? { language } : invalidChoice();
+    }
     if (kind === "speaker") {
         if (value.unknown === true) return { unknown: true };
         if (short(value.personId, MAX_ID_LENGTH)) {
@@ -736,6 +750,7 @@ export interface FinishedReview {
     skipped: { itemId: string; code: SkipCode; reason: string }[];
     /** A correction pass was queued to read the transcript again. */
     correcting: boolean;
+    confirmedLanguageChanged?: boolean;
 }
 
 /**
@@ -794,6 +809,18 @@ export async function finishReview(
     // The last review done releases what automatic Learn held back, unless
     // the correction pass it queued is still to run (that releases it).
     await releaseAutoLearnHold(access.recordingId);
+    if (finished.confirmedLanguageChanged) {
+        await refreshExistingRecordingSidecars(
+            access.ownerUserId,
+            access.recordingId,
+        );
+        await emitEvent(
+            "recording.updated",
+            access.ownerUserId,
+            access.recordingId,
+        );
+        await notifyIfShared(access.recordingId);
+    }
     return finished;
 }
 
@@ -1100,6 +1127,31 @@ function finishInTx(
     const { actorUserId, orgUserId } = writer;
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
+        const [languageItem] = isRecordingRun(latest)
+            ? await tx
+                  .select({ id: learnReviewItems.id })
+                  .from(learnReviewItems)
+                  .where(
+                      and(
+                          eq(learnReviewItems.runId, latest.id),
+                          eq(learnReviewItems.userId, latest.scopeUserId),
+                          eq(learnReviewItems.kind, "language"),
+                      ),
+                  )
+                  .limit(1)
+            : [];
+        if (languageItem) {
+            await tx
+                .select({ id: recordings.id })
+                .from(recordings)
+                .where(
+                    and(
+                        eq(recordings.id, latest.itemId),
+                        eq(recordings.userId, latest.userId),
+                    ),
+                )
+                .for("update");
+        }
         const source = isRecordingRun(latest)
             ? await transcriptSourceInTx(tx, latest, writer)
             : await mailSourceInTx(tx, latest, writer);
@@ -1177,6 +1229,7 @@ function finishInTx(
         const scopes = new Set<string>([scopeUserId]);
         const skipped: FinishedReview["skipped"] = [];
         let applied = 0;
+        let confirmedLanguageChanged = false;
         /** Apply one item in a savepoint; false when it was skipped. */
         const attempt = async (
             itemId: string,
@@ -1213,6 +1266,64 @@ function finishInTx(
         const skip = (itemId: string, code: SkipCode, reason: string) => {
             skipped.push({ itemId, code, reason });
         };
+        if (isRecordingRun(latest)) {
+            for (const item of items) {
+                if (item.kind !== "language" || !item.accepted) continue;
+                const payload = item.payload as Extract<
+                    ReviewCandidate,
+                    { kind: "language" }
+                >["payload"];
+                const chosen =
+                    item.choice && "language" in item.choice
+                        ? item.choice.language
+                        : payload.language;
+                const language = recordingLanguage(chosen);
+                if (!language) {
+                    skip(
+                        item.id,
+                        "no_longer_fits",
+                        "Unknown recording language",
+                    );
+                    continue;
+                }
+                const [current] = await tx
+                    .select({ confirmedLanguage: recordings.confirmedLanguage })
+                    .from(recordings)
+                    .where(
+                        and(
+                            eq(recordings.id, run.itemId),
+                            eq(recordings.userId, run.userId),
+                        ),
+                    )
+                    .limit(1);
+                if (
+                    current?.confirmedLanguage &&
+                    current.confirmedLanguage !== language
+                ) {
+                    skip(item.id, "answered_since", "Language answered since");
+                    continue;
+                }
+                if (current?.confirmedLanguage === language) {
+                    applied++;
+                    continue;
+                }
+                const changed = await attempt(item.id, async (sp) => {
+                    await sp
+                        .update(recordings)
+                        .set({
+                            confirmedLanguage: language,
+                            updatedAt: new Date(),
+                        })
+                        .where(
+                            and(
+                                eq(recordings.id, run.itemId),
+                                eq(recordings.userId, run.userId),
+                            ),
+                        );
+                });
+                confirmedLanguageChanged ||= changed;
+            }
+        }
         // New people and things first: the items that refer to one by its
         // ref are applied to the record it became.
         const refs = new Map<string, RecordTarget>();
@@ -1613,6 +1724,12 @@ function finishInTx(
                         ...transcript,
                         label: payload.label,
                         answer,
+                        proposalSource:
+                            !choice &&
+                            (payload.source === "calendar" ||
+                                payload.source === "meet")
+                                ? payload.source
+                                : undefined,
                     },
                     scopes,
                 );
@@ -1857,6 +1974,41 @@ function finishInTx(
         }
 
         const rejected = items.filter((item) => !item.accepted);
+        if (transcript) {
+            for (const item of rejected) {
+                if (item.kind !== "speaker") continue;
+                const payload = item.payload as Extract<
+                    ReviewCandidate,
+                    { kind: "speaker" }
+                >["payload"];
+                if (!payload.personId) continue;
+                const label = speakerKey(payload.label);
+                await tx
+                    .delete(transcriptSpeakers)
+                    .where(
+                        and(
+                            eq(
+                                transcriptSpeakers.id,
+                                learnGuessRowId(run.id, payload.label),
+                            ),
+                            eq(transcriptSpeakers.userId, transcript.userId),
+                            eq(
+                                transcriptSpeakers.transcriptionId,
+                                transcript.transcriptionId,
+                            ),
+                            eq(transcriptSpeakers.label, label),
+                            eq(transcriptSpeakers.personId, payload.personId),
+                            eq(transcriptSpeakers.status, "suggested"),
+                            eq(transcriptSpeakers.markedUnknown, false),
+                            isNull(transcriptSpeakers.confirmedByUserId),
+                            eq(
+                                transcriptSpeakers.updatedAt,
+                                transcriptSpeakers.createdAt,
+                            ),
+                        ),
+                    );
+            }
+        }
         if (rejected.length > 0) {
             await tx
                 .insert(learnDismissals)
@@ -1940,6 +2092,9 @@ function finishInTx(
             dismissed: rejected.length,
             skipped,
             correcting,
+            ...(confirmedLanguageChanged
+                ? { confirmedLanguageChanged: true }
+                : {}),
         };
     });
 }

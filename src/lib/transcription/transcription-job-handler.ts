@@ -104,6 +104,7 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             model: payload.model,
             attributionSource: payload.attributionSource,
             force: payload.force,
+            language: payload.language,
             view: payload.view,
             jobId,
         });

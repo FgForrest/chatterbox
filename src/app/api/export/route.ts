@@ -213,6 +213,7 @@ export const GET = apiHandler(async (request: Request) => {
                         enhancements[0];
                     return {
                         id: recording.id,
+                        confirmedLanguage: recording.confirmedLanguage ?? null,
                         filename: recording.filename,
                         duration: recording.duration,
                         startTime: recording.occurredAt,

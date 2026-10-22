@@ -194,9 +194,7 @@ describe("transcript topics", () => {
         fetchMock.mockReset();
         toastMock.success.mockReset();
         toastMock.error.mockReset();
-        fetchMock.mockResolvedValue(
-            new Response(JSON.stringify({ speakers: [] }), { status: 200 }),
-        );
+        fetchMock.mockImplementation(async () => json({ speakers: [] }));
         vi.stubGlobal("fetch", fetchMock);
         Element.prototype.scrollTo = vi.fn();
     });

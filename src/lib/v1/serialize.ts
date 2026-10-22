@@ -40,6 +40,7 @@ export type RecordingCursor = {
 };
 
 export type V1Transcript = {
+    confirmed_language: string | null;
     source: string;
     language: string | null;
     /** As heard: corrections never rewrite it. */
@@ -91,6 +92,7 @@ export type V1Summary = {
 
 export type V1Recording = {
     id: string;
+    confirmed_language: string | null;
     title: string;
     created_at: string;
     updated_at: string;
@@ -196,11 +198,13 @@ export function decodeRecordingCursor(cursor: string): RecordingCursor | null {
 export function serializeTranscript(
     transcription: TranscriptionRow | null,
     corrections?: readonly OverlayCorrection[],
+    confirmedLanguage?: string | null,
 ): V1Transcript | null {
     if (!transcription) return null;
 
     return {
         source: transcription.source,
+        confirmed_language: confirmedLanguage ?? null,
         language: transcription.detectedLanguage,
         text: decryptText(transcription.text),
         provider: transcription.provider,
@@ -257,6 +261,7 @@ export function serializeRecording(
 
     return {
         id: recording.id,
+        confirmed_language: recording.confirmedLanguage ?? null,
         title: decryptText(recording.title),
         created_at: toIso(recording.createdAt),
         updated_at: toIso(recording.updatedAt),
@@ -323,9 +328,19 @@ export function serializeRecordingDetail(
             },
             phases,
         ),
-        transcript: serializeTranscript(primary),
+        transcript: serializeTranscript(
+            primary,
+            undefined,
+            recording.confirmedLanguage,
+        ),
         transcripts: transcripts
-            .map((transcript) => serializeTranscript(transcript))
+            .map((transcript) =>
+                serializeTranscript(
+                    transcript,
+                    undefined,
+                    recording.confirmedLanguage,
+                ),
+            )
             .filter((t): t is V1Transcript => t !== null),
         summary: serializeSummary(primaryEnhancement),
     };

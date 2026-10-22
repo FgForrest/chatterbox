@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as AlmanacTermsModule from "@/lib/transcription/almanac-terms";
+import type * as MeetingTermsModule from "@/lib/transcription/meeting-terms";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/db", () => ({
@@ -82,9 +84,23 @@ vi.mock("@/lib/folders/item-scope", () => ({
     itemScopeFolderIds: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("@/lib/transcription/almanac-terms", () => ({
-    almanacTermsFor: vi.fn().mockResolvedValue([]),
+vi.mock("@/lib/integrations/google/meeting-roster", () => ({
+    resolveMeetingRoster: vi.fn().mockResolvedValue(null),
 }));
+
+vi.mock("@/lib/transcription/almanac-terms", async () => {
+    const actual = await vi.importActual<typeof AlmanacTermsModule>(
+        "@/lib/transcription/almanac-terms",
+    );
+    return { ...actual, almanacTermsFor: vi.fn().mockResolvedValue([]) };
+});
+
+vi.mock("@/lib/transcription/meeting-terms", async () => {
+    const actual = await vi.importActual<typeof MeetingTermsModule>(
+        "@/lib/transcription/meeting-terms",
+    );
+    return { mergeMeetingTerms: vi.fn(actual.mergeMeetingTerms) };
+});
 
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: vi.fn(async () =>
@@ -96,7 +112,9 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 }));
 
 import { db } from "@/db";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
+import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
 interface CredentialRow {
@@ -108,6 +126,7 @@ interface CredentialRow {
 function mockDbForCredential(
     credential: CredentialRow,
     accountLanguage = "cs",
+    confirmedLanguage: string | null = null,
 ): void {
     (db.select as Mock)
         // recording lookup
@@ -121,6 +140,7 @@ function mockDbForCredential(
                                 userId: "user-el",
                                 plaudFileId: "plaud-1",
                                 title: "Board meeting",
+                                confirmedLanguage,
                                 storagePath: "rec-el.mp3",
                                 deletedAt: null,
                             },
@@ -364,6 +384,81 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         ]);
     });
 
+    it.each([
+        [undefined, "cs", "cs"],
+        ["sk", "cs", "sk"],
+        [undefined, null, "de"],
+    ])("uses run override %s before confirmation %s for keyterms", async (language, confirmedLanguage, expected) => {
+        mockDbForCredential(
+            {
+                provider: "ElevenLabs",
+                baseUrl: null,
+                defaultModel: "scribe_v2",
+            },
+            "de",
+            confirmedLanguage,
+        );
+        const result = await transcribeRecording("user-el", "rec-el", {
+            trigger: "manual",
+            force: true,
+            ...(language ? { language } : {}),
+        });
+        expect(result.success).toBe(true);
+        expect(almanacTermsFor).toHaveBeenCalledWith(
+            expect.objectContaining({ language: expected }),
+        );
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).get("language_code")).toBe(
+            language ?? "de",
+        );
+    });
+
+    it("sends roster names once with the Almanac spelling in the provider request", async () => {
+        vi.mocked(resolveMeetingRoster).mockResolvedValueOnce({
+            eventId: "meeting",
+            attendees: [
+                { name: "jitka dvorakova", source: "calendar" },
+                { name: "Míra Luvin", source: "meet" },
+            ],
+        });
+        vi.mocked(almanacTermsFor).mockResolvedValueOnce([
+            { text: "Jitka Dvořáková", soundsLike: ["Jituška"] },
+            { text: "Zefira", soundsLike: [] },
+        ]);
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2",
+        });
+        (db.select as Mock).mockReturnValueOnce({
+            from: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue([{ email: null }]),
+                }),
+            }),
+        });
+
+        const result = await transcribeRecording("user-el", "rec-el");
+
+        expect(result.success).toBe(true);
+        expect(resolveMeetingRoster).toHaveBeenCalledWith({
+            ownerUserId: "user-el",
+            itemId: "rec-el",
+        });
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([
+            "Jitka Dvořáková",
+            "Míra Luvin",
+            "Zefira",
+        ]);
+    });
+
     it("does not read the Almanac for Scribe v1, which takes no keyterms", async () => {
         mockDbForCredential({
             provider: "ElevenLabs",
@@ -398,6 +493,48 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
             RequestInit,
         ];
         expect((init.body as FormData).getAll("keyterms")).toEqual([]);
+        logged.mockRestore();
+    });
+
+    it("transcribes with the plain Almanac terms when the roster cannot be merged", async () => {
+        const failure = new Error("roster unreadable");
+        vi.mocked(resolveMeetingRoster).mockResolvedValueOnce({
+            eventId: "meeting",
+            attendees: [{ name: "Míra Luvin", source: "meet" }],
+        });
+        vi.mocked(almanacTermsFor).mockResolvedValueOnce([
+            { text: "Zefira", soundsLike: [] },
+        ]);
+        vi.mocked(mergeMeetingTerms).mockImplementationOnce(() => {
+            throw failure;
+        });
+        const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2",
+        });
+        (db.select as Mock).mockReturnValueOnce({
+            from: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue([{ email: null }]),
+                }),
+            }),
+        });
+
+        const result = await transcribeRecording("user-el", "rec-el");
+
+        expect(result.success).toBe(true);
+        expect(mergeMeetingTerms).toHaveBeenCalledOnce();
+        expect(logged).toHaveBeenCalledWith(
+            "[transcription] Almanac terms unavailable:",
+            failure,
+        );
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual(["Zefira"]);
         logged.mockRestore();
     });
 });

@@ -5,7 +5,8 @@ import { getActiveJob } from "@/db/queries/async-jobs";
 import { transcriptions } from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
-import { apiHandler } from "@/lib/errors";
+import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { recordingLanguage } from "@/lib/recordings/language";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -57,6 +58,14 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             ? body.attributionSource
             : undefined;
     const retranscribe = body.retranscribe === true;
+    const language = recordingLanguage(body.language);
+    if (body.language !== undefined && (!language || !retranscribe)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A language requires Re-transcribe and a supported ISO 639-1 code",
+            400,
+        );
+    }
 
     const active = await getActiveJob(
         TRANSCRIPTION_JOB_KIND,
@@ -99,6 +108,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         model,
         attributionSource,
         force: retranscribe,
+        ...(language ? { language } : {}),
         trigger: "manual",
         view,
     });

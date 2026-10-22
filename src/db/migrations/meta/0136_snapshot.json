@@ -1,6 +1,6 @@
 {
-  "id": "6481e60b-80a4-44ea-8f25-2dd1ea0cb07f",
-  "prevId": "bf83287d-7bd2-420a-82ee-f1675152d38c",
+  "id": "d3b0f9f3-6e2b-4437-81b8-0bc9ac065062",
+  "prevId": "ddf2c5a5-6631-425a-b375-61df86265b17",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1114,6 +1114,232 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.almanac_duplicate_dismissals": {
+      "name": "almanac_duplicate_dismissals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "left_person_id": {
+          "name": "left_person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "right_person_id": {
+          "name": "right_person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "left_entity_id": {
+          "name": "left_entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "right_entity_id": {
+          "name": "right_entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dismissed_by_user_id": {
+          "name": "dismissed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "almanac_duplicate_dismissals_left_person_idx": {
+          "name": "almanac_duplicate_dismissals_left_person_idx",
+          "columns": [
+            {
+              "expression": "left_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_right_person_idx": {
+          "name": "almanac_duplicate_dismissals_right_person_idx",
+          "columns": [
+            {
+              "expression": "right_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_left_entity_idx": {
+          "name": "almanac_duplicate_dismissals_left_entity_idx",
+          "columns": [
+            {
+              "expression": "left_entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_right_entity_idx": {
+          "name": "almanac_duplicate_dismissals_right_entity_idx",
+          "columns": [
+            {
+              "expression": "right_entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "almanac_duplicate_dismissals_user_id_users_id_fk": {
+          "name": "almanac_duplicate_dismissals_user_id_users_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_left_person_id_people_id_fk": {
+          "name": "almanac_duplicate_dismissals_left_person_id_people_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "people",
+          "columnsFrom": [
+            "left_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_right_person_id_people_id_fk": {
+          "name": "almanac_duplicate_dismissals_right_person_id_people_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "people",
+          "columnsFrom": [
+            "right_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_left_entity_id_knowledge_entities_id_fk": {
+          "name": "almanac_duplicate_dismissals_left_entity_id_knowledge_entities_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "knowledge_entities",
+          "columnsFrom": [
+            "left_entity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_right_entity_id_knowledge_entities_id_fk": {
+          "name": "almanac_duplicate_dismissals_right_entity_id_knowledge_entities_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "knowledge_entities",
+          "columnsFrom": [
+            "right_entity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_dismissed_by_user_id_users_id_fk": {
+          "name": "almanac_duplicate_dismissals_dismissed_by_user_id_users_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "dismissed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "almanac_duplicate_dismissals_pair_unique": {
+          "name": "almanac_duplicate_dismissals_pair_unique",
+          "nullsNotDistinct": true,
+          "columns": [
+            "user_id",
+            "kind",
+            "left_person_id",
+            "right_person_id",
+            "left_entity_id",
+            "right_entity_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "almanac_duplicate_dismissals_pair_check": {
+          "name": "almanac_duplicate_dismissals_pair_check",
+          "value": "\n            (\"almanac_duplicate_dismissals\".\"kind\" = 'person' and \"almanac_duplicate_dismissals\".\"left_person_id\" is not null and \"almanac_duplicate_dismissals\".\"right_person_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_person_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_person_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_entity_id\" is null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is null)\n            or (\"almanac_duplicate_dismissals\".\"kind\" = 'entity' and \"almanac_duplicate_dismissals\".\"left_entity_id\" is not null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_entity_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_entity_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_person_id\" is null and \"almanac_duplicate_dismissals\".\"right_person_id\" is null)\n        "
+        }
+      },
       "isRLSEnabled": false
     },
     "public.api_credentials": {
@@ -10461,13 +10687,7 @@
           "name": "recording_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
-        },
-        "folder_id": {
-          "name": "folder_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "user_id": {
           "name": "user_id",
@@ -10486,24 +10706,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "note_updated_at": {
-          "name": "note_updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "note_updated_by_user_id": {
-          "name": "note_updated_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "assignee_person_id": {
           "name": "assignee_person_id",
@@ -10738,34 +10940,6 @@
           "method": "btree",
           "with": {}
         },
-        "recording_tasks_user_folder_status_idx": {
-          "name": "recording_tasks_user_folder_status_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "folder_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"recording_tasks\".\"folder_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "recording_tasks_created_by_user_id_idx": {
           "name": "recording_tasks_created_by_user_id_idx",
           "columns": [
@@ -10840,21 +11014,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "recording_tasks_note_updated_by_idx": {
-          "name": "recording_tasks_note_updated_by_idx",
-          "columns": [
-            {
-              "expression": "note_updated_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -10871,19 +11030,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "recording_tasks_folder_id_recording_folders_id_fk": {
-          "name": "recording_tasks_folder_id_recording_folders_id_fk",
-          "tableFrom": "recording_tasks",
-          "tableTo": "recording_folders",
-          "columnsFrom": [
-            "folder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
         "recording_tasks_user_id_users_id_fk": {
           "name": "recording_tasks_user_id_users_id_fk",
           "tableFrom": "recording_tasks",
@@ -10895,19 +11041,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "recording_tasks_note_updated_by_user_id_users_id_fk": {
-          "name": "recording_tasks_note_updated_by_user_id_users_id_fk",
-          "tableFrom": "recording_tasks",
-          "tableTo": "users",
-          "columnsFrom": [
-            "note_updated_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "recording_tasks_assignee_person_id_people_id_fk": {
@@ -10993,21 +11126,13 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "recording_tasks_personal_folder_check": {
-          "name": "recording_tasks_personal_folder_check",
-          "value": "\"recording_tasks\".\"folder_id\" is null or \"recording_tasks\".\"source\" = 'personal'"
-        },
         "recording_tasks_status_check": {
           "name": "recording_tasks_status_check",
           "value": "\"recording_tasks\".\"status\" in ('proposed', 'open', 'done', 'dropped')"
         },
         "recording_tasks_source_check": {
           "name": "recording_tasks_source_check",
-          "value": "\"recording_tasks\".\"source\" in ('riffado', 'plaud', 'manual', 'personal')"
-        },
-        "recording_tasks_personal_item_check": {
-          "name": "recording_tasks_personal_item_check",
-          "value": "(\"recording_tasks\".\"source\" = 'personal') = (\"recording_tasks\".\"recording_id\" is null) and (\"recording_tasks\".\"source\" <> 'personal' or (\"recording_tasks\".\"assignee_person_id\" is null and \"recording_tasks\".\"status\" <> 'proposed'))"
+          "value": "\"recording_tasks\".\"source\" in ('riffado', 'plaud', 'manual')"
         },
         "recording_tasks_evidence_check": {
           "name": "recording_tasks_evidence_check",
@@ -12053,89 +12178,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.task_followers": {
-      "name": "task_followers",
-      "schema": "",
-      "columns": {
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "task_followers_user_id_idx": {
-          "name": "task_followers_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "task_followers_task_id_recording_tasks_id_fk": {
-          "name": "task_followers_task_id_recording_tasks_id_fk",
-          "tableFrom": "task_followers",
-          "tableTo": "recording_tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "task_followers_user_id_users_id_fk": {
-          "name": "task_followers_user_id_users_id_fk",
-          "tableFrom": "task_followers",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "task_followers_task_id_user_id_pk": {
-          "name": "task_followers_task_id_user_id_pk",
-          "columns": [
-            "task_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.task_home_moves": {
       "name": "task_home_moves",
       "schema": "",
@@ -12646,89 +12688,6 @@
           "value": "(\"task_mentions\".\"evidence_segment_index\" is null and \"task_mentions\".\"evidence_char_start\" is null and \"task_mentions\".\"evidence_char_end\" is null) or (\"task_mentions\".\"evidence_start_ms\" is null and \"task_mentions\".\"evidence_segment_index\" >= 0 and \"task_mentions\".\"evidence_char_start\" >= 0 and \"task_mentions\".\"evidence_char_start\" < \"task_mentions\".\"evidence_char_end\")"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.task_unfollows": {
-      "name": "task_unfollows",
-      "schema": "",
-      "columns": {
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "task_unfollows_user_id_idx": {
-          "name": "task_unfollows_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "task_unfollows_task_id_recording_tasks_id_fk": {
-          "name": "task_unfollows_task_id_recording_tasks_id_fk",
-          "tableFrom": "task_unfollows",
-          "tableTo": "recording_tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "task_unfollows_user_id_users_id_fk": {
-          "name": "task_unfollows_user_id_users_id_fk",
-          "tableFrom": "task_unfollows",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "task_unfollows_task_id_user_id_pk": {
-          "name": "task_unfollows_task_id_user_id_pk",
-          "columns": [
-            "task_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.task_update_proposals": {

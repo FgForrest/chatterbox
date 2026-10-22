@@ -79,6 +79,9 @@ export function EntityDetail({
                         <EntityActions
                             entity={entity}
                             canManage={canManage}
+                            canCurateOrganization={
+                                editing.canCurateOrganization
+                            }
                             types={types}
                             relationLabels={Object.fromEntries(
                                 editing.relations.map((relation) => [

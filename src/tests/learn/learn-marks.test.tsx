@@ -93,6 +93,7 @@ describe("Learn marks", () => {
                 evidenceMs: [5_000],
                 onlyFirstName: false,
                 recorder: false,
+                reason: "introduces himself",
             },
         });
         expect(

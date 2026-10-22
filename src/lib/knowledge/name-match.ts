@@ -279,6 +279,7 @@ export interface NameCandidate {
 const TRIGRAM_FLOOR = 0.4;
 
 interface IndexedName {
+    targets?: { id: string; name: string }[];
     id: string;
     name: string;
     normalized: string;
@@ -326,6 +327,8 @@ function compact(postings: Map<string, number[]>): Map<string, Int32Array> {
  * Names normalized once, with their words and trigrams posted, so a query
  * scores only the names that share a word or a trigram with it. Built when
  * a scope is loaded into memory; `bytes` is its own estimate of its size.
+ * Duplicate scan mode groups equal forms, prunes weak trigram overlaps,
+ * and omits the stem/partial-name fallback used by ordinary lookups.
  */
 export class NameIndex {
     private readonly entries: IndexedName[] = [];
@@ -333,25 +336,44 @@ export class NameIndex {
     private readonly byGram: Map<string, Int32Array>;
     readonly bytes: number;
 
-    constructor(candidates: readonly NameCandidate[]) {
+    constructor(
+        candidates: readonly NameCandidate[],
+        private readonly scan = false,
+    ) {
         const words = new Map<string, number[]>();
         const grams = new Map<string, number[]>();
+        const byName = new Map<string, IndexedName>();
         let postings = 0;
         let text = 0;
         for (const candidate of candidates) {
             for (const name of candidate.names) {
                 const normalized = normalizeName(name);
                 if (!normalized) continue;
+                const held = this.scan ? byName.get(normalized) : undefined;
+                if (held) {
+                    if (
+                        !held.targets?.some(
+                            (target) => target.id === candidate.id,
+                        )
+                    )
+                        held.targets?.push({ id: candidate.id, name });
+                    continue;
+                }
                 const index = this.entries.length;
                 const wordSet = new Set(normalized.split(" "));
                 const gramSet = trigrams(normalized);
-                this.entries.push({
+                const entry: IndexedName = {
+                    ...(this.scan
+                        ? { targets: [{ id: candidate.id, name }] }
+                        : {}),
                     id: candidate.id,
                     name,
                     normalized,
                     words: wordSet.size,
                     grams: gramSet.size,
-                });
+                };
+                this.entries.push(entry);
+                if (this.scan) byName.set(normalized, entry);
                 for (const word of wordSet) post(words, word, index);
                 for (const gram of gramSet) post(grams, gram, index);
                 postings += wordSet.size + gramSet.size;
@@ -382,10 +404,12 @@ export class NameIndex {
         const queryStems = wordsOf(query).map((word) => stemmer.stem(word));
         const queryWords = new Set(normalized.split(" "));
         const queryGrams = trigrams(normalized);
-        const sharedGrams = new Map<number, number>();
+        const sharedGrams = new Int32Array(this.entries.length);
+        const considered: number[] = [];
         for (const gram of queryGrams) {
             for (const index of this.byGram.get(gram) ?? []) {
-                sharedGrams.set(index, (sharedGrams.get(index) ?? 0) + 1);
+                if (sharedGrams[index] === 0) considered.push(index);
+                sharedGrams[index] = (sharedGrams[index] ?? 0) + 1;
             }
         }
         const sharedWords = new Map<number, number>();
@@ -395,22 +419,42 @@ export class NameIndex {
             }
         }
         const best = new Map<string, NameMatch>();
-        const considered = new Set([
-            ...sharedGrams.keys(),
-            ...sharedWords.keys(),
-        ]);
+        for (const index of sharedWords.keys()) {
+            if (!sharedGrams[index]) considered.push(index);
+        }
         for (const index of considered) {
             const entry = this.entries[index];
             if (!entry) continue;
+            const shared = sharedGrams[index] ?? 0;
+            if (
+                this.scan &&
+                (sharedWords.get(index) ?? 0) !== queryWords.size
+            ) {
+                const allowed = Math.max(
+                    1,
+                    Math.floor(
+                        Math.min(normalized.length, entry.normalized.length) /
+                            5,
+                    ),
+                );
+                const minimum = Math.min(
+                    Math.ceil(
+                        (TRIGRAM_FLOOR * (queryGrams.size + entry.grams)) /
+                            (1 + TRIGRAM_FLOOR),
+                    ),
+                    Math.max(2, queryGrams.size - 3 * allowed),
+                );
+                if (shared < minimum) continue;
+            }
             let found = scoreEntry(
                 normalized,
                 queryWords.size,
                 queryGrams.size,
                 entry,
                 sharedWords.get(index) ?? 0,
-                sharedGrams.get(index) ?? 0,
+                shared,
             );
-            if (!found || found.score < 0.88) {
+            if (!this.scan && (!found || found.score < 0.88)) {
                 const stems = scoreStems(
                     queryStems,
                     wordsOf(entry.name).map((word) => stemmer.stem(word)),
@@ -420,13 +464,25 @@ export class NameIndex {
                     found = stems;
                 }
             }
-            const held = best.get(entry.id);
-            if (found && (!held || found.score > held.score)) {
-                best.set(entry.id, {
-                    id: entry.id,
-                    name: entry.name,
-                    ...found,
-                });
+            if (!found) continue;
+            if (entry.targets) {
+                for (const target of entry.targets) {
+                    const held = best.get(target.id);
+                    if (!held || found.score > held.score)
+                        best.set(target.id, {
+                            id: target.id,
+                            name: target.name,
+                            ...found,
+                        });
+                }
+            } else {
+                const held = best.get(entry.id);
+                if (!held || found.score > held.score)
+                    best.set(entry.id, {
+                        id: entry.id,
+                        name: entry.name,
+                        ...found,
+                    });
             }
         }
         return [...best.values()].sort((a, b) => b.score - a.score);

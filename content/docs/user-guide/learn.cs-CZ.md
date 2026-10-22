@@ -5,6 +5,7 @@ description: Nechte Klepna navrhnout jména mluvčích, opravy a fakta a poté j
 
 Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje nalezené položky:
 
+- **jazyk přepisu**, pokud Učení s vysokou jistotou rozpozná jiný jazyk než poskytovatel přepisu,
 - **jména mluvčích** pro ty, kteří zatím nebyli pojmenováni,
 - **opravy** jmen, která přepis nesprávně rozpoznal („Path finder“ místo Pathfinder),
 - **nové osoby a věci**, které stojí za to přidat do Almanachu,
@@ -24,6 +25,14 @@ Pokud má profil zpracování položky u Učení zapnuté **Spouštět automatic
 
 Pokud Učení nenajde nic ke kontrole a je zapnutá volba **Opravit přepis po Učení**, krok Učení zůstane ve stavu **Běží**, zatímco přepis znovu čte a opravuje špatně rozpoznaná slova. U shrnutí se zobrazí, že čeká na tuto opravu, a po jejím dokončení se samo spustí. Kliknutím na **Shrnout** jej můžete spustit ihned.
 
+## Kalendář, Meet a odhady mluvčích
+
+Po připojení Kalendáře používá každý běh Učení nad zvukovou nahrávkou, ruční i automatický, jména pozvaných z kalendáře vlastníka nahrávky. Po udělení přístupu k Meet přidá také jména připojených účastníků. Funguje to i po sdílení s Organizací. Klepna vybere schůzku s největším časovým překryvem; při podobných shodách nechá výběr nerozhodnutý. Při ručním spuštění si můžete vybrat z nabízených událostí.
+
+Učení porovná tato jména s přepisem a známými rolemi a fakty v Almanachu a navrhne pravděpodobné mluvčí. Návrhy mají **?** a uvedený původ: **Zazněl v přepisu**, **Pozván v Kalendáři**, **Připojen v Google Meet** nebo **Odhad** s krátkým vysvětlením. Odhady začínají nezaškrtnuté. Správný odhad přijmete jedním zaškrtnutím; dokončení bez zaškrtnutí nechá mluvčího nepotvrzeného. Nového účastníka lze současně přidat do Almanachu.
+
+Jména účastníků také pomáhají podporovaným poskytovatelům přepisu a následné opravě správně psát jména. Tím se mluvčí nepojmenuje. Nepotvrzené odhady se jako jména nikdy nedostanou do textu přepisu, shrnutí, exportů ani API. K určování identity se nepoužívají hlasová data, hlasové otisky ani biometrie; e-maily účastníků se nevyžadují.
+
 <span id="reviewing" />
 
 ## Kontrola návrhů
@@ -32,6 +41,7 @@ Obsah kontroly je stejný, ať je vložený v položce, nebo otevřený v okně.
 
 ![Přehled návrhů Učení](images/learn-review.png)
 
+- **Jazyk přepisu**: jazyk rozpoznaný Učením je předvybraný. Můžete jej ponechat, zachovat jazyk rozpoznaný poskytovatelem nebo vybrat jiný ze seznamu. **Dokončit kontrolu** potvrdí volbu pro tuto nahrávku v soukromém pohledu i v pohledu Organizace. Při shodě nebo nejistotě se jazyk nenabízí ani neukládá. Kontrola platí pro zvukové nahrávky; zacházení s jazykem pošty se nemění.
 - **Mluvčí**: koho Učení považuje za každého nepojmenovaného mluvčího a proč. **▷** přehraje důkaz. **Někdo jiný…** vybere jinou osobu, **Neznámý** označí mluvčího za neznámého.
 - **Nové v Almanachu**: osoby a věci, které Učení rozpoznalo, ale Almanach je nezná. Začínají nezaškrtnuté. Opravte jméno nebo typ před zaškrtnutím, zvolte **Je to něco známého…**, pokud záznam už máte pod jiným jménem, nebo **Nikdy nenavrhovat**, pokud jej nechcete navrhovat v žádné nahrávce.
 - **Opravy**: špatně rozpoznaná jména, četnost a výskyt. Tyto návrhy jsou předem zaškrtnuté.
@@ -68,7 +78,7 @@ Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učen
 ## Důležité vědět
 
 - Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
-- Mluvčí označený pouze křestním jménem je podle toho označen. Křestní jméno, které sdílí dvě osoby v Almanachu, nepřiřadí žádné z nich.
+- Mluvčí označený pouze křestním jménem je podle toho označen. Shodné křestní jméno vyžaduje rozlišující důkaz nebo výslovně označený odhad.
 - Zařazení nového záznamu jako toho, který už máte, naučí Klepna nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
 - Profil zpracování může Učení přiřadit vlastního poskytovatele a model, například výkonnější než pro shrnutí. Viz [Zpracování a profily](processing-and-profiles.md).
 
