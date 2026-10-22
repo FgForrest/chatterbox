@@ -332,6 +332,11 @@ export function WorkflowStrip({
                 return i18n("Your turn.");
         }
     };
+    const shortDateTime = (value: string) =>
+        new Date(value).toLocaleString(locale, {
+            dateStyle: "short",
+            timeStyle: "short",
+        });
     const message = () => {
         const status = workflow.status;
         if (!status) return "";
@@ -339,14 +344,19 @@ export function WorkflowStrip({
             return i18n("Queued, position {position}", {
                 position: String(status.params.position),
             });
-        if (status.params?.until)
+        if (status.message === "learnReview" && status.params?.until)
             return i18n("Waiting for Learn review, until {deadline}", {
-                deadline: new Date(status.params.until).toLocaleString(locale, {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                }),
+                deadline: shortDateTime(status.params.until),
             });
         switch (status.message) {
+            case "retryScheduled":
+                return i18n("Next attempt at {time}", {
+                    time: shortDateTime(status.params?.retryAt ?? ""),
+                });
+            case "shareRunning":
+                return i18n("Sharing…");
+            case "taskReviewRunning":
+                return i18n("Preparing task review…");
             case "stalled":
                 return i18n("Processing stalled, recovering");
             case "organizationUnavailable":

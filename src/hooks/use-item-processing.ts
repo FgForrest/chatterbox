@@ -36,10 +36,12 @@ export function useItemProcessing({
         initialData ?? null,
     );
     const [failures, setFailures] = useState(0);
-    const [nextCheckAt, setNextCheckAt] = useState(
-        () =>
-            initialData?.nextCheckAt ??
-            new Date(Date.now() + 60_000).toISOString(),
+    const [schedule, setSchedule] = useState(() => ({
+        delay: initialData?.nextCheckInMs ?? 60_000,
+    }));
+    const stoppedVersion = useRef<number | null>(null);
+    const [unavailableVersion, setUnavailableVersion] = useState<number | null>(
+        null,
     );
     const [pageVisible, setPageVisible] = useState(
         () =>
@@ -63,20 +65,20 @@ export function useItemProcessing({
 
     useEffect(() => {
         setData(initialData?.itemId === itemId ? initialData : null);
-        if (initialData?.nextCheckAt) setNextCheckAt(initialData.nextCheckAt);
+        if (initialData) setSchedule({ delay: initialData.nextCheckInMs });
         if (previousKey.current === key) return;
         previousKey.current = key;
         setFailures(0);
-        setNextCheckAt(
-            initialData?.nextCheckAt ??
-                new Date(Date.now() + 60_000).toISOString(),
-        );
+        stoppedVersion.current = null;
+        setUnavailableVersion(null);
+        setSchedule({ delay: initialData?.nextCheckInMs ?? 60_000 });
     }, [initialData, itemId, key]);
 
     const refresh = useCallback((): Promise<void> => {
         if (
             !mounted.current ||
             !enabled ||
+            stoppedVersion.current === version ||
             document.visibilityState !== "visible"
         )
             return Promise.resolve();
@@ -85,13 +87,24 @@ export function useItemProcessing({
             inFlight.current.version === version
         )
             return inFlight.current.request;
+        const stillCurrent = () =>
+            mounted.current &&
+            currentKey.current === key &&
+            versionRef.current === version;
         const request = (async () => {
             const path =
                 kind === "mail"
-                    ? `/api/mail/${encodeURIComponent(itemId)}`
+                    ? `/api/mail/${encodeURIComponent(itemId)}?processing=1`
                     : `/api/recordings/${encodeURIComponent(itemId)}?processing=1`;
             try {
                 const response = await fetch(withRecordingView(path, view));
+                if ([401, 403, 404].includes(response.status)) {
+                    if (stillCurrent()) {
+                        stoppedVersion.current = version;
+                        setUnavailableVersion(version);
+                    }
+                    return;
+                }
                 if (!response.ok) throw new Error(String(response.status));
                 const body = (await response.json()) as {
                     processing?: ItemProcessingPresentation | null;
@@ -99,27 +112,18 @@ export function useItemProcessing({
                 if (
                     !body.processing ||
                     body.processing.itemId !== itemId ||
-                    !Number.isFinite(Date.parse(body.processing.nextCheckAt))
+                    !Number.isFinite(body.processing.nextCheckInMs) ||
+                    body.processing.nextCheckInMs < 0
                 )
                     throw new Error("Invalid processing response");
-                if (
-                    !mounted.current ||
-                    currentKey.current !== key ||
-                    versionRef.current !== version
-                )
-                    return;
+                if (!stillCurrent()) return;
                 setData(body.processing);
                 setFailures(0);
-                setNextCheckAt(body.processing.nextCheckAt);
+                setSchedule({ delay: body.processing.nextCheckInMs });
             } catch {
-                if (
-                    !mounted.current ||
-                    currentKey.current !== key ||
-                    versionRef.current !== version
-                )
-                    return;
+                if (!stillCurrent()) return;
                 setFailures((count) => count + 1);
-                setNextCheckAt(new Date(Date.now() + 5_000).toISOString());
+                setSchedule({ delay: 5_000 });
             } finally {
                 if (
                     inFlight.current?.key === key &&
@@ -160,13 +164,13 @@ export function useItemProcessing({
     }, [refresh]);
 
     useEffect(() => {
-        if (!enabled || !pageVisible) return;
-        const delay = Math.max(1_000, Date.parse(nextCheckAt) - Date.now());
+        if (!enabled || !pageVisible || unavailableVersion === version) return;
+        const delay = Math.max(3_000, schedule.delay);
         const timer = window.setTimeout(() => {
             void refresh();
         }, delay);
         return () => window.clearTimeout(timer);
-    }, [enabled, nextCheckAt, pageVisible, refresh]);
+    }, [enabled, schedule, pageVisible, refresh, unavailableVersion, version]);
 
     const invalidationWaiting = useRef<Promise<void> | null>(null);
     const refreshAfterChange = useCallback(() => {

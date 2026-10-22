@@ -462,11 +462,15 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
         });
 
         await share();
+        expect(
+            (await call(getMailDetail, OTHER, MAIL, `/api/mail/${MAIL}`))
+                .status,
+        ).toBe(404);
         const member = await call(
             getMailDetail,
             OTHER,
             MAIL,
-            `/api/mail/${MAIL}`,
+            `/api/mail/${MAIL}?view=org`,
         );
         expect(member.status).toBe(200);
         await expect(member.json()).resolves.toMatchObject({

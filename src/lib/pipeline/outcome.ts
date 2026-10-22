@@ -5,8 +5,9 @@ export interface PipelineWait {
     kind: string;
     until?: string;
     jobId?: string;
-    status?: "queued" | "running";
+    status?: "queued" | "running" | "retry";
     position?: number;
+    retryAt?: string;
 }
 
 /** Use one wait representation for planner decisions and job outcomes. */

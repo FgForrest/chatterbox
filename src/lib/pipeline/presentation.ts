@@ -90,6 +90,7 @@ export interface ItemProcessingPresentation {
     phases: PipelinePhases;
     steps: Record<PhaseName, ProcessingStep>;
     nextCheckAt: string;
+    nextCheckInMs: number;
     profile:
         | (ProcessingProfileSummary & {
               revisionId: string;
@@ -146,16 +147,6 @@ interface StoredFolder {
     userId: string;
     parentId: string | null;
     name: string;
-}
-
-/** Reduce active database jobs to the state shown for one pipeline phase. */
-export function processingJobState(
-    jobs: Array<{
-        status: "pending" | "processing" | "completed" | "failed";
-    }>,
-): ProcessingJobState | null {
-    if (jobs.some((job) => job.status === "processing")) return "running";
-    return jobs.some((job) => job.status === "pending") ? "queued" : null;
 }
 
 /** Describe failed phase and Summary-step records for the status sentence. */
@@ -730,7 +721,7 @@ export async function loadPrivateItemProcessing(
         processAgainPending(item.phases ?? {});
     const presentation: Omit<
         ItemProcessingPresentation,
-        "steps" | "nextCheckAt"
+        "steps" | "nextCheckAt" | "nextCheckInMs"
     > = {
         itemId,
         kind: item.kind,

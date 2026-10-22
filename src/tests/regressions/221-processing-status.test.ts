@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { JOB_STALE_MS } from "@/lib/jobs/timing";
 import {
     type ProcessingInput,
     type ProcessingQueueJob,
@@ -25,14 +24,16 @@ const base: ProcessingInput = {
     failures: [],
 };
 const owner = { canChange: true, canFile: true };
-function job(status: "pending" | "processing", age = 0): ProcessingQueueJob {
+function job(
+    status: "pending" | "processing",
+    stale = false,
+): ProcessingQueueJob {
     return {
         id: "job-veln",
         kind: "learn.run",
         status,
-        heartbeatAt: new Date(now.getTime() - age),
-        startedAt: now,
-        updatedAt: now,
+        stale,
+        retryAt: null,
         position: 3,
         result: null,
         errorCode: null,
@@ -69,6 +70,7 @@ describe("#221 explicit processing response", () => {
             actions: [],
         });
         expect(result.nextCheckAt).toBe("2026-10-23T09:00:05.000Z");
+        expect(result.nextCheckInMs).toBe(5_000);
     });
     it("does not present a queue without a live pending job", () => {
         const result = projectProcessing(bound(), [], owner, now);
@@ -76,23 +78,98 @@ describe("#221 explicit processing response", () => {
         expect(result.steps.learn.waitingFor?.kind).not.toBe("job");
         expect(result.nextCheckAt).toBe("2026-10-23T09:01:00.000Z");
     });
-    it("reports stalled only after the shared heartbeat threshold", () => {
+    it("uses the database staleness verdict", () => {
         expect(
-            projectProcessing(
-                bound(),
-                [job("processing", JOB_STALE_MS)],
-                owner,
-                now,
-            ).steps.learn.state,
+            projectProcessing(bound(), [job("processing", false)], owner, now)
+                .steps.learn.state,
         ).toBe("running");
         expect(
-            projectProcessing(
-                bound(),
-                [job("processing", JOB_STALE_MS + 1)],
-                owner,
-                now,
-            ).steps.learn.state,
+            projectProcessing(bound(), [job("processing", true)], owner, now)
+                .steps.learn.state,
         ).toBe("stalled");
+    });
+    it("waits thirty seconds for the reconciler when a job is stalled", () => {
+        const result = projectProcessing(
+            bound(),
+            [job("processing", true)],
+            owner,
+            now,
+        );
+        expect(result.nextCheckInMs).toBe(30_000);
+    });
+    it.each([
+        30_000, 90_000,
+    ])("waits until a scheduled retry, capped at one minute (%s ms)", (delay) => {
+        const retryAt = new Date(now.getTime() + delay).toISOString();
+        const result = projectProcessing(
+            bound(),
+            [{ ...job("pending"), retryAt }],
+            owner,
+            now,
+        );
+        expect(result.steps.learn).toMatchObject({
+            state: "queued",
+            waitingFor: { kind: "job", status: "retry", retryAt },
+        });
+        expect(result.steps.learn.waitingFor?.position).toBeUndefined();
+        expect(result.jobs.transcription).toBeNull();
+        expect(result.nextCheckInMs).toBe(Math.min(delay, 60_000));
+    });
+    it("keeps a scheduled manual retry visible over an earlier output", () => {
+        const retryAt = new Date(now.getTime() + 90_000).toISOString();
+        const result = projectProcessing(
+            {
+                ...base,
+                manualOnly: true,
+                outputs: { ...base.outputs, transcript: true },
+            },
+            [
+                {
+                    ...job("pending"),
+                    kind: "transcription",
+                    unbound: true,
+                    retryAt,
+                },
+            ],
+            owner,
+            now,
+        );
+        expect(result.steps.transcribe).toMatchObject({
+            state: "queued",
+            waitingFor: { status: "retry", retryAt },
+        });
+        expect(result.nextCheckInMs).toBe(60_000);
+    });
+    it.each([
+        "review_pending_timeout",
+        "manual_review_pending",
+    ])("clears a carried Learn deadline for %s", (reason) => {
+        const until = new Date(now.getTime() + 900_000).toISOString();
+        const live = {
+            ...base,
+            phases: {
+                learn: {
+                    state: "waiting" as const,
+                    reason: "review_pending",
+                    waitingFor: { kind: "learnReview", until },
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+            },
+        };
+        expect(
+            projectProcessing(live, [], { ...owner, reviewUntil: until }, now)
+                .steps.learn.waitingFor?.until,
+        ).toBe(until);
+        const result = projectProcessing(
+            { ...live, phases: { learn: { ...live.phases.learn, reason } } },
+            [],
+            { ...owner, reviewUntil: until },
+            now,
+        );
+        expect(result.steps.learn.waitingFor?.until).toBeUndefined();
+        expect(result.steps.learn.reason).toBe(reason);
+        expect(result.nextCheckInMs).toBe(60_000);
     });
     it.each([
         ["completed", "done"],

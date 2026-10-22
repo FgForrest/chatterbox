@@ -193,6 +193,10 @@ describe("mail detail layout", () => {
             screen.getByTestId("folder-row").getAttribute("data-can-curate"),
         ).toBe("true");
         await screen.findByTestId("mail-summary");
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/mail/mail-1?view=org",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
     });
     it.each([
         "Recent",
@@ -214,6 +218,10 @@ describe("mail detail layout", () => {
                 onRemoveFromFolder={vi.fn()}
                 onMoveBetweenFolders={vi.fn()}
             />,
+        );
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/mail/mail-1",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
         expect(
             screen.getByRole("button", { name: backLabel }).className,

@@ -37,6 +37,9 @@ export type WorkflowActor =
 
 export type WorkflowMessageCode =
     | "stalled"
+    | "retryScheduled"
+    | "shareRunning"
+    | "taskReviewRunning"
     | "organizationUnavailable"
     | "waitingForProcessing"
     | "notFiled"
@@ -92,6 +95,7 @@ export interface WorkflowStatusSentence {
         count?: number;
         position?: number;
         until?: string;
+        retryAt?: string;
         folders?: string[];
         kind?: "audio" | "mail";
         step?: PhaseName;
@@ -187,6 +191,15 @@ function failureMessage(reasonCode: string): WorkflowMessageCode {
     return "stepFailed";
 }
 
+function runningMessage(phase: PhaseName, reason: string): WorkflowMessageCode {
+    if (phase === "transcribe") return "transcribing";
+    if (phase === "learn")
+        return reason === "correcting" ? "learnCorrecting" : "learnRunning";
+    if (phase === "share") return "shareRunning";
+    if (phase === "taskReview") return "taskReviewRunning";
+    return "summaryRunning";
+}
+
 function sentence(
     phase: PhaseName,
     step: ProcessingStep,
@@ -196,6 +209,12 @@ function sentence(
     const withAction = (
         value: WorkflowStatusSentence,
     ): WorkflowStatusSentence => (action ? { ...value, action } : value);
+    if (step.waitingFor?.status === "retry")
+        return {
+            actor: "queued",
+            message: "retryScheduled",
+            params: { retryAt: step.waitingFor.retryAt },
+        };
     if (step.state === "stalled")
         return {
             actor: "problem",
@@ -222,14 +241,7 @@ function sentence(
     if (step.state === "running")
         return {
             actor: "working",
-            message:
-                phase === "transcribe"
-                    ? "transcribing"
-                    : phase === "learn"
-                      ? step.reason === "correcting"
-                          ? "learnCorrecting"
-                          : "learnRunning"
-                      : "summaryRunning",
+            message: runningMessage(phase, step.reason),
         };
     if (step.reason === "profile_unavailable")
         return withAction({ actor: "problem", message: "profileUnavailable" });
@@ -266,7 +278,7 @@ function sentence(
                       : "learnReview",
             params: {
                 count: data.learnFindingsWaiting,
-                ...(step.waitingFor.until
+                ...(step.reason === "review_pending" && step.waitingFor.until
                     ? { until: step.waitingFor.until }
                     : {}),
             },

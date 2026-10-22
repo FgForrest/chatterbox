@@ -1,4 +1,3 @@
-import { JOB_STALE_MS } from "@/lib/jobs/timing";
 import {
     outcomeRecord,
     type PipelineWait,
@@ -34,9 +33,8 @@ export interface ProcessingQueueJob {
         generation: number;
     }[];
     status: "pending" | "processing" | "completed" | "failed";
-    heartbeatAt: Date | null;
-    startedAt: Date | null;
-    updatedAt: Date;
+    stale: boolean;
+    retryAt: string | null;
     position: number;
     result: Record<string, unknown> | null;
     errorCode: string | null;
@@ -44,7 +42,7 @@ export interface ProcessingQueueJob {
 
 export type ProcessingInput = Omit<
     ItemProcessingPresentation,
-    "steps" | "nextCheckAt"
+    "steps" | "nextCheckAt" | "nextCheckInMs"
 >;
 
 export interface ProcessingPermissions {
@@ -70,7 +68,6 @@ function isActive(step: ProcessingStep): boolean {
 function projectRecord(
     record: PhaseRecord | PhaseStepRecord | undefined,
     jobs: ProcessingQueueJob[],
-    now: Date,
     phase: PhaseName,
     child?: SummaryStepName,
 ): ProcessingStep {
@@ -118,20 +115,26 @@ function projectRecord(
                           ))) &&
                   ["pending", "processing"].includes(job.status),
           );
-    if (job?.status === "pending" || job?.status === "processing") {
-        const heartbeat = job.heartbeatAt ?? job.startedAt ?? job.updatedAt;
-        result.state =
-            job.status === "pending"
-                ? "queued"
-                : now.getTime() - heartbeat.getTime() > JOB_STALE_MS
-                  ? "stalled"
-                  : "running";
-        result.waitingFor = {
-            kind: "job",
-            jobId: job.id,
-            status: job.status === "pending" ? "queued" : "running",
-            ...(job.status === "pending" ? { position: job.position } : {}),
-        };
+    if (job?.status === "pending") {
+        result.state = "queued";
+        result.waitingFor = job.retryAt
+            ? {
+                  kind: "job",
+                  jobId: job.id,
+                  status: "retry",
+                  retryAt: job.retryAt,
+              }
+            : {
+                  kind: "job",
+                  jobId: job.id,
+                  status: "queued",
+                  position: job.position,
+              };
+        return result;
+    }
+    if (job?.status === "processing") {
+        result.state = job.stale ? "stalled" : "running";
+        result.waitingFor = { kind: "job", jobId: job.id, status: "running" };
         return result;
     }
     if (job) {
@@ -185,7 +188,7 @@ export function projectProcessing(
     const steps = Object.fromEntries(
         phaseOrder.map((phase) => [
             phase,
-            projectRecord(data.phases[phase], jobs, now, phase),
+            projectRecord(data.phases[phase], jobs, phase),
         ]),
     ) as Record<PhaseName, ProcessingStep>;
     const summary = data.phases.summary;
@@ -206,7 +209,6 @@ export function projectProcessing(
                               }
                             : job,
                     ),
-                    now,
                     "summary",
                     step as SummaryStepName,
                 ),
@@ -273,10 +275,13 @@ export function projectProcessing(
             step.state = "manual";
             step.waitingFor = null;
         }
-        if (step.waitingFor?.kind === "learnReview" && permissions.reviewUntil)
+        if (step.waitingFor?.kind === "learnReview")
             step.waitingFor = {
                 ...step.waitingFor,
-                until: permissions.reviewUntil,
+                until:
+                    step.reason === "review_pending"
+                        ? (permissions.reviewUntil ?? step.waitingFor.until)
+                        : undefined,
             };
         if (
             phase === "share" &&
@@ -367,7 +372,17 @@ export function projectProcessing(
         step,
         ...Object.values(step.steps ?? {}),
     ]);
-    const busy = allSteps.some(isActive);
+    const retries = allSteps.flatMap((step) =>
+        step.waitingFor?.retryAt
+            ? [Math.max(0, Date.parse(step.waitingFor.retryAt) - now.getTime())]
+            : [],
+    );
+    const busy = allSteps.some(
+        (step) =>
+            ["queued", "running"].includes(step.state) &&
+            step.waitingFor?.status !== "retry",
+    );
+    const stalled = allSteps.some((step) => step.state === "stalled");
     const holds = allSteps
         .flatMap((step) =>
             step.waitingFor?.kind === "learnReview" && step.waitingFor.until
@@ -375,21 +390,26 @@ export function projectProcessing(
                 : [],
         )
         .filter((until) => Number.isFinite(until) && until > now.getTime());
-    const nextCheckAt = new Date(
-        busy
-            ? now.getTime() + 5_000
-            : holds.length > 0
-              ? Math.min(...holds, now.getTime() + 600_000)
-              : now.getTime() + 60_000,
-    ).toISOString();
+    let checkCeiling = 60_000;
+    if (busy) checkCeiling = 5_000;
+    else if (stalled) checkCeiling = 30_000;
+    else if (holds.length > 0 && retries.length === 0) checkCeiling = 600_000;
+    const nextCheckInMs = Math.min(
+        checkCeiling,
+        ...holds.map((until) => until - now.getTime()),
+        ...retries,
+    );
+    const nextCheckAt = new Date(now.getTime() + nextCheckInMs).toISOString();
     const jobState = (step: ProcessingStep | undefined) =>
-        step?.waitingFor?.kind === "job" && step.state !== "stalled"
-            ? (step.waitingFor.status ?? null)
+        step?.waitingFor?.kind === "job" &&
+        (step.state === "queued" || step.state === "running")
+            ? step.state
             : null;
     return {
         ...data,
         steps,
         nextCheckAt,
+        nextCheckInMs,
         jobs: {
             transcription: jobState(steps.transcribe),
             summary: jobState(

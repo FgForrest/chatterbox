@@ -37,6 +37,7 @@ import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { canChangeItem } from "@/lib/sharing/change-permission";
+import { withRecordingView } from "@/lib/sharing/view";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -175,9 +176,13 @@ export function MailDetailPane({
         setFailed(false);
         setFormatted(null);
         setShowFormatted(false);
-        fetch(`/api/mail/${encodeURIComponent(mail.id)}`, {
-            signal: controller.signal,
-        })
+        fetch(
+            withRecordingView(
+                `/api/mail/${encodeURIComponent(mail.id)}`,
+                mail.view,
+            ),
+            { signal: controller.signal },
+        )
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
                 const body = (await response.json()) as MailDetailResponse;
@@ -191,7 +196,7 @@ export function MailDetailPane({
                 }
             });
         return () => controller.abort();
-    }, [mail.id]);
+    }, [mail.id, mail.view]);
 
     const toggleFormatted = useCallback(async () => {
         if (showFormatted) {

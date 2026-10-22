@@ -158,14 +158,16 @@ export async function updatePhaseInTx(
         }
     }
     if (record.state === "waiting" && !record.jobId) {
-        const waitingFor = record.waitingFor ?? waitForReason(record.reason);
-        if (previous?.waitingFor?.kind === waitingFor.kind)
+        const waitingFor = {
+            ...(record.waitingFor ?? waitForReason(record.reason)),
+        };
+        const learnReview = waitingFor.kind === "learnReview";
+        const liveLearnReview =
+            learnReview && record.reason === "review_pending";
+        if (learnReview && !liveLearnReview) delete waitingFor.until;
+        else if (previous?.waitingFor?.kind === waitingFor.kind)
             waitingFor.until ??= previous.waitingFor.until;
-        if (
-            phase === "learn" &&
-            waitingFor.kind === "learnReview" &&
-            record.reason !== "review_pending_timeout"
-        ) {
+        if (phase === "learn" && liveLearnReview) {
             const [item] = await tx
                 .select({ dueAt: chatterItems.summaryDueAt })
                 .from(chatterItems)

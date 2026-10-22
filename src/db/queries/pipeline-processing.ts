@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { jobBindings } from "@/db/queries/pipeline-jobs";
+import { JOB_STALE_MS } from "@/lib/jobs/timing";
 import type { ProcessingQueueJob } from "@/lib/pipeline/processing-status";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 
@@ -45,8 +46,11 @@ export async function loadPipelineProcessingJobs(
             where q.status = 'pending' and q.next_attempt_at <= now()
               and q.kind in ('pipeline.action', 'pipeline.advance') and q.kind in (select kind from targets where status = 'pending')
         )
-        select j.id, j.kind, j.status, j.payload, j.heartbeat_at as "heartbeatAt", j.started_at as "startedAt",
-            j.updated_at as "updatedAt", j.result, j.error_code as "errorCode",
+        select j.id, j.kind, j.status, j.payload, j.result, j.error_code as "errorCode",
+            (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at)
+                < now() - make_interval(secs => ${JOB_STALE_MS / 1_000}::double precision)) as stale,
+            case when j.status = 'pending' and j.next_attempt_at > now()
+                then to_char(j.next_attempt_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') end as "retryAt",
             case when j.status <> 'pending' then 1
             when j.kind in ('pipeline.action', 'pipeline.advance') then
                 (1 + (select count(*) from fair ahead left join fair target on target.id = j.id
@@ -71,9 +75,6 @@ export async function loadPipelineProcessingJobs(
                     binding.itemId === itemId && binding.userId === ownerUserId,
             ),
             unbound: allBindings.length === 0,
-            heartbeatAt: row.heartbeatAt ? new Date(row.heartbeatAt) : null,
-            startedAt: row.startedAt ? new Date(row.startedAt) : null,
-            updatedAt: new Date(row.updatedAt),
         };
     });
 }

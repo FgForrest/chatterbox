@@ -30,6 +30,7 @@ function processing(delay = 60_000, itemId = "item-veln") {
             failures: [],
         }),
         nextCheckAt: new Date(Date.now() + delay).toISOString(),
+        nextCheckInMs: delay,
     };
 }
 function visibility(state: "hidden" | "visible") {
