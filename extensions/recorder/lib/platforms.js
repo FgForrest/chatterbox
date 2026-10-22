@@ -10,6 +10,8 @@
  * @typedef {Object} Platform
  * @property {string} id            stable id, also the server's `platformHint`
  * @property {string} name          user-facing label
+ * @property {number} [promptTopOffset]
+ * @property {string[]} [promptOrigins]
  * @property {(url: URL) => boolean} inMeeting
  */
 
@@ -21,6 +23,8 @@ function hostIs(url, host) {
 export const PLATFORMS = [
     {
         id: "google-meet",
+        promptTopOffset: 16,
+        promptOrigins: ["https://*.meet.google.com/*"],
         name: "Google Meet",
         // Rooms are three lowercase groups: xxx-xxxx-xxx. Everything else on
         // the host (landing, /new redirects, settings) is not a meeting.
@@ -30,6 +34,8 @@ export const PLATFORMS = [
     },
     {
         id: "zoom",
+        promptTopOffset: 16,
+        promptOrigins: ["https://*.zoom.us/*"],
         name: "Zoom (web)",
         // Web client rooms live under /wc/<meetingId>/... on any zoom.us host.
         inMeeting: (url) =>
@@ -37,6 +43,8 @@ export const PLATFORMS = [
     },
     {
         id: "teams",
+        promptTopOffset: 64,
+        promptOrigins: ["https://*.teams.microsoft.com/*", "https://*.teams.live.com/*", "https://*.teams.cloud.microsoft/*"],
         name: "Microsoft Teams (web)",
         // Teams URLs are volatile; treat a meetup/call path on any Teams host
         // as a meeting and let real-world testing tighten this.
@@ -50,6 +58,8 @@ export const PLATFORMS = [
     },
     {
         id: "webex",
+        promptTopOffset: 16,
+        promptOrigins: ["https://*.webex.com/*"],
         name: "Webex",
         inMeeting: (url) =>
             hostIs(url, "webex.com") &&
@@ -63,6 +73,8 @@ export const PLATFORMS = [
     },
     {
         id: "whereby",
+        promptTopOffset: 16,
+        promptOrigins: ["https://*.whereby.com/*"],
         name: "Whereby",
         inMeeting: (url) =>
             hostIs(url, "whereby.com") &&
@@ -78,6 +90,8 @@ export const PLATFORMS = [
             url.pathname !== "/",
     },
 ];
+
+export const MEETING_PROMPT_ORIGINS = PLATFORMS.flatMap((platform) => platform.promptOrigins ?? []);
 
 export const PLATFORM_IDS = PLATFORMS.map((platform) => platform.id);
 

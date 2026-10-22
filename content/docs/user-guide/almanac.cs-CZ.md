@@ -82,4 +82,20 @@ Kurátoři Organizace najdou pod **Almanach → Péče → Možné duplicity** o
 
 Hledání kontroluje 2 000 nejnovějších živých záznamů každého druhu a jejich nejbližší shody. Duplicity se starším záznamem mimo tento limit se nenabízejí, ani když je druhý záznam nový. Procházení ani odmítání dvojic neposune hledání za tento limit. Omezené hledání označuje upozornění. Porovnání ukazuje sdílené položky a otevřené úkoly, soukromé položky kolegů zůstávají soukromé.
 
+<span id="folder-knowledge" />
+
+## Znalosti složky
+
+Na hlavní stránce otevřete složku a vedle jejího názvu zvolte **Znalosti**. Pohled může číst každý, kdo složku vidí. Zahrnuje položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
+
+Karta **Co dostanou modely** používá stejné funkce jako zpracování položek:
+
+- **Přepis:** nejvýše 500 jmen, přezdívek a pojmů. První je nahrávající, pak použití ve složce, vlastní použití, přeslechy a pořadí jmen. Náhled vysvětluje pořadí, ukazuje první výrazy, počet vynechaných, hranici 500 a několik výrazů pod ní. Složky mění pořadí, nikdy nefiltrují dostupné záznamy Almanachu.
+- **Oprava přepisu:** nejvýše 500 záznamů se jmény, přezdívkami a přeslechy, bez faktů. První jsou záznamy už zmíněné v přepisu, pak rozhoduje použití ve složce. Náhled ukazuje počet záznamů a přesnou podobu `ALMANAC (JSON)` prvních pěti záznamů.
+- **Učení:** znalosti si dohledává samo, nejvýše 10 výsledků na dotaz; při shodě rozhoduje použití ve složce.
+- **Shrnutí:** dostává opravený přepis bez Almanachu. Jména mluvčích se doplní až potom.
+- **MCP:** čte oprávněný Almanach Organizace a soukromý Almanach bez filtru složky.
+
+Náhled předpokládá novou položku vlastněnou čtenářem, zařazenou jen do této složky, zatím bez zmínek v přepisu. Používá jazyk přepisu z výchozího zvukového profilu složky, včetně zděděného profilu. Při automatickém rozpoznávání jazyka zahrnuje přeslechy ze všech jazyků. Jiný vlastník, jazyk, existující přepis nebo další umístění mohou pořadí změnit. Kořenové složky se z řazení vynechávají: položka zařazená přímo do kořene nedostává kontext z tohoto kořene; podsložky mohou nadále přispívat použitím. Karty znalostí přesto počítají celý strom kořene.
+
 Dále: [Učení](learn.md)

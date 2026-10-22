@@ -68,4 +68,18 @@ Organization curators use **Almanac → Care → Possible duplicates** to find t
 
 Scans check the newest 2,000 live records per kind and their closest matches. Duplicates involving an older record outside this cap are not suggested, even when the other record is new. Reviewing or dismissing pairs does not move the scan past this cap. A notice identifies a limited scan. Shared items and open tasks are shown in the comparison; colleagues' private items remain private.
 
+## Folder knowledge
+
+Open a folder on the dashboard and choose **Knowledge** beside its name. Everyone who can see the folder can read this view. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
+
+**What the models receive** reuses the processing pipeline:
+
+- **Transcription:** at most 500 names, aliases and terms. The recorder comes first, then folder usage, owner usage, mishearings and name order. The preview explains the ranking, shows the top terms, the number omitted, the 500-term cut line and a few terms below it. Folders change order, never which Almanac records are eligible.
+- **Transcript correction:** at most 500 records, with names, aliases and mishearings, without facts. Records already mentioned by the transcript come first, then folder usage. The preview shows the record count and the exact `ALMANAC (JSON)` representation of the first five records.
+- **Learn:** looks knowledge up itself, up to 10 results per lookup; folder usage breaks ties.
+- **Summary:** receives the corrected transcript without Almanac context. Speaker names are filled in afterwards.
+- **MCP:** reads its authorized Organization and private Almanac without a folder filter.
+
+The preview assumes a new item owned by the viewer, filed only in this folder, with no transcript mentions. It uses the transcription language from the folder’s default audio profile, including an inherited profile. When the profile auto-detects the language, mishearings from all languages are included. Another owner, language, existing transcript or additional placements can change the order. Root folders are excluded as ranking context: an item filed directly there gets no context from that root; descendant folders can still contribute usage. The knowledge tabs still count the whole root tree.
+
 Next: [Learn](learn.md)

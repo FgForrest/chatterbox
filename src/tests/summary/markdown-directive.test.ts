@@ -467,7 +467,9 @@ describe("output language under auto", () => {
 
     it("uses thematic Czech minutes for the legacy meeting prompt under auto", async () => {
         await summarize({ detectedLanguage: "cs-CZ" }, "meeting-notes");
-        expect(systemMessages()[0]).toContain("output in Czech");
+        expect(systemMessages()[0]).toContain(
+            "the language the transcription is predominantly spoken in",
+        );
         expect(userMessages()[0]).toContain("Nejprve z této schůzky");
         expect(userMessages()[0]).toContain("350–700");
         expect(userMessages()[0]).not.toContain("Účastníci, Účel, Diskuse");
@@ -482,10 +484,10 @@ describe("output language under auto", () => {
         expect(userMessages()[0]).toContain("skutečně probíraných témat");
     });
 
-    it("uses the account language for a profile run when detection returned none", async () => {
+    it("keeps account-language prompt wording with a generic directive when detection returned none", async () => {
         await summarize({ defaultTranscriptionLanguage: "cs" });
         expect(systemMessages()[0]).toContain(
-            "Write all natural-language output in Czech",
+            "the language the transcription is predominantly spoken in",
         );
         expect(userMessages()[0]).toContain(
             "Nejprve z tohoto zvukového přepisu",

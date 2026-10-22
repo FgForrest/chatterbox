@@ -101,4 +101,12 @@ Click a folder to show its items in the list. Use the current folder name in the
 
 Folder settings shows **Name** as text; **Rename** opens an inline field. **Mail to folder** shows the address, a copy button and when mail last arrived, when mail is enabled. **Default processing profile** shows the current recording and mail profiles, including inherited settings; **Change** edits them. **Export** shows its targets or **Not configured**, with **Change** or **Configure** to manage exports to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
 
+### Folder knowledge
+
+**Knowledge** beside the current folder's name opens a read-only view in place of the item detail. On a phone it opens its own view; **Back** returns to the list. It is available in every Private and Organization folder, for every viewer.
+
+**People**, **Things**, **Corrections** and **Facts** show what the folder's items and subfolders mention, with counts, last use, and evidence items. A person’s e-mail status is information, not a problem to fix. Private folders show your own and Organization knowledge; Organization folders show only Organization knowledge. Tabs load separately and have Previous/Next controls for longer lists.
+
+**What the models receive** shows ranked transcription terms and the correction model's exact Almanac JSON preview. See [Folder knowledge in the Almanac](almanac.md#folder-knowledge) for the limits and preview assumptions.
+
 Next: [Transcripts](transcripts.md)

@@ -250,6 +250,14 @@ async function resolveFolder(
     return null;
 }
 
+/** Resolve a folder through the tree's shared read authorization rules. */
+export async function resolveReadableFolder(
+    userId: string,
+    folderId: string,
+): Promise<AccessibleFolder | null> {
+    return resolveFolder(db, userId, folderId, await getOrgUserId());
+}
+
 /**
  * The custom folder `folderId` and its subfolders as `userId` reaches them,
  * or null when they cannot; `writable` is whether they may change it now.

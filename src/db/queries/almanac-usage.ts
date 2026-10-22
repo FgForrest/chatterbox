@@ -86,7 +86,7 @@ export async function almanacUsage(
 export async function almanacScopeUsage(input: {
     ownerUserId: string;
     orgUserId: string | null;
-    itemId: string;
+    itemId?: string;
     view: "private" | "org";
     scopeFolderIds: readonly string[];
     recentSince: Date;
@@ -109,15 +109,15 @@ export async function almanacScopeUsage(input: {
               on item.id = assignment.recording_id
              and item.user_id = assignment.user_id
             where assignment.folder_id = any(${sql.param(folderIds)}::text[])
-              and item.id <> ${input.itemId}
+              and (${input.itemId ?? null}::text is null or item.id <> ${input.itemId ?? null})
               and item.deleted_at is null
-              and exists (
+              and (${input.itemId ?? null}::text is null or exists (
                   select 1
                   from chatter_items scoped_item
-                  where scoped_item.id = ${input.itemId}
+                  where scoped_item.id = ${input.itemId ?? null}
                     and scoped_item.user_id = ${input.ownerUserId}
                     and scoped_item.deleted_at is null
-              )
+              ))
               and (
                   (${input.view} = 'private'
                    and item.user_id = ${input.ownerUserId}
