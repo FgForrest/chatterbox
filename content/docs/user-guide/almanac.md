@@ -5,7 +5,7 @@ description: The people and things Chatterbox knows, their nicknames and facts.
 
 The Almanac is what Chatterbox knows about the people and things your recordings talk about: who someone is, what they work on, what a project is called and what it is often misheard as. Transcription, Learn, summaries and tasks all use it.
 
-It has four tabs: **People**, **Things**, **Vocabulary** and **Review**.
+It has **People**, **Things**, **Vocabulary** and **Review** tabs. Organization curators also see **Care**.
 
 ## People
 
@@ -57,5 +57,15 @@ Click **Preview** to see what will be added before anything is saved:
 ![What waits for review](images/almanac-review.png)
 
 **Review** collects item reviews waiting for you: [Learn](learn.md) runs and proposed tasks from a recording or mail. The badge on **Almanac** counts these item reviews. Task changes routed to you because only you may apply them wait under **Tasks → Proposals for you**, with their own navigation badge. See [Routed proposals](summaries-and-tasks.md#routed-proposals).
+
+## Care: possible duplicates
+
+Organization curators use **Almanac → Care → Possible duplicates** to find the same person or thing recorded twice. The queue covers Organization records only. Each pair shows a high, medium or low match and the reasons: similar names, nicknames, Czech surname forms, heard-as forms or legal company suffixes. Contrary evidence appears in amber, such as two confirmed speakers in the same transcription or different email domains. Missing email is information, not a problem to fix.
+
+**Merge…** opens both records side by side. The proposed survivor has a primary email, then more evidence. You can change it, choose the name, and choose which value stays for each conflicting single-valued fact. Both records' emails, nicknames, heard-as forms and facts are kept; the other name becomes a nickname. Replaced fact values retain their evidence in history. Speakers, tasks and links move to the survivor; the other record redirects to it. For things with different types, the survivor's type stays; facts that would not fit that type must be corrected first.
+
+**Not the same** remembers the ordered pair for the Organization, including when another curator opens the queue. **Later** only hides it for this browser tab's session. The merge picker on a person's or thing's page also puts likely matches first.
+
+Scans check the newest 2,000 live records per kind and their closest matches. Duplicates involving an older record outside this cap are not suggested, even when the other record is new. Reviewing or dismissing pairs does not move the scan past this cap. A notice identifies a limited scan. Shared items and open tasks are shown in the comparison; colleagues' private items remain private.
 
 Next: [Learn](learn.md)

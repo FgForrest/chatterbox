@@ -4605,3 +4605,70 @@ export const personEmails = pgTable(
         personIdIdx: index("person_emails_person_id_idx").on(table.personId),
     }),
 );
+
+export const almanacDuplicateDismissals = pgTable(
+    "almanac_duplicate_dismissals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 8 })
+            .$type<"person" | "entity">()
+            .notNull(),
+        leftPersonId: text("left_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        rightPersonId: text("right_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        leftEntityId: text("left_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        rightEntityId: text("right_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        dismissedByUserId: text("dismissed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pairUnique: unique("almanac_duplicate_dismissals_pair_unique")
+            .on(
+                table.userId,
+                table.kind,
+                table.leftPersonId,
+                table.rightPersonId,
+                table.leftEntityId,
+                table.rightEntityId,
+            )
+            .nullsNotDistinct(),
+        leftPersonIdx: index("almanac_duplicate_dismissals_left_person_idx").on(
+            table.leftPersonId,
+        ),
+        rightPersonIdx: index(
+            "almanac_duplicate_dismissals_right_person_idx",
+        ).on(table.rightPersonId),
+        leftEntityIdx: index("almanac_duplicate_dismissals_left_entity_idx").on(
+            table.leftEntityId,
+        ),
+        rightEntityIdx: index(
+            "almanac_duplicate_dismissals_right_entity_idx",
+        ).on(table.rightEntityId),
+        pairCheck: check(
+            "almanac_duplicate_dismissals_pair_check",
+            sql`
+            (${table.kind} = 'person' and ${table.leftPersonId} is not null and ${table.rightPersonId} is not null
+                and ${table.leftPersonId} collate "C" < ${table.rightPersonId} collate "C" and ${table.leftEntityId} is null and ${table.rightEntityId} is null)
+            or (${table.kind} = 'entity' and ${table.leftEntityId} is not null and ${table.rightEntityId} is not null
+                and ${table.leftEntityId} collate "C" < ${table.rightEntityId} collate "C" and ${table.leftPersonId} is null and ${table.rightPersonId} is null)
+        `,
+        ),
+    }),
+);

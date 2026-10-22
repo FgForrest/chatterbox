@@ -3,6 +3,11 @@
 import { Command } from "cmdk";
 import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
+import { useMemo } from "react";
+import {
+    type DuplicateRecord,
+    scoreDuplicate,
+} from "@/lib/knowledge/duplicate-score";
 
 interface MergeTarget {
     id: string;
@@ -10,6 +15,10 @@ interface MergeTarget {
     email?: string | null;
     scope?: "personal" | "org";
     badge?: string;
+    aliases?: string[];
+    heardAs?: string[];
+    typeKey?: string;
+    duplicateScore?: number;
 }
 
 function searchKey(value: string): string {
@@ -21,12 +30,56 @@ export function MergeTargetPicker({
     candidates,
     value,
     onChange,
+    source,
 }: {
     candidates: readonly MergeTarget[];
     value: string;
     onChange: (id: string) => void;
+    source?: {
+        id: string;
+        name: string;
+        email?: string | null;
+        kind: "person" | "entity";
+        typeKey?: string;
+    };
 }) {
     const i18n = useExtracted();
+    const ranked = useMemo(() => {
+        if (!source)
+            return candidates.map((candidate) => ({ candidate, score: 0 }));
+        const record: DuplicateRecord = {
+            ...source,
+            primaryEmail: source.email ?? null,
+            typeKey: source.typeKey ?? "person",
+            emails: [],
+            aliases: [],
+            heardAs: [],
+            evidenceCount: 0,
+        };
+        return candidates
+            .map((candidate, index) => ({
+                candidate,
+                index,
+                score:
+                    candidate.duplicateScore ??
+                    scoreDuplicate(record, {
+                        id: candidate.id,
+                        name: candidate.name,
+                        kind: source.kind,
+                        typeKey: candidate.typeKey ?? record.typeKey,
+                        primaryEmail: candidate.email ?? null,
+                        emails: [],
+                        aliases: candidate.aliases ?? [],
+                        heardAs: candidate.heardAs ?? [],
+                        evidenceCount: 0,
+                    })?.score ??
+                    0,
+            }))
+            .sort((a, b) => {
+                if (a.score >= 0.6 || b.score >= 0.6) return b.score - a.score;
+                return a.index - b.index;
+            });
+    }, [candidates, source]);
     return (
         <Command
             label={i18n("Merge target")}
@@ -50,7 +103,7 @@ export function MergeTargetPicker({
                 <Command.Empty className="px-2 py-3 text-sm text-muted-foreground">
                     {i18n("No matches.")}
                 </Command.Empty>
-                {candidates.map((candidate) => (
+                {ranked.map(({ candidate, score }) => (
                     <Command.Item
                         key={candidate.id}
                         value={candidate.id}
@@ -62,6 +115,11 @@ export function MergeTargetPicker({
                             <span className="block truncate">
                                 {candidate.name}
                             </span>
+                            {score >= 0.6 && (
+                                <span className="block text-xs text-muted-foreground">
+                                    {i18n("Likely match")}
+                                </span>
+                            )}
                             {candidate.email && (
                                 <span className="block truncate text-xs text-muted-foreground">
                                     {candidate.email}

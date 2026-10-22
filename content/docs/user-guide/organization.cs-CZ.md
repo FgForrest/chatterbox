@@ -69,6 +69,7 @@ Při autorizaci přes poskytovatele identity jsou osoby s oprávněním `org.cur
 - upravovat sdílené nahrávky a poštu,
 - kontrolovat sdílené výsledky Učení a úkoly,
 - spravovat profily, osoby, věci a navržené vztahy Organizace,
+- procházet **Almanach → Péče → Možné duplicity**, porovnávat a slučovat záznamy Organizace nebo zvolit **Nejsou stejní**, aby se dvojice už nenabízela žádnému kurátorovi (viz [Péče](almanac.md#care-possible-duplicates)),
 - nastavit export složek Organizace,
 - zálohovat Organizaci s evidencí vlastníka každé položky.
 
