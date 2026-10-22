@@ -353,82 +353,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(result.committed).toBe(true);
     }
 
-    async function seedLegacyReview(
-        recordingId: string,
-        tasks: ProposedTask[],
-        extra: Partial<TaskProposals> = {},
-    ) {
-        await summarize(recordingId, [], { ...extra, matches: [] });
-        const [item] = await db()
-            .select({ occurredAt: chatterItems.occurredAt })
-            .from(chatterItems)
-            .where(eq(chatterItems.id, recordingId));
-        if (!item) throw new Error("missing legacy item");
-        for (const [position, task] of tasks.entries()) {
-            const [row] = await db()
-                .insert(recordingTasks)
-                .values({
-                    itemId: recordingId,
-                    userId: ALICE,
-                    status: "proposed",
-                    text: encryptText(task.text),
-                    assigneePersonId: task.assigneePersonId,
-                    assigneeHint: encryptText(task.assigneeHint),
-                    assigneeCheck: task.assigneeCheck,
-                    dueDate: task.dueDate,
-                    duePhrase: encryptText(task.duePhrase),
-                    quote: encryptText(task.quote),
-                    evidenceStartMs: task.evidenceStartMs,
-                    evidenceSegmentIndex: task.evidenceText?.segmentIndex,
-                    evidenceCharStart: task.evidenceText?.charStart,
-                    evidenceCharEnd: task.evidenceText?.charEnd,
-                    evidenceProvenance: task.evidenceProvenance,
-                    source: "riffado",
-                    ticked:
-                        !task.assigneeCheck &&
-                        !task.evidenceProvenance &&
-                        !task.candidateTaskIds?.length,
-                    position,
-                    createdByUserId: ALICE,
-                })
-                .returning({ id: recordingTasks.id });
-            if (!row) throw new Error("missing legacy task");
-            await db().insert(taskMentions).values({
-                taskId: row.id,
-                itemId: recordingId,
-                userId: ALICE,
-                view: "private",
-                statementAt: item.occurredAt,
-                matchDecision: "home",
-            });
-        }
-        const matches = [
-            ...(extra.matches ?? []),
-            ...tasks.flatMap((task) =>
-                (task.candidateTaskIds ?? []).map((taskId) =>
-                    match(taskId, task),
-                ),
-            ),
-        ];
-        for (const candidate of matches) {
-            await db()
-                .insert(taskMentions)
-                .values({
-                    taskId: candidate.taskId,
-                    itemId: recordingId,
-                    userId: ALICE,
-                    view: "private",
-                    quote: encryptText(candidate.quote),
-                    evidenceStartMs: candidate.evidenceStartMs,
-                    provenance: candidate.evidenceProvenance,
-                    statementAt: item.occurredAt,
-                    matchDecision: "suggested",
-                    ticked: false,
-                })
-                .onConflictDoNothing();
-        }
-    }
-
     async function share(recordingId = REC, userId = ALICE) {
         const [root] = await db()
             .select({ id: recordingFolders.id })
@@ -447,7 +371,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         return tasks;
     }
 
-    it("accepts trusted summary tasks immediately and leaves first-name matches unassigned", async () => {
+    it("stores a summary's proposals, ticked unless the assignee needs a check", async () => {
         await summarize(REC, [
             proposal("Draft the pricing page", {
                 assigneePersonId: bobPrivate,
@@ -456,60 +380,28 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             }),
             proposal("Write the press release", {
                 assigneePersonId: bobPrivate,
-                assigneeHint: "Bob",
                 assigneeCheck: true,
             }),
             proposal("Book the venue", { assigneeHint: "Dana" }),
         ]);
         const { proposals, tasks, canEdit } = await review(alice);
         expect(canEdit).toBe(true);
-        expect(proposals).toEqual([]);
+        expect(tasks).toEqual([]);
         expect(
-            tasks.map((row) => [row.text, row.status, row.assignee?.name]),
+            proposals.map((row) => [row.text, row.ticked, row.assignee?.name]),
         ).toEqual([
-            ["Draft the pricing page", "open", "Bob"],
-            ["Write the press release", "open", undefined],
-            ["Book the venue", "open", undefined],
+            ["Draft the pricing page", true, "Bob"],
+            ["Write the press release", false, "Bob"],
+            ["Book the venue", true, undefined],
         ]);
-        expect(tasks[0]).toMatchObject({
+        expect(proposals[0]).toMatchObject({
             dueDate: "2026-10-16",
             duePhrase: "by next Friday",
-            acceptedAt: expect.any(String),
         });
-        expect(tasks[1]).toMatchObject({
-            assignee: null,
-            assigneeHint: "Bob",
-            assigneeCheck: true,
-        });
-        const stored = await db()
-            .select()
-            .from(recordingTasks)
-            .where(eq(recordingTasks.itemId, REC));
-        expect(stored.every((task) => task.acceptedByUserId === ALICE)).toBe(
-            true,
-        );
-        expect(stored[0]?.assignedAt).toEqual(expect.any(Date));
-        expect(stored[1]?.assignedAt).toBeNull();
-        const archived = await tasksForArchive(
-            { kind: "personal", userId: ALICE },
-            [REC],
-            { proposals: true },
-        );
-        expect(archived.get(REC)?.[1]).toMatchObject({
-            status: "open",
-            assignee: null,
-            assigneeHint: "Bob",
-            review: { ticked: true, assigneeCheck: true },
-        });
-        expect(await listTasks(bob, query("mine"))).toEqual([]);
-        await share();
-        expect(
-            (await listTasks(bob, query("mine"))).map((task) => task.text),
-        ).toEqual(["Draft the pricing page"]);
-        expect(await recordingsAwaitingTaskReview(alice)).toEqual([]);
+        expect(proposals[2]?.assigneeHint).toBe("Dana");
     });
 
-    it("preserves the heard first name through resolution and leaves the saved task unassigned", async () => {
+    it("offers a first-name match for checking with its heard name", async () => {
         await createPerson({ userId: ALICE, displayName: "Dana Rivers" });
         const resolved = await resolveTaskProposals({
             source: "riffado",
@@ -538,34 +430,16 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             assigneeHint: "Dana",
         });
         await summarize(REC, resolved.tasks);
-        expect((await review(alice)).tasks[0]).toMatchObject({
-            status: "open",
-            assignee: null,
+        expect((await review(alice)).proposals[0]).toMatchObject({
+            status: "proposed",
+            assignee: { name: "Dana Rivers" },
+            ticked: false,
             assigneeHint: "Dana",
             assigneeCheck: true,
         });
     });
 
-    it("offers the current item's unassigned tasks for matching on re-summary", async () => {
-        await summarize(REC, [proposal("Send the revised notes")]);
-        const [task] = (await review(alice)).tasks;
-        const context = await loadTasksPromptContext({
-            recording: {
-                id: REC,
-                userId: ALICE,
-                occurredAt: new Date("2026-10-06T10:00:00Z"),
-                timezone: 0,
-                zonemins: 0,
-            },
-            transcriptionId: null,
-            orgView: false,
-            reviewer: alice,
-            itemText: "Send those revised notes",
-        });
-        expect([...context.refs.values()]).toContain(task?.id);
-    });
-
-    it("skips quoted new tasks while retaining follow-up evidence for review", async () => {
+    it("stores a mention for every proposed task and follow-up", async () => {
         const target = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -629,7 +503,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             })
             .from(taskMentions)
             .where(eq(taskMentions.itemId, REC));
-        expect(rows).toHaveLength(1);
+        expect(rows).toHaveLength(2);
         expect(
             rows.map((row) => ({
                 ...row,
@@ -637,6 +511,20 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             })),
         ).toEqual(
             expect.arrayContaining([
+                expect.objectContaining({
+                    itemId: REC,
+                    view: "private",
+                    quote: "draft the pricing page",
+                    start: null,
+                    segment: 2,
+                    charStart: 4,
+                    charEnd: 26,
+                    provenance: "quoted",
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                    decision: "home",
+                    statementAt: new Date("2026-10-06T10:00:00Z"),
+                }),
                 expect.objectContaining({
                     taskId: target.id,
                     itemId: REC,
@@ -653,7 +541,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         );
     });
 
-    it("does not create tasks or matches from ambiguous proposals", async () => {
+    it("stores ambiguous candidates beside a Keep as new proposal", async () => {
         const first = await addTask(alice, REC, {
             text: "Send the signed contract",
             status: "open",
@@ -662,22 +550,79 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the supplier contract",
             status: "open",
         });
+
         await summarize(LATER, [
             proposal("Send the contract", {
+                quote: "I will send the contract",
+                evidenceStartMs: 2_000,
                 candidateTaskIds: [first.id, second.id],
             }),
         ]);
-        expect(await review(alice, LATER)).toMatchObject({
-            tasks: [],
-            proposals: [],
-            matches: [],
-            updates: [],
-        });
+
+        const review = await listRecordingTasks(alice, LATER);
+        expect(
+            review?.proposals.map((row) => ({
+                text: row.text,
+                ticked: row.ticked,
+            })),
+        ).toEqual([{ text: "Send the contract", ticked: false }]);
+        const candidates = await db()
+            .select({
+                taskId: taskMentions.taskId,
+                decision: taskMentions.matchDecision,
+                quote: taskMentions.quote,
+                ticked: taskMentions.ticked,
+            })
+            .from(taskMentions)
+            .where(eq(taskMentions.itemId, LATER));
+        expect(
+            candidates
+                .filter((row) => row.decision === "suggested")
+                .map((row) => ({
+                    taskId: row.taskId,
+                    quote: row.quote ? decryptText(row.quote) : null,
+                    ticked: row.ticked,
+                })),
+        ).toEqual(
+            expect.arrayContaining([
+                {
+                    taskId: first.id,
+                    quote: "I will send the contract",
+                    ticked: false,
+                },
+                {
+                    taskId: second.id,
+                    quote: "I will send the contract",
+                    ticked: false,
+                },
+            ]),
+        );
+        expect(review?.matches).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    ticked: false,
+                    ambiguous: true,
+                    candidate: expect.objectContaining({
+                        id: first.id,
+                        text: "Send the signed contract",
+                        assignee: null,
+                        dueDate: null,
+                        duePhrase: null,
+                        homeItem: expect.objectContaining({ id: REC }),
+                    }),
+                }),
+                expect.objectContaining({
+                    ticked: false,
+                    ambiguous: true,
+                    candidate: expect.objectContaining({ id: second.id }),
+                }),
+            ]),
+        );
         expect(
             await db()
                 .select()
-                .from(taskMentions)
-                .where(eq(taskMentions.itemId, LATER)),
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, LATER)),
         ).toEqual([]);
     });
 
@@ -724,11 +669,10 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 kind: taskUpdateProposals.kind,
                 dueDate: taskUpdateProposals.dueDate,
                 ticked: taskUpdateProposals.ticked,
-                state: taskUpdateProposals.state,
             })
             .from(taskUpdateProposals)
             .where(eq(taskUpdateProposals.itemId, LATER));
-        expect(mention).toMatchObject({ decision: "accepted" });
+        expect(mention).toMatchObject({ decision: "suggested" });
         expect(mention?.quote ? decryptText(mention.quote) : null).toBe(
             "the same partner email",
         );
@@ -736,71 +680,69 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             kind: "due",
             dueDate: "2026-10-20",
             ticked: false,
-            state: "awaiting_source_review",
         });
         expect(field?.id).not.toBe(mention?.id);
     });
 
-    it("accepts identity matches automatically and does not duplicate them on re-summary", async () => {
+    it("stores a pure match unticked and accepts it only after review", async () => {
         const task = await addTask(alice, REC, {
             text: "Send the partner email",
             status: "open",
         });
-        for (let run = 0; run < 2; run++) {
-            await summarize(LATER, [
-                proposal("Send that email", { candidateTaskIds: [task.id] }),
-            ]);
-            expect(await review(alice, LATER)).toMatchObject({
-                proposals: [],
-                matches: [],
-                tasks: [
-                    expect.objectContaining({
-                        id: task.id,
-                        canUndoMatch: true,
-                    }),
-                ],
-            });
-        }
-        const mentions = await db()
-            .select()
-            .from(taskMentions)
-            .where(eq(taskMentions.itemId, LATER));
-        expect(mentions).toHaveLength(1);
-        expect(mentions[0]).toMatchObject({
-            matchDecision: "accepted",
-            decidedByUserId: ALICE,
-            decidedAt: expect.any(Date),
+        await db()
+            .update(recordingTasks)
+            .set({
+                quote: encryptText("I will send the partner email"),
+                evidenceStartMs: 7_000,
+            })
+            .where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    eq(recordingTasks.userId, ALICE),
+                ),
+            );
+        await summarize(LATER, [], {
+            matches: [match(task.id, { quote: "the same partner email" })],
         });
-        expect(await db().select().from(recordingTasks)).toHaveLength(1);
-        await summarize(REC, [proposal("Send the partner email")]);
-        expect(await db().select().from(recordingTasks)).toHaveLength(1);
-    });
 
-    it("keeps follow-ups reviewable after an automatic match without repeating reviewed changes", async () => {
-        const task = await addTask(alice, REC, {
-            text: "Send the notes",
-            status: "open",
-        });
-        await summarize(LATER, [], { matches: [match(task.id)] });
-        const updates = [
-            {
-                taskId: task.id,
-                kind: "done" as const,
-                dueDate: null,
-                duePhrase: null,
-                quote: "The notes are sent",
-                evidenceStartMs: null,
-            },
-        ];
-        await summarize(LATER, [], { matches: [match(task.id)], updates });
-        expect((await review(alice, LATER)).updates).toMatchObject([
-            { kind: "done", ticked: false },
+        const listed = await review(alice, LATER);
+        expect(listed.matches).toEqual([
+            expect.objectContaining({
+                ticked: false,
+                ambiguous: false,
+                evidenceProvenance: null,
+                candidate: expect.objectContaining({
+                    id: task.id,
+                    text: "Send the partner email",
+                    homeItem: expect.objectContaining({ id: REC }),
+                    quote: "I will send the partner email",
+                    evidenceStartMs: 7_000,
+                    evidenceText: null,
+                }),
+            }),
         ]);
-        expect((await review(alice, REC)).tasks[0]?.status).toBe("open");
+
+        const [suggestion] = listed.matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
+
         await acceptReview(alice, LATER);
-        await summarize(LATER, [], { matches: [match(task.id)], updates });
-        expect((await review(alice, LATER)).updates).toEqual([]);
-        expect((await review(alice, REC)).tasks[0]?.status).toBe("open");
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, task.id),
+                ),
+            );
+        expect(mention?.decision).toBe("accepted");
     });
 
     it("rejects a pure match unticked before Apply", async () => {
@@ -808,7 +750,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the partner email",
             status: "open",
         });
-        await seedLegacyReview(LATER, [], { matches: [match(task.id)] });
+        await summarize(LATER, [], { matches: [match(task.id)] });
         const [suggestion] = (await review(alice, LATER)).matches;
         if (!suggestion) throw new Error("missing suggested match");
 
@@ -837,7 +779,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the supplier contract",
             status: "open",
         });
-        await seedLegacyReview(LATER, [
+        await summarize(LATER, [
             proposal("Send the contract", {
                 quote: "I will send the contract",
                 candidateTaskIds: [first.id, second.id],
@@ -922,7 +864,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the partner email",
             status: "open",
         });
-        await seedLegacyReview(LATER, [], { matches: [match(task.id)] });
+        await summarize(LATER, [], { matches: [match(task.id)] });
         const [suggestion] = (await review(alice, LATER)).matches;
         if (!suggestion) throw new Error("missing suggested match");
         await tickUpdateProposal(
@@ -1122,10 +1064,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 ...mention,
                 quote: mention.quote ? decryptText(mention.quote) : null,
             })),
-        ).toEqual([
-            { quote: null, decision: "home" },
-            { quote: null, decision: "home" },
-        ]);
+        ).toEqual([{ quote: null, decision: "home" }]);
     });
 
     it("keeps a suggested match the reviewer ticked through a re-summary", async () => {
@@ -1133,7 +1072,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Send the partner email",
             status: "open",
         });
-        await seedLegacyReview(REC, [], {
+        await summarize(REC, [], {
             matches: [
                 match(target.id, {
                     evidenceProvenance: "unverified",
@@ -1266,6 +1205,16 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             status: "open",
         });
         await summarize(LATER, [], { matches: [match(target.id)] });
+        const [suggestion] = (await review(alice, LATER)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
+        await acceptReview(alice, LATER);
         await share(REC);
         await share(LATER);
 
@@ -1284,7 +1233,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     });
 
     it("accepts the ticked, rejects the rest for good, and keeps tasks over a re-summarize", async () => {
-        await seedLegacyReview(REC, [
+        await summarize(REC, [
             proposal("Draft the pricing page"),
             proposal("Share the draft"),
         ]);
@@ -1315,13 +1264,14 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const again = await review(alice);
         expect(again.tasks.map((task) => task.text)).toEqual([
             "Draft the pricing page",
+        ]);
+        expect(again.proposals.map((task) => task.text)).toEqual([
             "Send the partner email",
         ]);
-        expect(again.proposals).toEqual([]);
     });
 
     it("keeps a proposal the reviewer touched over a re-summarize", async () => {
-        await seedLegacyReview(REC, [
+        await summarize(REC, [
             proposal("Draft the pricing page"),
             proposal("Book the venue"),
         ]);
@@ -1335,12 +1285,10 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             proposal("Draft the pricing page"),
             proposal("Send the partner email"),
         ]);
-        const after = await review(alice);
-        expect(after.proposals.map((row) => [row.text, row.dueDate])).toEqual([
+        const after = (await review(alice)).proposals;
+        expect(after.map((row) => [row.text, row.dueDate])).toEqual([
             ["Draft the pricing page", "2026-10-20"],
-        ]);
-        expect(after.tasks.map((row) => row.text)).toEqual([
-            "Send the partner email",
+            ["Send the partner email", null],
         ]);
     });
 
@@ -1359,7 +1307,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     });
 
     it("merges proposals into the first and remembers the others as rejected", async () => {
-        await seedLegacyReview(REC, [
+        await summarize(REC, [
             proposal("Draft the pricing page", {
                 dueDate: "2026-10-20",
                 evidenceStartMs: 100,
@@ -1399,7 +1347,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     });
 
     it("requests workflow advancement after proposal merges and review-item merges", async () => {
-        await seedLegacyReview(REC, [
+        await summarize(REC, [
             proposal("Draft the pricing page"),
             proposal("Share the pricing page draft"),
         ]);
@@ -1576,8 +1524,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).rejects.toMatchObject({ statusCode: 409 });
         // The old words are not proposed again.
         await summarize(REC, [proposal("Call Dana"), proposal("Book a room")]);
-        expect((await review(alice)).tasks.map((row) => row.text)).toEqual([
-            "Call Dana today",
+        expect((await review(alice)).proposals.map((row) => row.text)).toEqual([
             "Book a room",
         ]);
     });
@@ -2669,8 +2616,8 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 ],
             },
         );
-        const { tasks, updates } = await review(alice);
-        expect(tasks.map((row) => [row.text, row.assignee])).toEqual([
+        const { proposals, updates } = await review(alice);
+        expect(proposals.map((row) => [row.text, row.assignee])).toEqual([
             ["Call Dana", null],
         ]);
         expect(updates).toEqual([]);
@@ -3436,13 +3383,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ]);
         expect(await recordingsAwaitingTaskReview(bob)).toEqual([]);
         expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
-        expect(
-            await recordingsAwaitingTaskReview(alice, {
-                includeProposals: false,
-            }),
-        ).toEqual([
-            expect.objectContaining({ recordingId: LATER, proposals: 1 }),
-        ]);
     });
 
     it("lists a shared recording's review for its owner and curators", async () => {
@@ -3480,7 +3420,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     });
 
     it("refuses an accept when the proposals changed since they were shown", async () => {
-        await seedLegacyReview(REC, [proposal("Call Dana")]);
+        await summarize(REC, [proposal("Call Dana")]);
         const shown = (await review(alice)).proposals.map((row) => row.id);
         await summarize(REC, [proposal("Book the venue")]);
         await expect(
@@ -3917,7 +3857,12 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             ],
         });
         const conflictReview = await review(alice, LATER);
-        expect(conflictReview.matches).toEqual([]);
+        expect(conflictReview.matches).toEqual([
+            expect.objectContaining({
+                candidate: expect.objectContaining({ id: task.id }),
+                ticked: false,
+            }),
+        ]);
         expect(
             conflictReview.updates.map((update) => update.kind).sort(),
         ).toEqual(["done", "drop"]);
@@ -4091,7 +4036,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     eq(recordingTasks.userId, BOB),
                 ),
             );
-        await seedLegacyReview(REC, [], {
+        await summarize(REC, [], {
             matches: [match(target.id)],
             updates: [
                 {
@@ -4393,6 +4338,16 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await summarize(mailId, [], {
             matches: [match(task.id, { quote: "send the combined follow-up" })],
         });
+        const [suggestion] = (await review(alice, mailId)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            mailId,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
+        await acceptReview(alice, mailId);
 
         expect(
             await db()

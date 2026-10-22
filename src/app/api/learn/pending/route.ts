@@ -9,13 +9,12 @@ import { recordingsAwaitingTaskReview } from "@/lib/tasks/tasks";
 
 /**
  * How many reviews wait for the caller: the Almanac badge. Learn reviews,
- * and items with follow-up task changes awaiting review.
+ * and items with proposed tasks or follow-up changes.
  */
 export const GET = apiHandler(async (request) => {
     const session = await requireApiSession(request);
     const tasks = await recordingsAwaitingTaskReview(
         await taskViewer({ id: session.user.id, email: session.user.email }),
-        { includeProposals: false },
     );
     const learn = isLearnDeploymentAvailable()
         ? await pendingReviewCount(

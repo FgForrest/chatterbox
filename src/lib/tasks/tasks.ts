@@ -3,6 +3,7 @@ import {
     asc,
     desc,
     eq,
+    exists,
     gt,
     gte,
     inArray,
@@ -197,8 +198,8 @@ export interface RecordingTasks {
     /** The viewer reviews and edits this recording's tasks. */
     canEdit: boolean;
     /**
-     * Its tasks were reviewed at least once (something was accepted or
-     * rejected): the summary's own action items no longer stand for them.
+     * Suppress the summary's action-item fallback after review or when
+     * this viewer cannot see proposals awaiting someone else's review.
      */
     reviewed: boolean;
     tasks: TaskView[];
@@ -373,6 +374,18 @@ export async function listRecordingTasks(
 ): Promise<RecordingTasks | null> {
     const [recording] = await db
         .select({
+            hasProposals: sql<boolean>`${exists(
+                db
+                    .select({ id: recordingTasks.id })
+                    .from(recordingTasks)
+                    .where(
+                        and(
+                            eq(recordingTasks.itemId, chatterItems.id),
+                            eq(recordingTasks.userId, chatterItems.userId),
+                            eq(recordingTasks.status, "proposed"),
+                        ),
+                    ),
+            )}`,
             id: chatterItems.id,
             ownerUserId: chatterItems.userId,
             kind: chatterItems.kind,
@@ -498,6 +511,7 @@ export async function listRecordingTasks(
     return {
         canEdit: recording.canEdit,
         reviewed:
+            (!recording.canEdit && recording.hasProposals) ||
             rejection !== undefined ||
             views.some((task) => task.status !== "proposed"),
         tasks: views.filter((task) => task.status !== "proposed"),
@@ -2530,10 +2544,7 @@ async function requireTaskView(
  * Recordings with proposals or follow-ups waiting for the viewer's review,
  * newest first, with how many.
  */
-export async function recordingsAwaitingTaskReview(
-    viewer: TaskViewer,
-    { includeProposals = true }: { includeProposals?: boolean } = {},
-): Promise<
+export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     {
         recordingId: string;
         kind: "audio" | "mail";
@@ -2542,23 +2553,21 @@ export async function recordingsAwaitingTaskReview(
     }[]
 > {
     const [proposals, followUps, matches] = await Promise.all([
-        includeProposals
-            ? db
-                  .select({
-                      recordingId: recordingTasks.itemId,
-                      taskId: recordingTasks.id,
-                  })
-                  .from(recordingTasks)
-                  .where(
-                      and(
-                          eq(recordingTasks.status, "proposed"),
-                          taskEditable(viewer, {
-                              id: recordingTasks.itemId,
-                              userId: recordingTasks.userId,
-                          }),
-                      ),
-                  )
-            : Promise.resolve([]),
+        db
+            .select({
+                recordingId: recordingTasks.itemId,
+                taskId: recordingTasks.id,
+            })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.status, "proposed"),
+                    taskEditable(viewer, {
+                        id: recordingTasks.itemId,
+                        userId: recordingTasks.userId,
+                    }),
+                ),
+            ),
         db
             .select({
                 recordingId: taskUpdateProposals.itemId,

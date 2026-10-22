@@ -17,7 +17,7 @@ Položku můžete také přetáhnout na složku ve stromu. Položky adresované 
 
 Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
-Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích, Učení a úkolů. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
+Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích a Učení. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
 
 <span id="profiles-are-processing-recipes" />
 
