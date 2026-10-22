@@ -34,6 +34,7 @@ const h = vi.hoisted(() => {
         createElement: () => ({
             setAttribute: vi.fn(),
             addEventListener: vi.fn(),
+            append: vi.fn(),
         }),
     };
     globalThis.window = { close: vi.fn() };

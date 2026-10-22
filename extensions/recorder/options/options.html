@@ -82,12 +82,19 @@
                     <h2 data-i18n="setupReady"></h2>
                     <p id="setup-ready-summary" class="hint"></p>
                     <p class="hint" data-i18n="setupReadyHint"></p>
+                    <label class="check">
+                        <input id="setup-meeting-prompt" type="checkbox" role="switch" aria-describedby="setup-meeting-prompt-hint" />
+                        <span data-i18n="meetingPromptToggleLabel"></span>
+                    </label>
+                    <p id="setup-meeting-prompt-hint" class="hint" data-i18n="meetingPromptDescription"></p>
                     <div class="row">
                         <button id="setup-return" class="primary" type="button" hidden data-i18n="setupReturn"></button>
                         <button id="ready-grant-mic" type="button" hidden data-i18n="setupGrantMic"></button>
                     </div>
                 </div>
             </section>
+
+            <p id="meeting-prompt-status" class="status err" role="status"></p>
 
             <section id="pending-pair" hidden>
                 <h2 data-i18n="confirmConnection">Confirm connection</h2>
@@ -122,6 +129,14 @@
                 <ul id="pending-buffer-list"></ul>
             </section>
 
+            <section id="meeting-prompt" tabindex="-1" aria-labelledby="meeting-prompt-heading">
+                <h2 id="meeting-prompt-heading" data-i18n="meetingPromptSetting"></h2>
+                <label class="check">
+                    <input id="meeting-prompt-switch" type="checkbox" role="switch" aria-describedby="meeting-prompt-hint" />
+                    <span data-i18n="meetingPromptToggleLabel"></span>
+                </label>
+                <p id="meeting-prompt-hint" class="hint" data-i18n="meetingPromptDescription"></p>
+            </section>
             <section>
                 <h2 data-i18n="automaticRecording">Automatic recording</h2>
                 <p class="hint" data-i18n="autoIntro">Choose what happens when you open a meeting on each platform.</p>

@@ -18,6 +18,16 @@
             <button id="dismiss-mic" type="button" hidden data-i18n="dismissMicReminder"></button>
         </section>
 
+        <section id="meeting-prompt-offer" class="meeting-prompt-offer" hidden aria-labelledby="meeting-prompt-news">
+            <p id="meeting-prompt-news" data-i18n="meetingPromptNews"></p>
+            <p class="hint" data-i18n="meetingPromptNewsDescription"></p>
+            <div class="row">
+                <button id="enable-meeting-prompt" class="primary" type="button" data-i18n="meetingPromptEnable"></button>
+                <button id="dismiss-meeting-prompt" type="button" data-i18n="notNow"></button>
+            </div>
+            <p id="meeting-prompt-offer-status" class="error" role="status"></p>
+        </section>
+
         <!-- Not paired, and the active tab is a site we could connect to -->
         <section id="view-connect" hidden>
             <p data-i18n="popupConnectIntro">Connect this extension to the Chatterbox instance in the current tab. Then click Set up recorder on that page.</p>
