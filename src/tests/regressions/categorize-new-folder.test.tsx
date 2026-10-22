@@ -162,7 +162,15 @@ function profileControl() {
     return screen.getByRole("combobox", { name: "Profile" });
 }
 
+class Observer {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+}
+
 beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", Observer);
+    Element.prototype.scrollIntoView = vi.fn();
     Object.defineProperty(document, "visibilityState", {
         configurable: true,
         value: "visible",
@@ -192,23 +200,29 @@ describe("Categorize folders stay live", () => {
             name: kind === "mail" ? "Categorize email" : "Categorize recording",
         });
         fireEvent.click(folderControl());
-        fireEvent.click(
-            screen.getByRole("option", { name: "Private › Tavri" }),
-        );
+        fireEvent.click(screen.getByRole("option", { name: "Tavri Private" }));
         await waitFor(() =>
             expect(profileControl().hasAttribute("disabled")).toBe(false),
         );
         fireEvent.click(profileControl());
         fireEvent.click(screen.getByRole("option", { name: "Nelvi" }));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(profileControl()),
+        );
         rerender(
             <ItemWorkflow {...initial} folders={[added, existing, root]} />,
         );
         expect(getPanel).toHaveBeenCalledTimes(2);
         expect(screen.queryByText("Loading filing choices…")).toBeNull();
         expect(folderControl().textContent).toContain("Tavri");
+        fireEvent.click(folderControl());
+        const search = screen.getByPlaceholderText("Find a folder…");
+        fireEvent.change(search, { target: { value: "zul" } });
         await act(async () => {
             refresh.resolve(Response.json(panel([root, existing, added])));
         });
+        expect(screen.getByPlaceholderText("Find a folder…")).toBe(search);
+        expect(search).toHaveProperty("value", "zul");
         expect(
             screen.getByRole("region", {
                 name:
@@ -219,9 +233,8 @@ describe("Categorize folders stay live", () => {
         ).toBe(card);
         expect(folderControl().textContent).toContain("Tavri");
         expect(profileControl().textContent).toContain("Nelvi");
-        fireEvent.click(folderControl());
         expect(
-            screen.getByRole("option", { name: "Private › Zulno" }),
+            screen.getByRole("option", { name: "Zulno Private" }),
         ).toBeTruthy();
         fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
         rerender(
@@ -282,7 +295,7 @@ describe("Categorize folders stay live", () => {
         ).toBe(false);
         fireEvent.click(folderControl());
         expect(
-            screen.getAllByRole("option", { name: "Private › Felvo" }),
+            screen.getAllByRole("option", { name: "Felvo Private" }),
         ).toHaveLength(1);
     });
 
@@ -314,11 +327,38 @@ describe("Categorize folders stay live", () => {
         );
         fireEvent.click(folderControl());
         expect(
-            screen.getAllByRole("option", { name: "Private › Felnora" }),
+            screen.getAllByRole("option", { name: "Felnora Private › Zulno" }),
         ).toHaveLength(1);
         expect(
-            screen.queryByRole("option", { name: "Private › Tavri" }),
+            screen.queryByRole("option", { name: "Tavri Private" }),
         ).toBeNull();
+    });
+
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("clears a deleted %s folder and disables submission", async (kind) => {
+        const getPanel = vi.fn().mockResolvedValueOnce(Response.json(panel()));
+        mockFetch(getPanel);
+        const initial = props(kind);
+        const { rerender } = render(<ItemWorkflow {...initial} />);
+        await screen.findByRole("combobox", { name: "Folder" });
+        fireEvent.click(folderControl());
+        fireEvent.click(screen.getByRole("option", { name: "Tavri Private" }));
+        const submit = screen.getByRole("button", {
+            name: kind === "mail" ? "Categorize email" : "Categorize recording",
+        });
+        await waitFor(() =>
+            expect(submit.hasAttribute("disabled")).toBe(false),
+        );
+        getPanel.mockResolvedValueOnce(Response.json(panel([root])));
+        rerender(<ItemWorkflow {...initial} folders={[root]} />);
+        await waitFor(() =>
+            expect(folderControl().textContent).toContain("Choose a folder"),
+        );
+        expect(submit.hasAttribute("disabled")).toBe(true);
+        fireEvent.click(folderControl());
+        expect(screen.queryByRole("option", { name: /Tavri/ })).toBeNull();
     });
 
     it("ignores stale folder responses, including when switching away and back to an item", async () => {
@@ -352,10 +392,10 @@ describe("Categorize folders stay live", () => {
         });
         fireEvent.click(folderControl());
         expect(
-            screen.getByRole("option", { name: "Private › Zulno" }),
+            screen.getByRole("option", { name: "Zulno Private" }),
         ).toBeTruthy();
         expect(
-            screen.queryByRole("option", { name: "Private › Tavri" }),
+            screen.queryByRole("option", { name: "Tavri Private" }),
         ).toBeNull();
     });
 });

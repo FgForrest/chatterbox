@@ -5,14 +5,14 @@ import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
+import type { FolderSearchEntry } from "@/components/recordings/folder-search-list";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
     Select,
     SelectContent,
-    SelectGroup,
     SelectItem,
-    SelectLabel,
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
@@ -154,15 +154,30 @@ export function CategorizePanel({
             ),
         ]);
     }, [data.folders]);
-    const fileableFolders = folders.filter(
-        (folder) => folder.parentId !== null,
-    );
+    const folderEntries = useMemo<FolderSearchEntry[]>(() => {
+        const byId = new Map(folders.map((folder) => [folder.id, folder]));
+        return folders
+            .filter((folder) => folder.parentId !== null)
+            .map((folder) => {
+                const path = byId.get(folder.parentId ?? "")?.path ?? "";
+                return {
+                    folder: { ...folder, kind: "custom" },
+                    path,
+                    depth: path ? path.split(" › ").length : 0,
+                    nameMatch: true,
+                };
+            });
+    }, [folders]);
     const [folderId, setFolderId] = useState(data.selectedFolderIds[0] ?? "");
     useEffect(() => {
         setFolderId((current) =>
-            folders.some((folder) => folder.id === current) ? current : "",
+            mode === "profile"
+                ? (data.selectedFolderIds[0] ?? "")
+                : folders.some((folder) => folder.id === current)
+                  ? current
+                  : "",
         );
-    }, [folders]);
+    }, [folders, mode, data.selectedFolderIds]);
     const [profileChoice, setProfileChoice] = useState(
         initialProfileChoice(data),
     );
@@ -241,6 +256,10 @@ export function CategorizePanel({
         return [...byId.values()];
     }, [data]);
     const selectedFolder = folders.find((folder) => folder.id === folderId);
+    const hasPlacement =
+        mode === "profile"
+            ? data.selectedFolderIds.length > 0
+            : Boolean(selectedFolder);
     let selectedProfileId: string | undefined = profileChoice;
     if (profileChoice === ORGANIZATION_DEFAULT) {
         selectedProfileId = data.organizationDefault?.id;
@@ -261,7 +280,7 @@ export function CategorizePanel({
             return;
         }
         setFolderId(nextFolderId);
-        if (mode === "profile") return;
+        if (!nextFolderId || mode === "profile") return;
         setPreviewing(true);
         try {
             const response = await fetch(
@@ -330,11 +349,16 @@ export function CategorizePanel({
     };
 
     const submit = async () => {
-        if (!folderId || !profileChoice || previewing || submitting) return;
+        if (
+            !hasPlacement ||
+            !profileChoice ||
+            profileChoice === UNAVAILABLE_DEFAULT ||
+            previewing ||
+            submitting
+        )
+            return;
         const folderIds =
-            mode === "profile" && data.selectedFolderIds.length > 0
-                ? data.selectedFolderIds
-                : [folderId];
+            mode === "profile" ? data.selectedFolderIds : [folderId];
         const submission: CategorizeSubmission = { folderIds };
         if (
             profileChoice === MANUAL_ONLY &&
@@ -517,67 +541,19 @@ export function CategorizePanel({
                                 </div>
                             </div>
                         ) : (
-                            <Select
+                            <FolderCombobox
+                                entries={folderEntries}
                                 value={folderId}
                                 onValueChange={(value) =>
                                     void selectFolder(value)
                                 }
+                                onCreate={(query) => {
+                                    setNewFolderName(query);
+                                    void selectFolder(NEW_FOLDER);
+                                }}
                                 disabled={mode === "profile"}
-                            >
-                                <SelectTrigger
-                                    className="w-full"
-                                    aria-label={i18n("Folder")}
-                                >
-                                    <SelectValue
-                                        placeholder={i18n("Choose a folder")}
-                                    />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectGroup>
-                                        <SelectLabel>
-                                            {i18n("Private")}
-                                        </SelectLabel>
-                                        {fileableFolders
-                                            .filter(
-                                                (folder) =>
-                                                    folder.scope === "personal",
-                                            )
-                                            .map((folder) => (
-                                                <SelectItem
-                                                    key={folder.id}
-                                                    value={folder.id}
-                                                >
-                                                    {folder.path}
-                                                </SelectItem>
-                                            ))}
-                                    </SelectGroup>
-                                    {fileableFolders.some(
-                                        (folder) => folder.scope === "org",
-                                    ) && (
-                                        <SelectGroup>
-                                            <SelectLabel>
-                                                {i18n("Organization")}
-                                            </SelectLabel>
-                                            {fileableFolders
-                                                .filter(
-                                                    (folder) =>
-                                                        folder.scope === "org",
-                                                )
-                                                .map((folder) => (
-                                                    <SelectItem
-                                                        key={folder.id}
-                                                        value={folder.id}
-                                                    >
-                                                        {folder.path}
-                                                    </SelectItem>
-                                                ))}
-                                        </SelectGroup>
-                                    )}
-                                    <SelectItem value={NEW_FOLDER}>
-                                        {i18n("New folder…")}
-                                    </SelectItem>
-                                </SelectContent>
-                            </Select>
+                                aria-label={i18n("Folder")}
+                            />
                         )}
                         <p className="text-xs text-muted-foreground">
                             {folderHint}
@@ -696,7 +672,7 @@ export function CategorizePanel({
                         disabled={
                             submitting ||
                             previewing ||
-                            !folderId ||
+                            !hasPlacement ||
                             !profileChoice ||
                             profileChoice === UNAVAILABLE_DEFAULT
                         }
