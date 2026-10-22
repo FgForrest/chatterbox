@@ -1,11 +1,11 @@
 ---
 title: Hosted providers require public pinned targets, OTP is throttled, admin elevation follows its session, and responses carry security headers
 date: 2026-10-22
-updated: 2026-10-22 23:12
+updated: 2026-10-23 01:20
 status: accepted
 kind: fix
 issues: []
-prs: []
+prs: [263]
 areas: [src/lib/net, src/lib/ai, src/lib/transcription, src/lib/learn/chat-clients.ts, src/lib/summary/summary-model.ts, src/lib/topics/generate-topics.ts, src/lib/webhooks, src/lib/rate-limit.ts, src/lib/env.ts, src/lib/errors.ts, src/lib/hosted/admin, src/app/(hosted)/api/admin/reauth, src/app/api/plaud/auth, src/app/api/settings/ai, src/app/api/folders, src/lib/folder-exports, src/proxy.ts, next.config.ts, docker-compose.yml, .env.example, content/docs/self-hosting]
 supersedes: []
 superseded-by: []
