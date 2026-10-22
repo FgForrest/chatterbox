@@ -49,6 +49,7 @@ export interface TranscriptRecording {
     id: string;
     ownerUserId: string;
     view: RecordingView;
+    confirmedLanguage?: string | null;
 }
 
 /**
@@ -94,16 +95,20 @@ export async function loadReadableTranscript(
     recording: TranscriptRecording,
     options: { preferredSource?: string } = {},
 ): Promise<ReadableTranscript | null> {
-    const [metadata] = await db
-        .select({ confirmedLanguage: recordings.confirmedLanguage })
-        .from(recordings)
-        .where(
-            and(
-                eq(recordings.id, recording.id),
-                eq(recordings.userId, recording.ownerUserId),
-            ),
-        )
-        .limit(1);
+    let confirmedLanguage = recording.confirmedLanguage;
+    if (confirmedLanguage === undefined) {
+        const [metadata] = await db
+            .select({ confirmedLanguage: recordings.confirmedLanguage })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recording.id),
+                    eq(recordings.userId, recording.ownerUserId),
+                ),
+            )
+            .limit(1);
+        confirmedLanguage = metadata?.confirmedLanguage ?? null;
+    }
     const rows = await db
         .select()
         .from(transcriptions)
@@ -124,7 +129,7 @@ export async function loadReadableTranscript(
         ownerUserId: recording.ownerUserId,
         view: recording.view,
         language: primary.detectedLanguage,
-        confirmedLanguage: metadata?.confirmedLanguage ?? null,
+        confirmedLanguage,
         detectedLanguage: primary.detectedLanguage,
     };
 

@@ -28,6 +28,7 @@ import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 interface LanguageMetadata {
     confirmedLanguage: string | null;
     needsResummary: boolean;
+    needsTitleRegeneration: boolean;
     canChange?: boolean;
 }
 
@@ -66,6 +67,8 @@ export function RecordingLanguage({
     const selectId = useId();
     const [metadata, setMetadata] = useState<LanguageMetadata | null>(null);
     const [saving, setSaving] = useState(false);
+    const [regeneratingTitle, setRegeneratingTitle] = useState(false);
+    const [titleRefreshKey, setTitleRefreshKey] = useState(0);
     const url = withRecordingView(
         `/api/recordings/${recordingId}/language`,
         view,
@@ -73,6 +76,7 @@ export function RecordingLanguage({
     useEffect(() => {
         void refreshKey;
         void resummarizeDisabled;
+        void titleRefreshKey;
         const controller = new AbortController();
         void fetch(url, { signal: controller.signal })
             .then(async (response) => {
@@ -81,7 +85,7 @@ export function RecordingLanguage({
             })
             .catch(() => {});
         return () => controller.abort();
-    }, [url, refreshKey, resummarizeDisabled]);
+    }, [url, refreshKey, resummarizeDisabled, titleRefreshKey]);
     const name = (code: string) => recordingLanguageName(code, locale);
     const confirmed = metadata?.confirmedLanguage;
     const detected = normalizeDetectedLanguage(detectedLanguage);
@@ -96,6 +100,7 @@ export function RecordingLanguage({
         setMetadata((value) => ({
             confirmedLanguage: language,
             needsResummary: value?.needsResummary ?? false,
+            needsTitleRegeneration: value?.needsTitleRegeneration ?? false,
             canChange: true,
         }));
         setSaving(true);
@@ -126,6 +131,33 @@ export function RecordingLanguage({
             );
         } finally {
             setSaving(false);
+        }
+    };
+    const regenerateTitle = async () => {
+        setRegeneratingTitle(true);
+        try {
+            const response = await fetch(
+                withRecordingView(`/api/recordings/${recordingId}/title`, view),
+                { method: "POST" },
+            );
+            if (!response.ok)
+                throw new Error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("Failed to regenerate title"),
+                    ),
+                );
+            setTitleRefreshKey((value) => value + 1);
+            onReload();
+            toast.success(i18n("Title regenerated"));
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Failed to regenerate title"),
+            );
+        } finally {
+            setRegeneratingTitle(false);
         }
     };
     return (
@@ -176,6 +208,16 @@ export function RecordingLanguage({
                             onClick={onResummarize}
                         >
                             {i18n("Re-summarize")}
+                        </Button>
+                    )}
+                    {metadata?.needsTitleRegeneration && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={saving || regeneratingTitle}
+                            onClick={() => void regenerateTitle()}
+                        >
+                            {i18n("Regenerate title")}
                         </Button>
                     )}
                     {detected && detected !== confirmed && (

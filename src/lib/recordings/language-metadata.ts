@@ -77,15 +77,23 @@ export async function recordingLanguageMetadata(
               throw error;
           })
         : null;
-    if (!profile) return { confirmedLanguage, needsResummary: false };
+    if (!profile)
+        return {
+            confirmedLanguage,
+            needsResummary: false,
+            needsTitleRegeneration: false,
+        };
     const outputLanguage = recordingOutputLanguage(
         profile.settings.steps.summary.outputLanguage,
         confirmedLanguage,
     );
     const needsResummary = Boolean(
         outputLanguage &&
-            ((summary?.summary && summaryLanguage !== outputLanguage) ||
-                (titleLanguage && titleLanguage !== outputLanguage)),
+            summary?.summary &&
+            summaryLanguage !== outputLanguage,
     );
-    return { confirmedLanguage, needsResummary };
+    const needsTitleRegeneration = Boolean(
+        outputLanguage && titleLanguage && titleLanguage !== outputLanguage,
+    );
+    return { confirmedLanguage, needsResummary, needsTitleRegeneration };
 }

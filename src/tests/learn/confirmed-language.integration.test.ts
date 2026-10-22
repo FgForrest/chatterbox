@@ -15,6 +15,7 @@ import {
     apiCredentials,
     asyncJobs,
     chatterItems,
+    itemProcessing,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -38,41 +39,44 @@ import {
     userCaller,
 } from "@/tests/mcp/fixtures";
 
-const { dbRef, dbProxy, chat, mockEnv, actorId } = vi.hoisted(() => {
-    const dbRef: { current: Record<PropertyKey, unknown> | null } = {
-        current: null,
-    };
-    return {
-        dbRef,
-        dbProxy: new Proxy(
-            {},
-            {
-                get: (_target, property) => {
-                    const current = dbRef.current;
-                    if (!current)
-                        throw new Error("test database not initialized");
-                    const value = current[property];
-                    return typeof value === "function"
-                        ? value.bind(current)
-                        : value;
+const { dbRef, dbProxy, chat, generateTitle, mockEnv, actorId } = vi.hoisted(
+    () => {
+        const dbRef: { current: Record<PropertyKey, unknown> | null } = {
+            current: null,
+        };
+        return {
+            dbRef,
+            dbProxy: new Proxy(
+                {},
+                {
+                    get: (_target, property) => {
+                        const current = dbRef.current;
+                        if (!current)
+                            throw new Error("test database not initialized");
+                        const value = current[property];
+                        return typeof value === "function"
+                            ? value.bind(current)
+                            : value;
+                    },
                 },
+            ),
+            chat: vi.fn(),
+            generateTitle: vi.fn(),
+            actorId: { value: "invented-owner" },
+            mockEnv: {
+                IS_HOSTED: false,
+                SELF_HOST_MODE: "shared",
+                AUTHZ_MODE: "local",
+                ORG_ACCOUNT_EMAIL: "invented-org@example.test",
+                ORG_ACCOUNT_PASSWORD: "invented-password",
+                ENCRYPTION_KEY:
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                BETTER_AUTH_SECRET: "invented-test-secret-invented-test-secret",
+                AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20,
             },
-        ),
-        chat: vi.fn(),
-        actorId: { value: "invented-owner" },
-        mockEnv: {
-            IS_HOSTED: false,
-            SELF_HOST_MODE: "shared",
-            AUTHZ_MODE: "local",
-            ORG_ACCOUNT_EMAIL: "invented-org@example.test",
-            ORG_ACCOUNT_PASSWORD: "invented-password",
-            ENCRYPTION_KEY:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            BETTER_AUTH_SECRET: "invented-test-secret-invented-test-secret",
-            AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20,
-        },
-    };
-});
+        };
+    },
+);
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
@@ -94,6 +98,9 @@ vi.mock("@/lib/learn/chat-clients", () => ({
         payerUserId: "invented-owner",
     }),
 }));
+vi.mock("@/lib/ai/generate-title", () => ({
+    generateTitleFromTranscription: generateTitle,
+}));
 vi.mock("@/lib/auth-server", () => ({
     requireApiSessionActor: async () => ({
         session: { user: { id: actorId.value } },
@@ -108,6 +115,7 @@ import {
     PATCH as patchLanguage,
 } from "@/app/api/recordings/[id]/language/route";
 import { GET as getRecording } from "@/app/api/recordings/[id]/route";
+import { POST as regenerateTitle } from "@/app/api/recordings/[id]/title/route";
 import { encrypt } from "@/lib/encryption";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
@@ -116,6 +124,7 @@ import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { decideReviewItem, finishReview, loadReview } from "@/lib/learn/review";
+import * as readableTranscripts from "@/lib/mcp/data/transcripts";
 import { loadReadableTranscript } from "@/lib/mcp/data/transcripts";
 import { TRANSCRIPT_TOOLS } from "@/lib/mcp/tools/transcripts";
 import { ensureOrgAccount } from "@/lib/org/account";
@@ -175,6 +184,7 @@ suite("confirmed language with PostgreSQL", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         chat.mockReset();
+        generateTitle.mockReset();
         actorId.value = OWNER;
         knowledgeStore().invalidateAll();
         await db().delete(users);
@@ -460,6 +470,67 @@ suite("confirmed language with PostgreSQL", () => {
     });
 
     it.each([
+        null,
+        "cs",
+    ])("passes confirmed language %s through the scan without per-row metadata queries", async (language) => {
+        if (language) await patchLanguage(request("PATCH", language), context);
+        const caller = userCaller(
+            OWNER,
+            "invented-owner@example.test",
+            ["transcripts:read"],
+            orgId,
+        );
+        const search = TRANSCRIPT_TOOLS.find(
+            (tool) => tool.name === "search_transcripts",
+        );
+        if (!search) throw new Error("Missing transcript search tool");
+        const select = vi.spyOn(db(), "select");
+        const load = vi.spyOn(readableTranscripts, "loadReadableTranscript");
+        try {
+            expect(
+                await search.run({ caller, touched: [] }, { query: "dnes" }),
+            ).toMatchObject({
+                results: [{ recording: { id: REC } }],
+                scanned: 1,
+                complete: true,
+            });
+            expect(load).toHaveBeenCalledWith(
+                caller,
+                expect.objectContaining({
+                    id: REC,
+                    confirmedLanguage: language,
+                }),
+                expect.anything(),
+            );
+            expect(await load.mock.results[0]?.value).toMatchObject({
+                confirmedLanguage: language,
+                detectedLanguage: "hun",
+            });
+            expect(
+                select.mock.calls.filter(
+                    ([fields]) =>
+                        fields &&
+                        Object.keys(fields).length === 1 &&
+                        "confirmedLanguage" in fields,
+                ),
+            ).toHaveLength(0);
+        } finally {
+            select.mockRestore();
+            load.mockRestore();
+        }
+        const get = TRANSCRIPT_TOOLS.find(
+            (tool) => tool.name === "get_transcript",
+        );
+        if (!get) throw new Error("Missing transcript tool");
+        expect(
+            await get.run({ caller, touched: [] }, { recording: REC }),
+        ).toMatchObject({
+            confirmed_language: language,
+            detected_language: "hun",
+        });
+    });
+
+    it.each([
         "summary",
         "title",
     ])("compares %s against the explicit profile output language", async (kind) => {
@@ -507,7 +578,11 @@ suite("confirmed language with PostgreSQL", () => {
                 });
         expect(
             await (await patchLanguage(request("PATCH", "cs"), context)).json(),
-        ).toMatchObject({ confirmedLanguage: "cs", needsResummary: false });
+        ).toMatchObject({
+            confirmedLanguage: "cs",
+            needsResummary: false,
+            needsTitleRegeneration: false,
+        });
         if (kind === "summary")
             await db()
                 .update(aiEnhancements)
@@ -525,7 +600,110 @@ suite("confirmed language with PostgreSQL", () => {
                 );
         expect(
             await (await getLanguage(request(), context)).json(),
-        ).toMatchObject({ needsResummary: true });
+        ).toMatchObject({
+            needsResummary: kind === "summary",
+            needsTitleRegeneration: kind === "title",
+        });
+        if (kind === "title") {
+            await db()
+                .insert(itemProcessing)
+                .values({
+                    itemId: REC,
+                    userId: OWNER,
+                    view: "private",
+                    phases: {
+                        summary: {
+                            state: "done",
+                            generation: 1,
+                            at: new Date().toISOString(),
+                            steps: {
+                                title: {
+                                    state: "done",
+                                    generation: 1,
+                                    contentId: transcriptId,
+                                    contentRevision: 0,
+                                },
+                            },
+                        },
+                    },
+                });
+            const title =
+                "The team agreed to review the project plan and prepare the next meeting.";
+            generateTitle.mockResolvedValueOnce(title);
+            const response = await regenerateTitle(
+                new Request(`http://localhost/api/recordings/${REC}/title`, {
+                    method: "POST",
+                }),
+                context,
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ filename: title });
+            expect(
+                await (await getLanguage(request(), context)).json(),
+            ).toMatchObject({
+                needsResummary: false,
+                needsTitleRegeneration: false,
+            });
+        }
+    });
+
+    it("offers title regeneration alone after confirming a different language", async () => {
+        await db()
+            .update(chatterItems)
+            .set({
+                title: encryptText(
+                    "The team agreed to review the project plan and prepare the next meeting.",
+                ),
+            })
+            .where(
+                and(eq(chatterItems.id, REC), eq(chatterItems.userId, OWNER)),
+            );
+        expect(
+            await (await patchLanguage(request("PATCH", "cs"), context)).json(),
+        ).toMatchObject({
+            confirmedLanguage: "cs",
+            needsResummary: false,
+            needsTitleRegeneration: true,
+        });
+        generateTitle.mockResolvedValueOnce(text);
+        expect(
+            (
+                await regenerateTitle(
+                    new Request(
+                        `http://localhost/api/recordings/${REC}/title`,
+                        { method: "POST" },
+                    ),
+                    context,
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            await (await getLanguage(request(), context)).json(),
+        ).toMatchObject({
+            needsResummary: false,
+            needsTitleRegeneration: false,
+        });
+    });
+
+    it("never flags a title the user typed in another language", async () => {
+        await db()
+            .update(chatterItems)
+            .set({
+                title: encryptText(
+                    "The team agreed to review the project plan and prepare the next meeting.",
+                ),
+                titleEditedAt: new Date(),
+            })
+            .where(
+                and(eq(chatterItems.id, REC), eq(chatterItems.userId, OWNER)),
+            );
+        expect(
+            await (await patchLanguage(request("PATCH", "cs"), context)).json(),
+        ).toMatchObject({
+            confirmedLanguage: "cs",
+            needsResummary: false,
+            needsTitleRegeneration: false,
+        });
     });
 
     it("exposes one language in private and Organization views and survives re-transcription", async () => {
@@ -614,6 +792,7 @@ suite("confirmed language with PostgreSQL", () => {
         expect(await changed.json()).toMatchObject({
             confirmedLanguage: "cs",
             needsResummary: true,
+            needsTitleRegeneration: false,
         });
         expect(await db().select().from(asyncJobs)).toHaveLength(before.length);
         expect((await db().select().from(aiEnhancements))[0]).toMatchObject({
@@ -631,7 +810,10 @@ suite("confirmed language with PostgreSQL", () => {
             );
         expect(
             await (await getLanguage(request(), context)).json(),
-        ).toMatchObject({ needsResummary: false });
+        ).toMatchObject({
+            needsResummary: false,
+            needsTitleRegeneration: false,
+        });
     });
 
     it("keeps language controls usable while the Organization waits for a profile", async () => {
@@ -703,7 +885,7 @@ suite("confirmed language with PostgreSQL", () => {
             REC,
             "transcript",
         );
-        expect(document?.content).toContain('language: "cs"');
+        expect(document?.content).toContain('\nlanguage: "hun"\n');
         expect(document?.content).toContain('confirmed_language: "cs"');
         let archive = Buffer.alloc(0);
         const storage: StorageProvider = {

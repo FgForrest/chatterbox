@@ -883,19 +883,7 @@ async function transcriptSourceInTx(
         revision,
         scopeUserId,
         turns,
-        language: async () => {
-            const [recording] = await tx
-                .select({ confirmedLanguage: recordings.confirmedLanguage })
-                .from(recordings)
-                .where(
-                    and(
-                        eq(recordings.id, latest.itemId),
-                        eq(recordings.userId, latest.userId),
-                    ),
-                )
-                .limit(1);
-            return recording?.confirmedLanguage ?? language;
-        },
+        language: async () => language,
         speakerPerson: async (label) => {
             const [row] = await tx
                 .select({ personId: transcriptSpeakers.personId })

@@ -248,7 +248,12 @@ function transcriptMatcher(
         try {
             transcript = await loadReadableTranscript(
                 caller,
-                { id: row.id, ownerUserId: row.userId, view },
+                {
+                    id: row.id,
+                    ownerUserId: row.userId,
+                    view,
+                    confirmedLanguage: row.confirmedLanguage,
+                },
                 { preferredSource },
             );
         } catch (error) {

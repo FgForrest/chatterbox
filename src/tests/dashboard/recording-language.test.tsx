@@ -42,10 +42,15 @@ describe("recording language control", () => {
         fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
             Response.json(
                 init?.method === "PATCH"
-                    ? { confirmedLanguage: "cs", needsResummary: true }
+                    ? {
+                          confirmedLanguage: "cs",
+                          needsResummary: true,
+                          needsTitleRegeneration: false,
+                      }
                     : {
                           confirmedLanguage: null,
                           needsResummary: false,
+                          needsTitleRegeneration: false,
                           canChange: true,
                       },
             ),
@@ -73,6 +78,9 @@ describe("recording language control", () => {
             await screen.findByRole("button", { name: "Re-summarize" }),
         );
         expect(resummarize).toHaveBeenCalledOnce();
+        expect(
+            screen.queryByRole("button", { name: "Regenerate title" }),
+        ).toBeNull();
         expect(transcribe).not.toHaveBeenCalled();
         const patch = fetchMock.mock.calls.find(
             ([, init]) => init?.method === "PATCH",
@@ -90,6 +98,77 @@ describe("recording language control", () => {
         expect(transcribe).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
         expect(transcribe).toHaveBeenCalledWith("riffado", true, "cs");
+    });
+
+    it.each([
+        "private",
+        "org",
+    ] as const)("offers only title regeneration for a title mismatch in %s and refreshes afterward", async (view) => {
+        let regenerated = false;
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) => {
+                if (init?.method === "POST") {
+                    regenerated = true;
+                    return Response.json({ filename: "Invented title" });
+                }
+                return Response.json({
+                    confirmedLanguage: "cs",
+                    needsResummary: false,
+                    needsTitleRegeneration: !regenerated,
+                    canChange: true,
+                });
+            },
+        );
+        control(false, view);
+        const button = await screen.findByRole("button", {
+            name: "Regenerate title",
+        });
+        expect(
+            screen.queryByRole("button", { name: "Re-summarize" }),
+        ).toBeNull();
+        expect(
+            fetchMock.mock.calls.some(([, init]) => init?.method === "POST"),
+        ).toBe(false);
+        fireEvent.click(button);
+        await waitFor(() =>
+            expect(
+                screen.queryByRole("button", { name: "Regenerate title" }),
+            ).toBeNull(),
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            `/api/recordings/invented-rec/title${view === "org" ? "?view=org" : ""}`,
+            { method: "POST" },
+        );
+        expect(reload).toHaveBeenCalledOnce();
+        expect(resummarize).not.toHaveBeenCalled();
+    });
+
+    it("keeps the title offer available after a refused regeneration", async () => {
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) =>
+                init?.method === "POST"
+                    ? Response.json({ error: "Forbidden" }, { status: 403 })
+                    : Response.json({
+                          confirmedLanguage: "cs",
+                          needsResummary: false,
+                          needsTitleRegeneration: true,
+                          canChange: true,
+                      }),
+        );
+        control();
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Regenerate title" }),
+        );
+        await waitFor(() =>
+            expect(
+                (
+                    screen.getByRole("button", {
+                        name: "Regenerate title",
+                    }) as HTMLButtonElement
+                ).disabled,
+            ).toBe(false),
+        );
+        expect(reload).not.toHaveBeenCalled();
     });
 
     it("clears confirmation with Automatic and skips unchanged choices", async () => {
@@ -250,6 +329,7 @@ describe("recording language control", () => {
             Response.json({
                 confirmedLanguage: "cs",
                 needsResummary: true,
+                needsTitleRegeneration: true,
                 canChange: false,
             }),
         );

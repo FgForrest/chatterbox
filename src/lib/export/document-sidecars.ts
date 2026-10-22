@@ -555,8 +555,7 @@ async function renderRecordingMarkdownDocument(
                 title,
                 recordedAt: recording.occurredAt,
                 durationMs: recording.duration,
-                language:
-                    recording.confirmedLanguage ?? primary.detectedLanguage,
+                language: primary.detectedLanguage,
                 confirmedLanguage: recording.confirmedLanguage,
                 provider: primary.provider,
                 model: primary.model,
