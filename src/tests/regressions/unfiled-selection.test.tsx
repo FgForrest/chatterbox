@@ -7,17 +7,24 @@ import {
     render,
     screen,
 } from "@testing-library/react";
-import { type ComponentProps, type Ref, useImperativeHandle } from "react";
+import {
+    type ComponentProps,
+    type ReactNode,
+    type Ref,
+    useImperativeHandle,
+} from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecordingPlayerHandle } from "@/components/dashboard/recording-player";
 import { Workstation } from "@/components/dashboard/workstation";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
+import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
 const router = vi.hoisted(() => ({
     canonicalUrl: "/dashboard",
     refresh: vi.fn(),
+    forwardInternalState: false,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -87,7 +94,25 @@ vi.mock("@/components/dashboard/command-palette", () => ({
     CommandPalette: () => null,
 }));
 vi.mock("@/components/dashboard/folder-tree", () => ({
-    FolderTree: () => null,
+    FolderTree: ({
+        selectedFolderId,
+        recordings,
+    }: {
+        selectedFolderId: string | null;
+        recordings: Recording[];
+    }) => (
+        <>
+            <output data-testid="selected-folder">
+                {selectedFolderId ?? "recent"}
+            </output>
+            <output data-testid="library-ids">
+                {recordings.map((item) => item.id).join(",")}
+            </output>
+        </>
+    ),
+}));
+vi.mock("@/components/mail/mail-detail-pane", () => ({
+    MailDetailPane: ({ mail }: { mail: Recording }) => <h1>{mail.filename}</h1>,
 }));
 vi.mock("@/components/dashboard/library-location-header", () => ({
     LibraryLocationHeader: () => null,
@@ -250,6 +275,7 @@ const props: ComponentProps<typeof Workstation> = {
 
 beforeEach(() => {
     router.canonicalUrl = "/dashboard";
+    router.forwardInternalState = false;
     router.refresh.mockClear();
     window.history.replaceState(
         { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] } },
@@ -260,6 +286,8 @@ beforeEach(() => {
         const original = window.history[method].bind(window.history);
         vi.spyOn(window.history, method).mockImplementation(
             (data, unused, url) => {
+                if (router.forwardInternalState)
+                    data = { ...window.history.state, ...data };
                 if (data?.__NA || data?._N) return original(data, unused, url);
                 const nextState = {
                     ...data,
@@ -290,6 +318,218 @@ beforeEach(() => {
             return Response.json({});
         }),
     );
+});
+
+const mail: Recording = {
+    ...unfiled,
+    id: "mail-nelra",
+    filename: "Nelra project update",
+    kind: "mail",
+    startTime: "2026-10-22T10:00:00.000Z",
+};
+const shared: Recording = {
+    ...unfiled,
+    id: "shared-vorla",
+    filename: "Vorla research notes",
+    view: "org",
+    isOwn: false,
+};
+const privateFolder: RecordingFolder = {
+    id: "folder-fenra",
+    name: "Fenra research",
+    parentId: null,
+    kind: "private",
+    scope: "personal",
+    sortOrder: 0,
+    version: 1,
+};
+const orgFolder: RecordingFolder = {
+    ...privateFolder,
+    id: "folder-vorla",
+    name: "Vorla Organization",
+    kind: "public",
+    scope: "org",
+};
+const arrivals: Recording[] = [
+    {
+        ...filed,
+        id: "arrival-audio-zalno",
+        filename: "Zalno new recording",
+        startTime: "2026-10-22T13:00:00.000Z",
+    },
+    {
+        ...mail,
+        id: "arrival-mail-zelra",
+        filename: "Zelra new mail",
+        startTime: "2026-10-22T14:00:00.000Z",
+    },
+    {
+        ...shared,
+        id: "arrival-org-zorla",
+        filename: "Zorla new shared recording",
+        startTime: "2026-10-22T15:00:00.000Z",
+    },
+];
+const arrivalProps: ComponentProps<typeof Workstation> = {
+    ...props,
+    recordings: [...props.recordings, mail],
+    organizationLibrary: {
+        recordings: [shared],
+        transcriptions: new Map(),
+        transcriptVariants: new Map(),
+    },
+    initialFolderOrganization: {
+        folders: [privateFolder, orgFolder],
+        assignments: [
+            ...[filed, unfiled, mail].map((item) => ({
+                recordingId: item.id,
+                folderId: privateFolder.id,
+            })),
+            { recordingId: shared.id, folderId: orgFolder.id },
+        ],
+    },
+};
+
+async function selectBeforeArrival(
+    selected: Recording,
+    folder: RecordingFolder | null,
+) {
+    const initialUrl = folder ? `/dashboard?folder=${folder.id}` : "/dashboard";
+    router.canonicalUrl = initialUrl;
+    window.history.replaceState(
+        { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] } },
+        "",
+        initialUrl,
+    );
+    const view = render(<Workstation {...arrivalProps} />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: selected.filename }));
+    await screen.findByRole("heading", { name: selected.filename });
+    return view;
+}
+
+async function deliverArrivals(rerender: (ui: ReactNode) => void) {
+    const previousIds = screen
+        .getByTestId("library-ids")
+        .textContent?.split(",");
+    for (const arrival of arrivals)
+        expect(previousIds).not.toContain(arrival.id);
+    await act(async () => {
+        router.refresh();
+        window.history.replaceState(
+            { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] } },
+            "",
+            router.canonicalUrl,
+        );
+        rerender(
+            <Workstation
+                {...arrivalProps}
+                recordings={[
+                    ...arrivals.filter((item) => item.view !== "org"),
+                    ...arrivalProps.recordings.map((item) => ({ ...item })),
+                ]}
+                organizationLibrary={{
+                    recordings: [
+                        ...arrivals.filter((item) => item.view === "org"),
+                        { ...shared },
+                    ],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+                initialFolderOrganization={{
+                    ...arrivalProps.initialFolderOrganization,
+                    assignments: [
+                        ...arrivalProps.initialFolderOrganization.assignments,
+                        ...arrivals.map((item) => ({
+                            recordingId: item.id,
+                            folderId:
+                                item.view === "org"
+                                    ? orgFolder.id
+                                    : privateFolder.id,
+                        })),
+                    ],
+                }}
+            />,
+        );
+    });
+    const ids = screen.getByTestId("library-ids").textContent?.split(",");
+    for (const arrival of arrivals) expect(ids).toContain(arrival.id);
+}
+
+describe("arrival selection", () => {
+    it.each([
+        { name: "audio in Recent", selected: unfiled, folder: null },
+        {
+            name: "audio in a private folder",
+            selected: unfiled,
+            folder: privateFolder,
+        },
+        { name: "mail in Recent", selected: mail, folder: null },
+        {
+            name: "mail in a private folder",
+            selected: mail,
+            folder: privateFolder,
+        },
+        {
+            name: "Organization audio in a folder",
+            selected: shared,
+            folder: orgFolder,
+        },
+    ])("keeps $name selected when newer audio, mail and Organization IDs arrive", async ({
+        selected,
+        folder,
+    }) => {
+        const { rerender } = await selectBeforeArrival(selected, folder);
+        const selectionUrl = window.location.href;
+        expect(new URL(selectionUrl).searchParams.get("recording")).toBe(
+            selected.id,
+        );
+        await deliverArrivals(rerender);
+        expect(window.location.href).toBe(selectionUrl);
+        expect(new URL(router.canonicalUrl, window.location.origin).href).toBe(
+            selectionUrl,
+        );
+        expect(screen.getByTestId("selected-folder").textContent).toBe(
+            folder?.id ?? "recent",
+        );
+        expect(
+            screen.getByRole("heading", { name: selected.filename }),
+        ).toBeTruthy();
+        expect(
+            screen
+                .getByRole("button", { name: selected.filename })
+                .getAttribute("aria-pressed"),
+        ).toBe("true");
+        expect(
+            screen
+                .getByRole("region", { name: "Recordings" })
+                .parentElement?.classList.contains("hidden"),
+        ).toBe(true);
+    });
+
+    it("reproduces the newest-item jump when pre-fix writes forward __NA", async () => {
+        router.forwardInternalState = true;
+        const { rerender } = await selectBeforeArrival(unfiled, privateFolder);
+        expect(window.location.search).toContain(`recording=${unfiled.id}`);
+        expect(router.canonicalUrl).toBe(
+            `/dashboard?folder=${privateFolder.id}`,
+        );
+        await deliverArrivals(rerender);
+        expect(
+            screen.queryByRole("heading", { name: unfiled.filename }),
+        ).toBeNull();
+        expect(
+            screen
+                .getByRole("button", { name: "Zelra new mail" })
+                .getAttribute("aria-pressed"),
+        ).toBe("true");
+        expect(window.location.search).toBe(
+            `?folder=${privateFolder.id}&recording=arrival-mail-zelra`,
+        );
+        expect(screen.getByTestId("selected-folder").textContent).toBe(
+            privateFolder.id,
+        );
+    });
 });
 
 afterEach(() => {

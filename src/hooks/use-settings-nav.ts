@@ -5,6 +5,7 @@ import {
     buildSettingsNav,
     SETTINGS_STORAGE_KEY,
 } from "@/components/settings-nav-config";
+import { getAppHistoryState } from "@/lib/history-state";
 import type { SettingsSection } from "@/types/settings";
 
 /**
@@ -127,7 +128,7 @@ export function useSettingsNav(
         const url = new URL(window.location.href);
         url.hash = visibleActiveSection;
         url.searchParams.set("section", visibleActiveSection);
-        window.history.replaceState(window.history.state, "", url);
+        window.history.replaceState(getAppHistoryState(), "", url);
         lastLocationRef.current = {
             section: visibleActiveSection,
             hash: url.hash,

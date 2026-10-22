@@ -120,6 +120,7 @@ afterEach(() => {
     cleanup();
     localStorage.clear();
     window.history.replaceState({}, "", "/");
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
 });
@@ -151,6 +152,30 @@ function renderChrome(onboardingCompleted = true, organization = false) {
         </AppChromeProvider>,
     );
 }
+
+it("preserves dashboard state without forwarding Next's keys when resuming setup", () => {
+    const appState = { mobileView: "detail", draft: "draft-velno" };
+    window.history.replaceState(
+        {
+            ...appState,
+            __NA: true,
+            _N: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] },
+        },
+        "",
+        "/dashboard?folder=folder-fenra&recording=item-velno&onboarding=google#notes",
+    );
+    const replace = vi.spyOn(window.history, "replaceState");
+    const historyLength = window.history.length;
+    renderChrome();
+    expect(screen.getByText("open:google")).toBeTruthy();
+    expect(replace).toHaveBeenLastCalledWith(appState, "", expect.any(URL));
+    expect(window.history.state).toEqual(appState);
+    expect(`${window.location.search}${window.location.hash}`).toBe(
+        "?folder=folder-fenra&recording=item-velno#notes",
+    );
+    expect(window.history.length).toBe(historyLength);
+});
 
 describe.each([
     "/dashboard",
