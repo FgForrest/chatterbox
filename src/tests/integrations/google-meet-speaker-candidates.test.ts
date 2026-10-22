@@ -88,6 +88,34 @@ describe("Meet candidates for Learn", () => {
         expect(getGoogleAccessToken).not.toHaveBeenCalled();
     });
 
+    it("counts diacritic variants once and keeps the first display form", async () => {
+        vi.mocked(getMeetParticipantContext).mockResolvedValue({
+            status: "available",
+            conferenceRecord: "conferenceRecords/record_1",
+            participants: [
+                {
+                    displayName: "Jitka Dvořáková",
+                    source: "signed_in",
+                    googleUserId: "users/1",
+                },
+                {
+                    displayName: "jitka dvorakova",
+                    source: "anonymous",
+                    googleUserId: null,
+                },
+                {
+                    displayName: "Míra Luvin",
+                    source: "anonymous",
+                    googleUserId: null,
+                },
+            ],
+        });
+        await expect(getMeetSpeakerCandidates(input)).resolves.toEqual([
+            { name: "Jitka Dvořáková", source: "meet" },
+            { name: "Míra Luvin", source: "meet" },
+        ]);
+    });
+
     it("returns no partial context after a Meet failure", async () => {
         vi.mocked(getMeetParticipantContext).mockResolvedValue({
             status: "unavailable",

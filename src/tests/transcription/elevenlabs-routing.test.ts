@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as AlmanacTermsModule from "@/lib/transcription/almanac-terms";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/db", () => ({
@@ -82,9 +83,16 @@ vi.mock("@/lib/folders/item-scope", () => ({
     itemScopeFolderIds: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("@/lib/transcription/almanac-terms", () => ({
-    almanacTermsFor: vi.fn().mockResolvedValue([]),
+vi.mock("@/lib/integrations/google/meeting-roster", () => ({
+    resolveMeetingRoster: vi.fn().mockResolvedValue(null),
 }));
+
+vi.mock("@/lib/transcription/almanac-terms", async () => {
+    const actual = await vi.importActual<typeof AlmanacTermsModule>(
+        "@/lib/transcription/almanac-terms",
+    );
+    return { ...actual, almanacTermsFor: vi.fn().mockResolvedValue([]) };
+});
 
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: vi.fn(async () =>
@@ -96,6 +104,7 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 }));
 
 import { db } from "@/db";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
@@ -361,6 +370,49 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         expect((init.body as FormData).getAll("keyterms")).toEqual([
             "Zefira",
             "Blue Harbor",
+        ]);
+    });
+
+    it("sends roster names once with the Almanac spelling in the provider request", async () => {
+        vi.mocked(resolveMeetingRoster).mockResolvedValueOnce({
+            eventId: "meeting",
+            attendees: [
+                { name: "jitka dvorakova", source: "calendar" },
+                { name: "Míra Luvin", source: "meet" },
+            ],
+        });
+        vi.mocked(almanacTermsFor).mockResolvedValueOnce([
+            { text: "Jitka Dvořáková", soundsLike: ["Jituška"] },
+            { text: "Zefira", soundsLike: [] },
+        ]);
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2",
+        });
+        (db.select as Mock).mockReturnValueOnce({
+            from: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue([{ email: null }]),
+                }),
+            }),
+        });
+
+        const result = await transcribeRecording("user-el", "rec-el");
+
+        expect(result.success).toBe(true);
+        expect(resolveMeetingRoster).toHaveBeenCalledWith({
+            ownerUserId: "user-el",
+            itemId: "rec-el",
+        });
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([
+            "Jitka Dvořáková",
+            "Míra Luvin",
+            "Zefira",
         ]);
     });
 

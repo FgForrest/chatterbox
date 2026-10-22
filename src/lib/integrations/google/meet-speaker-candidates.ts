@@ -3,6 +3,7 @@ import type { CalendarEventCandidate } from "./calendar-events";
 import { getGoogleAccessToken, getGoogleConnectionStatus } from "./connection";
 import { GOOGLE_MEET_READ_SCOPE } from "./meet-consent";
 import { getMeetParticipantContext } from "./meet-context";
+import { attendeeNameKey } from "./meeting-roster-names";
 
 const MAX_LEARN_CANDIDATES = 80;
 
@@ -44,7 +45,7 @@ export async function getMeetSpeakerCandidates(input: {
         const names = new Map<string, string>();
         for (const participant of context.participants) {
             const name = participant.displayName.slice(0, 120);
-            const key = name.toLocaleLowerCase();
+            const key = attendeeNameKey(name);
             if (!names.has(key)) names.set(key, name);
             if (names.size >= MAX_LEARN_CANDIDATES) break;
         }

@@ -71,6 +71,10 @@ import {
     answerSpeakerInTx,
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
+import {
+    learnGuessRowId,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
 import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import {
@@ -1863,6 +1867,41 @@ function finishInTx(
         }
 
         const rejected = items.filter((item) => !item.accepted);
+        if (transcript) {
+            for (const item of rejected) {
+                if (item.kind !== "speaker") continue;
+                const payload = item.payload as Extract<
+                    ReviewCandidate,
+                    { kind: "speaker" }
+                >["payload"];
+                if (!payload.personId) continue;
+                const label = speakerKey(payload.label);
+                await tx
+                    .delete(transcriptSpeakers)
+                    .where(
+                        and(
+                            eq(
+                                transcriptSpeakers.id,
+                                learnGuessRowId(run.id, payload.label),
+                            ),
+                            eq(transcriptSpeakers.userId, transcript.userId),
+                            eq(
+                                transcriptSpeakers.transcriptionId,
+                                transcript.transcriptionId,
+                            ),
+                            eq(transcriptSpeakers.label, label),
+                            eq(transcriptSpeakers.personId, payload.personId),
+                            eq(transcriptSpeakers.status, "suggested"),
+                            eq(transcriptSpeakers.markedUnknown, false),
+                            isNull(transcriptSpeakers.confirmedByUserId),
+                            eq(
+                                transcriptSpeakers.updatedAt,
+                                transcriptSpeakers.createdAt,
+                            ),
+                        ),
+                    );
+            }
+        }
         if (rejected.length > 0) {
             await tx
                 .insert(learnDismissals)

@@ -999,7 +999,7 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         ]);
     });
 
-    async function runAutomatic() {
+    async function runAutomatic(evidence = false) {
         expect(
             await startAutomaticLearn({
                 userId: "owner",
@@ -1047,12 +1047,203 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         expect(storedRun?.inputs?.calendarEventId).toBe("meeting");
         expect(items).toHaveLength(proposedName ? 2 : 1);
         expect(items[0]?.preTicked).toBe(false);
-        expect(decryptJsonField(items[0]?.payload ?? null)).toMatchObject({
-            guess: { confidence: 0.49 },
-            source: "calendar",
-        });
+        expect(decryptJsonField(items[0]?.payload ?? null)).toMatchObject(
+            evidence
+                ? { personId, evidenceMs: [0] }
+                : { guess: { confidence: 0.49 }, source: "calendar" },
+        );
         return items;
     }
+
+    it("removes a rejected guess at review finish and preserves another label's suggestion", async () => {
+        const items = await runAutomatic();
+        const [other] = await database.db
+            .insert(transcriptSpeakers)
+            .values({
+                userId: "owner",
+                transcriptionId: transcriptId,
+                label: "speaker_1",
+                personId,
+                status: "suggested",
+                source: "calendar",
+            })
+            .returning();
+        const access = await requireRecordingView(
+            "owner",
+            "recording",
+            "private",
+        );
+        const item = items[0];
+        if (!item) throw new Error("Missing speaker proposal");
+        await decideReviewItem(access, item.id, {
+            decision: "rejected",
+            version: 0,
+        });
+        const result = await finishReview(access, "owner", {
+            versions: { [item.id]: 1 },
+        });
+        expect(result).toMatchObject({
+            status: "finished",
+            dismissed: 1,
+            applied: 0,
+        });
+        expect(
+            await getTranscriptSpeakers("owner", transcriptId),
+        ).toMatchObject([
+            {
+                id: other?.id,
+                label: "speaker_1",
+                status: "suggested",
+                personId,
+            },
+        ]);
+    });
+
+    it.each([
+        "confirmed",
+        "unknown",
+        "different_person",
+        "later_run",
+        "edited",
+    ] as const)("preserves a guess changed before review finish (%s)", async (change) => {
+        const items = await runAutomatic();
+        if (change === "confirmed" || change === "unknown") {
+            await changeTranscriptSpeaker({
+                userId: "owner",
+                transcriptionId: transcriptId,
+                revision: 0,
+                label: "speaker_0",
+                answer:
+                    change === "confirmed"
+                        ? { kind: "name", personId }
+                        : { kind: "unknown" },
+                actorUserId: "owner",
+                orgUserId: await ensureOrgAccount(),
+            });
+        } else if (change === "later_run") {
+            await database.db
+                .delete(transcriptSpeakers)
+                .where(
+                    and(
+                        eq(transcriptSpeakers.userId, "owner"),
+                        eq(transcriptSpeakers.transcriptionId, transcriptId),
+                        eq(transcriptSpeakers.label, "speaker_0"),
+                    ),
+                );
+            await database.db.insert(transcriptSpeakers).values({
+                userId: "owner",
+                transcriptionId: transcriptId,
+                label: "speaker_0",
+                personId,
+                status: "suggested",
+                source: "calendar",
+            });
+        } else {
+            const otherPerson = await createPerson({
+                userId: "owner",
+                displayName: "Tavin Vosk",
+            });
+            await database.db
+                .update(transcriptSpeakers)
+                .set(
+                    change === "different_person"
+                        ? { personId: otherPerson.id }
+                        : { updatedAt: new Date("2099-01-01T00:00:00Z") },
+                )
+                .where(
+                    and(
+                        eq(transcriptSpeakers.userId, "owner"),
+                        eq(transcriptSpeakers.transcriptionId, transcriptId),
+                        eq(transcriptSpeakers.label, "speaker_0"),
+                    ),
+                );
+        }
+        const before = await database.db
+            .select()
+            .from(transcriptSpeakers)
+            .where(
+                and(
+                    eq(transcriptSpeakers.userId, "owner"),
+                    eq(transcriptSpeakers.transcriptionId, transcriptId),
+                ),
+            );
+        const access = await requireRecordingView(
+            "owner",
+            "recording",
+            "private",
+        );
+        await finishReview(access, "owner", {
+            versions: Object.fromEntries(items.map((item) => [item.id, 0])),
+        });
+        const after = await database.db
+            .select()
+            .from(transcriptSpeakers)
+            .where(
+                and(
+                    eq(transcriptSpeakers.userId, "owner"),
+                    eq(transcriptSpeakers.transcriptionId, transcriptId),
+                ),
+            );
+        expect(after).toEqual(before);
+    });
+
+    it("keeps evidence-backed speaker proposals in the review without a strip suggestion", async () => {
+        await database.db
+            .update(transcriptions)
+            .set({
+                text: encryptText("Speaker 0: Já jsem Nera Veln."),
+                turns: encryptJsonField([
+                    {
+                        speaker: "speaker_0",
+                        startMs: 0,
+                        endMs: 5000,
+                        text: "Já jsem Nera Veln.",
+                    },
+                ]),
+            })
+            .where(
+                and(
+                    eq(transcriptions.userId, "owner"),
+                    eq(transcriptions.id, transcriptId),
+                ),
+            );
+        mocks.chat.mockImplementation(async (messages: LearnChatMessage[]) =>
+            messages[0]?.content.includes("list the words")
+                ? '{"mentions":[]}'
+                : JSON.stringify({
+                      speakers: [
+                          {
+                              label: "speaker_0",
+                              personId,
+                              evidence: ["00:00"],
+                              reason: "Jméno zaznělo.",
+                          },
+                      ],
+                      newRecords: [],
+                      corrections: [],
+                      facts: [],
+                      relationPhrases: [],
+                  }),
+        );
+        const items = await runAutomatic(true);
+        expect(decryptJsonField(items[0]?.payload ?? null)).not.toHaveProperty(
+            "guess",
+        );
+        expect(await getTranscriptSpeakers("owner", transcriptId)).toEqual([]);
+        const access = await requireRecordingView(
+            "owner",
+            "recording",
+            "private",
+        );
+        const item = items[0];
+        if (!item) throw new Error("Missing speaker proposal");
+        await decideReviewItem(access, item.id, {
+            decision: "rejected",
+            version: 0,
+        });
+        await finishReview(access, "owner", { versions: { [item.id]: 1 } });
+        expect(await getTranscriptSpeakers("owner", transcriptId)).toEqual([]);
+    });
     it("replaces a previous Learn guess while preserving a human answer and carried suggestion", async () => {
         await database.db.insert(transcriptSpeakers).values([
             {
@@ -1244,7 +1435,12 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
                 source: "calendar",
                 confirmedByUserId: "owner",
             });
-        } else expect(resolver).toBeUndefined();
+        } else {
+            expect(resolver).toBeUndefined();
+            expect(await getTranscriptSpeakers("owner", transcriptId)).toEqual(
+                [],
+            );
+        }
     });
 });
 

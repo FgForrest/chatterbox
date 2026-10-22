@@ -53,6 +53,7 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { findPersonByEmail } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
+import { learnGuessRowId } from "@/lib/knowledge/speaker-label-rules";
 import { detectLanguage } from "@/lib/knowledge/stemming/detect-language";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
@@ -1096,6 +1097,10 @@ async function runLearnJob({
                             item.payload.guess
                                 ? [
                                       {
+                                          id: learnGuessRowId(
+                                              run.id,
+                                              item.payload.label,
+                                          ),
                                           label: item.payload.label,
                                           personId: item.payload.personId,
                                           source:

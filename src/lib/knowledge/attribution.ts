@@ -85,6 +85,7 @@ export interface TranscriptLabelArgs {
 
 /** A suggestion a machine made, before it is filtered and written. */
 export interface SuggestedSpeaker {
+    id?: string;
     label: string;
     personId: string | null;
     source: AttributionSource;
@@ -563,6 +564,7 @@ export async function insertSuggestionsInTx(
         .insert(transcriptSpeakers)
         .values(
             allowed.map((row) => ({
+                id: row.id,
                 userId,
                 transcriptionId,
                 label: row.label,
