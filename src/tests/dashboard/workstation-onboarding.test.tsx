@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -11,10 +12,27 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppChromeProvider } from "@/components/app-chrome-provider";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
+import type { useAutoSync } from "@/hooks/use-auto-sync";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
 
-const mocks = vi.hoisted(() => ({ pathname: "/dashboard", push: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+    pathname: "/dashboard",
+    push: vi.fn(),
+    success: vi.fn(),
+    syncOptions: null as Parameters<typeof useAutoSync>[0] | null,
+    permission: vi.fn(async () => true),
+    newRecordingNotification: vi.fn(),
+    syncNotification: vi.fn(),
+}));
+vi.mock("sonner", () => ({
+    toast: { success: mocks.success, error: vi.fn() },
+}));
+vi.mock("@/lib/notifications/browser", () => ({
+    requestNotificationPermission: mocks.permission,
+    showNewRecordingNotification: mocks.newRecordingNotification,
+    showSyncCompleteNotification: mocks.syncNotification,
+}));
 vi.mock("next-intl", () => ({
     useExtracted: () => (source: string) => source,
 }));
@@ -100,7 +118,10 @@ vi.mock("@/components/onboarding-dialog", () => ({
     ),
 }));
 vi.mock("@/hooks/use-auto-sync", () => ({
-    useAutoSync: () => ({ manualSync: vi.fn() }),
+    useAutoSync: (options: Parameters<typeof useAutoSync>[0]) => {
+        mocks.syncOptions = options;
+        return { manualSync: vi.fn() };
+    },
 }));
 vi.mock("@/hooks/use-google-connection", () => ({
     useGoogleConnectOutcome: vi.fn(),
@@ -125,12 +146,18 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-function renderChrome(onboardingCompleted = true, organization = false) {
+function renderChrome(
+    onboardingCompleted = true,
+    organization = false,
+    notifications = false,
+) {
     return render(
         <AppChromeProvider
             initialSettings={{
                 ...INITIAL_SETTINGS_DEFAULTS,
                 onboardingCompleted,
+                syncNotifications: notifications,
+                browserNotifications: notifications,
             }}
             isAdmin={false}
             isOrgAccount={organization}
@@ -175,6 +202,35 @@ it("preserves dashboard state without forwarding Next's keys when resuming setup
         "?folder=folder-fenra&recording=item-velno#notes",
     );
     expect(window.history.length).toBe(historyLength);
+});
+
+describe("Dashboard sync notices", () => {
+    it.each([
+        "/dashboard",
+        "/tasks",
+        "/almanac",
+        "/settings",
+    ])("handles new recordings on %s without changing browser notifications", async (pathname) => {
+        mocks.pathname = pathname;
+        renderChrome(true, false, true);
+        await act(async () => mocks.syncOptions?.onSuccess?.(2));
+        expect(mocks.success).toHaveBeenCalledTimes(
+            pathname === "/dashboard" ? 0 : 1,
+        );
+        if (pathname !== "/dashboard")
+            expect(mocks.success).toHaveBeenCalledWith(
+                "Synced {count, plural, one {# new recording} other {# new recordings}}",
+            );
+        expect(mocks.newRecordingNotification).toHaveBeenCalledWith(2);
+    });
+    it("keeps the manual no-new-recordings toast on the dashboard", async () => {
+        renderChrome(true, false, true);
+        await act(async () => mocks.syncOptions?.onSuccess?.(0));
+        expect(mocks.success).toHaveBeenCalledWith(
+            "Sync complete - no new recordings",
+        );
+        expect(mocks.syncNotification).toHaveBeenCalled();
+    });
 });
 
 describe.each([

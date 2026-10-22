@@ -47,7 +47,14 @@ vi.mock("next-intl", () => ({
         },
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({
+    toast: {
+        error: vi.fn(),
+        success: vi.fn(),
+        custom: vi.fn(),
+        dismiss: vi.fn(),
+    },
+}));
 vi.mock("@/components/app-chrome-provider", () => ({
     useAppChrome: () => ({
         settingsOpen: false,
