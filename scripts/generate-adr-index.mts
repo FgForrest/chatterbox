@@ -1,5 +1,4 @@
 import {
-    existsSync,
     readdirSync,
     readFileSync,
     statSync,
@@ -406,18 +405,15 @@ export function collectRecords(adrDir: string): {
         }
         seen.add(id);
         const path = isDirectory ? `${name}/README.md` : name;
-        if (isDirectory && !existsSync(join(full, "README.md"))) {
+        const text = readIfExists(join(adrDir, path));
+        if (text === null) {
             problems.push({
                 path: name,
                 message: "record directory has no README.md",
             });
             continue;
         }
-        const result = readRecord(
-            id,
-            path,
-            readFileSync(join(adrDir, path), "utf8"),
-        );
+        const result = readRecord(id, path, text);
         problems.push(...result.problems);
         if (result.record) records.push(result.record);
     }
