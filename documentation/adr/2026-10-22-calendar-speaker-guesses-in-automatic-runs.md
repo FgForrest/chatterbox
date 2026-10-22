@@ -1,7 +1,7 @@
 ---
 title: Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm
 date: 2026-10-22
-updated: 2026-10-22 21:10
+updated: 2026-10-22 21:40
 status: accepted
 kind: feature
 issues: []
@@ -137,8 +137,11 @@ stored event ids ignored in Organization runs, and the owner's manual choice and
 working; an ineligible event with a larger overlap no longer masking an eligible one; the confidence
 cap for 0, 0.2, 0.49, 0.7 and 1 (all fc604cc9); carried rows with null or missing confidence not
 shown as guesses, and 22 roster names against 0, 18 and 20 evidence-backed records always yielding
-exactly 20 new-person proposals with no dangling speaker reference (d16f0ec8). Google and model
-calls are stubbed; no live Google smoke test was run.
+exactly 20 new-person proposals with no dangling speaker reference (d16f0ec8); a rejected guess
+leaving the speaker strip when the review finishes while a confirmed, edited or replaced row stays,
+and Calendar and Meet names reaching the Scribe v2 `keyterms` and Speechmatics `additional_vocab`
+requests once with the Almanac spelling (aeaf950c). Google and model calls are stubbed; no live
+Google smoke test was run.
 
 ## Consequences & open follow-ups
 
@@ -161,4 +164,5 @@ calls are stubbed; no live Google smoke test was run.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
 - **2026-10-22**: merged as PR #250, after review fixes (only the owner picks a calendar event,
   eligible events ranked first, the 0.49 cap in the review payload, carried speakers kept out of
-  guesses, roster proposals inside the 20-record budget).
+  guesses, roster proposals inside the 20-record budget, a rejected guess cleared from the speaker
+strip when the review finishes).
