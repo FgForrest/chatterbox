@@ -1,7 +1,7 @@
 ---
 title: Generated text follows the language the transcript is written in; Learn asks when the provider's language is wrong, and the answer is stored per recording
 date: 2026-10-22
-updated: 2026-10-22 21:10
+updated: 2026-10-22 21:45
 status: accepted
 kind: fix
 issues: []
@@ -84,7 +84,8 @@ recording language, then "Auto" (the generic directive).
   and it is not asked again. Audio only.
 - **Storage:** one nullable column, `recordings.confirmed_language varchar(2)` (`src/db/schema.ts`),
   on the recording so it survives re-transcription and is shared by private and Organization views.
-  The same migration widens the Learn review kind check constraint to admit `language`. The
+  The same migration (`0137_short_leopardon.sql`) widens the Learn review kind check constraint to
+  admit `language`. The
   provider's detection is kept unchanged beside it.
 - **Transcript card** (`src/components/dashboard/recording-language.tsx`): the footer shows the
   confirmed language, or the detected one marked as detected. The owner, or a curator for an
@@ -134,8 +135,8 @@ recording language, then "Auto" (the generic directive).
 - Upgrade: the app runs the migration on start (one nullable column, one widened check constraint,
   no backfill), with no env or compose change. Existing recordings keep automatic language
   behaviour until someone confirms a language.
-- #251's migration number may be regenerated before merge: #247 also adds a 0135, and the second to
-  merge reruns `drizzle-kit generate`.
+- The migration was generated as 0135 and regenerated as 0137 after #247 merged its own 0135 and
+  0136; the statements are unchanged.
 - PR #250 (Calendar speaker guesses) also changes Learn's output schema, in nearby lines of the
   Learn handler, both model paths and the correction pass; the two keep separate fields, so
   whichever merges second only resolves neighbouring hunks.
