@@ -5,7 +5,7 @@ description: Lidé a věci, které Klepna zná, jejich přezdívky a fakta.
 
 Almanach obsahuje vše, co Klepna ví o lidech a věcech, o kterých Vaše nahrávky hovoří: kdo je kdo, na čem kdo pracuje, jak se jmenuje projekt a jak bývá často špatně rozuměn. Přepis, Učení, souhrny a úkoly z něj vycházejí.
 
-Obsahuje čtyři karty: **Lidé**, **Věci**, **Slovník** a **Kontrola**.
+Obsahuje karty **Lidé**, **Věci**, **Slovník** a **Kontrola**. Kurátoři Organizace navíc vidí kartu **Péče**.
 
 <span id="people" />
 
@@ -69,6 +69,18 @@ Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte
 ![Co čeká na kontrolu](images/almanac-review.png)
 
 **Kontrola** shromažďuje kontroly položek čekající na Vaše posouzení: běhy [Učení](learn.md) a navržené úkoly z nahrávky nebo pošty. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
+
+<span id="care-possible-duplicates" />
+
+## Péče: možné duplicity
+
+Kurátoři Organizace najdou pod **Almanach → Péče → Možné duplicity** osoby a věci, které mohou být zapsané dvakrát. Fronta obsahuje pouze záznamy Organizace. U dvojice je vysoká, střední nebo nízká shoda a její důvody: podobná jména, přezdívky, české tvary příjmení, přeslechy nebo právní forma firmy. Důvody proti shodě jsou jantarové, například oba potvrzení mluvčí v jednom přepisu nebo různé e-maily na různých doménách. Chybějící e-mail je pouze informace, nikoli problém k nápravě.
+
+**Sloučit…** otevře oba záznamy vedle sebe. Klepna navrhne ponechat záznam s hlavním e-mailem, poté ten s více doklady. Můžete vybrat jiný, zvolit jméno a u rozporných jednohodnotových faktů určit, která hodnota zůstane aktuální. E-maily, přezdívky, přeslechy a fakta obou záznamů se zachovají; druhé jméno se uloží jako přezdívka. Nahrazené hodnoty faktů zůstanou v historii s doklady. Mluvčí, úkoly a odkazy přejdou na ponechaný záznam, druhý na něj bude přesměrovávat. U věcí různých typů zůstane typ ponechaného záznamu; fakta, která by mu neodpovídala, je třeba nejprve opravit.
+
+**Nejsou stejní** uloží rozhodnutí pro danou dvojici v Organizaci, takže se už nenabídne ani jinému kurátorovi. **Později** ji skryje jen pro relaci této karty prohlížeče. Výběr cíle sloučení na stránce osoby nebo věci také řadí pravděpodobné shody na začátek.
+
+Hledání kontroluje 2 000 nejnovějších živých záznamů každého druhu a jejich nejbližší shody. Duplicity se starším záznamem mimo tento limit se nenabízejí, ani když je druhý záznam nový. Procházení ani odmítání dvojic neposune hledání za tento limit. Omezené hledání označuje upozornění. Porovnání ukazuje sdílené položky a otevřené úkoly, soukromé položky kolegů zůstávají soukromé.
 
 <span id="folder-knowledge" />
 

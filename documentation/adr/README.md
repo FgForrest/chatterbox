@@ -38,7 +38,7 @@ the allowed ones, or a `supersedes`/`relates` link is not mirrored by the record
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
 | 2026-10-22 | [AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index](2026-10-22-agent-instructions-and-decision-records.md) | process | accepted | PR #245 |
-| 2026-10-22 | [Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only](2026-10-22-almanac-curator-desk.md) | feature | proposed | #240 |
+| 2026-10-22 | [Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only](2026-10-22-almanac-curator-desk.md) | feature | partially-implemented | #240, PR #244, PR #247 |
 | 2026-10-22 | [An arriving recording or e-mail never moves the selection; one corner notice offers to open the newest](2026-10-22-arrivals-never-move-selection.md) | feature | accepted | PR #235, PR #236 |
 | 2026-10-22 | [Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) | feature | proposed |  |
 | 2026-10-22 | [The dashboard's library column browses by location, with a folder rail from 1280 px, walk-in folders below it, and one Organization colour](2026-10-22-library-column/README.md) | feature | accepted | PR #226, PR #228, PR #237 |

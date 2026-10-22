@@ -37,6 +37,12 @@ vi.mock("next/navigation", () => ({
     usePathname: () => mocks.pathname,
     useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }),
 }));
+vi.mock("@/lib/auth-server", () => ({
+    requireAuth: async () => ({ user: { id: "viewer" } }),
+}));
+vi.mock("@/lib/authz/curator", () => ({
+    userCuratesOrganizationNow: async () => false,
+}));
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
     useExtracted: () => (source: string | { message: string }) =>
@@ -222,6 +228,8 @@ function DashboardPalette() {
     );
 }
 
+let almanacContent: ReactNode;
+
 function renderPage(
     pathname: string,
     overrides: Partial<AppChromeConfig> = {},
@@ -234,8 +242,7 @@ function renderPage(
             <DashboardPalette />
         </>
     );
-    if (pathname.startsWith("/almanac"))
-        content = <AlmanacLayout>People filter stays here</AlmanacLayout>;
+    if (pathname.startsWith("/almanac")) content = almanacContent;
     if (pathname.startsWith("/tasks"))
         content = <TasksLayout>Task filters stay here</TasksLayout>;
     return render(
@@ -257,7 +264,7 @@ function openPalette(metaKey = true) {
     fireEvent.keyDown(window, { key: "k", metaKey, ctrlKey: !metaKey });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
     vi.clearAllMocks();
     mocks.pendingReviews = 0;
     mocks.pendingTasks = 0;
@@ -278,6 +285,9 @@ beforeEach(() => {
             return new Response(JSON.stringify(empty));
         }),
     );
+    almanacContent = await AlmanacLayout({
+        children: "People filter stays here",
+    });
 });
 afterEach(() => {
     cleanup();

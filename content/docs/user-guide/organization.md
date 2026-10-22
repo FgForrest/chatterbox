@@ -71,6 +71,7 @@ With identity-provider authorization, people granted `org.curate` are curators a
 - edit shared recordings and mail,
 - review shared Learn results and tasks,
 - manage Organization profiles, people, things, and suggested relations,
+- review **Almanac → Care → Possible duplicates**, compare and join Organization records, or mark a pair **Not the same** so it stays dismissed for all curators (see [Care](almanac.md#care-possible-duplicates)),
 - set up folder exports of Organization folders,
 - back up the Organization, with each item's owner recorded.
 

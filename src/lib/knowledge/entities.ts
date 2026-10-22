@@ -33,6 +33,11 @@ import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { relationFits } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
+    finishMergeChoices,
+    type MergeChoices,
+    prepareMergeChoices,
+} from "@/lib/knowledge/merge-choices";
+import {
     lockOrgPeople,
     lockRecordingsNaming,
     orgOwnedCondition,
@@ -223,7 +228,7 @@ function alreadyNamed(existingId: string): AppError {
         ErrorCode.CONFLICT,
         "An entity of that type already has that name",
         409,
-        { field: "name", existingId },
+        { field: "name", existingId, reason: "name_conflict" },
     );
 }
 
@@ -776,7 +781,9 @@ async function mergeEntitiesInTx(
  * Fold `loserId` into `keepId`: two records of one project, say. The loser
  * must be the actor's; the survivor theirs or the Organization's, so a
  * private duplicate can be folded into the shared record, never the
- * reverse. Both must be of one type. A private loser's description goes
+ * reverse. Without comparison choices both must be of one type. Curators
+ * may compare Organization things of different types and keep the survivor's
+ * type when their current facts still fit. A private loser's description goes
  * with it into the survivor: as the description when both are the actor's,
  * as the actor's private notes on an Organization survivor.
  */
@@ -784,6 +791,7 @@ export async function mergeEntities(
     actorUserId: string,
     keepId: string,
     loserId: string,
+    choices?: MergeChoices,
 ): Promise<void> {
     if (keepId === loserId) return;
     await db.transaction(async (tx) => {
@@ -799,21 +807,90 @@ export async function mergeEntities(
         if (loser.ownerRole === "org" && keep.ownerRole !== "org") {
             throw curatorOnly();
         }
+        const prepared = choices
+            ? await prepareMergeChoices(
+                  tx,
+                  actorUserId,
+                  loser.userId,
+                  "entity",
+                  [keepId, loserId],
+                  choices,
+              )
+            : null;
+        if (prepared && keep.userId !== loser.userId) throw curatorOnly();
         const winnerId = keep.mergedIntoId ?? keepId;
         if (winnerId === loserId || loser.mergedIntoId) return;
-        if (keep.typeKey !== loser.typeKey) {
+        if (keep.typeKey !== loser.typeKey && !prepared) {
             throw new AppError(
                 ErrorCode.CONFLICT,
                 "Only entities of one type can be merged",
                 409,
-                { field: "typeKey" },
+                { field: "typeKey", reason: "type_mismatch" },
             );
+        }
+        if (prepared && keep.typeKey !== loser.typeKey) {
+            const misfit = await factNotFittingInTx(
+                tx,
+                loserId,
+                keep.typeKey,
+                keep.userId,
+            );
+            if (misfit)
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "A fact would not fit the surviving type. Change or erase it first.",
+                    409,
+                    { ...misfit, reason: "incompatible_facts" },
+                );
         }
         const scopes = await scopesNamingInTx(tx, {
             entityIds: [winnerId, loserId],
         });
         await mergeEntitiesInTx(tx, winnerId, loserId);
         await mergeDescriptionInTx(tx, keep, loser, winnerId);
+        if (prepared) {
+            if (keep.typeKey !== loser.typeKey) {
+                await tx
+                    .update(knowledgeEntities)
+                    .set({ typeKey: keep.typeKey, updatedAt: new Date() })
+                    .where(
+                        and(
+                            eq(knowledgeEntities.userId, keep.userId),
+                            eq(knowledgeEntities.mergedIntoId, winnerId),
+                        ),
+                    );
+            }
+            const hmac = nameHmacOf(prepared.name);
+            const existing = await sameNamed(
+                tx,
+                keep.userId,
+                keep.typeKey,
+                hmac,
+            );
+            if (existing && existing !== winnerId) throw alreadyNamed(existing);
+            await tx
+                .update(knowledgeEntities)
+                .set({
+                    name: encryptText(prepared.name),
+                    nameHmac: hmac,
+                    updatedAt: new Date(),
+                })
+                .where(
+                    and(
+                        eq(knowledgeEntities.id, winnerId),
+                        eq(knowledgeEntities.userId, keep.userId),
+                    ),
+                );
+            await finishMergeChoices(
+                tx,
+                keep.userId,
+                actorUserId,
+                "entity",
+                winnerId,
+                loserId,
+                prepared,
+            );
+        }
         await bumpScopeInTx(tx, scopes);
     });
 }

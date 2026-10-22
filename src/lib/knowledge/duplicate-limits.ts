@@ -1,0 +1,2 @@
+export const MAX_DUPLICATE_RECORDS = 2000;
+export const MAX_DUPLICATE_PAGE_SIZE = 50;

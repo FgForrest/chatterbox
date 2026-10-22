@@ -1,5 +1,5 @@
 {
-  "id": "178c0629-ddd0-48ec-8ce3-4eba030b3fe3",
+  "id": "ddf2c5a5-6631-425a-b375-61df86265b17",
   "prevId": "8d44c06a-7cfe-49fb-8960-6fa674f63b41",
   "version": "7",
   "dialect": "postgresql",
@@ -1114,6 +1114,232 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.almanac_duplicate_dismissals": {
+      "name": "almanac_duplicate_dismissals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "left_person_id": {
+          "name": "left_person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "right_person_id": {
+          "name": "right_person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "left_entity_id": {
+          "name": "left_entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "right_entity_id": {
+          "name": "right_entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dismissed_by_user_id": {
+          "name": "dismissed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "almanac_duplicate_dismissals_left_person_idx": {
+          "name": "almanac_duplicate_dismissals_left_person_idx",
+          "columns": [
+            {
+              "expression": "left_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_right_person_idx": {
+          "name": "almanac_duplicate_dismissals_right_person_idx",
+          "columns": [
+            {
+              "expression": "right_person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_left_entity_idx": {
+          "name": "almanac_duplicate_dismissals_left_entity_idx",
+          "columns": [
+            {
+              "expression": "left_entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "almanac_duplicate_dismissals_right_entity_idx": {
+          "name": "almanac_duplicate_dismissals_right_entity_idx",
+          "columns": [
+            {
+              "expression": "right_entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "almanac_duplicate_dismissals_user_id_users_id_fk": {
+          "name": "almanac_duplicate_dismissals_user_id_users_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_left_person_id_people_id_fk": {
+          "name": "almanac_duplicate_dismissals_left_person_id_people_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "people",
+          "columnsFrom": [
+            "left_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_right_person_id_people_id_fk": {
+          "name": "almanac_duplicate_dismissals_right_person_id_people_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "people",
+          "columnsFrom": [
+            "right_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_left_entity_id_knowledge_entities_id_fk": {
+          "name": "almanac_duplicate_dismissals_left_entity_id_knowledge_entities_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "knowledge_entities",
+          "columnsFrom": [
+            "left_entity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_right_entity_id_knowledge_entities_id_fk": {
+          "name": "almanac_duplicate_dismissals_right_entity_id_knowledge_entities_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "knowledge_entities",
+          "columnsFrom": [
+            "right_entity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "almanac_duplicate_dismissals_dismissed_by_user_id_users_id_fk": {
+          "name": "almanac_duplicate_dismissals_dismissed_by_user_id_users_id_fk",
+          "tableFrom": "almanac_duplicate_dismissals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "dismissed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "almanac_duplicate_dismissals_pair_unique": {
+          "name": "almanac_duplicate_dismissals_pair_unique",
+          "nullsNotDistinct": true,
+          "columns": [
+            "user_id",
+            "kind",
+            "left_person_id",
+            "right_person_id",
+            "left_entity_id",
+            "right_entity_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "almanac_duplicate_dismissals_pair_check": {
+          "name": "almanac_duplicate_dismissals_pair_check",
+          "value": "\n            (\"almanac_duplicate_dismissals\".\"kind\" = 'person' and \"almanac_duplicate_dismissals\".\"left_person_id\" is not null and \"almanac_duplicate_dismissals\".\"right_person_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_person_id\" < \"almanac_duplicate_dismissals\".\"right_person_id\" and \"almanac_duplicate_dismissals\".\"left_entity_id\" is null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is null)\n            or (\"almanac_duplicate_dismissals\".\"kind\" = 'entity' and \"almanac_duplicate_dismissals\".\"left_entity_id\" is not null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_entity_id\" < \"almanac_duplicate_dismissals\".\"right_entity_id\" and \"almanac_duplicate_dismissals\".\"left_person_id\" is null and \"almanac_duplicate_dismissals\".\"right_person_id\" is null)\n        "
+        }
+      },
       "isRLSEnabled": false
     },
     "public.api_credentials": {
@@ -6755,7 +6981,7 @@
       "checkConstraints": {
         "learn_review_items_kind_check": {
           "name": "learn_review_items_kind_check",
-          "value": "\"learn_review_items\".\"kind\" in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record', 'language')"
+          "value": "\"learn_review_items\".\"kind\" in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record')"
         }
       },
       "isRLSEnabled": false
@@ -11015,12 +11241,6 @@
           "type": "varchar(50)",
           "primaryKey": false,
           "notNull": true
-        },
-        "confirmed_language": {
-          "name": "confirmed_language",
-          "type": "varchar(2)",
-          "primaryKey": false,
-          "notNull": false
         },
         "timezone": {
           "name": "timezone",
