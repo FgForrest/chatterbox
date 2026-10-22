@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { mergeLikelihoods } from "@/components/almanac/merge-likelihoods";
 import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +25,7 @@ interface Candidate {
     id: string;
     name: string;
     scope: "personal" | "org";
+    duplicateScore?: number;
 }
 
 type Editing = "edit" | "type" | "merge" | "erase" | "notes" | null;
@@ -36,6 +38,7 @@ type Editing = "edit" | "type" | "merge" | "erase" | "notes" | null;
 export function EntityActions({
     entity,
     canManage,
+    canCurateOrganization = false,
     types,
     relationLabels = {},
 }: {
@@ -48,6 +51,7 @@ export function EntityActions({
         scope: "personal" | "org";
     };
     canManage: boolean;
+    canCurateOrganization?: boolean;
     /** The types it may take. */
     types: { key: string; label: string }[];
     /** Relation labels by key, to name a fact that blocks a type change. */
@@ -67,33 +71,57 @@ export function EntityActions({
 
     useEffect(() => {
         if (editing !== "merge") return;
-        let cancelled = false;
+        const controller = new AbortController();
+        let likelihoods: Map<string, number> | null = null;
+        setCandidates([]);
         void fetch(
             `/api/knowledge/entities?typeKey=${encodeURIComponent(entity.typeKey)}`,
+            { signal: controller.signal },
         )
-            .then((response) =>
-                response.ok ? response.json() : { entities: [] },
-            )
-            .then((body: { entities?: Candidate[] }) => {
-                if (cancelled) return;
-                // An Organization thing folds only into another of the
-                // Organization's; a private one into anything its owner sees.
+            .then(async (response) => {
+                const body: { entities?: Candidate[] } = response.ok
+                    ? await response.json()
+                    : {};
+                if (controller.signal.aborted) return;
                 setCandidates(
-                    (body.entities ?? []).filter(
-                        (candidate) =>
-                            candidate.id !== entity.id &&
-                            (entity.scope !== "org" ||
-                                candidate.scope === "org"),
-                    ),
+                    (body.entities ?? [])
+                        .filter(
+                            (candidate) =>
+                                candidate.id !== entity.id &&
+                                (entity.scope !== "org" ||
+                                    candidate.scope === "org"),
+                        )
+                        .map((candidate) => ({
+                            ...candidate,
+                            duplicateScore: likelihoods
+                                ? (likelihoods.get(candidate.id) ?? 0)
+                                : undefined,
+                        })),
                 );
             })
-            .catch(() => {
-                if (!cancelled) setCandidates([]);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [editing, entity.id, entity.scope, entity.typeKey]);
+            .catch(() => {});
+        if (entity.scope === "org" && canCurateOrganization) {
+            void mergeLikelihoods("entity", entity.id, controller.signal).then(
+                (scores) => {
+                    likelihoods = scores;
+                    if (!controller.signal.aborted && scores)
+                        setCandidates((current) =>
+                            current.map((candidate) => ({
+                                ...candidate,
+                                duplicateScore: scores.get(candidate.id) ?? 0,
+                            })),
+                        );
+                },
+            );
+        }
+        return () => controller.abort();
+    }, [
+        editing,
+        entity.id,
+        entity.scope,
+        entity.typeKey,
+        canCurateOrganization,
+    ]);
 
     const open = (next: Editing) => {
         setCandidates([]);
@@ -387,6 +415,12 @@ export function EntityActions({
                                 </DialogDescription>
                             </DialogHeader>
                             <MergeTargetPicker
+                                source={{
+                                    id: entity.id,
+                                    name: entity.name,
+                                    kind: "entity",
+                                    typeKey: entity.typeKey,
+                                }}
                                 value={targetId}
                                 onChange={setTargetId}
                                 candidates={candidates}

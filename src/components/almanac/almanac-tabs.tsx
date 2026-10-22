@@ -6,13 +6,14 @@ import { useExtracted } from "next-intl";
 import { usePendingReviews } from "@/components/learn/review-events";
 import { cn } from "@/lib/utils";
 
-type Tab = "people" | "things" | "vocabulary" | "review";
+type Tab = "people" | "things" | "vocabulary" | "review" | "care";
 
 /** Which tab a path belongs to: a person's page is under People. */
 function tabOf(pathname: string): Tab {
     if (pathname.startsWith("/almanac/things")) return "things";
     if (pathname.startsWith("/almanac/vocabulary")) return "vocabulary";
     if (pathname.startsWith("/almanac/review")) return "review";
+    if (pathname.startsWith("/almanac/care")) return "care";
     return "people";
 }
 
@@ -20,7 +21,13 @@ function tabOf(pathname: string): Tab {
  * The Almanac's sections. Review counts what waits for the viewer (Learn's
  * reviews and proposed tasks), as the Almanac's badge in the app nav does.
  */
-export function AlmanacTabs() {
+export function AlmanacTabs({
+    canCurate = false,
+    careCount,
+}: {
+    canCurate?: boolean;
+    careCount?: number;
+}) {
     const i18n = useExtracted();
     const pathname = usePathname();
     const pending = usePendingReviews();
@@ -34,6 +41,15 @@ export function AlmanacTabs() {
             label: i18n("Vocabulary"),
         },
         { key: "review", href: "/almanac/review", label: i18n("Review") },
+        ...(canCurate
+            ? [
+                  {
+                      key: "care" as const,
+                      href: "/almanac/care",
+                      label: i18n("Care"),
+                  },
+              ]
+            : []),
     ];
     return (
         <nav
@@ -53,6 +69,13 @@ export function AlmanacTabs() {
                     )}
                 >
                     {tab.label}
+                    {tab.key === "care" &&
+                        careCount !== undefined &&
+                        careCount > 0 && (
+                            <span className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">
+                                {careCount}
+                            </span>
+                        )}
                     {tab.key === "review" && pending > 0 && (
                         <span className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">
                             {pending}

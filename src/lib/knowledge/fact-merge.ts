@@ -14,7 +14,8 @@
  * `entities.ts` can both use it.
  */
 
-import { and, eq, ne, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, notExists, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { db } from "@/db";
 import { knowledgeFactEvidence, knowledgeFacts } from "@/db/schema";
 import {
@@ -123,13 +124,64 @@ async function combineFactsInTx(
     fact: { id: string; origin: string; replacedByFactId: string | null },
     same: { id: string; replacedByFactId: string | null },
 ): Promise<void> {
+    const kept = alias(knowledgeFactEvidence, "kept");
     await tx
         .update(knowledgeFactEvidence)
         .set({ factId: same.id })
         .where(
             and(
                 eq(knowledgeFactEvidence.factId, fact.id),
-                sql`not exists (select 1 from ${knowledgeFactEvidence} as kept where kept.fact_id = ${same.id} and kept.transcription_id = ${knowledgeFactEvidence.transcriptionId} and kept.start_ms = ${knowledgeFactEvidence.startMs} and kept.end_ms = ${knowledgeFactEvidence.endMs})`,
+                notExists(
+                    tx
+                        .select({ id: kept.id })
+                        .from(kept)
+                        .where(
+                            and(
+                                eq(kept.userId, knowledgeFactEvidence.userId),
+                                eq(kept.factId, same.id),
+                                or(
+                                    and(
+                                        isNotNull(
+                                            knowledgeFactEvidence.transcriptionId,
+                                        ),
+                                        eq(
+                                            kept.transcriptionId,
+                                            knowledgeFactEvidence.transcriptionId,
+                                        ),
+                                        eq(
+                                            kept.startMs,
+                                            knowledgeFactEvidence.startMs,
+                                        ),
+                                        eq(
+                                            kept.endMs,
+                                            knowledgeFactEvidence.endMs,
+                                        ),
+                                    ),
+                                    and(
+                                        isNotNull(
+                                            knowledgeFactEvidence.segmentIndex,
+                                        ),
+                                        eq(
+                                            kept.itemId,
+                                            knowledgeFactEvidence.itemId,
+                                        ),
+                                        eq(
+                                            kept.segmentIndex,
+                                            knowledgeFactEvidence.segmentIndex,
+                                        ),
+                                        eq(
+                                            kept.charStart,
+                                            knowledgeFactEvidence.charStart,
+                                        ),
+                                        eq(
+                                            kept.charEnd,
+                                            knowledgeFactEvidence.charEnd,
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                ),
             ),
         );
     // `same` stands where the later of the two stood: where `fact` did

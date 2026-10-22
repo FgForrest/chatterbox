@@ -3,7 +3,9 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     knowledgeAliases,
+    mailParticipants,
     people,
+    personEmails,
     personNotes,
     recordingTasks,
     taskUpdateProposals,
@@ -18,6 +20,11 @@ import { assertAlmanacOwner } from "@/lib/knowledge/almanac-access";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import {
+    finishMergeChoices,
+    type MergeChoices,
+    prepareMergeChoices,
+} from "@/lib/knowledge/merge-choices";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
 import {
     lockOrgPeople,
@@ -516,6 +523,14 @@ async function mergeInTx(
         .delete(knowledgeAliases)
         .where(eq(knowledgeAliases.personId, loserId));
     await moveFactsInTx(tx, { personId: loserId }, { personId: winnerId });
+    await tx
+        .update(personEmails)
+        .set({ personId: winnerId })
+        .where(eq(personEmails.personId, loserId));
+    await tx
+        .update(mailParticipants)
+        .set({ personId: winnerId })
+        .where(eq(mailParticipants.personId, loserId));
 
     // Chains collapse to the final winner rather than forming a linked
     // list nobody walks: anything already pointing at the loser is
@@ -613,11 +628,15 @@ async function settleContradictions(tx: Tx, personId: string): Promise<void> {
  * a curator, an Organization person. The target may be the
  * actor's own or an Organization person, so anyone can fold a private
  * duplicate into the shared record, but never the reverse.
+ * Comparison choices require two live Organization records and current
+ * curator access; the name and conflicting facts are chosen atomically,
+ * with both primary emails and the other name retained.
  */
 export async function mergePeople(
     actorId: string,
     keepId: string,
     loserId: string,
+    choices?: MergeChoices,
 ): Promise<void> {
     if (keepId === loserId) return;
 
@@ -633,6 +652,17 @@ export async function mergePeople(
         if (loser.ownerRole === "org" && keep.ownerRole !== "org") {
             throw curatorOnly();
         }
+        const prepared = choices
+            ? await prepareMergeChoices(
+                  tx,
+                  actorId,
+                  loser.userId,
+                  "person",
+                  [keepId, loserId],
+                  choices,
+              )
+            : null;
+        if (prepared && keep.userId !== loser.userId) throw curatorOnly();
 
         // Every tombstone is repointed at the surviving person when its own
         // target is merged away (the collapse in `mergeInTx`), so a redirect
@@ -643,6 +673,84 @@ export async function mergePeople(
             personIds: [winnerId, loserId],
         });
         await mergeInTx(tx, winnerId, loserId);
+        if (prepared) {
+            const primaryEmail =
+                [keep.primaryEmail, loser.primaryEmail].find(
+                    (value) =>
+                        value && !isInternalMailAddress(decryptText(value)),
+                ) ?? null;
+            const primaryHash = primaryEmail
+                ? lookupHash(decryptText(primaryEmail))
+                : null;
+            for (const row of [keep, loser]) {
+                if (!row.primaryEmail) continue;
+                const email = decryptText(row.primaryEmail);
+                const hash = lookupHash(email);
+                if (isInternalMailAddress(email) || hash === primaryHash)
+                    continue;
+                const [held] = await tx
+                    .select({ personId: personEmails.personId })
+                    .from(personEmails)
+                    .where(
+                        and(
+                            eq(personEmails.userId, keep.userId),
+                            eq(personEmails.emailHash, hash),
+                        ),
+                    )
+                    .limit(1);
+                if (held && held.personId !== winnerId)
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        "An email belongs to another person",
+                        409,
+                        { reason: "email_conflict" },
+                    );
+                await tx
+                    .insert(personEmails)
+                    .values({
+                        userId: keep.userId,
+                        personId: winnerId,
+                        email: row.primaryEmail,
+                        emailHash: hash,
+                    })
+                    .onConflictDoNothing();
+            }
+            if (primaryHash)
+                await tx
+                    .delete(personEmails)
+                    .where(
+                        and(
+                            eq(personEmails.userId, keep.userId),
+                            eq(personEmails.personId, winnerId),
+                            eq(personEmails.emailHash, primaryHash),
+                        ),
+                    );
+            await tx
+                .update(people)
+                .set({
+                    displayName: encryptText(prepared.name),
+                    primaryEmail,
+                    primaryEmailHash: primaryEmail
+                        ? lookupHash(decryptText(primaryEmail))
+                        : null,
+                    updatedAt: new Date(),
+                })
+                .where(
+                    and(
+                        eq(people.id, winnerId),
+                        eq(people.userId, keep.userId),
+                    ),
+                );
+            await finishMergeChoices(
+                tx,
+                keep.userId,
+                actorId,
+                "person",
+                winnerId,
+                loserId,
+                prepared,
+            );
+        }
         if (loser.ownerRole !== "org" && keep.ownerRole === "org") {
             await moveNotesToOverlay(tx, loser, winnerId);
         }

@@ -150,6 +150,9 @@ export function PersonDetail({
                     <div className="flex flex-wrap justify-end gap-2">
                         <PersonActions
                             person={person}
+                            canCurateOrganization={
+                                editing?.canCurateOrganization
+                            }
                             accountEmail={isMe ? undefined : accountEmail}
                         />
                     </div>
