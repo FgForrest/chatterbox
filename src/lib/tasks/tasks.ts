@@ -11,7 +11,6 @@ import {
     lt,
     lte,
     ne,
-    not,
     notExists,
     or,
     type SQL,
@@ -19,6 +18,8 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
+import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
+import { taskNoteHasMailSource } from "@/db/queries/task-visibility";
 import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
 import {
     chatterItems,
@@ -28,9 +29,12 @@ import {
     recordingTaskRejections,
     recordingTasks,
     type TaskUpdateProposalKind,
+    taskFollowers,
     taskMentions,
+    taskUnfollows,
     taskUpdateProposals,
     userSettings,
+    users,
 } from "@/db/schema";
 import { type Keyset, keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
@@ -40,8 +44,12 @@ import {
     exportRecordingSidecarsIfEnabled,
     refreshExistingRecordingSidecars,
 } from "@/lib/export/document-sidecars";
-import { folderCondition } from "@/lib/folders/condition";
+import { folderRecordingCondition } from "@/lib/folders/condition";
+import { listRecordingFolderTrees } from "@/lib/folders/folders";
+import { descendantFolderIds } from "@/lib/folders/hierarchy";
+import { privateTreeFolders } from "@/lib/folders/private-tree";
 import { nudge } from "@/lib/jobs/nudge";
+import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -50,15 +58,24 @@ import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
     assignedToViewer,
+    lockFollowableTask,
     mayMergeTaskOwners,
+    personalTask,
     type TaskViewer,
     taskClosable,
     taskEditable,
+    taskFollowed,
     taskListed,
+    taskMergeable,
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
 import { fieldProposalIsLater } from "@/lib/tasks/chronology";
+import {
+    loadTaskFolders,
+    requireTaskFolder,
+    type TaskFolder,
+} from "@/lib/tasks/folders";
 import {
     type LoadedTaskMentions,
     loadVisibleTaskMentions,
@@ -79,14 +96,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type TaskStatus = "proposed" | "open" | "done" | "dropped";
 
-const MAX_TEXT = 500;
+const MAX_TEXT = 2000;
 const LIST_LIMIT = 200;
 
 /** A task or proposal as the client gets it. */
 export interface TaskView {
     id: string;
-    recordingId: string;
-    evidenceItemId: string;
+    recordingId: string | null;
+    evidenceItemId: string | null;
     evidenceItemKind: "audio" | "mail";
     evidenceAudioAvailable: boolean;
     status: TaskStatus;
@@ -110,7 +127,16 @@ export interface TaskView {
      * not found in a mail with quoted parts.
      */
     evidenceProvenance: EvidenceProvenance | null;
-    source: "riffado" | "plaud" | "manual";
+    source: "riffado" | "plaud" | "manual" | "personal";
+    own: boolean;
+    folder?: TaskFolder | null;
+    note: string | null;
+    noteUpdatedAt: string | null;
+    noteBy: { id: string; name: string | null } | null;
+    following: boolean;
+    automaticFollow: boolean;
+    canFollow: boolean;
+    canMerge: boolean;
     ticked: boolean;
     version: number;
     createdAt: string;
@@ -239,8 +265,9 @@ function decryptOptional(value: string | null | undefined): string | null {
  */
 async function tasksChanged(
     ownerUserId: string,
-    recordingId: string,
+    recordingId: string | null,
 ): Promise<void> {
+    if (!recordingId) return;
     await notifyIfShared(recordingId);
     await refreshExistingRecordingSidecars(ownerUserId, recordingId);
     await exportRecordingSidecarsIfEnabled(ownerUserId, recordingId, "summary");
@@ -251,6 +278,7 @@ function iso(value: Date | null): string | null {
 }
 
 const taskAudio = alias(recordings, "task_audio");
+const taskNoteAuthor = alias(users, "task_note_author");
 
 const taskColumns = {
     homeAudioId: taskAudio.id,
@@ -258,8 +286,13 @@ const taskColumns = {
     homeAudioDeletedAt: taskAudio.deletedAt,
     id: recordingTasks.id,
     recordingId: recordingTasks.itemId,
+    folderId: recordingTasks.folderId,
     status: recordingTasks.status,
     text: recordingTasks.text,
+    note: recordingTasks.note,
+    noteUpdatedAt: recordingTasks.noteUpdatedAt,
+    noteUpdatedByUserId: recordingTasks.noteUpdatedByUserId,
+    noteAuthorName: taskNoteAuthor.name,
     assigneePersonId: recordingTasks.assigneePersonId,
     assigneeName: people.displayName,
     assigneeEmailHash: people.primaryEmailHash,
@@ -289,19 +322,26 @@ type TaskSelect = {
 };
 
 function toView(
-    row: TaskSelect & { canEdit: boolean; canClose: boolean },
+    row: TaskSelect & {
+        canEdit: boolean;
+        canClose: boolean;
+        following: boolean;
+        automaticFollow: boolean;
+        canMerge: boolean;
+        canFollow: boolean;
+    },
     mentions?: LoadedTaskMentions,
     undoableTaskIds: ReadonlySet<string> = new Set(),
+    folders: ReadonlyMap<string, TaskFolder> = new Map(),
 ): TaskView {
     const taskId = row.id as string;
     const mention = mentions?.latest.get(taskId);
     const legacy = !mentions?.taskIdsWithMentions.has(taskId);
     return {
         id: taskId,
-        recordingId: row.recordingId as string,
-        evidenceItemId: mention?.itemId ?? (row.recordingId as string),
-        evidenceItemKind:
-            mention?.kind ?? (row.homeItemKind as "audio" | "mail"),
+        recordingId: row.recordingId,
+        evidenceItemId: mention?.itemId ?? row.recordingId,
+        evidenceItemKind: mention?.kind ?? row.homeItemKind ?? "audio",
         evidenceAudioAvailable:
             mention?.audioAvailable ??
             hasAudio({
@@ -347,6 +387,20 @@ function toView(
             mention?.provenance ??
             (legacy ? (row.evidenceProvenance ?? null) : null),
         source: row.source as TaskView["source"],
+        own: row.source === "personal",
+        folder:
+            row.source === "personal" && row.folderId
+                ? (folders.get(row.folderId) ?? null)
+                : null,
+        note: decryptOptional(row.note),
+        noteUpdatedAt: iso(row.noteUpdatedAt),
+        noteBy: row.noteUpdatedByUserId
+            ? { id: row.noteUpdatedByUserId, name: row.noteAuthorName }
+            : null,
+        following: row.following,
+        automaticFollow: row.automaticFollow,
+        canFollow: row.canFollow,
+        canMerge: row.canMerge && row.status === "open",
         ticked: row.ticked === true,
         version: row.version ?? 0,
         createdAt: (row.createdAt as Date).toISOString(),
@@ -361,6 +415,21 @@ function toView(
 /** The assignee's name, from a person of the owner's or the Organization's. */
 function assigneeJoin() {
     return eq(people.id, recordingTasks.assigneePersonId);
+}
+
+function noteAuthorJoin() {
+    return eq(taskNoteAuthor.id, recordingTasks.noteUpdatedByUserId);
+}
+
+function taskViewerColumns(viewer: TaskViewer) {
+    return {
+        canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM, true)}`,
+        canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM, true)}`,
+        following: sql<boolean>`coalesce(${taskFollowed(viewer)}, false)`,
+        automaticFollow: sql<boolean>`coalesce(${chatterItems.userId} = ${viewer.userId} and not (${assignedToViewer(viewer)}), false)`,
+        canMerge: sql<boolean>`${taskMergeable(viewer)}`,
+        canFollow: sql<boolean>`${!viewer.isOrg}`,
+    };
 }
 
 /**
@@ -440,11 +509,7 @@ export async function listRecordingTasks(
     const linkedTaskIds = linkedMentions.map((mention) => mention.taskId);
 
     const rows = await db
-        .select({
-            ...taskColumns,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
-            canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
-        })
+        .select({ ...taskColumns, ...taskViewerColumns(viewer) })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .leftJoin(
@@ -455,6 +520,7 @@ export async function listRecordingTasks(
             ),
         )
         .leftJoin(people, assigneeJoin())
+        .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(
             and(
                 or(
@@ -801,7 +867,7 @@ async function listUpdateProposals(
             ticked: taskUpdateProposals.ticked,
             version: taskUpdateProposals.version,
             taskId: recordingTasks.id,
-            taskRecordingId: recordingTasks.itemId,
+            taskRecordingId: chatterItems.id,
             taskText: recordingTasks.text,
             taskDueDate: recordingTasks.dueDate,
             taskDuePhrase: recordingTasks.duePhrase,
@@ -905,7 +971,7 @@ async function listUpdateProposals(
 
 interface LockedTask {
     id: string;
-    recordingId: string;
+    recordingId: string | null;
     ownerUserId: string;
     status: TaskStatus;
     text: string;
@@ -924,6 +990,24 @@ async function lockTask(
     viewer: TaskViewer,
     taskId: string,
 ): Promise<LockedTask> {
+    const [own] = await tx
+        .select()
+        .from(recordingTasks)
+        .where(and(eq(recordingTasks.id, taskId), personalTask(viewer)))
+        .for("update")
+        .limit(1);
+    if (own)
+        return {
+            id: own.id,
+            recordingId: null,
+            ownerUserId: own.userId,
+            status: own.status,
+            text: decryptText(own.text),
+            version: own.version,
+            canEdit: true,
+            canClose: true,
+            shared: false,
+        };
     if ((await taskItemKind(tx, taskId)) === "mail") {
         return lockMailTask(tx, viewer, taskId);
     }
@@ -1099,7 +1183,14 @@ async function assignablePerson(
 }
 
 function cleanText(text: string): string {
-    const trimmed = text.replace(/\s+/g, " ").trim().slice(0, MAX_TEXT);
+    const trimmed = text.trim();
+    if (trimmed.length > MAX_TEXT)
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Task text must be at most 2000 characters",
+            400,
+            { field: "text" },
+        );
     if (!trimmed) {
         throw new AppError(
             ErrorCode.MISSING_REQUIRED_FIELD,
@@ -1201,6 +1292,8 @@ export async function addTask(
 export interface TaskChange {
     version: number;
     text?: string;
+    note?: string | null;
+    folderId?: string | null;
     assigneePersonId?: string | null;
     dueDate?: string | null;
     /** A proposal's draft tick. */
@@ -1219,120 +1312,164 @@ export async function updateTask(
     taskId: string,
     change: TaskChange,
 ): Promise<TaskView> {
-    const task = await db.transaction(async (tx) => {
-        const task = await lockTask(tx, viewer, taskId);
-        if (task.version !== change.version) throw versionConflict();
+    const task = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            if (change.folderId !== undefined)
+                await lockPrivateFolderTree(tx, viewer.userId);
+            const task = await lockTask(tx, viewer, taskId);
+            if (task.version !== change.version) throw versionConflict();
 
-        const editing =
-            change.text !== undefined ||
-            change.assigneePersonId !== undefined ||
-            change.dueDate !== undefined ||
-            change.ticked !== undefined ||
-            change.status === "dropped" ||
-            (change.status !== undefined && task.status === "dropped");
-        if (editing && !task.canEdit) throw forbidden();
-        if (change.status !== undefined) {
-            if (task.status === "proposed") {
+            if (change.folderId !== undefined && task.recordingId)
+                throw forbidden();
+
+            if (change.note !== undefined && !task.canClose) throw forbidden();
+            if (change.note && change.note.length > MAX_TEXT)
                 throw new AppError(
                     ErrorCode.INVALID_INPUT,
-                    "Accept the review first",
+                    "Note must be at most 2000 characters",
                     400,
-                    { field: "status" },
+                    { field: "note" },
+                );
+            if (!task.recordingId && change.assigneePersonId !== undefined)
+                throw forbidden();
+            const editing =
+                change.text !== undefined ||
+                change.folderId !== undefined ||
+                change.assigneePersonId !== undefined ||
+                change.dueDate !== undefined ||
+                change.ticked !== undefined ||
+                change.status === "dropped" ||
+                (change.status !== undefined && task.status === "dropped");
+            if (editing && !task.canEdit) throw forbidden();
+            if (change.status !== undefined) {
+                if (task.status === "proposed") {
+                    throw new AppError(
+                        ErrorCode.INVALID_INPUT,
+                        "Accept the review first",
+                        400,
+                        { field: "status" },
+                    );
+                }
+                if (!task.canEdit && !task.canClose) throw forbidden();
+            }
+            if (change.ticked !== undefined && task.status !== "proposed") {
+                throw new AppError(
+                    ErrorCode.INVALID_INPUT,
+                    "Only a proposal is ticked",
+                    400,
+                    { field: "ticked" },
                 );
             }
-            if (!task.canEdit && !task.canClose) throw forbidden();
-        }
-        if (change.ticked !== undefined && task.status !== "proposed") {
-            throw new AppError(
-                ErrorCode.INVALID_INPUT,
-                "Only a proposal is ticked",
-                400,
-                { field: "ticked" },
-            );
-        }
 
-        const now = new Date();
-        const set: Partial<typeof recordingTasks.$inferInsert> = {
-            version: task.version + 1,
-            updatedAt: now,
-            updatedByUserId: viewer.userId,
-        };
-        if (change.text !== undefined) {
-            const text = cleanText(change.text);
-            set.text = encryptText(text);
-            // The summary would say it in its old words again.
-            if (text !== task.text) {
-                await rejectInTx(tx, task, [task.text]);
+            const now = new Date();
+            const set: Partial<typeof recordingTasks.$inferInsert> = {
+                version: task.version + 1,
+                updatedAt: now,
+                updatedByUserId: viewer.userId,
+            };
+            if (change.folderId !== undefined) {
+                set.folderId =
+                    change.folderId === null
+                        ? null
+                        : await requireTaskFolder(
+                              viewer.userId,
+                              change.folderId,
+                              tx,
+                          );
             }
-        }
-        if (change.assigneePersonId !== undefined) {
-            set.assigneePersonId = change.assigneePersonId
-                ? await assignablePerson(
-                      tx,
-                      change.assigneePersonId,
-                      task,
-                      viewer.orgUserId,
-                  )
-                : null;
-            set.assigneeHint = null;
-            set.assigneeCheck = false;
-            set.assigneeEffectiveAt = now;
-            // A task, not a proposal: news for whoever it names now.
-            if (task.status !== "proposed" && set.assigneePersonId) {
-                set.assignedAt = now;
+            if (change.note !== undefined) {
+                set.note = change.note?.trim()
+                    ? encryptText(change.note.trim())
+                    : null;
+                set.noteUpdatedAt = now;
+                set.noteUpdatedByUserId = viewer.userId;
             }
-        }
-        if (change.dueDate !== undefined) {
-            set.dueDate = cleanDue(change.dueDate);
-            set.dueEffectiveAt = now;
-        }
-        if (change.ticked !== undefined) set.ticked = change.ticked;
-        if (change.status !== undefined && change.status !== task.status) {
-            set.status = change.status;
-            set.statusChangedAt = now;
-            set.statusChangedByUserId = viewer.userId;
-            set.statusEffectiveAt = now;
-        }
-        await tx
-            .update(recordingTasks)
-            .set(set)
-            .where(eq(recordingTasks.id, taskId));
-        if (change.status !== undefined && change.status !== task.status) {
-            await settleEarlierTaskProposalsInTx(tx, {
-                taskId,
-                ownerUserId: task.ownerUserId,
-                kinds: ["done", "drop"],
-                effectiveAt: now,
-            });
-        }
-        if (change.dueDate !== undefined) {
-            await settleEarlierTaskProposalsInTx(tx, {
-                taskId,
-                ownerUserId: task.ownerUserId,
-                kinds: ["due", "due_phrase"],
-                effectiveAt: now,
-            });
-        }
-        if (change.assigneePersonId !== undefined) {
-            await settleEarlierTaskProposalsInTx(tx, {
-                taskId,
-                ownerUserId: task.ownerUserId,
-                kinds: ["assignee"],
-                effectiveAt: now,
-            });
-        }
-        return task;
-    });
+            if (change.text !== undefined) {
+                const text = cleanText(change.text);
+                set.text = encryptText(text);
+                // The summary would say it in its old words again.
+                if (text !== task.text) {
+                    await rejectInTx(tx, task, [task.text]);
+                }
+            }
+            if (change.assigneePersonId !== undefined) {
+                set.assigneePersonId = change.assigneePersonId
+                    ? await assignablePerson(
+                          tx,
+                          change.assigneePersonId,
+                          task,
+                          viewer.orgUserId,
+                      )
+                    : null;
+                set.assigneeHint = null;
+                set.assigneeCheck = false;
+                set.assigneeEffectiveAt = now;
+                // A task, not a proposal: news for whoever it names now.
+                if (task.status !== "proposed" && set.assigneePersonId) {
+                    set.assignedAt = now;
+                }
+            }
+            if (change.dueDate !== undefined) {
+                set.dueDate = cleanDue(change.dueDate);
+                set.dueEffectiveAt = now;
+            }
+            if (change.ticked !== undefined) set.ticked = change.ticked;
+            if (change.status !== undefined && change.status !== task.status) {
+                set.status = change.status;
+                set.statusChangedAt = now;
+                set.statusChangedByUserId = viewer.userId;
+                set.statusEffectiveAt = now;
+            }
+            await tx
+                .update(recordingTasks)
+                .set(set)
+                .where(
+                    and(
+                        eq(recordingTasks.id, taskId),
+                        eq(recordingTasks.userId, task.ownerUserId),
+                        eq(recordingTasks.version, change.version),
+                    ),
+                );
+            if (change.status !== undefined && change.status !== task.status) {
+                await settleEarlierTaskProposalsInTx(tx, {
+                    taskId,
+                    ownerUserId: task.ownerUserId,
+                    kinds: ["done", "drop"],
+                    effectiveAt: now,
+                });
+            }
+            if (change.dueDate !== undefined) {
+                await settleEarlierTaskProposalsInTx(tx, {
+                    taskId,
+                    ownerUserId: task.ownerUserId,
+                    kinds: ["due", "due_phrase"],
+                    effectiveAt: now,
+                });
+            }
+            if (change.assigneePersonId !== undefined) {
+                await settleEarlierTaskProposalsInTx(tx, {
+                    taskId,
+                    ownerUserId: task.ownerUserId,
+                    kinds: ["assignee"],
+                    effectiveAt: now,
+                });
+            }
+            return task;
+        }),
+    );
     await tasksChanged(task.ownerUserId, task.recordingId);
     return requireTaskView(viewer, taskId);
 }
 
 async function rejectInTx(
     tx: Tx,
-    { recordingId, ownerUserId }: { recordingId: string; ownerUserId: string },
+    {
+        recordingId,
+        ownerUserId,
+    }: { recordingId: string | null; ownerUserId: string },
     texts: readonly string[],
 ): Promise<void> {
-    if (texts.length === 0) return;
+    if (texts.length === 0 || !recordingId) return;
     await tx
         .insert(recordingTaskRejections)
         .values(
@@ -1347,7 +1484,7 @@ async function rejectInTx(
 
 interface MergeTaskRow {
     id: string;
-    itemId: string;
+    itemId: string | null;
     ownerUserId: string;
     status: TaskStatus;
     version: number;
@@ -1356,6 +1493,11 @@ interface MergeTaskRow {
     statusEffectiveAt: Date | null;
     dueEffectiveAt: Date | null;
     occurredAt: Date;
+    text: string;
+    note: string | null;
+    noteUpdatedAt: Date | null;
+    noteUpdatedByUserId: string | null;
+    assigned: boolean;
     visible: boolean;
     shared: boolean;
 }
@@ -1398,11 +1540,11 @@ async function lockMergeTasks(
     const taskRefs = await tx
         .select({
             taskId: recordingTasks.id,
-            itemId: chatterItems.id,
+            itemId: recordingTasks.itemId,
             kind: chatterItems.kind,
         })
         .from(recordingTasks)
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(inArray(recordingTasks.id, ids));
     if (taskRefs.length !== 2) throw notFound();
     const [mentionRefs, proposalRefs] = await Promise.all([
@@ -1417,9 +1559,9 @@ async function lockMergeTasks(
     ]);
     const graphItemIds = [
         ...new Set(
-            [...taskRefs, ...mentionRefs, ...proposalRefs].map(
-                (row) => row.itemId,
-            ),
+            [...taskRefs, ...mentionRefs, ...proposalRefs]
+                .map((row) => row.itemId)
+                .filter((id): id is string => id !== null),
         ),
     ];
     const refs = await tx
@@ -1451,27 +1593,7 @@ async function lockMergeTasks(
         }
     };
     await lockItems(itemRefs);
-    const readTasks = () =>
-        tx
-            .select({
-                id: recordingTasks.id,
-                itemId: recordingTasks.itemId,
-                ownerUserId: recordingTasks.userId,
-                status: recordingTasks.status,
-                version: recordingTasks.version,
-                dueDate: recordingTasks.dueDate,
-                duePhrase: recordingTasks.duePhrase,
-                statusEffectiveAt: recordingTasks.statusEffectiveAt,
-                dueEffectiveAt: recordingTasks.dueEffectiveAt,
-                occurredAt: chatterItems.occurredAt,
-                visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
-                shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
-            })
-            .from(recordingTasks)
-            .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-            .where(inArray(recordingTasks.id, ids))
-            .orderBy(asc(recordingTasks.id))
-            .for("update", { of: recordingTasks });
+    const readTasks = () => readMergeTaskRows(tx, viewer, ids, true);
     let rows = await readTasks();
     if (rows.length !== 2) throw notFound();
     const lockedItemIds = new Set(itemRefs.map((ref) => ref.itemId));
@@ -1479,7 +1601,10 @@ async function lockMergeTasks(
         ...new Set(
             rows
                 .map((row) => row.itemId)
-                .filter((itemId) => !lockedItemIds.has(itemId)),
+                .filter(
+                    (itemId): itemId is string =>
+                        itemId !== null && !lockedItemIds.has(itemId),
+                ),
         ),
     ];
     if (driftedItemIds.length > 0) {
@@ -1493,7 +1618,12 @@ async function lockMergeTasks(
         rows = await readTasks();
         if (rows.length !== 2) throw notFound();
         const relockedItemIds = new Set(itemRefs.map((ref) => ref.itemId));
-        if (rows.some((row) => !relockedItemIds.has(row.itemId))) {
+        if (
+            rows.some(
+                (row) =>
+                    row.itemId !== null && !relockedItemIds.has(row.itemId),
+            )
+        ) {
             throw new AppError(
                 ErrorCode.CONFLICT,
                 "A task home changed meanwhile; retry the merge",
@@ -1501,9 +1631,61 @@ async function lockMergeTasks(
             );
         }
     }
+    return mergeTaskPair(rows, sourceTaskId, targetTaskId);
+}
+
+async function readMergeTaskRows(
+    executor: Pick<typeof db, "select">,
+    viewer: TaskViewer,
+    ids: string[],
+    lock = false,
+) {
+    const query = executor
+        .select({
+            id: recordingTasks.id,
+            itemId: recordingTasks.itemId,
+            ownerUserId: recordingTasks.userId,
+            status: recordingTasks.status,
+            text: recordingTasks.text,
+            note: recordingTasks.note,
+            noteUpdatedAt: recordingTasks.noteUpdatedAt,
+            noteUpdatedByUserId: recordingTasks.noteUpdatedByUserId,
+            assigned: sql<boolean>`${assignedToViewer(viewer)}`,
+            version: recordingTasks.version,
+            dueDate: recordingTasks.dueDate,
+            duePhrase: recordingTasks.duePhrase,
+            statusEffectiveAt: recordingTasks.statusEffectiveAt,
+            dueEffectiveAt: recordingTasks.dueEffectiveAt,
+            occurredAt:
+                sql<Date>`coalesce(${chatterItems.occurredAt}, ${recordingTasks.createdAt})`.mapWith(
+                    chatterItems.occurredAt,
+                ),
+            visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM, true)}`,
+            shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
+        })
+        .from(recordingTasks)
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                inArray(recordingTasks.id, ids),
+                isNull(chatterItems.deletedAt),
+                taskVisible(viewer, ANY_TASK_ITEM, true),
+            ),
+        )
+        .orderBy(asc(recordingTasks.id));
+    return lock ? query.for("update", { of: recordingTasks }) : query;
+}
+
+function mergeTaskPair(
+    rows: Awaited<ReturnType<typeof readMergeTaskRows>>,
+    sourceTaskId: string,
+    targetTaskId: string,
+): { source: MergeTaskRow; target: MergeTaskRow } {
     const normalized = rows.map((row) => ({
         ...row,
         duePhrase: decryptOptional(row.duePhrase),
+        text: decryptText(row.text),
+        note: decryptOptional(row.note),
     }));
     const source = normalized.find((row) => row.id === sourceTaskId);
     const target = normalized.find((row) => row.id === targetTaskId);
@@ -1603,7 +1785,9 @@ function mergeDifferences(
         eligible.find((mention) => mention.itemId === source.itemId) ??
         eligible[0] ??
         null;
-    const sourceRef = { itemId: source.itemId, userId: source.ownerUserId };
+    const sourceRef = source.itemId
+        ? { itemId: source.itemId, userId: source.ownerUserId }
+        : { itemId: target.itemId as string, userId: target.ownerUserId };
     const baseStatementAt =
         source.statusEffectiveAt ??
         source.dueEffectiveAt ??
@@ -1638,6 +1822,7 @@ function mergeDifferences(
         });
     }
     if (
+        source.status === "proposed" &&
         (source.dueDate !== target.dueDate ||
             source.duePhrase !== target.duePhrase) &&
         fieldProposalIsLater(
@@ -1678,12 +1863,143 @@ function mergeDifferences(
     return differences;
 }
 
+interface MergeTaskOptions {
+    reviewItemId?: string;
+    sourceVersion?: number;
+    targetVersion?: number;
+    confirmPrivateToShared?: boolean;
+}
+
+function prepareTaskMerge(
+    viewer: TaskViewer,
+    pair: { source: MergeTaskRow; target: MergeTaskRow },
+    options: MergeTaskOptions = {},
+) {
+    let { source, target } = pair;
+    if (
+        (options.sourceVersion !== undefined &&
+            source.version !== options.sourceVersion) ||
+        (options.targetVersion !== undefined &&
+            target.version !== options.targetVersion)
+    )
+        throw versionConflict();
+    if (source.shared && !target.shared) [source, target] = [target, source];
+    if (!source.visible || !target.visible) {
+        throw mergeRule("both tasks must be visible to the person merging");
+    }
+    if (target.status !== "open") {
+        throw mergeRule("the target must be an open task");
+    }
+    if (source.shared && !target.shared) {
+        throw mergeRule(
+            "an Organization task can be merged only into an Organization task",
+        );
+    }
+    const proposal = source.status === "proposed";
+    if (!proposal && source.status !== "open")
+        throw mergeRule("both tasks must be open");
+    if (proposal) {
+        if (options.reviewItemId !== source.itemId) {
+            throw mergeRule(
+                "a proposal may be merged only from its item's review",
+            );
+        }
+        if (
+            source.ownerUserId !== viewer.userId &&
+            !(viewer.isCurator && source.shared)
+        ) {
+            throw mergeRule(
+                "only the item's owner or a curator may accept its match",
+            );
+        }
+    } else if (
+        !(source.assigned && target.assigned) &&
+        !mayMergeTaskOwners(viewer, source.ownerUserId, target.ownerUserId)
+    ) {
+        if (target.ownerUserId === viewer.userId) {
+            throw mergeRule(
+                "merging someone else's task into your own requires a curator",
+            );
+        }
+        if (source.ownerUserId === target.ownerUserId) {
+            throw mergeRule(
+                "only the home owner or a curator may merge that owner's tasks",
+            );
+        }
+        throw mergeRule(
+            "only the merged task's home owner may attach it to someone else's task",
+        );
+    }
+    const privateToShared = !source.shared && target.shared;
+    const resultText = proposal
+        ? target.text
+        : cleanText(`${target.text}\n${source.text}`);
+    const resultNote = proposal
+        ? target.note
+        : [target.note, source.note].filter(Boolean).join("\n") || null;
+    if (resultNote && resultNote.length > MAX_TEXT)
+        throw mergeRule("the merged note exceeds 2000 characters");
+
+    const preview: TaskMergePreview = {
+        keepId: target.id,
+        mergeId: source.id,
+        keepVersion: target.version,
+        mergeVersion: source.version,
+        text: resultText,
+        note: resultNote,
+        dueDate: proposal
+            ? target.dueDate
+            : ([target.dueDate, source.dueDate]
+                  .filter((date): date is string => date !== null)
+                  .sort()[0] ?? null),
+        privateToShared,
+    };
+    return { source, target, proposal, preview };
+}
+
+function mergedNoteAuthorship(
+    source: MergeTaskRow,
+    target: MergeTaskRow,
+    resultNote: string | null,
+    viewerUserId: string,
+    now: Date,
+): { noteUpdatedAt: Date | null; noteUpdatedByUserId: string | null } {
+    if (!resultNote) return { noteUpdatedAt: null, noteUpdatedByUserId: null };
+    if (target.note && source.note) {
+        return { noteUpdatedAt: now, noteUpdatedByUserId: viewerUserId };
+    }
+    const author = target.note ? target : source;
+    return {
+        noteUpdatedAt: author.noteUpdatedAt,
+        noteUpdatedByUserId: author.noteUpdatedByUserId,
+    };
+}
+
+/** Compute a merge preview from visible rows without locks or writes. */
+export async function previewTaskMerge(
+    viewer: TaskViewer,
+    sourceTaskId: string,
+    targetTaskId: string,
+): Promise<TaskMergePreview> {
+    if (sourceTaskId === targetTaskId)
+        throw mergeRule("a task cannot be merged into itself");
+    const rows = await readMergeTaskRows(db, viewer, [
+        sourceTaskId,
+        targetTaskId,
+    ]);
+    if (rows.length !== 2 || rows.some((row) => !row.visible)) throw notFound();
+    return prepareTaskMerge(
+        viewer,
+        mergeTaskPair(rows, sourceTaskId, targetTaskId),
+    ).preview;
+}
+
 /** Merge one task or reviewed proposal into an open target task. */
 export async function mergeTaskIntoTask(
     viewer: TaskViewer,
     sourceTaskId: string,
     targetTaskId: string,
-    options: { reviewItemId?: string } = {},
+    options: MergeTaskOptions = {},
 ): Promise<TaskView & { mergeOwnerNotified: boolean }> {
     if (sourceTaskId === targetTaskId) {
         throw new AppError(
@@ -1696,76 +2012,30 @@ export async function mergeTaskIntoTask(
     const visible = await db
         .select({
             id: recordingTasks.id,
-            visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
+            visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM, true)}`,
         })
         .from(recordingTasks)
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(inArray(recordingTasks.id, [sourceTaskId, targetTaskId]));
     if (visible.length !== 2 || visible.some((task) => !task.visible)) {
         throw notFound();
     }
     const changed = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
-            const { source, target } = await lockMergeTasks(
-                tx,
+            const { source, target, proposal, preview } = prepareTaskMerge(
                 viewer,
-                sourceTaskId,
-                targetTaskId,
+                await lockMergeTasks(tx, viewer, sourceTaskId, targetTaskId),
+                options,
             );
-            if (!source.visible || !target.visible) {
+            const {
+                text: resultText,
+                note: resultNote,
+                privateToShared,
+            } = preview;
+            if (privateToShared && !options.confirmPrivateToShared)
                 throw mergeRule(
-                    "both tasks must be visible to the person merging",
+                    "confirm that private text becomes visible to the Organization",
                 );
-            }
-            if (target.status !== "open") {
-                throw mergeRule("the target must be an open task");
-            }
-            if (source.shared && !target.shared) {
-                throw mergeRule(
-                    "an Organization task can be merged only into an Organization task",
-                );
-            }
-            const proposal = source.status === "proposed";
-            if (proposal) {
-                if (options.reviewItemId !== source.itemId) {
-                    throw mergeRule(
-                        "a proposal may be merged only from its item's review",
-                    );
-                }
-                if (
-                    source.ownerUserId !== viewer.userId &&
-                    !(viewer.isCurator && source.shared)
-                ) {
-                    throw mergeRule(
-                        "only the item's owner or a curator may accept its match",
-                    );
-                }
-            } else if (
-                !mayMergeTaskOwners(
-                    viewer,
-                    source.ownerUserId,
-                    target.ownerUserId,
-                )
-            ) {
-                if (target.ownerUserId === viewer.userId) {
-                    throw mergeRule(
-                        "merging someone else's task into your own requires a curator",
-                    );
-                }
-                if (source.ownerUserId === target.ownerUserId) {
-                    throw mergeRule(
-                        "only the home owner or a curator may merge that owner's tasks",
-                    );
-                }
-                throw mergeRule(
-                    "only the merged task's home owner may attach it to someone else's task",
-                );
-            }
-            if (!source.shared && target.shared) {
-                throw mergeRule(
-                    "a private task can join an Organization task only after its home item is shared",
-                );
-            }
             if (viewer.isCurator && (source.shared || target.shared)) {
                 assertOrgScopeWritable();
             }
@@ -1796,6 +2066,16 @@ export async function mergeTaskIntoTask(
                 (mention) => mention.taskId === source.id,
             );
             const now = new Date();
+            if (!proposal)
+                await tx
+                    .update(recordingTasks)
+                    .set({ version: target.version + 1 })
+                    .where(
+                        and(
+                            eq(recordingTasks.id, target.id),
+                            eq(recordingTasks.userId, target.ownerUserId),
+                        ),
+                    );
             await movePendingTaskProposalsInTx(tx, {
                 viewer,
                 sourceTaskId: source.id,
@@ -1819,6 +2099,94 @@ export async function mergeTaskIntoTask(
                 mentions,
                 now,
             });
+            if (!proposal) {
+                await tx
+                    .update(recordingTasks)
+                    .set({
+                        text: encryptText(resultText),
+                        note: resultNote ? encryptText(resultNote) : null,
+                        ...mergedNoteAuthorship(
+                            source,
+                            target,
+                            resultNote,
+                            viewer.userId,
+                            now,
+                        ),
+                        dueDate: preview.dueDate,
+                        dueEffectiveAt:
+                            source.dueDate &&
+                            (!target.dueDate || source.dueDate < target.dueDate)
+                                ? source.dueEffectiveAt
+                                : target.dueEffectiveAt,
+                        updatedAt: now,
+                        updatedByUserId: viewer.userId,
+                        version: target.version + 1,
+                    })
+                    .where(
+                        and(
+                            eq(recordingTasks.id, target.id),
+                            eq(recordingTasks.userId, target.ownerUserId),
+                        ),
+                    );
+            }
+            const followers = await tx
+                .select({ userId: taskFollowers.userId })
+                .from(taskFollowers)
+                .where(eq(taskFollowers.taskId, source.id));
+            if (source.itemId && source.ownerUserId !== viewer.orgUserId) {
+                const [owner] = await tx
+                    .select({ email: users.email })
+                    .from(users)
+                    .where(eq(users.id, source.ownerUserId));
+                if (owner) {
+                    const [follow] = await tx
+                        .select({
+                            following: sql<boolean>`${taskFollowed({
+                                ...viewer,
+                                userId: source.ownerUserId,
+                                emailHash: lookupHash(owner.email),
+                                isOrg: false,
+                                isCurator: false,
+                            })}`,
+                        })
+                        .from(recordingTasks)
+                        .leftJoin(
+                            chatterItems,
+                            eq(chatterItems.id, recordingTasks.itemId),
+                        )
+                        .where(
+                            and(
+                                eq(recordingTasks.id, source.id),
+                                eq(recordingTasks.userId, source.ownerUserId),
+                            ),
+                        );
+                    if (
+                        follow?.following &&
+                        !followers.some((f) => f.userId === source.ownerUserId)
+                    )
+                        followers.push({ userId: source.ownerUserId });
+                }
+            }
+            if (followers.length) {
+                await tx
+                    .insert(taskFollowers)
+                    .values(
+                        followers.map(({ userId }) => ({
+                            taskId: target.id,
+                            userId,
+                        })),
+                    )
+                    .onConflictDoNothing();
+                await tx.delete(taskUnfollows).where(
+                    and(
+                        eq(taskUnfollows.taskId, target.id),
+                        inArray(
+                            taskUnfollows.userId,
+                            followers.map((f) => f.userId),
+                        ),
+                    ),
+                );
+            }
             await tx
                 .delete(recordingTasks)
                 .where(
@@ -1840,6 +2208,7 @@ export async function mergeTaskIntoTask(
                 sourceOwnerUserId: source.ownerUserId,
                 targetItemId: target.itemId,
                 targetOwnerUserId: target.ownerUserId,
+                keepId: target.id,
             };
         }),
     );
@@ -1849,7 +2218,7 @@ export async function mergeTaskIntoTask(
         await tasksChanged(changed.targetOwnerUserId, changed.targetItemId);
     }
     return {
-        ...(await requireTaskView(viewer, targetTaskId)),
+        ...(await requireTaskView(viewer, changed.keepId)),
         mergeOwnerNotified:
             changed.sourceOwnerUserId !== changed.targetOwnerUserId,
     };
@@ -2513,13 +2882,9 @@ async function requireTaskView(
     taskId: string,
 ): Promise<TaskView> {
     const [row] = await db
-        .select({
-            ...taskColumns,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
-            canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
-        })
+        .select({ ...taskColumns, ...taskViewerColumns(viewer) })
         .from(recordingTasks)
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .leftJoin(
             taskAudio,
             and(
@@ -2528,16 +2893,22 @@ async function requireTaskView(
             ),
         )
         .leftJoin(people, assigneeJoin())
+        .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(
             and(
                 eq(recordingTasks.id, taskId),
-                taskVisible(viewer, ANY_TASK_ITEM),
+                taskVisible(viewer, ANY_TASK_ITEM, true),
             ),
         )
         .limit(1);
     if (!row) throw notFound();
-    const mentions = await loadVisibleTaskMentions(viewer, [taskId]);
-    return toView(row, mentions);
+    const [mentions, folders] = await Promise.all([
+        loadVisibleTaskMentions(viewer, [taskId]),
+        row.source === "personal" && row.folderId
+            ? loadTaskFolders(viewer.userId)
+            : new Map<string, TaskFolder>(),
+    ]);
+    return toView(row, mentions, undefined, folders);
 }
 
 /**
@@ -2638,6 +3009,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     ]);
     const waiting = new Map<string, Set<string>>();
     for (const proposal of proposals) {
+        if (!proposal.recordingId) continue;
         const decisions =
             waiting.get(proposal.recordingId) ?? new Set<string>();
         decisions.add(`new:${proposal.taskId}`);
@@ -2676,13 +3048,14 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     }));
 }
 
-export type TaskTab = "mine" | "tracked";
+export type TaskTab = "mine" | "followed" | "tracked";
 export type TaskStateFilter = "open" | "done" | "dropped" | "all";
 export type TaskDueFilter = "overdue" | "week" | "none" | null;
 export type TaskSort = "created" | "due";
 
 export interface TaskListQuery {
     tab: TaskTab;
+    organization?: boolean;
     state: TaskStateFilter;
     folderId: string | null;
     /** Tracked only: a person id, or `none` for unassigned tasks. */
@@ -2694,6 +3067,8 @@ export interface TaskListQuery {
 }
 
 export interface TaskListItem extends TaskView {
+    /** Notes attached to any mail source remain subject to MCP mail redaction. */
+    noteMailSourced?: boolean;
     /** Visible mention quotes used by MCP's encrypted-text scan. */
     visibleMentionQuotes: { text: string; kind: "audio" | "mail" }[];
     recording: {
@@ -2704,7 +3079,7 @@ export interface TaskListItem extends TaskView {
         view: "private" | "org";
         /** What the item is: a recording or a mail. */
         kind: "audio" | "mail";
-    };
+    } | null;
     evidence: {
         audioAvailable: boolean;
         id: string;
@@ -2712,7 +3087,7 @@ export interface TaskListItem extends TaskView {
         startTime: string;
         view: "private" | "org";
         kind: "audio" | "mail";
-    };
+    } | null;
 }
 
 function addDays(day: string, days: number): string {
@@ -2721,15 +3096,29 @@ function addDays(day: string, days: number): string {
     return date.toISOString().slice(0, 10);
 }
 
-function taskTabConditions(viewer: TaskViewer, tab: TaskTab): SQL[] {
-    const mine = assignedToViewer(viewer);
+function taskTabConditions(
+    viewer: TaskViewer,
+    tab: TaskTab,
+    organization = false,
+): SQL[] {
     return [
         ne(recordingTasks.status, "proposed"),
         isNull(chatterItems.deletedAt),
-        ...(tab === "mine"
-            ? [mine, taskVisible(viewer, ANY_TASK_ITEM)]
-            : [taskListed(viewer, ANY_TASK_ITEM), not(mine)]),
+        taskVisible(viewer, ANY_TASK_ITEM, true),
+        taskTabScope(viewer, tab, organization),
     ];
+}
+
+function taskTabScope(
+    viewer: TaskViewer,
+    tab: TaskTab,
+    organization: boolean,
+): SQL {
+    if (tab === "mine") return assignedToViewer(viewer);
+    if (organization && viewer.isCurator) {
+        return taskRecordingShared(viewer, ANY_TASK_ITEM);
+    }
+    return taskFollowed(viewer);
 }
 
 /** A person a task is assigned to. */
@@ -2738,13 +3127,14 @@ export type TaskAssignee = NonNullable<TaskView["assignee"]>;
 /** Distinct assignees of all the viewer's Tracked tasks, without a list limit. */
 export async function listTrackedAssignees(
     viewer: TaskViewer,
+    organization = false,
 ): Promise<TaskAssignee[]> {
     const rows = await db
         .selectDistinct({ personId: people.id, name: people.displayName })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .innerJoin(people, assigneeJoin())
-        .where(and(...taskTabConditions(viewer, "tracked")));
+        .where(and(...taskTabConditions(viewer, "followed", organization)));
     return rows.map((row) => ({ ...row, name: decryptText(row.name) }));
 }
 
@@ -2761,8 +3151,9 @@ export async function listTasks(
     const conditions: (SQL | undefined)[] = taskTabConditions(
         viewer,
         query.tab,
+        query.organization,
     );
-    if (query.tab === "tracked" && query.assignee) {
+    if (query.tab !== "mine" && query.assignee) {
         conditions.push(
             query.assignee === "none"
                 ? isNull(recordingTasks.assigneePersonId)
@@ -2774,7 +3165,11 @@ export async function listTasks(
     }
     if (query.folderId) {
         conditions.push(
-            await folderCondition(viewer.userId, query.folderId, ANY_TASK_ITEM),
+            await taskFolderCondition(
+                viewer,
+                query.folderId,
+                query.tab === "mine",
+            ),
         );
     }
     if (query.due === "none") {
@@ -2809,6 +3204,8 @@ export async function listTasks(
 /** A query of {@link listCallerTasks}. */
 export interface CallerTaskQuery {
     status: TaskStateFilter;
+    list?: "mine" | "followed";
+    folderId?: string | null;
     assigneePersonId: string | null;
     recordingId: string | null;
     /** `YYYY-MM-DD`: due strictly before this day; undated tasks drop out. */
@@ -2842,7 +3239,9 @@ export async function listCallerTasks(
     viewer: TaskViewer,
     query: CallerTaskQuery,
 ): Promise<TaskListItem[]> {
-    const conditions = callerTaskConditions(viewer);
+    const conditions = query.list
+        ? taskTabConditions(viewer, query.list)
+        : callerTaskConditions(viewer);
     if (query.status !== "all") {
         conditions.push(eq(recordingTasks.status, query.status));
     }
@@ -2858,6 +3257,14 @@ export async function listCallerTasks(
         conditions.push(lt(recordingTasks.dueDate, query.dueBefore));
     }
     if (query.recordingCondition) conditions.push(query.recordingCondition);
+    if (query.folderId)
+        conditions.push(
+            await taskFolderCondition(
+                viewer,
+                query.folderId,
+                query.list !== "followed",
+            ),
+        );
     if (query.after) {
         conditions.push(
             keysetBefore(
@@ -2889,6 +3296,25 @@ export async function getCallerTask(
     return item ?? null;
 }
 
+/** One currently visible accepted task, including tasks outside the viewer's lists. */
+export async function getVisibleTask(
+    viewer: TaskViewer,
+    taskId: string,
+): Promise<TaskListItem | null> {
+    const [task] = await loadTaskListItems(
+        viewer,
+        [
+            ne(recordingTasks.status, "proposed"),
+            isNull(chatterItems.deletedAt),
+            taskVisible(viewer, ANY_TASK_ITEM, true),
+            eq(recordingTasks.id, taskId),
+        ],
+        [],
+        1,
+    );
+    return task ?? null;
+}
+
 async function loadTaskListItems(
     viewer: TaskViewer,
     conditions: readonly (SQL | undefined)[],
@@ -2898,15 +3324,15 @@ async function loadTaskListItems(
     const rows = await db
         .select({
             ...taskColumns,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
-            canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
+            ...taskViewerColumns(viewer),
+            noteMailSourced: sql<boolean>`${taskNoteHasMailSource()}`,
             recordingOwner: chatterItems.userId,
             recordingTitle: chatterItems.title,
             recordingStart: chatterItems.occurredAt,
             recordingKind: chatterItems.kind,
         })
         .from(recordingTasks)
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .leftJoin(
             taskAudio,
             and(
@@ -2917,18 +3343,25 @@ async function loadTaskListItems(
         // Conditions over `recordings` (the MCP tools') keep to recordings.
         .leftJoin(recordings, eq(recordings.id, recordingTasks.itemId))
         .leftJoin(people, assigneeJoin())
+        .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(and(...conditions))
         .orderBy(...order)
         .limit(limit);
 
-    const mentions = await loadVisibleTaskMentions(
-        viewer,
-        rows.map((row) => row.id),
-    );
+    const [mentions, folders] = await Promise.all([
+        loadVisibleTaskMentions(
+            viewer,
+            rows.map((row) => row.id),
+        ),
+        rows.some((row) => row.source === "personal" && row.folderId)
+            ? loadTaskFolders(viewer.userId)
+            : new Map<string, TaskFolder>(),
+    ]);
     return rows.map((row) => {
         const evidence = mentions.latest.get(row.id);
         return {
-            ...toView(row, mentions),
+            ...toView(row, mentions, undefined, folders),
+            noteMailSourced: row.noteMailSourced,
             visibleMentionQuotes:
                 mentions.quotes.get(row.id) ??
                 (mentions.taskIdsWithMentions.has(row.id)
@@ -2937,36 +3370,53 @@ async function loadTaskListItems(
                           .filter((quote): quote is string => quote !== null)
                           .map((text) => ({
                               text,
-                              kind: row.recordingKind,
+                              kind: row.recordingKind ?? "audio",
                           }))),
-            recording: {
-                id: row.recordingId as string,
-                title: decryptText(row.recordingTitle),
-                startTime: row.recordingStart.toISOString(),
-                view: row.recordingOwner === viewer.userId ? "private" : "org",
-                kind: row.recordingKind,
-            },
-            evidence: {
-                audioAvailable:
-                    evidence?.audioAvailable ??
-                    hasAudio({
-                        kind: row.recordingKind,
-                        audioId: row.homeAudioId,
-                        audioReapedAt: row.homeAudioReapedAt,
-                        audioDeletedAt: row.homeAudioDeletedAt,
-                    }),
-                id: evidence?.itemId ?? (row.recordingId as string),
-                title: evidence?.title ?? decryptText(row.recordingTitle),
-                startTime: (
-                    evidence?.occurredAt ?? row.recordingStart
-                ).toISOString(),
-                view:
-                    (evidence?.ownerUserId ?? row.recordingOwner) ===
-                    viewer.userId
-                        ? "private"
-                        : "org",
-                kind: evidence?.kind ?? row.recordingKind,
-            },
+            recording:
+                row.recordingId &&
+                row.recordingTitle &&
+                row.recordingStart &&
+                row.recordingKind
+                    ? {
+                          id: row.recordingId,
+                          title: decryptText(row.recordingTitle),
+                          startTime: row.recordingStart.toISOString(),
+                          view:
+                              row.recordingOwner === viewer.userId
+                                  ? "private"
+                                  : "org",
+                          kind: row.recordingKind,
+                      }
+                    : null,
+            evidence:
+                row.recordingId &&
+                row.recordingKind &&
+                row.recordingStart &&
+                row.recordingTitle
+                    ? {
+                          audioAvailable:
+                              evidence?.audioAvailable ??
+                              hasAudio({
+                                  kind: row.recordingKind,
+                                  audioId: row.homeAudioId,
+                                  audioReapedAt: row.homeAudioReapedAt,
+                                  audioDeletedAt: row.homeAudioDeletedAt,
+                              }),
+                          id: evidence?.itemId ?? (row.recordingId as string),
+                          title:
+                              evidence?.title ??
+                              decryptText(row.recordingTitle),
+                          startTime: (
+                              evidence?.occurredAt ?? row.recordingStart
+                          ).toISOString(),
+                          view:
+                              (evidence?.ownerUserId ?? row.recordingOwner) ===
+                              viewer.userId
+                                  ? "private"
+                                  : "org",
+                          kind: evidence?.kind ?? row.recordingKind,
+                      }
+                    : null,
         };
     });
 }
@@ -3018,4 +3468,118 @@ export async function markTasksSeen(viewer: TaskViewer): Promise<void> {
             target: userSettings.userId,
             set: { tasksSeenAt: now },
         });
+}
+
+export interface TaskMergePreview {
+    keepId: string;
+    mergeId: string;
+    keepVersion: number;
+    mergeVersion: number;
+    text: string;
+    note: string | null;
+    dueDate: string | null;
+    privateToShared: boolean;
+}
+
+/** Create a private task, owned and implicitly assigned to the caller. */
+export async function createPersonalTask(
+    viewer: TaskViewer,
+    input: { text: string; dueDate?: string | null; folderId?: string | null },
+): Promise<TaskView> {
+    if (viewer.isOrg) throw forbidden();
+    const text = cleanText(input.text);
+    const dueDate = cleanDue(input.dueDate ?? null);
+    const now = new Date();
+    const row = await db.transaction(async (tx) => {
+        await lockPrivateFolderTree(tx, viewer.userId);
+        const folderId =
+            input.folderId == null
+                ? null
+                : await requireTaskFolder(viewer.userId, input.folderId, tx);
+        const [created] = await tx
+            .insert(recordingTasks)
+            .values({
+                itemId: null,
+                folderId,
+                userId: viewer.userId,
+                status: "open",
+                source: "personal",
+                text: encryptText(text),
+                dueDate,
+                createdByUserId: viewer.userId,
+                acceptedAt: now,
+                acceptedByUserId: viewer.userId,
+                updatedByUserId: viewer.userId,
+            })
+            .returning({ id: recordingTasks.id });
+        return created;
+    });
+    return requireTaskView(viewer, row.id);
+}
+
+async function taskFolderCondition(
+    viewer: TaskViewer,
+    folderId: string,
+    includeOwn: boolean,
+): Promise<SQL> {
+    const folders = await listRecordingFolderTrees(viewer.userId);
+    const items = folderRecordingCondition(
+        { folders, assignments: [] },
+        viewer.userId,
+        folderId,
+        ANY_TASK_ITEM,
+    );
+    const folder = privateTreeFolders(folders).find(
+        (entry) => entry.id === folderId,
+    );
+    const own =
+        includeOwn && folder && !viewer.isOrg
+            ? and(
+                  personalTask(viewer),
+                  folder.kind === "private"
+                      ? undefined
+                      : inArray(recordingTasks.folderId, [
+                            ...descendantFolderIds(folders, folderId),
+                        ]),
+              )
+            : undefined;
+    return or(items ?? sql`false`, own) ?? sql`false`;
+}
+
+/** Set an explicit follow or an unfollow override without changing task versions. */
+export async function followTask(
+    viewer: TaskViewer,
+    taskId: string,
+    follow: boolean,
+): Promise<TaskView> {
+    if (viewer.isOrg) throw forbidden();
+    await db.transaction(async (tx) => {
+        if (!(await setTaskFollowInTx(tx, viewer, taskId, follow))) {
+            throw notFound();
+        }
+    });
+    return requireTaskView(viewer, taskId);
+}
+
+/** Lock a followable task and store the viewer's follow or unfollow; false when the task is not followable. */
+export async function setTaskFollowInTx(
+    tx: Tx,
+    viewer: TaskViewer,
+    taskId: string,
+    follow: boolean,
+    createdAt?: Date,
+): Promise<boolean> {
+    if (!(await lockFollowableTask(tx, viewer, taskId))) return false;
+    const remove = follow ? taskUnfollows : taskFollowers;
+    const add = follow ? taskFollowers : taskUnfollows;
+    await tx
+        .delete(remove)
+        .where(
+            and(eq(remove.taskId, taskId), eq(remove.userId, viewer.userId)),
+        );
+    await tx
+        .insert(add)
+        .values({ taskId, userId: viewer.userId, createdAt })
+        .onConflictDoNothing();
+    return true;
 }

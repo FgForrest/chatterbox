@@ -5,11 +5,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { OwnTaskForm } from "@/components/tasks/own-task-form";
 import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
 import {
     announceTasksChanged,
     changeTask,
     mergeTaskIntoTarget,
+    type TaskMergeOptions,
     TaskRequestError,
 } from "@/components/tasks/task-api";
 import { localToday } from "@/components/tasks/task-fields";
@@ -23,6 +25,9 @@ import {
 } from "@/components/ui/select";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useOrgEvents } from "@/hooks/use-org-events";
+import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
+import { descendantFolderIds } from "@/lib/folders/hierarchy";
+import { privateTreeFolders } from "@/lib/folders/private-tree";
 import type {
     TaskAssignee,
     TaskChange,
@@ -30,7 +35,7 @@ import type {
     TaskView,
 } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
-import type { FolderOrganization, RecordingFolder } from "@/types/folder";
+import type { RecordingFolder } from "@/types/folder";
 
 const ALL = "all";
 
@@ -119,26 +124,49 @@ function flattenFolders(
  * track of; filtered by state, folder, assignee and deadline, newest first
  * or by due date. Filters live in the URL, so a filtered list can be bookmarked.
  */
-export function TaskList({ organization }: { organization: boolean }) {
+export function TaskList({
+    organization,
+    canCurate = false,
+}: {
+    organization: boolean;
+    canCurate?: boolean;
+}) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
     const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname();
     const params = useSearchParams();
-    const tab = organization
-        ? "tracked"
-        : params.get("tab") === "tracked"
-          ? "tracked"
-          : "mine";
+    const tab =
+        organization ||
+        ["tracked", "followed"].includes(params.get("tab") ?? "")
+            ? "followed"
+            : "mine";
+    const [addOpen, setAddOpen] = useState(false);
+    const addRequest = params.get("add");
+    useEffect(() => {
+        setAddOpen(Boolean(addRequest));
+    }, [addRequest]);
+    const allOrganization = canCurate && params.get("organization") === "true";
     const state = params.get("state") ?? "open";
     const folder = params.get("folder") ?? ALL;
-    const assignee = tab === "tracked" ? params.get("assignee") || ALL : ALL;
+    const assignee = tab === "followed" ? params.get("assignee") || ALL : ALL;
     const due = params.get("due") ?? ALL;
     const sort = params.get("sort") === "due" ? "due" : "created";
 
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
-    const [folders, setFolders] = useState<RecordingFolder[]>([]);
+    const folders = useTaskFolderTree();
+    const privateFolders = privateTreeFolders(folders);
+    const selectedPrivate = privateFolders.find((entry) => entry.id === folder);
+    const ownMatchesFolder = (task: TaskListItem) =>
+        folder === ALL ||
+        !task.own ||
+        (selectedPrivate &&
+            (selectedPrivate.kind === "private" ||
+                (task.folder &&
+                    descendantFolderIds(privateFolders, selectedPrivate.id).has(
+                        task.folder.id,
+                    ))));
     const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
     const assigneeNames = useRef(new Map<string, string>());
     const assigneeRequest = useRef(0);
@@ -160,6 +188,7 @@ export function TaskList({ organization }: { organization: boolean }) {
 
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
+        if (allOrganization) search.set("organization", "true");
         if (folder !== ALL) search.set("folder", folder);
         if (assignee !== ALL) search.set("assignee", assignee);
         if (due !== ALL) {
@@ -167,13 +196,15 @@ export function TaskList({ organization }: { organization: boolean }) {
             search.set("today", localToday());
         }
         return search.toString();
-    }, [tab, state, sort, folder, assignee, due]);
+    }, [tab, state, sort, folder, assignee, due, allOrganization]);
 
     const loadAssignees = useCallback(async () => {
-        if (tab !== "tracked") return;
+        if (tab !== "followed") return;
         const request = ++assigneeRequest.current;
         try {
-            const response = await fetch("/api/tasks/assignees");
+            const response = await fetch(
+                `/api/tasks/assignees${allOrganization ? "?organization=true" : ""}`,
+            );
             if (!response.ok) throw new Error();
             const body = (await response.json()) as {
                 assignees: TaskAssignee[];
@@ -210,7 +241,7 @@ export function TaskList({ organization }: { organization: boolean }) {
         } catch {
             return;
         }
-    }, [tab, assignee, i18n]);
+    }, [tab, assignee, i18n, allOrganization]);
 
     useEffect(() => {
         void loadAssignees();
@@ -246,15 +277,6 @@ export function TaskList({ organization }: { organization: boolean }) {
             .catch(() => {});
     }, []);
 
-    useEffect(() => {
-        void fetch("/api/folders")
-            .then((response) => (response.ok ? response.json() : null))
-            .then((body: FolderOrganization | null) =>
-                setFolders(body?.folders ?? []),
-            )
-            .catch(() => {});
-    }, []);
-
     const reload = useCallback(
         () => Promise.all([load(), loadAssignees()]),
         [load, loadAssignees],
@@ -274,9 +296,11 @@ export function TaskList({ organization }: { organization: boolean }) {
     ) => {
         setTasks(
             (current) =>
-                current?.map((row) =>
-                    row.id === task.id ? { ...row, ...optimistic } : row,
-                ) ?? null,
+                current
+                    ?.map((row) =>
+                        row.id === task.id ? { ...row, ...optimistic } : row,
+                    )
+                    .filter(ownMatchesFolder) ?? null,
         );
         const run = (pending.current.get(task.id) ?? Promise.resolve())
             .then(async () => {
@@ -314,15 +338,23 @@ export function TaskList({ organization }: { organization: boolean }) {
         pending.current.set(task.id, run);
     };
 
-    const merge = async (task: TaskListItem, targetTaskId: string) => {
+    const merge = async (
+        task: TaskListItem,
+        targetTaskId: string,
+        options?: TaskMergeOptions,
+    ) => {
         const snapshot = tasks;
         setTasks(
             (current) => current?.filter((row) => row.id !== task.id) ?? null,
         );
         try {
-            const result = await mergeTaskIntoTarget(task.id, targetTaskId);
+            const result = await mergeTaskIntoTarget(
+                task.id,
+                targetTaskId,
+                options,
+            );
             announceTasksChanged();
-            void loadAssignees();
+            await reload();
             return { ownerNotified: result.mergeOwnerNotified };
         } catch (error) {
             setTasks(snapshot);
@@ -356,7 +388,7 @@ export function TaskList({ organization }: { organization: boolean }) {
         ? []
         : [
               { key: "mine", label: i18n("Mine") },
-              { key: "tracked", label: i18n("Tracked") },
+              { key: "followed", label: i18n("Followed") },
           ];
 
     return (
@@ -372,10 +404,10 @@ export function TaskList({ organization }: { organization: boolean }) {
                             ? i18n("Tasks from the Organization's recordings.")
                             : tab === "mine"
                               ? i18n(
-                                    "Assigned to you, from your recordings and the Organization's.",
+                                    "Assigned to you, including your own private tasks.",
                                 )
                               : i18n(
-                                    "The other tasks from your recordings: assigned to others, or to nobody yet.",
+                                    "Tasks you follow, and tasks from your items assigned to others.",
                                 )}
                     </p>
                 </div>
@@ -412,6 +444,33 @@ export function TaskList({ organization }: { organization: boolean }) {
             <RoutedProposalsInbox />
 
             <div className="flex flex-wrap items-center gap-2">
+                {canCurate && tab === "followed" && (
+                    <Select
+                        value={allOrganization ? "organization" : "followed"}
+                        onValueChange={(value) =>
+                            setParam(
+                                "organization",
+                                value === "organization" ? "true" : null,
+                            )
+                        }
+                    >
+                        <SelectTrigger
+                            className="h-8 w-52 text-xs"
+                            aria-label={i18n("Followed task scope")}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="followed">
+                                {i18n("Followed")}
+                            </SelectItem>
+                            <SelectItem value="organization">
+                                {i18n("All Organization tasks")}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                )}
+
                 <Select
                     value={state}
                     onValueChange={(value) =>
@@ -466,7 +525,7 @@ export function TaskList({ organization }: { organization: boolean }) {
                         )}
                     </SelectContent>
                 </Select>
-                {tab === "tracked" && (
+                {tab === "followed" && (
                     <Select
                         value={assignee}
                         onValueChange={(value) => setParam("assignee", value)}
@@ -540,39 +599,61 @@ export function TaskList({ organization }: { organization: boolean }) {
                 </button>
             </div>
 
-            {tasks === null ? (
-                <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    {i18n("Loading tasks…")}
-                </p>
-            ) : tasks.length === 0 ? (
-                <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                    {tab === "mine"
-                        ? i18n(
-                              "Nothing here. Tasks assigned to you appear once a recording's tasks are accepted.",
-                          )
-                        : i18n("Nothing here.")}
-                </p>
-            ) : (
-                <ul className="divide-y rounded-lg border">
-                    {tasks.map((task) => (
+            <ul className="divide-y rounded-lg border">
+                {!organization && tab === "mine" && (
+                    <OwnTaskForm
+                        key={addRequest ?? "inline"}
+                        open={addOpen}
+                        folders={folders}
+                        defaultFolderId={
+                            selectedPrivate?.kind === "private"
+                                ? null
+                                : (selectedPrivate?.id ?? null)
+                        }
+                        onOpenChange={(open) => {
+                            setAddOpen(open);
+                            if (!open && addRequest) setParam("add", null);
+                        }}
+                        onAdded={(task) => {
+                            versions.current.set(task.id, task.version);
+                            setTasks((current) =>
+                                ownMatchesFolder(task)
+                                    ? [task, ...(current ?? [])]
+                                    : current,
+                            );
+                        }}
+                    />
+                )}
+                {tasks === null ? (
+                    <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        {i18n("Loading tasks…")}
+                    </li>
+                ) : tasks.length === 0 ? (
+                    <li className="p-8 text-center text-sm text-muted-foreground">
+                        {i18n("Nothing here.")}
+                    </li>
+                ) : (
+                    tasks.map((task) => (
                         <TaskRow
                             key={task.id}
                             task={task}
+                            folders={folders}
                             recording={task.recording}
                             evidence={task.evidence}
-                            showAssignee={tab === "tracked" || task.canEdit}
-                            organizationOnly={task.recording.view === "org"}
+                            showAssignee={tab !== "mine" || task.canEdit}
+                            organizationOnly={task.recording?.view === "org"}
                             onChange={(change, optimistic) =>
                                 update(task, change, optimistic)
                             }
-                            onMerge={(targetTaskId) =>
-                                merge(task, targetTaskId)
+                            onMerge={(targetTaskId, options) =>
+                                merge(task, targetTaskId, options)
                             }
+                            onFollow={() => void reload()}
                         />
-                    ))}
-                </ul>
-            )}
+                    ))
+                )}
+            </ul>
         </div>
     );
 }

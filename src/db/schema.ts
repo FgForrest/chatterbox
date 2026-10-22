@@ -2672,9 +2672,12 @@ export const recordingTasks = pgTable(
         id: text("id")
             .primaryKey()
             .$defaultFn(() => nanoid()),
-        itemId: text("recording_id")
-            .notNull()
-            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        itemId: text("recording_id").references(() => chatterItems.id, {
+            onDelete: "cascade",
+        }),
+        folderId: text("folder_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
         // The recording's owner.
         userId: text("user_id")
             .notNull()
@@ -2684,6 +2687,12 @@ export const recordingTasks = pgTable(
             .notNull(),
         // Encrypted.
         text: text("text").notNull(),
+        note: text("note"),
+        noteUpdatedAt: timestamp("note_updated_at"),
+        noteUpdatedByUserId: text("note_updated_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
         // Who has to do it: a person of the Almanac (the owner's, or the
         // Organization's on a shared recording); null for nobody yet.
         assigneePersonId: text("assignee_person_id").references(
@@ -2711,7 +2720,7 @@ export const recordingTasks = pgTable(
             length: 16,
         }).$type<EvidenceProvenance>(),
         source: varchar("source", { length: 16 })
-            .$type<"riffado" | "plaud" | "manual">()
+            .$type<"riffado" | "plaud" | "manual" | "personal">()
             .notNull(),
         // A proposal's draft: whether accepting the review keeps it.
         ticked: boolean("ticked").notNull().default(true),
@@ -2759,6 +2768,13 @@ export const recordingTasks = pgTable(
             table.userId,
             table.status,
         ),
+        userFolderStatusIdx: index("recording_tasks_user_folder_status_idx")
+            .on(table.userId, table.folderId, table.status)
+            .where(sql`${table.folderId} is not null`),
+        personalFolderCheck: check(
+            "recording_tasks_personal_folder_check",
+            sql`${table.folderId} is null or ${table.source} = 'personal'`,
+        ),
         createdByIdx: index("recording_tasks_created_by_user_id_idx").on(
             table.createdByUserId,
         ),
@@ -2780,12 +2796,53 @@ export const recordingTasks = pgTable(
         ),
         sourceCheck: check(
             "recording_tasks_source_check",
-            sql`${table.source} in ('riffado', 'plaud', 'manual')`,
+            sql`${table.source} in ('riffado', 'plaud', 'manual', 'personal')`,
+        ),
+        personalItemCheck: check(
+            "recording_tasks_personal_item_check",
+            sql`(${table.source} = 'personal') = (${table.itemId} is null) and (${table.source} <> 'personal' or (${table.assigneePersonId} is null and ${table.status} <> 'proposed'))`,
+        ),
+        noteUpdatedByIdx: index("recording_tasks_note_updated_by_idx").on(
+            table.noteUpdatedByUserId,
         ),
         evidenceCheck: check(
             "recording_tasks_evidence_check",
             sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
         ),
+    }),
+);
+
+export const taskFollowers = pgTable(
+    "task_followers",
+    {
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.taskId, table.userId] }),
+        userIdIdx: index("task_followers_user_id_idx").on(table.userId),
+    }),
+);
+
+export const taskUnfollows = pgTable(
+    "task_unfollows",
+    {
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.taskId, table.userId] }),
+        userIdIdx: index("task_unfollows_user_id_idx").on(table.userId),
     }),
 );
 

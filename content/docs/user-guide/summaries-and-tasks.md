@@ -67,7 +67,7 @@ If you review a proposed change but do not have permission to apply it, Chatterb
 
 ![A routed task proposal in the Tasks inbox](images/tasks-routed.png)
 
-On a shared task, its home item's owner and Organization curators may edit, change its deadline or assignee, drop it, merge it, and close it. The assignee may also close or reopen it. On a private task, only its owner may do those things. These task rights are an exception to the other editing rules for shared items.
+On a shared task, its home item's owner and Organization curators may edit, change its deadline or assignee, drop it, merge it, and close it. The assignee may also close or reopen it, write its note, and merge it with another task assigned to them. On a private task, only its owner may do those things. These task rights are an exception to the other editing rules for shared items.
 
 When the home item is deleted, the newest surviving mention in the same scope becomes home. If none remains, the task disappears. When a shared home item is withdrawn from the Organization, the newest remaining shared mention becomes home. If none remains, the task becomes private with the withdrawn item. The withdrawn mention is no longer visible to the Organization. Retention that removes audio or generated content does not move the home.
 
@@ -79,13 +79,41 @@ When the home item is deleted, the newest surviving mention in the same scope be
 
 ![Tasks assigned to you](images/tasks-mine.png)
 
-- **Mine**: tasks assigned to you. Chatterbox knows which person in the Almanac is you by your email address; open your own person in the Almanac and choose **This is me** if your tasks do not show here.
-- **Tracked**: the other tasks from your items, assigned to someone else or to nobody yet.
+- **Mine**: tasks assigned to you and your own private tasks. Chatterbox knows which person in the Almanac is you by your email address; open your own person in the Almanac and choose **This is me** if your tasks do not show here.
+- **Followed**: tasks you explicitly follow, plus tasks from your own items assigned to others or nobody. **Stop following** removes either kind. Curators can switch to **All Organization tasks**; the Organization account continues to see all shared tasks. Old `tab=tracked` links still open this tab.
 
 ![Tasks you track](images/tasks-tracked.png)
 
 The filters show open, done or dropped tasks, tasks from one folder, and tasks that are overdue, due this week or have no date. Sort by newest or by due date. Each task offers the actions you have permission to use and **Where it was said** for every mention.
 
-Use **Merge into an earlier task** here when two task rows are the same work. The target keeps its fields. Differences that require another person's authority are routed as proposals rather than applied silently. Private and Organization tasks cannot be merged in a way that hides an Organization task from members.
+### Own tasks
+
+**Add task** is the first row of **Mine**. Enter up to 2,000 characters and an optional due date. **Only you** means the author is always the assignee and the only person who can see it, including when a curator or the Organization account opens Tasks. You may edit, finish, drop, restore and merge it. It has no recording, cannot be shared or reassigned, raises no badge, and survives item retention and deletion.
+
+The folder pill next to **Only you** optionally files the task in one of your private folders. It defaults to the private folder selected in the Tasks filter, otherwise **No folder**. On the task's source line, click its folder name or **File in a folder** to move it; **No folder** clears it. The unfiled action appears on hover or keyboard focus with a mouse and stays visible on touch. A folder only helps you organize: it never grants anyone access and tasks do not change the library's folder item counts. Recording and mail tasks keep using their source item's folders.
+
+Selecting a private folder in **Mine** includes own tasks filed there or in its subfolders. The **Private** root includes all your own tasks, including unfiled ones, as does **All folders**. An Organization folder hides own tasks. Deleting a folder or moving it outside your private tree clears the task's folder in the same transaction; the task stays private and survives.
+
+Right-click **Tasks** in the navigation, press the context-menu key or Shift+F10 while it is focused, or long press it on touch to open Mine with the form focused. Ctrl-click and middle-click retain normal new-tab behavior.
+
+### Notes and follows
+
+Ticking a task opens an optional note box. Choose **Skip** or **Save note**. **Note** opens it again at any time. There is one encrypted note of at most 2,000 characters per task; saving replaces it. Everyone who sees the task reads the note with its author and time. Anyone allowed to mark it done may write the note. Notes are searched and backed up; they never enter summary prompts.
+
+**Follow** is available on visible tasks under a recording or mail and on the Tasks page. **Following** remains visible between row actions. A follow survives unsharing: the task is hidden until its item becomes visible again. Followers can open the task detail page. Follows and unfollows belong to the follower's personal backup. Own tasks and changes on followed tasks do not raise the assignment badge.
+
+On the Tasks page the source is a small button under the text. Under a recording or mail, **Where it was said** shares the assignee and due-date row. Actions appear on hover or keyboard focus with a mouse and stay visible on touch.
+
+### Merging tasks
+
+Use **Merge into another task** for duplicate open tasks. Assignees can choose from their other open tasks across recordings, mail and own tasks. The dialog previews the server's result: the kept text followed by the other text on a new line, the notes joined in the same order, and the earlier due date. Both items' links and followers stay, and pending proposals move. A result over 2,000 characters is refused so no text is lost.
+
+An Organization task always remains. Adding a private task to it requires confirming that its text and note become visible to everyone who sees the Organization task. A merge is irreversible. Cross-owner merges notify the kept task's owner through the existing proposal inbox.
+
+### Task backups and restore
+
+Personal backups include `tasks/personal.json`, `tasks/follows.json` and notes in the existing item task files. Organization backups exclude own tasks and members' follow preferences. To import extracted task data after restoring its items and people, an authenticated session may POST to `/api/tasks/restore` with `{personal, items, follows}`: `personal` is the own-task array, `items` contains `{itemId, tasks}` from each recording's `tasks.json` or mail's task array, and `follows` is the preference array. Existing task IDs are kept unchanged; IDs belonging to another owner are refused. Follow references to tasks absent from the installation are skipped. This imports tasks; the app has no general archive restore screen.
+
+Each own task carries `folderId`. After restoring the private folders from `organization/folders.json`, add `folders: [{id, restoredId}]` to the import request to map each archived folder ID to its restored private folder ID. References without a mapping become null, including folders omitted from the archive. Organization and other users' target folders are refused. Organization archives are unchanged.
 
 Next: [The Almanac](almanac.md)

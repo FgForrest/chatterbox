@@ -91,6 +91,14 @@ it("links and labels a task with its evidence item metadata", () => {
         canEdit: false,
         canClose: false,
         canUndoMatch: false,
+        own: false,
+        note: null,
+        noteUpdatedAt: null,
+        noteBy: null,
+        following: false,
+        automaticFollow: false,
+        canFollow: false,
+        canMerge: false,
     };
     const recording: TaskListItem["recording"] = {
         id: "home-item",
@@ -122,7 +130,7 @@ it("links and labels a task with its evidence item metadata", () => {
     expect(screen.getByText("2026-10-15")).toBeTruthy();
     expect(
         screen
-            .getByRole("link", { name: "Latest evidence" })
+            .getByRole("link", { name: "Latest evidence · 2026-10-15" })
             .getAttribute("href"),
     ).toBe("/dashboard?recording=evidence-item&view=org&playFrom=2500");
 });

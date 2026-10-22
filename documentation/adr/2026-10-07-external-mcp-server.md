@@ -1,7 +1,7 @@
 ---
 title: External MCP server in the app, gated by Keycloak client roles from the SSO realm
 date: 2026-10-07
-updated: 2026-10-22 16:00
+updated: 2026-10-22 20:00
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [98]
 areas: [src/app/api/mcp/route.ts, src/lib/mcp, src/app/.well-known/oauth-protected-resource, content/docs/self-hosting/mcp.mdx, e2e/keycloak/riffado-e2e-realm.json]
 supersedes: []
 superseded-by: []
-relates: [2026-10-06-oidc-single-sign-on, 2026-10-11-claude-connector-through-sso-realm, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-14-identity-provider-authorization]
+relates: [2026-10-22-assignee-task-list, 2026-10-06-oidc-single-sign-on, 2026-10-11-claude-connector-through-sso-realm, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-14-identity-provider-authorization]
 ---
 
 # External MCP server in the app, gated by Keycloak client roles from the SSO realm
@@ -162,6 +162,8 @@ app.
   resolve and scan behavior in the other files under `src/tests/mcp/`.
 
 ## Consequences & open follow-ups
+
+- [Assignee task list](2026-10-22-assignee-task-list.md): The task-write restriction is partly replaced: text, due dates, own-task creation, notes, follows and merges now use the existing task permissions; proposal review remains app-only.
 
 - The per-IP limit before token validation (120 a minute) was removed for Claude, whose users share
   a few Anthropic addresses; see

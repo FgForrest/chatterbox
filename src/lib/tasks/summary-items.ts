@@ -39,7 +39,7 @@ export interface SummaryTaskUpdate {
     quote: string | null;
 }
 
-const MAX_TEXT = 500;
+const MAX_TEXT = 2000;
 const MAX_FIELD = 200;
 const MAX_ITEMS = 60;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;

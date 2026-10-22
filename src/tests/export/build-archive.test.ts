@@ -12,6 +12,8 @@ const { dbMock, archivedTasks } = vi.hoisted(() => ({
 vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/lib/tasks/archive", () => ({
     tasksForArchive: vi.fn(async () => archivedTasks),
+    personalTasksForArchive: vi.fn(async () => []),
+    followsForArchive: vi.fn(async () => []),
     taskUpdatesForArchive: vi.fn(async () => new Map()),
     taskMentionsForArchive: vi.fn(async () => []),
     taskHomeMovesForArchive: vi.fn(async () => []),

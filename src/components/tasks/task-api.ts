@@ -6,6 +6,8 @@ import type {
     AcceptResult,
     RecordingTasks,
     TaskChange,
+    TaskListItem,
+    TaskMergePreview,
     TaskView,
 } from "@/lib/tasks/tasks";
 
@@ -119,10 +121,11 @@ export function tickTaskUpdate(
 export function mergeTaskIntoTarget(
     sourceTaskId: string,
     targetTaskId: string,
+    options?: TaskMergeOptions,
 ): Promise<TaskView & { mergeOwnerNotified?: boolean }> {
     return send(`/api/tasks/${encodeURIComponent(sourceTaskId)}/merge`, {
         method: "POST",
-        json: { targetTaskId },
+        json: { targetTaskId, ...options },
     });
 }
 
@@ -157,4 +160,45 @@ export function announceTasksChanged(): void {
 export function onTasksChanged(listener: () => void): () => void {
     window.addEventListener(TASKS_CHANGED, listener);
     return () => window.removeEventListener(TASKS_CHANGED, listener);
+}
+
+export interface TaskMergeOptions {
+    sourceVersion: number;
+    targetVersion: number;
+    confirmPrivateToShared?: boolean;
+}
+
+export function previewTaskMerge(
+    sourceTaskId: string,
+    targetTaskId: string,
+): Promise<TaskMergePreview> {
+    return send(
+        `/api/tasks/${encodeURIComponent(sourceTaskId)}/merge?target=${encodeURIComponent(targetTaskId)}`,
+    );
+}
+
+export function setTaskFollow(
+    taskId: string,
+    follow: boolean,
+): Promise<TaskView> {
+    return send(`/api/tasks/${encodeURIComponent(taskId)}/follow`, {
+        method: "POST",
+        json: { follow },
+    });
+}
+
+export function addOwnTask(
+    text: string,
+    dueDate: string | null,
+    folderId: string | null = null,
+): Promise<TaskListItem> {
+    return send("/api/tasks", {
+        method: "POST",
+        json: { text, dueDate, folderId },
+    }).then((task) => ({
+        ...(task as TaskView),
+        recording: null,
+        evidence: null,
+        visibleMentionQuotes: [],
+    }));
 }

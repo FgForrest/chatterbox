@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { useOptionalConfirm } from "@/components/confirm-dialog";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
+import { mergeTaskIntoTarget } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
@@ -107,6 +108,17 @@ export function RecordingTasks({
                             onChange={(change, optimistic) =>
                                 state.update(task, change, optimistic)
                             }
+                            onMerge={async (targetTaskId, options) => {
+                                const result = await mergeTaskIntoTarget(
+                                    task.id,
+                                    targetTaskId,
+                                    options,
+                                );
+                                await state.refresh?.();
+                                return {
+                                    ownerNotified: result.mergeOwnerNotified,
+                                };
+                            }}
                             onUndoMatch={
                                 task.canUndoMatch
                                     ? () => {

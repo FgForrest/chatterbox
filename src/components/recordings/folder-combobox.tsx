@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Users } from "lucide-react";
+import { ChevronDown, Folder, Users } from "lucide-react";
 import { useExtracted } from "next-intl";
 import {
     type CSSProperties,
@@ -26,6 +26,10 @@ interface FolderComboboxProps {
     onCreate?: (query: string) => void;
     disabled?: boolean;
     "aria-label"?: string;
+    variant?: "field" | "pill";
+    placeholder?: string;
+    emptyChoiceLabel?: string;
+    className?: string;
 }
 
 /** Inline folder choice with the same search and recent folders as FolderPicker. */
@@ -36,6 +40,10 @@ export function FolderCombobox({
     onCreate,
     disabled = false,
     "aria-label": ariaLabel,
+    variant = "field",
+    placeholder,
+    emptyChoiceLabel,
+    className = "",
 }: FolderComboboxProps) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -174,7 +182,7 @@ export function FolderCombobox({
                 aria-haspopup="listbox"
                 disabled={disabled}
                 title={selectedPath}
-                className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-left text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50"
+                className={`${variant === "pill" ? "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:text-foreground" : "flex min-h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-left text-sm shadow-xs dark:bg-input/30 dark:hover:bg-input/50"} outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
                 onClick={() => (expanded ? close() : show())}
                 onKeyDown={(event) => {
                     if (
@@ -198,6 +206,9 @@ export function FolderCombobox({
                     }
                 }}
             >
+                {variant === "pill" && (
+                    <Folder className="size-3 shrink-0" aria-hidden />
+                )}
                 {selected?.folder.scope === "org" && (
                     <Users
                         className="size-4 shrink-0 text-organization"
@@ -207,7 +218,11 @@ export function FolderCombobox({
                 <span
                     className={`min-w-0 flex-1 whitespace-normal [overflow-wrap:anywhere] ${selected ? "" : "text-muted-foreground"}`}
                 >
-                    {selectedPath ?? i18n("Choose a folder")}
+                    {(variant === "pill" && selected
+                        ? label(selected.folder)
+                        : selectedPath) ??
+                        placeholder ??
+                        i18n("Choose a folder")}
                 </span>
                 <ChevronDown
                     className="size-4 shrink-0 text-muted-foreground opacity-50"
@@ -223,6 +238,7 @@ export function FolderCombobox({
                     >
                         <FolderSearchList
                             entries={entries}
+                            emptyChoiceLabel={emptyChoiceLabel}
                             query={query}
                             onQueryChange={setQuery}
                             showPaths
@@ -230,7 +246,7 @@ export function FolderCombobox({
                             onEscape={close}
                             onTab={close}
                             onSelect={(folderId) => {
-                                rememberFolder(folderId);
+                                if (folderId) rememberFolder(folderId);
                                 close();
                                 onValueChange(folderId);
                             }}

@@ -60,6 +60,8 @@ import { collectArchivedMail } from "@/lib/mail/archive";
 import type { StorageProvider } from "@/lib/storage/types";
 import {
     archivedAssigneeIds,
+    followsForArchive,
+    personalTasksForArchive,
     taskHomeMovesForArchive,
     taskMentionsForArchive,
     tasksForArchive,
@@ -270,8 +272,12 @@ export async function buildAndUploadExportArchive(input: {
     const mailTasks = await tasksForArchive(scope, mailIds, {
         proposals: true,
     });
+    const [personalTasks, taskFollows] = await Promise.all([
+        personalTasksForArchive(scope),
+        followsForArchive(scope),
+    ]);
     const archivedTaskIds = new Set(
-        [...taskMap.values(), ...mailTasks.values()]
+        [...taskMap.values(), ...mailTasks.values(), personalTasks]
             .flat()
             .map((task) => task.id),
     );
@@ -381,6 +387,8 @@ export async function buildAndUploadExportArchive(input: {
             pendingOrganizationPlacements: number;
             path: string;
         };
+        personalTasks?: { count: number; path: string };
+        taskFollows?: { count: number; path: string };
         taskEvidence?: {
             mentions: { count: number; path: string | null };
             homeMoves: { count: number; path: string | null };
@@ -399,7 +407,7 @@ export async function buildAndUploadExportArchive(input: {
             raw: { included: boolean; reason?: string };
         }[];
     } = {
-        version: "2.3",
+        version: "2.4",
         scope: scope.kind,
         createdAt: new Date().toISOString(),
         userId,
@@ -825,6 +833,23 @@ export async function buildAndUploadExportArchive(input: {
         });
     }
 
+    if (scope.kind === "personal") {
+        if (personalTasks.length) {
+            const path = "tasks/personal.json";
+            archive.append(
+                Buffer.from(JSON.stringify(personalTasks, null, 2)),
+                { name: path },
+            );
+            manifest.personalTasks = { count: personalTasks.length, path };
+        }
+        if (taskFollows.length) {
+            const path = "tasks/follows.json";
+            archive.append(Buffer.from(JSON.stringify(taskFollows, null, 2)), {
+                name: path,
+            });
+            manifest.taskFollows = { count: taskFollows.length, path };
+        }
+    }
     const containedItemIds = new Set([
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),

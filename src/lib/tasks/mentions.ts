@@ -277,7 +277,7 @@ interface RemainingMention {
 
 interface LockedTaskRow {
     id: string;
-    itemId: string;
+    itemId: string | null;
     userId: string;
 }
 
@@ -347,7 +347,7 @@ async function taskGraphItemRefs(
                 .where(inArray(taskUpdateProposals.taskId, [...taskIds])),
         ]);
         for (const row of [...tasks, ...mentions, ...proposals]) {
-            ids.add(row.itemId);
+            if (row.itemId) ids.add(row.itemId);
         }
     }
     return tx
@@ -525,12 +525,11 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
     );
     const affected = locked.filter(
         (task) =>
-            (task.itemId === input.itemId &&
+            task.itemId !== null &&
+            ((task.itemId === input.itemId &&
                 task.userId === input.ownerUserId) ||
-            (input.removeMentions && mentioned.has(task.id)),
+                (input.removeMentions && mentioned.has(task.id))),
     );
-    if (affected.length === 0) return;
-
     const taskIds = affected.map((task) => task.id);
     if (input.removeMentions) {
         await tx
@@ -539,10 +538,11 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
                 and(
                     eq(taskMentions.itemId, input.itemId),
                     eq(taskMentions.userId, input.ownerUserId),
-                    inArray(taskMentions.taskId, taskIds),
                 ),
             );
     }
+
+    if (affected.length === 0) return;
 
     const remaining = await tx
         .select({
@@ -707,7 +707,8 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
                 ),
             );
         if (proposals.length === 0) continue;
-        const targetShared = shared.has(current.itemId);
+        const targetShared =
+            current.itemId !== null && shared.has(current.itemId);
         let assigneeUserId: string | null = null;
         if (current.assigneePersonId) {
             const [person] = await tx

@@ -433,7 +433,7 @@ describe.skipIf(!url)("task evidence audio availability", () => {
                     evidenceStartMs: 5000,
                 });
             const row = await read();
-            expect(row?.evidence.audioAvailable).toBe(state === "available");
+            expect(row?.evidence?.audioAvailable).toBe(state === "available");
             expect(row?.evidenceAudioAvailable).toBe(state === "available");
             expect(row).not.toHaveProperty("homeAudioReapedAt");
             expect(row?.evidence).not.toHaveProperty("storagePath");

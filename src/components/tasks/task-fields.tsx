@@ -2,7 +2,7 @@
 
 import { CalendarDays, X } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** Today in the viewer's time zone, `YYYY-MM-DD`. */
@@ -27,7 +27,14 @@ export function TaskTextInput({
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(text);
+    const input = useRef<HTMLTextAreaElement>(null);
     useEffect(() => setDraft(text), [text]);
+    useLayoutEffect(() => {
+        if (!input.current) return;
+        input.current.rows = draft.split("\n").length;
+        input.current.style.height = "auto";
+        input.current.style.height = `${input.current.scrollHeight}px`;
+    }, [draft]);
 
     const save = () => {
         const next = draft.trim();
@@ -39,12 +46,18 @@ export function TaskTextInput({
     };
 
     return (
-        <input
+        <textarea
+            ref={input}
+            rows={1}
+            maxLength={2000}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={save}
             onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                }
                 if (event.key === "Escape") {
                     setDraft(text);
                     event.currentTarget.blur();
@@ -52,7 +65,7 @@ export function TaskTextInput({
             }}
             aria-label={i18n("Task")}
             className={cn(
-                "rounded border border-transparent bg-transparent px-1 hover:border-border focus:border-ring focus:outline-none",
+                "min-h-6 resize-none overflow-hidden whitespace-pre-wrap rounded border border-transparent bg-transparent px-1 hover:border-border focus:border-ring focus:outline-none",
                 className,
             )}
         />

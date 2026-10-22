@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
+import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     asyncJobs,
@@ -9,6 +10,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    recordingTasks,
     users,
 } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
@@ -776,6 +778,7 @@ export async function moveFolder(input: {
     const moved = await db.transaction(
         async (tx) => {
             if (orgUserId) await lockOrgTree(tx);
+            await lockPrivateFolderTree(tx, input.userId);
             const target = await resolveFolder(
                 tx,
                 input.userId,
@@ -855,6 +858,22 @@ export async function moveFolder(input: {
                         400,
                     );
                 }
+                await tx
+                    .update(recordingTasks)
+                    .set({
+                        folderId: null,
+                        version: sql`${recordingTasks.version} + 1`,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(recordingTasks.userId, target.ownerId),
+                            eq(recordingTasks.source, "personal"),
+                            inArray(recordingTasks.folderId, [
+                                ...subtreeIds(folders, folder.id),
+                            ]),
+                        ),
+                    );
             }
 
             const siblings = folders
@@ -957,6 +976,7 @@ export async function deleteFolder(
     const orgUserId = await getOrgUserId();
     const scope = await db.transaction(async (tx) => {
         if (orgUserId) await lockOrgTree(tx);
+        await lockPrivateFolderTree(tx, userId);
         const target = await resolveFolder(tx, userId, folderId, orgUserId);
         if (!target || target.folder.kind !== "custom") throw folderNotFound();
         assertWritable(target);
@@ -1051,6 +1071,25 @@ export async function deleteFolder(
                 target.folder.id,
             ),
         ]);
+        await tx
+            .update(recordingTasks)
+            .set({
+                folderId: null,
+                version: sql`${recordingTasks.version} + 1`,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingTasks.userId, target.ownerId),
+                    eq(recordingTasks.source, "personal"),
+                    inArray(recordingTasks.folderId, [
+                        ...subtreeIds(
+                            await listTreeFolders(tx, target.ownerId),
+                            target.folder.id,
+                        ),
+                    ]),
+                ),
+            );
         await tx
             .delete(recordingFolders)
             .where(
