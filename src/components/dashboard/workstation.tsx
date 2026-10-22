@@ -290,7 +290,7 @@ export function Workstation({
             )
                 return;
             window.history[method === "push" ? "pushState" : "replaceState"](
-                { ...window.history.state, mobileView: intendedMobileView },
+                { mobileView: intendedMobileView },
                 "",
                 dashboardLocation(params),
             );
@@ -439,7 +439,7 @@ export function Workstation({
                 }
                 params.delete("googleExport");
                 window.history.replaceState(
-                    window.history.state,
+                    { mobileView: window.history.state?.mobileView },
                     "",
                     dashboardLocation(params),
                 );
@@ -449,7 +449,7 @@ export function Workstation({
             handledLocationQuery.current = params.toString();
             if (traversing)
                 window.history.replaceState(
-                    window.history.state,
+                    { mobileView: window.history.state?.mobileView },
                     "",
                     dashboardLocation(params),
                 );
