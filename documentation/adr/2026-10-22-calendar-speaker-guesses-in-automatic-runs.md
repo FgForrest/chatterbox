@@ -22,7 +22,7 @@ the call) and waits for the user to confirm it. Roster names also go to the tran
 provider's spelling hints and to the correction pass. Matching attendees to Almanac people by e-mail
 was dropped.
 
-This reverses two rules of `2026-10-12-calendar-meet-speaker-candidates` once it ships: that only
+This reverses two rules of [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md) once it ships: that only
 runs started by hand get a roster, and that the model may not infer identity from attendance or
 elimination. Because it is not merged, that record stays in force and the two are linked as
 related only; when this ships, it should supersede it.
@@ -37,11 +37,11 @@ to be used: "model should try to guess ... assign speakers to known person to be
 (calendar) based on information we know there? All will be somehow attributed with question mark
 and user will just confirm it." His other points: "automatic runs MUST use it", "we should pass it
 to transcription spelling", "the review should show the source". Identity still comes from
-invitations and attendance, never from voices (`2026-09-14-speaker-identity-without-biometrics`).
+invitations and attendance, never from voices ([2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md)).
 
 ### Previous state
 
-See `2026-10-12-calendar-meet-speaker-candidates`: a roster only on a manual run on the private view,
+See [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md): a roster only on a manual run on the private view,
 candidate names as hints, a speaker named only from direct transcript evidence, no e-mails requested.
 
 ## Options considered
@@ -111,7 +111,7 @@ longer ignores the calendar.
 
 ## Consequences & open follow-ups
 
-- When this merges, `2026-10-12-calendar-meet-speaker-candidates` becomes superseded; the link must
+- When this merges, [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md) becomes superseded; the link must
   change from `relates` to `supersedes`.
 - The defaults above need the maintainer's confirmation.
 - Coverage should be re-measured with the Learn evaluation after it ships; the last measured
@@ -119,7 +119,7 @@ longer ignores the calendar.
 
 ## Related work
 
-- `2026-10-12-calendar-meet-speaker-candidates`: the rule this proposes to replace.
+- [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md): the rule this proposes to replace.
 - [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md): the non-biometric boundary these guesses stay inside.
 
 ## Timeline

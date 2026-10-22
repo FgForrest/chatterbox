@@ -9,7 +9,7 @@ prs: [70, 76, 144, 153, 178]
 areas: [src/lib/ai/default-provider.ts, src/lib/ai/provider-resolution-order.ts, src/lib/ai/enhancement-provider.ts, src/lib/ai/list-providers.ts, src/lib/profiles/organization-providers.ts, src/lib/profiles/default-rule.ts, src/components/settings/provider-card.tsx]
 supersedes: []
 superseded-by: []
-relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-05-ai-cost-per-provider-card, 2026-10-19-employee-first-onboarding, 2026-09-23-shared-organization-scope]
+relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-19-ai-cost-per-provider-card, 2026-10-19-employee-first-onboarding, 2026-09-23-shared-organization-scope]
 ---
 
 # Organization providers are every member's defaults per role, explicit choices fail loudly, and nothing falls back to a hard-coded model
@@ -165,7 +165,7 @@ Organization ones; a referenced profile is archived, not deleted, and is never r
 
 - [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md):
   introduced Organization providers with the pins-only rule this record replaces.
-- [2026-10-05-ai-cost-per-provider-card](2026-10-05-ai-cost-per-provider-card.md): prices live on
+- [2026-10-19-ai-cost-per-provider-card](2026-10-19-ai-cost-per-provider-card.md): prices live on
   the same provider cards, and spend shows every payer once the Organization pays for members.
 - [2026-10-19-employee-first-onboarding](2026-10-19-employee-first-onboarding.md): the wizard
   relies on members inheriting the Organization's providers.

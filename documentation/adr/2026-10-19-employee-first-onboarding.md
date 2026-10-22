@@ -1,11 +1,11 @@
 ---
 title: The setup wizard on a self-hosted Organization is built for employees, skips what the Organization provides, and reads readiness from the pipeline's own resolver
 date: 2026-10-19
-updated: 2026-10-22 16:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [136, 182, 189]
+prs: [136, 182]
 areas: [src/components/onboarding-dialog.tsx, src/components/onboarding-steps.tsx, src/lib/onboarding/readiness.ts, src/lib/onboarding/capabilities.ts, src/app/api/onboarding/readiness, src/components/meeting-recorder-setup.tsx]
 supersedes: []
 superseded-by: []
@@ -140,5 +140,5 @@ does the Organization already provide this for the member?
   (PR #136).
 - **2026-10-19**: the maintainer's rulings on the AI step, the Claude step, the Organization account
   and the recorder; PR #182 merged.
-- **2026-10-20**: consistent connected line for the recorder step (PR #189).
+- **2026-10-20**: follow-up: consistent connected line for the recorder step (PR #189).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

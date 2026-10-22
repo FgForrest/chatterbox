@@ -69,13 +69,13 @@ and shipped in PR #53 on 2026-09-23.
 |--------|------------------|------------|
 | Copy each shared recording to an Organization user, encrypted with an Organization key unlocked at start (the maintainer's first idea) | Encryption at rest uses one instance-wide key and passwords only authenticate, so an Organization key adds no protection. Copies double audio storage and must be kept in sync through edits, re-summaries, renames, retention and deletion | Per-user or per-Organization keys are ever introduced |
 | A curator role on regular users (`ORG_CURATORS`), or both role and account | More surface than one account that owns the shared rows and sees nothing private | Happened: identity-provider authorization added `org.curate` (PR #131) |
-| One shared result per recording, the last run replacing it for everyone including the owner's private view (first chosen, then reversed in the same session) | The maintainer wanted the owner's own output preserved privately and the Organization view to show output made with Organization templates | Happened in a different form: one set of rows, record `2026-09-30-shared-recording-edited-by-organization` |
+| One shared result per recording, the last run replacing it for everyone including the owner's private view (first chosen, then reversed in the same session) | The maintainer wanted the owner's own output preserved privately and the Organization view to show output made with Organization templates | Happened in a different form: one set of rows, record [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md) |
 | Per-user results on a shared recording | More storage and UI, and the Organization knowledge base would have to pick which transcript counts | |
 | Copy the owner's transcript into an Organization row at share time (with or without the owner's names as suggestions, with or without an automatic Organization summary) | The maintainer chose no copy at all; suggested names would show the owner's private names to every member, and an automatic summary would charge the owner for every share | |
 | Two linked knowledge bases, personal people linked to Organization people with Organization fields overriding | Needs a sync and override layer with race windows where the two disagree | |
 | One instance-wide knowledge base | A speaker named only in someone's private recording becomes visible to everyone by name | |
 | Everyone edits Organization people, the Organization account locks; or only the Organization account creates them | More churn; or members wait on the curator for every new person | |
-| The Organization's retention replaces the owner's while shared (the maintainer's first rule) | Nothing is copied, so a shorter Organization period deletes the owner's only copy earlier than they configured | Happened once sharing became a hand-over (record `2026-09-30-shared-recording-edited-by-organization`) |
+| The Organization's retention replaces the owner's while shared (the maintainer's first rule) | Nothing is copied, so a shorter Organization period deletes the owner's only copy earlier than they configured | Happened once sharing became a hand-over (record [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md)) |
 | The actor's settings for everything in an Organization-view run | The shared summary would flip language and format with whoever clicked last | |
 | Anyone may withdraw, and deleting a folder withdraws its recordings | One careless folder delete hides many recordings from everyone | |
 | Polling for tree changes | Seconds of lag and constant load | |
@@ -131,9 +131,9 @@ the client localizes the folder conflict (409) only.
   `0066_merge_org_rows`). Re-transcription in the Organization view became the Organization
   account's alone (replacing "any member, the clicker pays"), and speakers on a shared recording
   became one shared set instead of the Organization view's own. See
-  `2026-09-30-shared-recording-edited-by-organization` and `2026-09-30-learn`.
+  [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md) and [2026-09-30-learn](../2026-09-30-learn/README.md).
 - **2026-10-14, PR #131:** identity-provider authorization added `org.curate`; a curator acts for the
-  Organization under their own identity (record `2026-10-14-identity-provider-authorization`).
+  Organization under their own identity (record [2026-10-14-identity-provider-authorization](../2026-10-14-identity-provider-authorization.md)).
 - **2026-10-16, implemented in PR #135:** editing the Organization tree is no longer open to everyone.
   Members create subfolders inside existing Organization folders and file items into them; creating
   top-level Organization folders, renaming, moving, reordering and deleting them (and changing a
@@ -141,20 +141,20 @@ the client localizes the folder conflict (409) only.
   the UI only. The maintainer chose this over "curators only" and "any member"; no reason was
   recorded.
 - **2026-10-17:** Organization default providers: members use Organization providers for work no
-  profile pins, and the Organization pays (record `2026-10-19-provider-defaults-and-no-fallback`).
+  profile pins, and the Organization pays (record [2026-10-19-provider-defaults-and-no-fallback](../2026-10-19-provider-defaults-and-no-fallback.md)).
 - **2026-10-21, PR #222:** curators manage existing Organization Almanac entries
-  (`2026-10-21-curators-manage-organization-almanac`).
+  ([2026-10-21-curators-manage-organization-almanac](../2026-10-21-curators-manage-organization-almanac.md)).
 - **2026-10-22, PR #221:** the owner edits a shared recording again, in the Organization scope
-  (`2026-10-22-owner-edits-shared-recording`).
+  ([2026-10-22-owner-edits-shared-recording](../2026-10-22-owner-edits-shared-recording.md)).
 
 ## Related work
 
-- `2026-09-30-shared-recording-edited-by-organization`: replaced the two-view model with one set of
+- [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md): replaced the two-view model with one set of
   rows and changed the retention rule.
-- `2026-09-30-learn`: the Learn work that forced that change and made speakers shared.
-- `2026-10-07-backup-scope`: splits backups and exports along the personal and Organization scopes
+- [2026-09-30-learn](../2026-09-30-learn/README.md): the Learn work that forced that change and made speakers shared.
+- [2026-10-07-backup-scope](../2026-10-07-backup-scope.md): splits backups and exports along the personal and Organization scopes
   defined here.
-- `2026-10-22-owner-edits-shared-recording`: the current writer rule for a shared recording.
+- [2026-10-22-owner-edits-shared-recording](../2026-10-22-owner-edits-shared-recording.md): the current writer rule for a shared recording.
 - [2026-10-21-curators-manage-organization-almanac](../2026-10-21-curators-manage-organization-almanac.md): changed this record's rule that only the Organization account curates Organization people.
 - [2026-10-19-processing-profiles-and-workflow](../2026-10-19-processing-profiles-and-workflow/README.md): carries the 2026-10-16 Organization folder permissions listed under Later changes.
 - [2026-10-14-identity-provider-authorization](../2026-10-14-identity-provider-authorization.md): added `org.curate`, so curators act for the Organization under their own identity.

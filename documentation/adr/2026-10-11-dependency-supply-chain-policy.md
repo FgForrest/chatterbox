@@ -9,7 +9,7 @@ prs: [10, 99, 112, 113, 115]
 areas: [pnpm-workspace.yaml, package.json, .github/workflows/ci.yml, .github/dependabot.yml, scripts/snowball-stemmers.sh, src/lib/knowledge/stemming/snowball, src/lib/notifications/email-components.tsx, src/lib/transcription/gemini-transcribe.ts, src/components/app-progress.tsx]
 supersedes: []
 superseded-by: []
-relates: [2026-10-01-name-matching-across-word-forms, 2026-10-11-inbound-mail]
+relates: [2026-10-01-name-matching-across-word-forms, 2026-10-18-inbound-mail]
 ---
 
 # Production dependencies come from well-known publishers or our own code, and installs wait seven days and refuse provenance downgrades
@@ -128,7 +128,7 @@ everything.
 - [2026-10-01-name-matching-across-word-forms](2026-10-01-name-matching-across-word-forms.md): the
   Almanac's word-form matching runs on the stemmers this record moved to the official Snowball
   source.
-- [2026-10-11-inbound-mail](2026-10-11-inbound-mail/README.md): the switch from sanitize-html to DOMPurify was ruled in this audit and shipped with the mail work.
+- [2026-10-18-inbound-mail](2026-10-18-inbound-mail/README.md): the switch from sanitize-html to DOMPurify was ruled in this audit and shipped with the mail work.
 
 ## Timeline
 

@@ -1,11 +1,11 @@
 ---
 title: Inbound mail through an own MX into one pile with recordings, on an item supertype and a kind-neutral content model
-date: 2026-10-11
-updated: 2026-10-22 16:00
+date: 2026-10-18
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [110, 114, 121, 142, 146, 174]
+prs: [110, 114, 121, 142, 146]
 areas: [src/lib/mail, mail-receiver, src/app/api/internal/mail, src/lib/content, src/db/deprecated-columns.ts, src/db/schema.ts, src/lib/mcp/tools/mail.ts, src/lib/events, docker-compose.yml]
 supersedes: []
 superseded-by: []
@@ -21,8 +21,9 @@ forwarded, copied or blind-copied there lands in the same list as recordings ("C
 "Klepy") and gets summaries, tasks, Learn facts, exports, retention, MCP tools and search. To carry
 it, recordings and mail became subtypes of a new `chatter_items` supertype, and the AI pipeline
 reads a kind-neutral content model (participants, segments, anchors) instead of transcripts. The
-line ran from PR #110 (the five-phase implementation) through receiver packaging, proxy support,
-two fixes that made mail actually work in built images, and live delivery to the dashboard.
+line ran from PR #110 (the five-phase implementation) through receiver packaging, proxy support and
+the two fixes that made mail actually work in built images (the last, PR #146, on 2026-10-18); live
+delivery to the dashboard (PR #174) came after as a follow-up.
 
 ## Why
 
@@ -66,7 +67,7 @@ SMTP but making mail a second kind of item. The constraints:
 | 2026-10-12 | PROXY protocol v1 accepted only from listed proxies (`MAIL_PROXY_PROTOCOL_FROM`, PR #121) | Port 25 may live on an edge host; without it every connection shows the proxy's address and the source check refuses it; STARTTLS stays end to end | `src/lib/mail/receiver/proxy.ts` |
 | 2026-10-17 | Every env schema key must have an explicit runtime read, enforced by the type of `readEnvInput` and a test (PR #142) | The nine `MAIL_*` keys had no read, so mail never switched on in a built image; unit tests mock the env module and could not see it | `src/lib/env.ts`, `src/tests/mail/env.test.ts` |
 | 2026-10-18 | One shared DKIM resolver joins every string of a `_domainkey` TXT answer, under Node and Bun alike (PR #146) | Bun returns the strings of a 2048-bit key as separate records; mailauth read half a key and the app refused mail the Node receiver had passed | `src/lib/mail/dkim.ts` (`resolveDkimDns`) |
-| 2026-10-19 | New mail reaches the dashboard by `pg_notify` after commit and one shared server-sent event stream per tab; status polling stays as the safety net (PR #174) | Polling took up to two minutes; a second stream per tab would eat the browser's ~6 HTTP/1.1 connections per origin | `src/db/queries/events.ts`, `src/app/api/events/route.ts`, `src/lib/events/client.ts` |
+| 2026-10-19 | Follow-up (PR #174): new mail reaches the dashboard by `pg_notify` after commit and one shared server-sent event stream per tab; status polling stays as the safety net (PR #174) | Polling took up to two minutes; a second stream per tab would eat the browser's ~6 HTTP/1.1 connections per origin | `src/db/queries/events.ts`, `src/app/api/events/route.ts`, `src/lib/events/client.ts` |
 
 ## Rejected outright
 
@@ -158,5 +159,5 @@ SMTP but making mail a second kind of item. The constraints:
 - **2026-10-12**: PR #121 merged.
 - **2026-10-17**: PR #142 merged.
 - **2026-10-18**: PR #146 merged.
-- **2026-10-19**: PR #174 merged.
+- **2026-10-19**: follow-up PR #174 merged (live delivery to the dashboard).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

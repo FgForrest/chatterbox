@@ -30,7 +30,7 @@ Learn's evaluation at merge (PR #69) named 14 of 14 speakers it proposed correct
 deliberately hidden speakers unnamed, but it named only 14 of 70 speaker labels: meetings rarely
 say names. Calendar and Meet were the planned way to raise that coverage without voice data: the
 maintainer ruled on 2026-09-13 that speaker identity uses Google Calendar and Meet, never
-voiceprints (`2026-09-14-speaker-identity-without-biometrics`), and the Learn work deferred
+voiceprints ([2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md)), and the Learn work deferred
 Calendar and Meet to a follow-up on 2026-09-28. The constraint that made the design non-obvious is
 the failure Learn is built to avoid: a wrong name in a summary or the minutes is worse than no
 name, which is why Learn already refused to resolve a first name two known people share.
@@ -81,7 +81,7 @@ turns when their language is English, and Calendar and Meet treated as facts rat
 identity from topic, attendance, or elimination." The same change (PR #105) made Learn assess every
 unnamed label separately and look up people by the names used to address a speaker who then answers.
 What would make Option A win: a review flow where a roster-based name is clearly marked as a guess
-the user confirms. That is the proposal in `2026-10-22-calendar-speaker-guesses-in-automatic-runs`.
+the user confirms. That is the proposal in [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md).
 
 ## Key technical details
 
@@ -127,14 +127,14 @@ Checked on 2026-10-22, the integration helped little in practice:
   exist, nothing writes them);
 - only the owner's primary calendar, only the private view, Meet data only for 30 days.
 
-The proposal `2026-10-22-calendar-speaker-guesses-in-automatic-runs` addresses all but the e-mail
+The proposal [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) addresses all but the e-mail
 link; it is not merged, so this record stays in force until it ships.
 
 ## Related work
 
-- `2026-09-14-speaker-identity-without-biometrics`: why identity comes from Calendar and Meet at all.
-- `2026-09-30-learn`: the Learn passes and evaluation these candidates feed.
-- `2026-10-22-calendar-speaker-guesses-in-automatic-runs`: the proposed successor rule (roster on every
+- [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md): why identity comes from Calendar and Meet at all.
+- [2026-09-30-learn](2026-09-30-learn/README.md): the Learn passes and evaluation these candidates feed.
+- [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): the proposed successor rule (roster on every
   run, guesses for the user to confirm).
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): the per-user Google connection Calendar and Meet reuse.
 

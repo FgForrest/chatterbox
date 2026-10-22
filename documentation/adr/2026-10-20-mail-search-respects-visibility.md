@@ -9,7 +9,7 @@ prs: [185, 186, 191, 197]
 areas: [src/lib/mail/searchable-parts.ts, src/lib/mcp/data/mail.ts, src/lib/mcp/tools/mail.ts, src/lib/mcp/scan.ts, src/lib/search/item-search.ts, src/lib/mail/internal-address.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-11-inbound-mail, 2026-10-07-external-mcp-server]
+relates: [2026-10-18-inbound-mail, 2026-10-07-external-mcp-server]
 ---
 
 # Mail search reads forwarded and quoted parts but never more than the caller may already see
@@ -134,7 +134,7 @@ with it, and nothing else should.
 
 ## Related work
 
-- [2026-10-11-inbound-mail](2026-10-11-inbound-mail/README.md): the segments, `knownItemId`
+- [2026-10-18-inbound-mail](2026-10-18-inbound-mail/README.md): the segments, `knownItemId`
   de-duplication, secret addresses and the `mail:read` role this search builds on.
 - [2026-10-07-external-mcp-server](2026-10-07-external-mcp-server.md): the bounded decrypt-scan and
   row-scoping rules `search_mail` extends.

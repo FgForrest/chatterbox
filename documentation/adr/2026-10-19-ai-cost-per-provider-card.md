@@ -1,11 +1,11 @@
 ---
 title: AI cost is priced from the provider card that made the call, recorded once and never repriced, and shown for every payer
-date: 2026-10-05
-updated: 2026-10-22 16:00
+date: 2026-10-19
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [77, 78, 85, 170, 179, 231]
+prs: [77, 78, 85, 170, 179]
 areas: [src/lib/ai/usage-cost.ts, src/lib/ai/published-rates.ts, src/lib/ai/provider-rate-input.ts, src/components/recordings/ai-cost-summary.tsx, agent-bridge/lib.mjs, src/db/schema.ts]
 supersedes: []
 superseded-by: []
@@ -148,5 +148,6 @@ it clear who carried it.
 - **2026-10-05**: per-card prices decided, no repricing, no subscription toggle; PR #85 merged.
 - **2026-10-19**: PR #170 (spend in the header's metadata row) merged; every payer shown and the
   unknown-price display agreed; PR #179 merged.
-- **2026-10-22**: PR #231 merged (bridge rate for a new Codex model).
+- **2026-10-22**: follow-up, outside this line: PR #231 added the bridge rate for a new Codex model
+  (a price-table update).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

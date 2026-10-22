@@ -1,11 +1,11 @@
 ---
 title: Play a transcript sentence from a gutter control, and keep transcript and player on one position in both directions
 date: 2026-10-07
-updated: 2026-10-22 16:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [75, 90, 204, 225]
+prs: [75, 90]
 areas: [src/components/dashboard/transcript-view.tsx, src/hooks/use-transcript-follow.ts, src/hooks/use-playback-engine.ts, src/components/playback]
 supersedes: []
 superseded-by: []
@@ -20,7 +20,8 @@ follows the sentence under the pointer, and each turn's speaker dot becomes its 
 keyboard skip tints the sentence being played and scrolls the transcript to it, and a scroll the
 reader makes in the transcript seeks the audio to the sentence on the reading line, paused or
 playing. Sentence times are estimated from character positions, so playback starts 300 ms early.
-Later work moved every play control onto one engine (PR #204) and one button component (PR #225).
+Follow-up work moved every play control onto one engine (PR #204) and one button component
+(PR #225).
 
 ## Why
 
@@ -134,7 +135,7 @@ reader scrolls" reverses an explicit ruling and needs his confirmation and a new
 
 - **2026-10-01**: right-click a speaker chip to play their turns (PR #75).
 - **2026-10-07**: layout A, auto-scroll and two-way sync chosen and built; PR #90 merged.
-- **2026-10-20**: audio stayed silent after speaker and transcript plays; one playback engine
-  (PR #204).
-- **2026-10-22**: one play control and one availability rule (PR #225).
+- **2026-10-20**: follow-up: audio stayed silent after speaker and transcript plays; one playback
+  engine (PR #204).
+- **2026-10-22**: follow-up: one play control and one availability rule (PR #225).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

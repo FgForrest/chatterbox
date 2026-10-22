@@ -1,15 +1,15 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-10-22 17:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [69, 79]
+prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-14-speaker-identity-without-biometrics, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-almanac-and-new-records, 2026-10-01-name-matching-across-word-forms, 2026-10-02-almanac-guided-transcript-correction, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-19-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
+relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-14-speaker-identity-without-biometrics, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-almanac-and-new-records, 2026-10-01-name-matching-across-word-forms, 2026-10-02-almanac-guided-transcript-correction, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
 ---
 
 # Learn: knowledge from recordings, proposed by a model and confirmed by a person
@@ -20,8 +20,8 @@ names, and lasting work facts ("a person leads a project"). Nothing is written u
 reviews it; what they accept becomes knowledge for the next transcript, summary and Learn run.
 Knowledge has two layers: a shared one owned by the Organization account and a private one per
 user, chosen by whether the recording is shared. PR #69 built the whole plan in six phases, each
-reviewed by two independent model reviewers and fixed before the next; PR #79 fixed what the first
-real automatic run exposed.
+reviewed by two independent model reviewers and fixed before the next; a follow-up, PR #79, fixed what
+the first real automatic run exposed.
 
 ## Why
 
@@ -61,7 +61,7 @@ real automatic run exposed.
 | 2026-09-29 | A share adopts the owner's private types it needs into the Organization; the curator tidies afterwards; a type the curator deleted is remembered as refused | See below | `adoptTypesForShareInTx` in `vocabulary.ts` |
 | 2026-09-29 | A person heard only by first name is suggested with a mark and never pre-ticked; one that two known people share is dropped | In the pilot every wrongly named speaker had been resolved from a first name alone | `validate.ts`, `evaluation.md` |
 | 2026-09-29 | A provider can be marked "Use for Learn" | The maintainer accepted a separate, stronger model for Learn; the evaluation recommended Opus 5.5 for Learn and a cheaper model for summaries | migration 0078 |
-| 2026-10-02 | A correction of a thing spreads to every other place its words stand alone; a person's correction does not | A person's name may belong to a namesake elsewhere in the recording | `occurrences` in `validate.ts` (PR #79) |
+| 2026-10-02 | Follow-up after the merge (PR #79): a correction of a thing spreads to every other place its words stand alone; a person's correction does not | A person's name may belong to a namesake elsewhere in the recording | `occurrences` in `validate.ts` (PR #79) |
 
 ### Evidence anchored to audio time
 
@@ -223,7 +223,7 @@ share would bring it back; the refusal lifts when the Organization has a type of
   the correction pass after Learn.
 - [2026-10-12-calendar-meet-speaker-candidates](../2026-10-12-calendar-meet-speaker-candidates.md): the
   follow-up assignment for calendar context.
-- [2026-10-19-learn-review-one-column](../2026-10-19-learn-review-one-column.md): the later review
+- [2026-10-20-learn-review-one-column](../2026-10-20-learn-review-one-column.md): the later review
   layout and its language.
 - [2026-09-13-durable-job-queue](../2026-09-13-durable-job-queue.md): the queue Learn runs on, made generic with the knowledge base in mind.
 - [2026-10-22-recording-language-checked-by-learn](../2026-10-22-recording-language-checked-by-learn.md): Learn also reports the transcript's language and asks when the provider's is wrong.
@@ -244,6 +244,6 @@ share would bring it back; the refusal lifts when the Organization has a type of
 - **2026-09-29**: Phases 2 to 6 built; thresholds set; auto-adopt and refusals decided; pilot on 9
   recordings with four models; the first-name rule.
 - **2026-09-30**: three tuning rounds overnight; PR #69 merged.
-- **2026-10-02**: PR #79 merged: the page follows released work, speaker guesses, spreading
+- **2026-10-02**: follow-up PR #79 merged: the page follows released work, speaker guesses, spreading
   corrections, the recorder as "you".
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

@@ -35,7 +35,7 @@ action.
 Curators (`org.curate`) already acted for the Organization on shared recordings: the writer rule
 let them change a shared recording's content (PR #131). The Almanac pages and APIs did not: the
 organization account alone managed Organization people, things and vocabulary, as decided in
-`2026-09-23-shared-organization-scope`.
+[2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md).
 
 ## Options considered
 
@@ -97,17 +97,17 @@ each page shows, including Organization facts and nicknames. Locally the changed
 ## Consequences & open follow-ups
 
 - The next day the Organization Almanac was opened wider: a member's confirmed Learn findings become
-  Organization knowledge on share (`2026-10-22-organization-almanac-grows-on-share`, proposed). That
+  Organization knowledge on share ([2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md), proposed). That
   makes curator tooling, not just curator rights, necessary: duplicate detection and per-folder
   knowledge views are tracked in issue #240.
 - Organization people still cannot be created directly by anyone but the organization account.
 
 ## Related work
 
-- `2026-10-01-almanac-and-new-records`: the Almanac and how new records arise.
-- `2026-10-14-identity-provider-authorization`: introduced `org.curate`, which made the
+- [2026-10-01-almanac-and-new-records](2026-10-01-almanac-and-new-records.md): the Almanac and how new records arise.
+- [2026-10-14-identity-provider-authorization](2026-10-14-identity-provider-authorization.md): introduced `org.curate`, which made the
   organization-account-only rule unusable.
-- `2026-10-22-organization-almanac-grows-on-share`: widens what reaches the Organization Almanac,
+- [2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md): widens what reaches the Organization Almanac,
   relying on these curator rights to clean up.
 - [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization scope whose curator rule this record widens.
 - [2026-10-22-almanac-curator-desk](2026-10-22-almanac-curator-desk.md): the duplicate queue and folder knowledge view built on these curator rights.

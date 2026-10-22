@@ -9,7 +9,7 @@ prs: []
 areas: [src/lib/ai/summary-presets.ts, src/lib/summary/generate-summary.ts, src/lib/summary/generate-mail-summary.ts, src/lib/ai/generate-title.ts, src/lib/learn/output.ts, src/lib/learn/review-language.ts, src/components/dashboard/transcription-panel.tsx]
 supersedes: []
 superseded-by: []
-relates: [2026-09-30-learn, 2026-10-19-learn-review-one-column]
+relates: [2026-09-30-learn, 2026-10-20-learn-review-one-column]
 ---
 
 # Generated text follows the language the transcript is written in; Learn asks when the provider's language is wrong, and the answer is stored per recording
@@ -97,7 +97,7 @@ titles); three older tests that asserted the forced language were changed to the
 ## Related work
 
 - [2026-09-30-learn](2026-09-30-learn/README.md): the full-transcript read the language check rides on.
-- [2026-10-19-learn-review-one-column](2026-10-19-learn-review-one-column.md): the review where the
+- [2026-10-20-learn-review-one-column](2026-10-20-learn-review-one-column.md): the review where the
   language item appears, already written in the reviewer's language.
 
 ## Timeline

@@ -144,16 +144,16 @@ including migration 0066 merging a snapshot copy.
 **Superseded in part.** On 2026-10-21 the maintainer asked why an owner cannot keep working on a recording shared at step
 two of the workflow; nothing technical required it. He ruled that the owner writes a shared
 recording like a curator of it, in the Organization scope (PR #221,
-`2026-10-22-owner-edits-shared-recording`). What survives from this record: one set of rows, no
+[2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md)). What survives from this record: one set of rows, no
 copy; withdrawal returns the recording as the Organization left it; erase withdraws first; the
 Organization's retention while shared with no grace period; names keep pointing at Organization
 people after withdrawal; other members stay read-only.
 
 ## Related work
 
-- `2026-09-23-shared-organization-scope`: the two-view model and the retention rule this replaced.
-- `2026-09-30-learn`: the Learn work whose evidence model needed one transcript per shared recording.
-- `2026-10-22-owner-edits-shared-recording`: gives the owner edit rights back.
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the two-view model and the retention rule this replaced.
+- [2026-09-30-learn](2026-09-30-learn/README.md): the Learn work whose evidence model needed one transcript per shared recording.
+- [2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): gives the owner edit rights back.
 
 ## Timeline
 

@@ -54,7 +54,7 @@ The hand-over protected three things, and any replacement had to keep them:
 
 ### Previous state
 
-From 2026-09-28 (PR #69, record `2026-09-30-shared-recording-edited-by-organization`): while shared,
+From 2026-09-28 (PR #69, record [2026-09-30-shared-recording-edited-by-organization](2026-09-30-shared-recording-edited-by-organization.md)): while shared,
 only the Organization account, and since PR #131 verified curators, changed the recording; the owner
 got 409 `RECORDING_SHARED` from `writerRefusal`. Tasks were the exception: `taskEditable` already let
 the owner edit and close tasks on their shared recording.
@@ -139,7 +139,7 @@ processing card, which the maintainer reported as fine the same morning.
 
 - **A finished private Learn review was not covered.** The cancel-and-restart rule handles an
   unfinished run only; after sharing, the Organization view offered a fresh Learn for a recording
-  whose review the owner had finished. The answer is `2026-10-22-organization-almanac-grows-on-share`
+  whose review the owner had finished. The answer is [2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md)
   (proposed).
 - **Decisions taken for the maintainer and not yet confirmed (PR #221):** withdrawal rebinds pending
   steps to the profile the item would have now without the Organization placement, not the one it
@@ -149,10 +149,10 @@ processing card, which the maintainer reported as fine the same morning.
 
 ## Related work
 
-- `2026-10-22-pipeline-steps-settle-their-jobs`: the job and reconciler half of the same PR (#221);
+- [2026-10-22-pipeline-steps-settle-their-jobs](2026-10-22-pipeline-steps-settle-their-jobs.md): the job and reconciler half of the same PR (#221);
   the owner's pipeline can only keep running because steps now settle reliably.
-- `2026-09-23-shared-organization-scope`: the Organization scope, account and promotion rules.
-- `2026-10-22-organization-almanac-grows-on-share`: what a finished private Learn contributes when the
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization scope, account and promotion rules.
+- [2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md): what a finished private Learn contributes when the
   item is shared.
 - [2026-10-19-one-widget-for-recordings-and-mail](2026-10-19-one-widget-for-recordings-and-mail.md): the shared header and erase menu whose permission check follows the new writer rule.
 

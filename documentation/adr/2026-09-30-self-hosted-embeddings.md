@@ -1,11 +1,11 @@
 ---
 title: Learn's embeddings come from an optional self-hosted Ollama service serving bge-m3, not text-embeddings-inference
 date: 2026-09-30
-updated: 2026-10-22 16:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: infrastructure
 issues: []
-prs: [69, 155]
+prs: [69]
 areas: [docker-compose.yml, src/lib/knowledge/embeddings.ts, src/lib/knowledge/availability.ts, src/lib/knowledge/knowledge-embed.ts, src/lib/env.ts]
 supersedes: []
 superseded-by: []
@@ -146,5 +146,5 @@ now bounded by size as well as count, the timeout is configurable, and finished 
   added on the Learn branch.
 - **2026-09-30**: Learn merged with the optional embeddings service (PR #69).
 - **2026-10-12**: EmbeddingGemma 2 evaluated as a replacement and rejected.
-- **2026-10-18**: size-bounded batches, configurable timeout and kept partial progress (PR #155).
+- **2026-10-18**: follow-up: size-bounded batches, configurable timeout and kept partial progress (PR #155).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

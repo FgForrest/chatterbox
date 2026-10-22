@@ -26,7 +26,7 @@ The usual workflow files a new recording into a private folder, runs it through 
 Learn and summary, and then shares it into an Organization folder. Klepna keeps one Learn result
 per Almanac, so after sharing, the Organization view had no Learn result and offered a fresh Learn
 that looked exactly like the one the owner had just finished. The rule from the day before
-(`2026-10-22-owner-edits-shared-recording`: a private Learn run still open at share time is
+([2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): a private Learn run still open at share time is
 cancelled and restarted on the Organization scope) covered only unfinished runs. The maintainer's
 requirement: the process must be easy and straightforward, the knowledge base grows organically,
 "do not ask for permission, ask for forgiveness. The curator can erase and merge data afterwards."
@@ -65,7 +65,7 @@ The risks were put to the maintainer before he chose it, and he accepted them:
 
 - any member who shares adds people, facts and corrections to the Organization Almanac without a
   curator, a conscious widening of the rule that a curator's new entries stay private
-  (`2026-10-21-curators-manage-organization-almanac`);
+  ([2026-10-21-curators-manage-organization-almanac](2026-10-21-curators-manage-organization-almanac.md));
 - one person's mistaken correction then corrects every transcript that uses the Organization Almanac;
 - a share by mistake leaves promoted people behind after withdrawal.
 
@@ -131,9 +131,9 @@ person for someone without an e-mail named on two shared items.
 
 ## Related work
 
-- `2026-10-21-curators-manage-organization-almanac`: curator rights this relies on, and the "new
+- [2026-10-21-curators-manage-organization-almanac](2026-10-21-curators-manage-organization-almanac.md): curator rights this relies on, and the "new
   entries stay private" rule it widens for sharing.
-- `2026-10-22-owner-edits-shared-recording`: the cancel-and-restart rule for unfinished private Learn
+- [2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): the cancel-and-restart rule for unfinished private Learn
   runs, which this complements for finished ones.
 - [2026-10-22-almanac-curator-desk](2026-10-22-almanac-curator-desk.md): the curator tools that clean up
   what organic growth adds.

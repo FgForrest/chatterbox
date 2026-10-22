@@ -1,7 +1,7 @@
 ---
 title: The Learn review is one column of stacked sections, written in the reviewer's language
-date: 2026-10-19
-updated: 2026-10-22 17:00
+date: 2026-10-20
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []

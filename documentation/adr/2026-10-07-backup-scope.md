@@ -129,8 +129,8 @@ Postgres, 2894 passed and 16 skipped (opt-in live tests).
 
 ## Related work
 
-- `2026-09-23-shared-organization-scope`: defines the personal and Organization scopes split here.
-- `2026-10-07-tasks-from-summaries`: tasks joined the archives under the same rules the same day.
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): defines the personal and Organization scopes split here.
+- [2026-10-07-tasks-from-summaries](2026-10-07-tasks-from-summaries.md): tasks joined the archives under the same rules the same day.
 
 ## Timeline
 

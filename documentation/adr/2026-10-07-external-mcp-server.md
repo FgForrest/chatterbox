@@ -9,7 +9,7 @@ prs: [98]
 areas: [src/app/api/mcp/route.ts, src/lib/mcp, src/app/.well-known/oauth-protected-resource, content/docs/self-hosting/mcp.mdx, e2e/keycloak/riffado-e2e-realm.json]
 supersedes: []
 superseded-by: []
-relates: [2026-10-06-oidc-single-sign-on, 2026-10-11-claude-connector-through-sso-realm, 2026-10-20-mail-search-respects-visibility, 2026-10-11-inbound-mail, 2026-10-14-identity-provider-authorization]
+relates: [2026-10-06-oidc-single-sign-on, 2026-10-11-claude-connector-through-sso-realm, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-14-identity-provider-authorization]
 ---
 
 # External MCP server in the app, gated by Keycloak client roles from the SSO realm
@@ -184,7 +184,7 @@ app.
   opens this server to hosted Claude and Claude Code.
 - [2026-10-20-mail-search-respects-visibility](2026-10-20-mail-search-respects-visibility.md):
   extends the bounded scan to mail.
-- [2026-10-11-inbound-mail](2026-10-11-inbound-mail/README.md): mail tools and the `mail:read` role added to this server.
+- [2026-10-18-inbound-mail](2026-10-18-inbound-mail/README.md): mail tools and the `mail:read` role added to this server.
 - [2026-10-14-identity-provider-authorization](2026-10-14-identity-provider-authorization.md): later changed MCP token rules (unknown key id, allowed clients).
 
 ## Timeline

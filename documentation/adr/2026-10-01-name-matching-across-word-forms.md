@@ -1,18 +1,18 @@
 ---
-title: Names are matched across word forms in memory, with ported accent-free stemmers and the official Snowball stemmers
+title: Names are matched across word forms in memory, with ported accent-free stemmers and Snowball stemmers
 date: 2026-10-01
-updated: 2026-10-22 17:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [72, 113]
+prs: [72]
 areas: [src/lib/knowledge/stemming, src/lib/knowledge/name-match.ts, src/lib/learn/name-match.ts, scripts/snowball-stemmers.sh, NOTICE]
 supersedes: []
 superseded-by: []
 relates: [2026-09-30-learn, 2026-10-01-almanac-and-new-records, 2026-10-11-dependency-supply-chain-policy, 2026-10-22-almanac-curator-desk]
 ---
 
-# Names are matched across word forms in memory, with ported accent-free stemmers and the official Snowball stemmers
+# Names are matched across word forms in memory, with ported accent-free stemmers and Snowball stemmers
 
 Learn looks up the names it hears in the Almanac. In languages with case endings a name is rarely
 said in its base form (a company name in the genitive, a first name in the vocative), and the
@@ -21,8 +21,8 @@ Polish and Romanian with variant stemmers ported from a Java project credited in
 words without accents and
 return every stem the word could have had; about twenty other languages with Snowball's stemmers;
 English not at all. Nicknames that no stemmer can join are learned from the reviewer's links. PR #72
-built it (Block 4); PR #113 replaced the third-party Snowball package with Snowball's official
-release, vendored and rebuilt from pinned source.
+built it (Block 4); a follow-up under the dependency policy, PR #113, replaced the third-party
+Snowball package with Snowball's official release, vendored and rebuilt from pinned source.
 
 ## Why
 
@@ -100,7 +100,7 @@ snowballstem.org's sha256-pinned source.
 
 ## Decision
 
-**Chosen: E, with Snowball built from the official release (F).** The ported stemmers fit the
+**Chosen: E.** Snowball's source was switched to the official release in a follow-up (F). The ported stemmers fit the
 matcher, which strips accents before comparing, and the encryption rule leaves in-memory matching as
 the only place to do it. The fallback also asks the model for each mention's base form and for the
 full name a nickname stands for, and looks those up only when the words themselves find nothing.
@@ -164,5 +164,6 @@ was that a user adds one once and it matches from then on.
 
 - **2026-10-01**: an evaluation round shows lookups missing inflected names; the ported stemmers and
   Snowball built as Block 4, re-evaluated and merged with PR #72.
-- **2026-10-11**: PR #113 merged: official Snowball 3.1.1 vendored, Slovene dropped.
+- **2026-10-11**: follow-up PR #113 merged under the dependency policy: official Snowball 3.1.1
+  vendored, Slovene dropped.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

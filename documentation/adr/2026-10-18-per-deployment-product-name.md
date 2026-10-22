@@ -1,11 +1,11 @@
 ---
 title: The product names itself per deployment through one deployment-aware name, and self-host stops showing upstream names
 date: 2026-10-18
-updated: 2026-10-22 16:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: feature
 issues: []
-prs: [50, 101, 103, 149, 172]
+prs: [50, 101, 103, 149]
 areas: [src/lib/brand.ts, src/lib/deployment-brand.ts, src/components/product-name-provider.tsx, messages, docker-compose.yml, .env.example, src/tests/i18n/self-host-branding.test.ts]
 supersedes: []
 superseded-by: []
@@ -159,6 +159,6 @@ shipping a hosted mode.
   with upstream attribution (PR #103).
 - **2026-10-18**: the maintainer's scope, provider, identifier and compose rulings, then "fix it
   everywhere" for hosted naming; PR #149 merged.
-- **2026-10-19**: leftover English terms in the Czech UI and docs replaced (PR #172).
+- **2026-10-19**: follow-up: leftover English terms in the Czech UI and docs replaced (PR #172).
 - **2026-10-21**: ruling that every Czech string uses the declined Czech name.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.

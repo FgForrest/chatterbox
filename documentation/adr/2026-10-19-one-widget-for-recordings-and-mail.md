@@ -9,7 +9,7 @@ prs: [164, 165, 166, 167, 168]
 areas: [src/components/pipeline/workflow-widget.tsx, src/components/summary/summary-widget.tsx, src/components/learn/learn-widget.tsx, src/components/items/item-header.tsx, src/lib/recordings/erase.ts, src/lib/sharing/change-permission.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-11-inbound-mail, 2026-10-22-owner-edits-shared-recording]
+relates: [2026-10-18-inbound-mail, 2026-10-22-owner-edits-shared-recording]
 ---
 
 # One body per widget across its variants, tested by one suite per variant set; an erase never undoes Almanac data a person confirmed
@@ -126,7 +126,7 @@ colour and an accent border.
 
 ## Related work
 
-- [2026-10-11-inbound-mail](2026-10-11-inbound-mail/README.md): introduced mail as a second item kind
+- [2026-10-18-inbound-mail](2026-10-18-inbound-mail/README.md): introduced mail as a second item kind
   next to recordings; this record makes its detail pane share the recording's widgets.
 - [2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): changed who may change a shared item, which the shared header's erase menu follows.
 

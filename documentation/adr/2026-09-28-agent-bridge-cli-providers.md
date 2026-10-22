@@ -1,15 +1,15 @@
 ---
 title: Claude Code and Codex subscriptions serve summaries through a locked-down, locally built sidecar
 date: 2026-09-28
-updated: 2026-10-22 16:00
+updated: 2026-10-22 17:05
 status: accepted
 kind: infrastructure
 issues: []
-prs: [11, 12, 13, 63, 78, 116, 151, 158, 231]
+prs: [11, 12, 13, 63]
 areas: [agent-bridge, src/lib/ai/provider-presets.ts, docker-compose.yml, scripts/build-agent-bridge.sh]
 supersedes: []
 superseded-by: []
-relates: [2026-09-30-learn, 2026-10-05-ai-cost-per-provider-card]
+relates: [2026-09-30-learn, 2026-10-19-ai-cost-per-provider-card]
 ---
 
 # Claude Code and Codex subscriptions serve summaries through a locked-down, locally built sidecar
@@ -173,7 +173,7 @@ its own isolation, or the licence of the Claude CLI allowing redistribution.
 
 - [2026-09-30-learn](2026-09-30-learn/README.md): Learn runs through the bridge with the app's
   knowledge tools over MCP and answers in a JSON Schema.
-- [2026-10-05-ai-cost-per-provider-card](2026-10-05-ai-cost-per-provider-card.md): a card's own
+- [2026-10-19-ai-cost-per-provider-card](2026-10-19-ai-cost-per-provider-card.md): a card's own
   price is the fallback when the bridge reports tokens without a cost.
 
 ## Timeline
@@ -183,9 +183,10 @@ its own isolation, or the licence of the Claude CLI allowing redistribution.
   corrections; decision not to publish an image.
 - **2026-09-28**: CLIs run without tools or session persistence (PR #63); purge made optional.
 - **2026-09-29**: Learn's knowledge tools over MCP and JSON Schema answers through the bridge.
-- **2026-10-01**: bridge forwards Claude's cost and prices Codex turns (PR #78).
-- **2026-10-12**: build script for the bridge image (PR #116).
-- **2026-10-18**: every `gpt-` id routes to Codex (PR #151); CLI errors reported with a fitting
-  status (PR #158).
-- **2026-10-22**: newest Codex model priced (PR #231).
+- **2026-10-01**: follow-up: bridge forwards Claude's cost and prices Codex turns (PR #78, part of
+  the AI cost line).
+- **2026-10-12**: follow-up: build script for the bridge image (PR #116).
+- **2026-10-18**: follow-ups: every `gpt-` id routes to Codex (PR #151); CLI errors reported with a
+  fitting status (PR #158).
+- **2026-10-22**: follow-up: newest Codex model priced (PR #231).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
