@@ -47,6 +47,8 @@ Accepted corrections are kept beside the original text, never in place of it, so
 
 When the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
+When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. Learn shows **Learned from the owner's review** in the Organization view, with the review's applied and skipped counts. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
+
 ## Where reviews wait
 
 - The **Needs review** filter above the recording list.
