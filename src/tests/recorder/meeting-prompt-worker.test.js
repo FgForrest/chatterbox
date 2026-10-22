@@ -138,6 +138,7 @@ const h = vi.hoisted(() => {
             onRemoved: event("windowRemoved"),
             getLastFocused: vi.fn(async () => null),
             create: vi.fn(async () => ({ id: 77 })),
+            update: vi.fn(async () => ({})),
         },
         tabCapture: {
             getMediaStreamId: vi.fn((_input, callback) => callback("stream-1")),
@@ -1131,5 +1132,22 @@ describe("Chrome-check worker fixes", () => {
         await h.listeners.notificationClicked("nudge:7");
         expect(chrome.tabs.create).not.toHaveBeenCalled();
         expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+        expect(chrome.windows.update).toHaveBeenCalledWith(3, {
+            focused: true,
+        });
+    });
+    it.each([
+        "missing",
+        "closed",
+    ])("ignores a notification body click when the meeting tab is %s", async (status) => {
+        h.tabs.delete(7);
+        if (status === "closed")
+            chrome.tabs.get.mockRejectedValueOnce(
+                new Error("No tab with id: 7"),
+            );
+        await h.listeners.notificationClicked("nudge:7");
+        expect(chrome.tabs.create).not.toHaveBeenCalled();
+        expect(chrome.tabs.update).not.toHaveBeenCalled();
+        expect(chrome.windows.update).not.toHaveBeenCalled();
     });
 });

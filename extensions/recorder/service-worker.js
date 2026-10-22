@@ -1030,7 +1030,10 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
         await chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html#meeting-prompt") });
     } else {
         const tabId = Number(notificationId.slice(NUDGE_PREFIX.length));
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        if (!tab) return;
         await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+        await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
     }
 });
 
