@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,7 +16,6 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 
 interface MergeCandidate {
@@ -245,25 +245,16 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                             )}
                         </DialogDescription>
                     </DialogHeader>
-                    <NativeSelect
+                    <MergeTargetPicker
                         value={targetId}
-                        onChange={(event) => setTargetId(event.target.value)}
-                        aria-label={i18n("Merge target")}
-                        className="w-full"
-                    >
-                        <option value="">{i18n("Choose a person")}</option>
-                        {candidates.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                                {candidate.displayName}
-                                {candidate.primaryEmail
-                                    ? ` (${candidate.primaryEmail})`
-                                    : ""}
-                                {candidate.scope === "org"
-                                    ? ` · ${i18n("Organization")}`
-                                    : ""}
-                            </option>
-                        ))}
-                    </NativeSelect>
+                        onChange={setTargetId}
+                        candidates={candidates.map((candidate) => ({
+                            id: candidate.id,
+                            name: candidate.displayName,
+                            email: candidate.primaryEmail,
+                            scope: candidate.scope ?? "personal",
+                        }))}
+                    />
                     <DialogFooter>
                         <Button
                             variant="outline"

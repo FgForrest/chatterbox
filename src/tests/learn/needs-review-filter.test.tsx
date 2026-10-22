@@ -100,7 +100,7 @@ describe("the list, as people read the transcript", () => {
         vi.unstubAllGlobals();
     });
 
-    it("previews the corrected text and finds a recording by either words", () => {
+    it("shows matching corrected or original words only during search", () => {
         list(
             [recording("r1", "Weekly"), recording("r2", "Budget")],
             new Map([
@@ -114,7 +114,7 @@ describe("the list, as people read the transcript", () => {
                 ["r2", { text: "speaker_0: Numbers." }],
             ]),
         );
-        expect(screen.getByText(/Tavesi joined\./)).toBeTruthy();
+        expect(screen.queryByText(/Tavesi joined\./)).toBeNull();
         expect(screen.queryByText(/Sanesi joined\./)).toBeNull();
         const search = screen.getByRole("textbox", {
             name: "Search recordings",
@@ -123,7 +123,13 @@ describe("the list, as people read the transcript", () => {
             fireEvent.change(search, { target: { value: words } });
             expect(screen.getByText("Weekly")).toBeTruthy();
             expect(screen.queryByText("Budget")).toBeNull();
+            expect(
+                screen.getByText(new RegExp(`${words} joined`, "i")),
+            ).toBeTruthy();
         }
+        fireEvent.change(search, { target: { value: "" } });
+        expect(screen.queryByText(/Tavesi joined\./)).toBeNull();
+        expect(screen.queryByText(/Sanesi joined\./)).toBeNull();
     });
 });
 

@@ -23,7 +23,10 @@ import {
 } from "@/components/dashboard/recording-list-toolbar";
 import { RecordingRow } from "@/components/dashboard/recording-row";
 import { Card, CardContent } from "@/components/ui/card";
+import { useFolderLabel } from "@/hooks/use-folder-label";
+import { folderDisplayPath } from "@/lib/folders/labels";
 import { dateGroupLabel } from "@/lib/format-date";
+import { snippetBounds } from "@/lib/search/snippets";
 import type { DateTimeFormat } from "@/types/common";
 import type {
     RecordingFolder,
@@ -100,19 +103,28 @@ function persistSetting(field: string, value: unknown) {
     }).catch(() => {});
 }
 
-function transcriptSnippet(
+function searchHitSnippet(
     text: string | undefined,
-    maxChars = 140,
+    query: string,
 ): string | null {
     if (!text) return null;
-    const stripped = text
+    const startOfMatch = text.toLowerCase().indexOf(query.toLowerCase());
+    if (startOfMatch < 0) return null;
+    const endOfMatch = startOfMatch + query.length;
+    const { start, end } = snippetBounds(
+        text,
+        startOfMatch - 60,
+        endOfMatch + 80,
+        { start: startOfMatch, end: endOfMatch },
+    );
+    const excerpt = text
+        .slice(start, end)
         .replace(/\[[^\]]+\]/g, " ")
         .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-    if (!stripped) return null;
-    if (stripped.length <= maxChars) return stripped;
-    return `${stripped.slice(0, maxChars - 1).trimEnd()}\u2026`;
+    if (!excerpt) return null;
+    return `${start > 0 ? "…" : ""}${excerpt}${end < text.length ? "…" : ""}`;
 }
 
 export function RecordingList({
@@ -149,6 +161,7 @@ export function RecordingList({
 }: RecordingListProps & { ref?: React.Ref<RecordingListHandle> }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const folderLabel = useFolderLabel();
     const [dateTimeFormat] = useState<DateTimeFormat>(initialDateTimeFormat);
     const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
     const [kindFilter, setKindFilter] = useState<KindFilter>(initialKindFilter);
@@ -256,6 +269,25 @@ export function RecordingList({
         }
         return result;
     }, [assignments]);
+
+    const firstFolders = useMemo(() => {
+        const byId = new Map(folders.map((folder) => [folder.id, folder]));
+        const result = new Map<
+            string,
+            { folder: RecordingFolder; path: string }
+        >();
+        for (const assignment of assignments) {
+            if (result.has(assignment.recordingId)) continue;
+            const assigned = byId.get(assignment.folderId);
+            if (!assigned || (searchView === "org" && assigned.scope !== "org"))
+                continue;
+            result.set(assignment.recordingId, {
+                folder: assigned,
+                path: folderDisplayPath(assigned, byId, folderLabel),
+            });
+        }
+        return result;
+    }, [assignments, folders, folderLabel, searchView]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -473,6 +505,22 @@ export function RecordingList({
         [filtered, currentRecording, onSelect],
     );
 
+    const snippetFor = (recording: Recording): string | null => {
+        const q = query.trim();
+        if (!q) return null;
+        const hit =
+            serverHits?.query === q && serverHits.scopeKey === searchScopeKey
+                ? serverHits.hits.get(recording.id)
+                : null;
+        if (hit) return hit;
+        if (!searchScopes.has("content")) return null;
+        const transcript = transcriptions.get(recording.id);
+        return (
+            searchHitSnippet(transcript?.readText, q) ??
+            searchHitSnippet(transcript?.text, q)
+        );
+    };
+
     const rowPadding = "px-4 py-3";
 
     let emptyMessage = i18n("No recordings yet.");
@@ -550,19 +598,10 @@ export function RecordingList({
                                         inFlight={inFlightActions.get(
                                             recording.id,
                                         )}
-                                        snippet={
-                                            (query.trim() &&
-                                                serverHits?.hits.get(
-                                                    recording.id,
-                                                )) ||
-                                            transcriptSnippet(
-                                                transcriptions.get(recording.id)
-                                                    ?.readText ??
-                                                    transcriptions.get(
-                                                        recording.id,
-                                                    )?.text,
-                                            )
-                                        }
+                                        snippet={snippetFor(recording)}
+                                        firstFolder={firstFolders.get(
+                                            recording.id,
+                                        )}
                                         isCompact={false}
                                         rowPadding={rowPadding}
                                         dateTimeFormat={dateTimeFormat}

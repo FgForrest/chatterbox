@@ -14,7 +14,7 @@ import {
     Trash2,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
 import { FolderPicker } from "@/components/recordings/folder-picker";
@@ -41,6 +41,10 @@ import type { DateTimeFormat } from "@/types/common";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
+function folderTone(folder: RecordingFolder): string {
+    return folder.scope === "org" ? "text-organization" : "text-primary";
+}
+
 export function RecordingRow({
     recording,
     isSelected,
@@ -54,6 +58,7 @@ export function RecordingRow({
     shared = false,
     registerRef,
     folderLocations = [],
+    firstFolder,
     sourceFolder,
     folders = [],
     assignedIds = new Set(),
@@ -75,6 +80,7 @@ export function RecordingRow({
     shared?: boolean;
     registerRef: (id: string, el: HTMLButtonElement | null) => void;
     folderLocations?: RecordingFolder[];
+    firstFolder?: { folder: RecordingFolder; path: string };
     sourceFolder?: RecordingFolder | null;
     folders?: RecordingFolder[];
     assignedIds?: ReadonlySet<string>;
@@ -105,6 +111,10 @@ export function RecordingRow({
     const subfolders = folderLocations.filter(
         (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
     );
+    const showFirstFolder =
+        firstFolder &&
+        firstFolder.folder.id !== sourceFolder?.id &&
+        !subfolders.some((folder) => folder.id === firstFolder.folder.id);
     const sharedBy =
         recording.view === "org" && recording.ownerName
             ? recording.isOwn
@@ -112,6 +122,30 @@ export function RecordingRow({
                 : i18n("Shared by {owner}", { owner: recording.ownerName })
             : null;
     const [mailDeleteOpen, setMailDeleteOpen] = useState(false);
+    let meta: ReactNode = null;
+    if (snippet || recording.kind === "mail") {
+        meta = (
+            <span className="min-w-0 flex-1 truncate">
+                {snippet ?? recording.mail?.from ?? i18n("Unknown sender")}
+            </span>
+        );
+    } else if (showFirstFolder) {
+        meta = (
+            <span
+                className="flex min-w-0 flex-1 items-center gap-1"
+                title={firstFolder.path}
+            >
+                <Folder
+                    className={cn(
+                        "size-3 shrink-0",
+                        folderTone(firstFolder.folder),
+                    )}
+                    aria-hidden="true"
+                />
+                <span className="truncate">{label(firstFolder.folder)}</span>
+            </span>
+        );
+    }
     return (
         <div
             className={cn(
@@ -179,7 +213,7 @@ export function RecordingRow({
                         )}
                         {recording.mail?.waitingToShare && (
                             <Share2
-                                className="size-3 shrink-0 text-primary"
+                                className="size-3 shrink-0 text-organization"
                                 aria-label={i18n("Waiting to be shared")}
                             />
                         )}
@@ -202,9 +236,7 @@ export function RecordingRow({
                                     <Folder
                                         className={cn(
                                             "size-3 shrink-0",
-                                            sourceFolder?.scope === "org"
-                                                ? "text-blue-600"
-                                                : "text-primary",
+                                            folderTone(subfolders[0]),
                                         )}
                                     />
                                     <span className="truncate">
@@ -226,13 +258,7 @@ export function RecordingRow({
                             isCompact ? "mt-0.5" : "mt-1",
                         )}
                     >
-                        {(snippet || recording.kind === "mail") && (
-                            <span className="min-w-0 flex-1 truncate">
-                                {snippet ??
-                                    recording.mail?.from ??
-                                    i18n("Unknown sender")}
-                            </span>
-                        )}
+                        {meta}
                         <span className="shrink-0 text-[11px]">
                             {recording.kind !== "mail" && (
                                 <>{formatDurationMs(recording.duration)} · </>

@@ -650,13 +650,20 @@ describe("LearnReview", () => {
         const fact = screen.getByRole("checkbox", {
             name: "Speaker 1 — works for — Tavesi",
         }) as HTMLInputElement;
-        expect(fact.disabled).toBe(true);
+        expect(fact.getAttribute("aria-disabled")).toBe("true");
+        expect(fact.title).toBe(
+            "Name and tick Speaker 1 in Speakers first, or leave this item unticked.",
+        );
+        fireEvent.click(fact);
+        expect(screen.getByRole("alert").textContent).toBe(fact.title);
         expect(screen.getByText("replaces Acme")).toBeTruthy();
         expect(screen.getByText("needs Speaker 1 named")).toBeTruthy();
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Accept Speaker 1 as Jan" }),
         );
-        await waitFor(() => expect(fact.disabled).toBe(false));
+        await waitFor(() =>
+            expect(fact.getAttribute("aria-disabled")).toBeNull(),
+        );
         expect(fact.getAttribute("aria-label")).toBe(
             "Jan — works for — Tavesi",
         );
@@ -1582,7 +1589,7 @@ describe("LearnReview", () => {
             ).toHaveLength(linked ? 0 : 1);
         });
 
-        it("lists them after the speakers, and holds what refers to one until it is ticked", async () => {
+        it("lists them after the speakers and offers to add records with their items", async () => {
             const fetch = respond({
                 "GET /api/recordings/rec-1/review?source=riffado": {
                     ...READY,
@@ -1615,13 +1622,15 @@ describe("LearnReview", () => {
             const speaker = screen.getByRole("checkbox", {
                 name: "Accept Speaker 1 as Petra Kolářová",
             }) as HTMLInputElement;
-            expect(fact.disabled).toBe(true);
-            expect(speaker.disabled).toBe(true);
+            expect(fact.disabled).toBe(false);
+            expect(speaker.disabled).toBe(false);
             expect(
-                screen.getByText(
-                    "waits for Petra Kolářová, Veltrix to be added",
-                ),
-            ).toBeTruthy();
+                screen.getAllByRole("button", { name: "Petra Kolářová" }),
+            ).toHaveLength(2);
+            expect(
+                screen.getByRole("button", { name: "Veltrix" }).parentElement
+                    ?.textContent,
+            ).toBe("also adds Veltrix");
 
             fireEvent.click(
                 screen.getByRole("checkbox", {
@@ -1630,16 +1639,20 @@ describe("LearnReview", () => {
             );
             await waitFor(() =>
                 expect(
-                    screen.getByText("waits for Petra Kolářová to be added"),
-                ).toBeTruthy(),
+                    screen.queryByRole("button", { name: "Veltrix" }),
+                ).toBeNull(),
             );
-            expect(fact.disabled).toBe(true);
+            expect(fact.disabled).toBe(false);
             fireEvent.click(
                 screen.getByRole("checkbox", {
                     name: "Add Petra Kolářová to the Almanac",
                 }),
             );
-            await waitFor(() => expect(fact.disabled).toBe(false));
+            await waitFor(() =>
+                expect(
+                    screen.queryAllByRole("button", { name: "Petra Kolářová" }),
+                ).toHaveLength(0),
+            );
             expect(speaker.disabled).toBe(false);
             expect(fetch).toHaveBeenCalledWith(
                 "/api/recordings/rec-1/review/items/i-petra?source=riffado",
