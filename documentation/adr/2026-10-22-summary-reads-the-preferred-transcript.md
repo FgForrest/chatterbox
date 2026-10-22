@@ -1,11 +1,11 @@
 ---
 title: Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's
 date: 2026-10-22
-updated: 2026-10-22 17:00
-status: proposed
+updated: 2026-10-22 19:55
+status: accepted
 kind: fix
 issues: []
-prs: []
+prs: [243]
 areas: [src/lib/summary/generate-summary.ts, src/lib/ai/generate-title.ts, src/lib/recordings/title-input.ts, src/lib/pipeline/facts.ts, src/lib/profiles/settings.ts, src/components/dashboard/transcription-panel.tsx]
 supersedes: []
 superseded-by: []
@@ -19,7 +19,7 @@ already used: the own transcript (`riffado`), then the user's edited one (`mixed
 (`plaud`). Before, they read only the own transcript, so a recording that had only Plaud's
 transcript, under a processing profile set to use Plaud's transcript (the built-in default), had its
 transcript, Learn and topics done and then failed summary and title with `INVALID_INPUT` ("No custom
-transcription available"). Decided on 2026-10-22; the fix is on a branch, not merged.
+transcription available"). Decided on 2026-10-22 and merged the same day as PR #243.
 
 ## Why
 
@@ -62,10 +62,11 @@ content; the order is own, edited, Plaud.
 
 ## Key technical details
 
-As built on the branch (not on `dev`):
+As merged in PR #243:
 
-- One reader supplies both summary views and the title readers, scoped to recording and owner; the
-  client uses the same selection for the card's content, speaker labels and Summarize availability.
+- One reader, `readPreferredTranscript` (`src/lib/transcription/read-source.ts`), supplies both
+  summary views and the title readers, scoped to recording and owner; the client uses the same
+  selection for the card's content, speaker labels and Summarize availability.
 - The generated summary row keeps `source = "riffado"` (it marks a generated summary, not its input);
   its `transcriptionId`, content id, revision and fences name the transcript actually read. Learn
   corrections are applied to that row.
@@ -78,10 +79,14 @@ As built on the branch (not on `dev`):
 
 ## Verification
 
-Not merged. On the branch: a regression file with 14 database cases (automatic Plaud summary and
-title, Learn staleness, later own transcript, manual recovery, source priority, `also_transcribe`
-waiting), widget tests for Plaud-only and edited-only content; the changed-test run's failures were
-fixture updates, rerun green.
+- `src/tests/regressions/summary-plaud-transcript.test.ts`: 14 database cases (automatic Plaud
+  summary and title, persisted inputs, Learn corrections and staleness, later own transcript, manual
+  recovery, no-transcript error, source priority, `also_transcribe` waiting, mixed source), plus
+  widget tests for Plaud-only and edited-only content and title tests.
+- Summary, title, pipeline and Organization integration paths: 17 files, 224 tests passed. The
+  fixtures that failed on the first changed-test run were updated and rerun (8 files, 109 tests).
+  Biome and `tsc` clean.
+- CI (lint, type check, test, build, CodeQL) was green on the merged head.
 
 ## Consequences & open follow-ups
 
@@ -99,5 +104,6 @@ fixture updates, rerun green.
 ## Timeline
 
 - **2026-10-22**: failed summary and title on a Plaud-only recording diagnosed and confirmed with
-  data; fix built on a branch.
+  data; fix built.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: merged as PR #243.

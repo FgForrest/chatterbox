@@ -1,11 +1,11 @@
 ---
 title: AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index
 date: 2026-10-22
-updated: 2026-10-22 17:00
-status: proposed
+updated: 2026-10-22 19:55
+status: accepted
 kind: process
 issues: []
-prs: []
+prs: [245]
 areas: [AGENTS.md, CLAUDE.md, .claude/rules, .claude/agents/pr-reviewer.md, documentation/adr, scripts/generate-adr-index.mts, src/tests/adr-index.test.ts]
 supersedes: []
 superseded-by: []
@@ -21,7 +21,7 @@ the one file every agent reads, shrunk from 360 lines (32.6 KB) to about 200 (23
 live in twelve path-scoped files under `.claude/rules/`, each named in an area table in `AGENTS.md`;
 a thin `CLAUDE.md` imports `AGENTS.md`; ADRs live in `documentation/adr/` with a generated index that
 `scripts/generate-adr-index.mts --check` validates; and the history up to this day was reconstructed
-into records. Built on 2026-10-22 on a branch, awaiting the maintainer's review.
+into records. Merged into `dev` on 2026-10-22 as PR #245.
 
 ## Why
 
@@ -84,7 +84,7 @@ allowed is an open question for the maintainer.
 
 ## Decision
 
-All the chosen options above, proposed as one change. The reconstructed records follow the
+All the chosen options above, merged as one change. The reconstructed records follow the
 convention: one record per line of work, an alternative only if it was really on the table, every
 inferred reason marked, and no names, company or production details.
 
@@ -103,8 +103,9 @@ inferred reason marked, and no names, company or production details.
 ## Verification
 
 Headless Claude Code sessions in the worktree loaded `AGENTS.md` and the `CLAUDE.md` notes at start
-and a rule file only after reading a matching file. Generator: 11 tests; `--check` passes on the
-reconstructed records. Biome and `tsc` clean.
+and a rule file only after reading a matching file. Generator: 11 tests in
+`src/tests/adr-index.test.ts`; `--check` passes on the 50 reconstructed records. Biome and `tsc`
+clean. CI (lint, type check, test, build, CodeQL) was green on the merged head.
 
 ## Consequences & open follow-ups
 
@@ -119,6 +120,8 @@ reconstructed records. Biome and `tsc` clean.
 
 ## Timeline
 
-- **2026-10-22**: restructure and ADR convention requested; built on a branch; history reconstructed
-  into records.
+- **2026-10-22**: restructure and ADR convention requested; built; history reconstructed into
+  records.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: merged as PR #245, after fixing two generator issues CodeQL flagged (a title ending
+  in a backslash broke its table cell; an existence check before each file read was a race).

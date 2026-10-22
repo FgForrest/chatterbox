@@ -1,11 +1,11 @@
 ---
 title: Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog
 date: 2026-10-22
-updated: 2026-10-22 17:00
-status: proposed
+updated: 2026-10-22 19:55
+status: accepted
 kind: feature
 issues: []
-prs: []
+prs: [249]
 areas: [extensions/recorder/service-worker.js, extensions/recorder/lib/platforms.js, extensions/recorder/manifest.json, extensions/recorder/popup/folder-combobox.js, extensions/recorder/PRIVACY.md]
 supersedes: []
 superseded-by: []
@@ -19,8 +19,8 @@ confirmed, record" button opened Chrome's screen-sharing dialog, which makes no 
 meeting is already in. Version 0.7.0 replaces the notification with a Klepna-styled banner inside the
 meeting page. The banner tells the user to click the extension's icon (or its keyboard shortcut),
 which records the tab with no dialog; while the banner shows, that click starts recording at once; a
-recording pill then shows the time, the target folder (changeable) and Stop. Decided on 2026-10-22;
-built on a branch, not merged or uploaded to the Store.
+recording pill then shows the time, the target folder (changeable) and Stop. Decided on 2026-10-22
+and merged into `dev` the same day as PR #249; the Chrome Web Store upload is still pending.
 
 ## Why
 
@@ -79,7 +79,7 @@ the design's five questions, all yes:
 
 ## Key technical details
 
-As built on the branch (not on `dev`):
+As merged in PR #249:
 
 - The meeting origins come from `lib/platforms.js` (one source) and are requested with
   `chrome.permissions.request` from a click in an extension page; on grant the banner script is
@@ -94,13 +94,26 @@ As built on the branch (not on `dev`):
 
 ## Verification
 
-Not merged. On the branch: recorder and regression tests 855 passed, 0 failed; the manifest differs
-from `dev` only in its version. Native permission prompts, real toolbar and shortcut invocations and
-the Store review were not exercised in a real browser yet.
+- `vitest run src/tests/recorder src/tests/regressions`: 94 files, 904 tests passed (the 270
+  skipped are Postgres-backed). The manifest's permissions are unchanged; only its version moves to
+  0.7.0.
+- Real Chrome 156 over CDP against a fake Meet page (local stub server, nothing uploaded): the
+  prompt, a real toolbar invocation, the pill with folder change and Stop, Not now, error
+  dismissal, the fallback notification, the popup card, the Options switch, the permission grant and
+  removal lifecycle, and Trusted Types, with no extension console errors.
+- CI (lint, type check, test, build, CodeQL) was green on the merged head.
+
+Not exercised: real meeting sites, Chrome's native permission prompt, the keyboard shortcut and
+notification clicks (see open follow-ups).
 
 ## Consequences & open follow-ups
 
-- The Store upload needs the updated justification text and a new screenshot.
+- The Store upload is pending: the ZIP from `node extensions/recorder/pack.mjs`, the new
+  justification texts in `extensions/recorder/store/STORE_SUBMISSION.md`, and new screenshots of
+  the banner (en, cs) and the recording pill.
+- Unverified until tried in a real browser session: real Meet, Teams and the other meeting sites
+  (they need logins; the Teams banner offset was checked on a layout mock only), Chrome's native
+  permission prompt (the checks ran headless), the keyboard shortcut, and notification clicks.
 - Users who never opt in keep the notification path and its dialog.
 
 ## Related work
@@ -113,5 +126,8 @@ the Store review were not exercised in a real browser yet.
 
 - **2026-10-20**: verified that only an extension invocation records a tab without the dialog.
 - **2026-10-22**: the meeting prompt reported; option A chosen as 0.7.0; design approved with a to e;
-  built on a branch.
+  built.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: merged as PR #249, with fixes from review and the real-Chrome pass (a banner start
+  no longer hits the auto-mode silence stop, an arm/audible race, window focus on a notification
+  click); Store upload pending.

@@ -37,18 +37,18 @@ the allowed ones, or a `supersedes`/`relates` link is not mirrored by the record
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-10-22 | [AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index](2026-10-22-agent-instructions-and-decision-records.md) | process | proposed |  |
+| 2026-10-22 | [AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index](2026-10-22-agent-instructions-and-decision-records.md) | process | accepted | PR #245 |
 | 2026-10-22 | [Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only](2026-10-22-almanac-curator-desk.md) | feature | partially-implemented | #240, PR #244, PR #247 |
 | 2026-10-22 | [An arriving recording or e-mail never moves the selection; one corner notice offers to open the newest](2026-10-22-arrivals-never-move-selection.md) | feature | accepted | PR #235, PR #236 |
 | 2026-10-22 | [Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) | feature | proposed |  |
 | 2026-10-22 | [The dashboard's library column browses by location, with a folder rail from 1280 px, walk-in folders below it, and one Organization colour](2026-10-22-library-column/README.md) | feature | accepted | PR #226, PR #228, PR #237 |
-| 2026-10-22 | [Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog](2026-10-22-meeting-recorder-banner.md) | feature | proposed |  |
-| 2026-10-22 | [A finished private Learn review becomes Organization knowledge on share, without asking; curators clean up](2026-10-22-organization-almanac-grows-on-share.md) | feature | proposed | #240 |
+| 2026-10-22 | [Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog](2026-10-22-meeting-recorder-banner.md) | feature | accepted | PR #249 |
+| 2026-10-22 | [A finished private Learn review becomes Organization knowledge on share, without asking; curators clean up](2026-10-22-organization-almanac-grows-on-share.md) | feature | accepted | #240, PR #248 |
 | 2026-10-22 | [The owner keeps editing a recording shared with the Organization, as a curator of that recording](2026-10-22-owner-edits-shared-recording.md) | feature | accepted | PR #221 |
 | 2026-10-22 | [The owner reviews a summary's tasks, the assignee never has to accept anything, and sharing does not wait for the review](2026-10-22-owner-reviews-tasks-sharing-ungated.md) | fix | accepted | PR #238 |
 | 2026-10-22 | [A pipeline step names its job and the worker settles both, one reconciler repairs drift, and the server says what each step waits for](2026-10-22-pipeline-steps-settle-their-jobs.md) | fix | accepted | PR #209, PR #216, PR #220, PR #221 |
 | 2026-10-22 | [Generated text follows the language the transcript is written in; Learn asks when the provider's language is wrong, and the answer is stored per recording](2026-10-22-recording-language-checked-by-learn.md) | fix | proposed |  |
-| 2026-10-22 | [Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's](2026-10-22-summary-reads-the-preferred-transcript.md) | fix | proposed |  |
+| 2026-10-22 | [Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's](2026-10-22-summary-reads-the-preferred-transcript.md) | fix | accepted | PR #243 |
 | 2026-10-21 | [Curators manage existing Organization Almanac entries; their new entries stay private](2026-10-21-curators-manage-organization-almanac.md) | fix | accepted | PR #222 |
 | 2026-10-21 | [Meeting Recorder as a Chromium extension with encrypted buffering, released ahead of the servers it talks to](2026-10-21-meeting-recorder-extension/README.md) | feature | accepted | PR #108, PR #123, PR #124, PR #125, PR #130, PR #132, PR #163, PR #180, PR #188, PR #193, PR #195, PR #198, PR #207, PR #213 |
 | 2026-10-21 | [A summary's tasks are accepted automatically and sharing no longer waits for a task review](2026-10-21-tasks-accepted-automatically.md) | feature | superseded by [2026-10-22-owner-reviews-tasks-sharing-ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md) | PR #224 |

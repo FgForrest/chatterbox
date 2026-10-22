@@ -1,11 +1,11 @@
 ---
 title: A finished private Learn review becomes Organization knowledge on share, without asking; curators clean up
 date: 2026-10-22
-updated: 2026-10-22 17:00
-status: proposed
+updated: 2026-10-22 19:55
+status: accepted
 kind: feature
 issues: [240]
-prs: []
+prs: [248]
 areas: [src/lib/knowledge/share-knowledge.ts, src/lib/sharing/share-names.ts, src/lib/learn/sharing.ts, src/components/learn/learn-widget.tsx, src/app/(app)/almanac]
 supersedes: []
 superseded-by: []
@@ -18,7 +18,7 @@ When an owner shares a recording or mail whose private Learn review they have al
 what they confirmed becomes Organization knowledge, with no confirmation step and no second
 review, and the item's Organization view counts Learn as done. The Organization Almanac is meant to
 grow "organically"; a few curators clean it up afterwards with dedicated tools (issue #240, three
-PRs). Decided on 2026-10-22; nothing is merged yet.
+PRs). Decided on 2026-10-22 and merged the same day as PR #248.
 
 ## Why
 
@@ -82,7 +82,7 @@ skipped the existing publication.
   created a duplicate Organization person on every share. Its premise ("copy, not move") was wrong:
   the share path already moves people and publishes knowledge.
 
-### Implementation 3b: keep the existing publication and settle Learn in the Organization view (chosen, in progress)
+### Implementation 3b: keep the existing publication and settle Learn in the Organization view (chosen)
 
 At share, after the existing publication, a finished private run for the current content writes a
 finished Learn receipt in the Organization view (the private run's counts, no review items, no
@@ -111,16 +111,26 @@ The curator tooling decided the same day (issue #240) is its own record:
   the mail share gate (`src/lib/mail/share-gate.ts`).
 - **Open runs:** `cancelPrivateLearnAtShareInTx` in `src/lib/learn/sharing.ts` stays the rule for a
   private run that is not finished.
-- **Receipt idempotence:** concurrent shares and reshares must write the Organization receipt at most
-  once, under the locks the share already holds.
+- **Receipt idempotence:** concurrent shares and reshares write the Organization receipt at most
+  once, under the locks the share already holds: `publishFinishedPrivateLearnInTx`
+  (`src/lib/learn/share-finished.ts`) inserts it with a deterministic id and `onConflictDoNothing`.
 - **Self-host without an Organization:** nothing changes.
 
 ## Verification
 
-Not merged; nothing verified yet. The rework is required to pin, as regression tests, exactly the
-cases the first attempt broke: correction-pass and manual corrections, facts from an earlier run, a
-hand-named speaker surviving share, withdrawal, private rename and reshare, and one Organization
-person for someone without an e-mail named on two shared items.
+- `src/tests/regressions/learn-share-settles.integration.test.ts` (PostgreSQL) pins the cases the
+  first attempt broke: the speaker, a correction-pass fix, a manual correction and an earlier run's
+  fact still published; a hand-named speaker kept through withdrawal, a private rename and reshare;
+  one Organization person for someone without an e-mail on two shared items. It also covers the
+  content choice (own versus Plaud) and revision, Topics and fresh or stale summaries across share
+  and reshare (no new jobs, no phase change), created versus picked contacts with and without stored
+  metadata, empty automatic receipts, one receipt under concurrency, withdrawal, mail, worker claim
+  revocation, and private-only items left alone.
+- `src/tests/regressions/learn-share-settles-widget.test.tsx`: recording and mail, inline and
+  dialog, Re-learn, unknown historical counts, empty runs.
+- Locally the whole suite passed (669 files, 7,321 tests), plus 46 focused tests; Biome, `tsc` and
+  the message extractor clean. CI (lint, type check, test, build, CodeQL) was green on the merged
+  head.
 
 ## Consequences & open follow-ups
 
@@ -144,3 +154,4 @@ person for someone without an e-mail named on two shared items.
   designed and decided, issue #240 opened; the first implementation (3a) rejected in review and the
   rework (3b) started.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: merged as PR #248 (the 3b rework).
