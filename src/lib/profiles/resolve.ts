@@ -309,6 +309,7 @@ export async function resolveItemProfile(
     ownerUserId: string,
     actorUserId = ownerUserId,
     step?: ProfileStepName,
+    jobId?: string,
 ): Promise<ResolvedItemProfile> {
     const [item] = await db
         .select({ kind: chatterItems.kind })
@@ -357,9 +358,8 @@ export async function resolveItemProfile(
         try {
             return await loadItemProfileRevision({
                 itemId,
-                view: "private",
                 ownerUserId,
-                actorUserId: ownerUserId,
+                actorUserId,
                 revisionId,
             });
         } catch (error) {
@@ -372,7 +372,7 @@ export async function resolveItemProfile(
     const held = step
         ? processing?.phases.categorize?.heldProfiles?.[step]
         : undefined;
-    if (held) {
+    if (held && held.jobId === jobId) {
         const [job] = await db
             .select({ status: asyncJobs.status })
             .from(asyncJobs)
@@ -492,7 +492,6 @@ export async function resolveItemProfile(
 /** Read the exact immutable revision already recorded for a run. */
 export async function loadItemProfileRevision(input: {
     itemId: string;
-    view: RecordingView;
     ownerUserId: string;
     actorUserId?: string;
     revisionId: string;

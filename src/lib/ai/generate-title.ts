@@ -38,6 +38,7 @@ export async function generateTitleFromTranscription(
     view: RecordingView = "private",
     detectedLanguage?: string | null,
     automatic = false,
+    jobId?: string,
 ): Promise<string | null> {
     const profile = await resolveItemProfile(
         recordingId,
@@ -45,6 +46,7 @@ export async function generateTitleFromTranscription(
         ownerUserId,
         userId,
         automatic ? "title" : undefined,
+        automatic ? jobId : undefined,
     );
     const settings = profile.settings as ProfileSettings;
     let contentLanguage = detectedLanguage;

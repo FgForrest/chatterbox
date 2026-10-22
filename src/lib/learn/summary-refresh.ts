@@ -13,6 +13,7 @@ import { db } from "@/db";
 import { aiEnhancements, itemProcessing } from "@/db/schema";
 import { env } from "@/lib/env";
 import { llmRendering } from "@/lib/learn/llm-input";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import type { RecordingView } from "@/lib/sharing/view";
@@ -111,7 +112,10 @@ export async function summaryRefreshDue(input: {
         return null;
     }
     const [processing] = await db
-        .select({ manualOnly: itemProcessing.manualOnly })
+        .select({
+            manualOnly: itemProcessing.manualOnly,
+            phases: itemProcessing.phases,
+        })
         .from(itemProcessing)
         .where(
             and(
@@ -121,7 +125,7 @@ export async function summaryRefreshDue(input: {
             ),
         )
         .limit(1);
-    if (processing?.manualOnly) return null;
+    if (effectiveManualOnly(processing)) return null;
     const profile = await resolveItemProfile(
         input.recordingId,
         "private",

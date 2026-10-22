@@ -135,6 +135,7 @@ describe("#221 job profile resolution", () => {
             "owner-zava",
             "owner-zava",
             trigger === "auto" ? "summary" : undefined,
+            trigger === "auto" ? "held-job" : undefined,
         );
     });
 
@@ -158,6 +159,7 @@ describe("#221 job profile resolution", () => {
             "owner-zava",
             "owner-zava",
             trigger === "auto" ? "topics" : undefined,
+            trigger === "auto" ? "held-job" : undefined,
         );
     });
 
@@ -183,6 +185,7 @@ describe("#221 job profile resolution", () => {
             "owner-zava",
             "owner-zava",
             "title",
+            "held-job",
         );
         error.mockRestore();
     });
@@ -213,6 +216,7 @@ describe("#221 job profile resolution", () => {
             "owner-zava",
             "owner-zava",
             "title",
+            "held-job",
         );
         error.mockRestore();
     });
@@ -230,6 +234,7 @@ describe("#221 job profile resolution", () => {
             "private",
             "owner-zava",
             "owner-zava",
+            undefined,
             undefined,
         );
     });
@@ -253,6 +258,7 @@ describe("#221 job profile resolution", () => {
             "owner-zava",
             "owner-zava",
             trigger === "pipeline" ? "transcribe" : undefined,
+            trigger === "pipeline" ? "held-job" : undefined,
         );
         error.mockRestore();
     });

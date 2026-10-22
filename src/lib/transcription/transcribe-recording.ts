@@ -560,6 +560,7 @@ async function transcribeRecordingInner(
             (opts.trigger ?? "manual") !== "manual" && opts.jobId
                 ? "transcribe"
                 : undefined,
+            (opts.trigger ?? "manual") !== "manual" ? opts.jobId : undefined,
         );
         const profileSettings = profile.settings as AudioProfileSettings;
         const transcribeStep = profileSettings.steps.transcribe;

@@ -297,6 +297,7 @@ export async function generateSummaryForRecording(
                 ctx.ownerUserId,
                 ctx.actorUserId,
                 opts.trigger === "auto" ? "summary" : undefined,
+                opts.trigger === "auto" ? opts.jobId : undefined,
             );
     const profileSettings = profile?.settings as
         | AudioProfileSettings

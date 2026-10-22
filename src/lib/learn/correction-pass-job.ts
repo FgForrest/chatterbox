@@ -148,7 +148,6 @@ async function runPass({
     const profile = learnRun.profileRevisionId
         ? await loadItemProfileRevision({
               itemId: pass.recordingId,
-              view: pass.view,
               ownerUserId: pass.userId,
               actorUserId,
               revisionId: learnRun.profileRevisionId,

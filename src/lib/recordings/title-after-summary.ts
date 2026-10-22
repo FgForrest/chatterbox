@@ -54,6 +54,7 @@ export async function updateTitleAfterSummary(input: {
         input.userId,
         input.userId,
         "title",
+        input.jobId,
     );
     const title = profile.settings.steps.title;
     const summaryInputs = processing?.phases.summary?.inputs;
@@ -132,6 +133,7 @@ export async function updateTitleAfterSummary(input: {
             syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
             ...(fence ? { fence } : {}),
             skipIfAutomaticTitleSettled: true,
+            jobId: input.jobId,
         });
     } catch (error) {
         await settleSkipped("first_summary_title_failed");

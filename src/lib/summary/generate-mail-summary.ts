@@ -162,6 +162,7 @@ export async function generateMailSummary(
                 ctx.ownerUserId,
                 ctx.actorUserId,
                 opts.trigger === "auto" ? "summary" : undefined,
+                opts.trigger === "auto" ? opts.jobId : undefined,
             );
     const profileSettings = profile?.settings as
         | MailProfileSettings

@@ -748,7 +748,6 @@ export async function finishReview(
     const profile = latest.profileRevisionId
         ? await loadItemProfileRevision({
               itemId: latest.itemId,
-              view: latest.view,
               ownerUserId: latest.userId,
               actorUserId,
               revisionId: latest.profileRevisionId,

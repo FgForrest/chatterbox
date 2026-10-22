@@ -1,5 +1,7 @@
 import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { NextRequest } from "next/server";
+import postgres from "postgres";
 import {
     afterAll,
     beforeAll,
@@ -30,6 +32,7 @@ import {
     processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     recordingTasks,
     taskMentions,
     transcriptions,
@@ -38,6 +41,7 @@ import {
     users,
 } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
+import { isDeadlock } from "@/lib/deadlock-retry";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import {
     addRecordingToFolder,
@@ -45,6 +49,12 @@ import {
     unshareRecording,
 } from "@/lib/folders/folders";
 import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
+import { startAutomaticLearn } from "@/lib/learn/auto-learn";
+import {
+    isSummaryStale,
+    refreshSummaryAfterCorrections,
+    summaryRefreshDue,
+} from "@/lib/learn/summary-refresh";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
@@ -54,8 +64,13 @@ import {
     confirmIntendedPlacements,
     executeIntendedSharesWithOutcome,
 } from "@/lib/pipeline/share-intent";
-import { readProcessing, updatePhaseInTx } from "@/lib/pipeline/state";
+import {
+    markSummaryStepDoneInTx,
+    readProcessing,
+    updatePhaseInTx,
+} from "@/lib/pipeline/state";
 import type { PipelinePhases } from "@/lib/pipeline/types";
+import * as placementBinding from "@/lib/profiles/placement-binding";
 import { bindPlacementProfileInTx } from "@/lib/profiles/placement-binding";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
@@ -101,6 +116,7 @@ const mocks = vi.hoisted(() => {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+            AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 100,
         },
     };
 });
@@ -248,6 +264,7 @@ const content = {
         }
 
         beforeEach(async () => {
+            mocks.env.AUTHZ_MODE = "local";
             mocks.create.mockResolvedValue({
                 choices: [{ message: { content: "Shared planning" } }],
             });
@@ -412,8 +429,8 @@ const content = {
                 recordingId: ITEM,
                 folderId,
             });
-        const resolved = (step: "summary" | "topics") =>
-            resolveItemProfile(ITEM, "private", OWNER, OWNER, step);
+        const resolved = (step: "summary" | "topics", jobId?: string) =>
+            resolveItemProfile(ITEM, "private", OWNER, OWNER, step, jobId);
 
         it("uses the inherited Organization profile for pending steps without touching the transcript", async () => {
             const before = await db()
@@ -484,9 +501,9 @@ const content = {
                 });
             await bindSeededJob("running-summary");
             await share();
-            expect((await resolved("summary")).revisionId).toBe(
-                `${PERSONAL}-rev`,
-            );
+            expect(
+                (await resolved("summary", "running-summary")).revisionId,
+            ).toBe(`${PERSONAL}-rev`);
             expect((await resolved("topics")).revisionId).toBe(
                 `${ORG_PROFILE}-rev`,
             );
@@ -708,16 +725,16 @@ const content = {
                     payload: { recordingId: ITEM, trigger: "auto" },
                 });
             await share();
-            expect((await resolved("summary")).revisionId).toBe(
-                `${PERSONAL}-rev`,
-            );
+            expect(
+                (await resolved("summary", "queued-summary")).revisionId,
+            ).toBe(`${PERSONAL}-rev`);
             await db()
                 .update(asyncJobs)
                 .set({ status: "completed" })
                 .where(eq(asyncJobs.id, "queued-summary"));
-            expect((await resolved("summary")).revisionId).toBe(
-                `${ORG_PROFILE}-rev`,
-            );
+            expect(
+                (await resolved("summary", "queued-summary")).revisionId,
+            ).toBe(`${ORG_PROFILE}-rev`);
         });
 
         it.each([
@@ -1273,7 +1290,7 @@ const content = {
                     payload: { trigger: "auto" },
                 });
             await share();
-            expect((await resolved("summary")).revisionId).toBe(
+            expect((await resolved("summary", "held-summary")).revisionId).toBe(
                 `${PERSONAL}-rev`,
             );
             expect(
@@ -1583,6 +1600,450 @@ const content = {
             }
             expect(await db().select().from(taskMentions)).toEqual([]);
         });
+
+        it.each([
+            true,
+            false,
+        ])("starts automatic Learn using the placement policy (automatic: %s)", async (automatic) => {
+            const settings = defaultProfileSettings("audio");
+            settings.steps.learn.automatic = true;
+            await db()
+                .update(processingProfileRevisions)
+                .set({ settings: encryptText(JSON.stringify(settings)) })
+                .where(eq(processingProfileRevisions.id, `${ORG_PROFILE}-rev`));
+            const pending = phases();
+            delete pending.learn;
+            delete pending.summary;
+            await db()
+                .update(itemProcessing)
+                .set({ manualOnly: automatic, phases: pending })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, ITEM),
+                        eq(itemProcessing.userId, OWNER),
+                    ),
+                );
+            if (!automatic) await manualPlacement();
+            await share();
+            const plan = planAdvance(await gatherFacts(ITEM, "private", OWNER));
+            expect(
+                plan.actions.some((action) => action.type === "startAutoLearn"),
+            ).toBe(automatic);
+            await expect(
+                startAutomaticLearn({
+                    userId: OWNER,
+                    itemId: ITEM,
+                    source: "riffado",
+                    timed: true,
+                }),
+            ).resolves.toEqual(
+                automatic
+                    ? { status: "started" }
+                    : { status: "skipped", reason: "profile_off" },
+            );
+            const runs = await db()
+                .select()
+                .from(learnRuns)
+                .where(
+                    and(
+                        eq(learnRuns.itemId, ITEM),
+                        eq(learnRuns.userId, OWNER),
+                    ),
+                );
+            expect(runs).toHaveLength(automatic ? 1 : 0);
+            if (automatic)
+                expect(runs[0]).toMatchObject({
+                    view: "org",
+                    trigger: "auto",
+                    profileRevisionId: `${ORG_PROFILE}-rev`,
+                });
+        });
+
+        it.each([
+            true,
+            false,
+        ])("refreshes a stale summary using the placement policy (automatic: %s)", async (automatic) => {
+            await db()
+                .update(itemProcessing)
+                .set({ manualOnly: automatic })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, ITEM),
+                        eq(itemProcessing.userId, OWNER),
+                    ),
+                );
+            if (!automatic) await manualPlacement();
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    itemId: ITEM,
+                    userId: OWNER,
+                    transcriptionId: TRANSCRIPT,
+                    summary: encryptText("Previous reading"),
+                    source: "riffado",
+                    provider: "test",
+                    model: "test",
+                    inputFingerprint: "previous-reading",
+                });
+            await share();
+            expect(await isSummaryStale(OWNER, ITEM)).toBe(true);
+            const input = {
+                ownerUserId: OWNER,
+                recordingId: ITEM,
+                view: "private" as const,
+            };
+            expect(await summaryRefreshDue(input)).toEqual(
+                automatic ? {} : null,
+            );
+            await refreshSummaryAfterCorrections(input);
+            const jobs = await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.userId, OWNER),
+                        eq(asyncJobs.kind, "summary"),
+                        eq(asyncJobs.subjectId, ITEM),
+                    ),
+                );
+            expect(jobs).toHaveLength(automatic ? 1 : 0);
+            if (automatic) expect(jobs[0]?.payload.trigger).toBe("auto");
+        });
+
+        it.each([
+            ["summary", "summary"],
+            ["topics", "topics"],
+            ["transcribe", "transcription"],
+            ["title", "title.generate"],
+        ] as const)("holds the %s revision only for the captured job", async (step, kind) => {
+            await db()
+                .insert(asyncJobs)
+                .values({
+                    id: "captured-job",
+                    userId: OWNER,
+                    subjectId: ITEM,
+                    kind,
+                    status: "processing",
+                    payload: { recordingId: ITEM, trigger: "auto" },
+                });
+            await share();
+            await db()
+                .insert(asyncJobs)
+                .values({
+                    id: "newer-job",
+                    userId: OWNER,
+                    subjectId: `org:${ITEM}`,
+                    kind,
+                    status: "processing",
+                    payload: {
+                        recordingId: ITEM,
+                        trigger: "auto",
+                        view: "org",
+                    },
+                });
+            expect(
+                (
+                    await resolveItemProfile(
+                        ITEM,
+                        "private",
+                        OWNER,
+                        OWNER,
+                        step,
+                        "captured-job",
+                    )
+                ).revisionId,
+            ).toBe(`${PERSONAL}-rev`);
+            expect(
+                (
+                    await resolveItemProfile(
+                        ITEM,
+                        "org",
+                        OWNER,
+                        OWNER,
+                        step,
+                        "newer-job",
+                    )
+                ).revisionId,
+            ).toBe(`${ORG_PROFILE}-rev`);
+            expect(
+                (await resolveItemProfile(ITEM, "private", OWNER, OWNER, step))
+                    .revisionId,
+            ).toBe(`${ORG_PROFILE}-rev`);
+        });
+
+        it("authorizes a bound Organization revision as the curator after the owner's access is revoked", async () => {
+            await share();
+            await db()
+                .insert(userAccessStates)
+                .values([
+                    {
+                        userId: OWNER,
+                        issuer: "https://identity.example.test",
+                        subject: "zava-subject",
+                        capabilities: [],
+                        status: "disabled",
+                        verifiedAt: new Date(),
+                        source: "verifier",
+                    },
+                    {
+                        userId: CURATOR,
+                        issuer: "https://identity.example.test",
+                        subject: "noren-subject",
+                        capabilities: ["use", "org.curate"],
+                        status: "active",
+                        verifiedAt: new Date(),
+                        source: "verifier",
+                    },
+                ]);
+            mocks.env.AUTHZ_MODE = "idp";
+            try {
+                expect(
+                    (await resolveItemProfile(ITEM, "org", OWNER, CURATOR))
+                        .revisionId,
+                ).toBe(`${ORG_PROFILE}-rev`);
+                await expect(
+                    resolveItemProfile(ITEM, "org", OWNER, OWNER),
+                ).rejects.toMatchObject({
+                    name: "AssignedProfileUnavailableError",
+                });
+            } finally {
+                mocks.env.AUTHZ_MODE = "local";
+            }
+        });
+
+        it("avoids held-profile reads when a phase settles without held jobs", async () => {
+            await db().transaction(async (tx) => {
+                const select = vi.spyOn(tx, "select");
+                try {
+                    expect(
+                        await updatePhaseInTx(
+                            tx,
+                            ITEM,
+                            "private",
+                            OWNER,
+                            "learn",
+                            {
+                                state: "done",
+                                reason: "released",
+                                generation: 1,
+                                at: at.toISOString(),
+                                inputs: content,
+                            },
+                        ),
+                    ).toBe(true);
+                    expect(select).toHaveBeenCalledTimes(1);
+                    select.mockClear();
+                    expect(
+                        await markSummaryStepDoneInTx(tx, {
+                            itemId: ITEM,
+                            userId: OWNER,
+                            view: "private",
+                            step: "summary",
+                            content,
+                            generation: 1,
+                        }),
+                    ).toBe(true);
+                    expect(select).toHaveBeenCalledTimes(2);
+                } finally {
+                    select.mockRestore();
+                }
+            });
+        });
+
+        it.each([
+            true,
+            false,
+        ])("keeps completed output current and commits pending output on B after a second binding (finished: %s)", async (finished) => {
+            await share();
+            const profileA = await resolved("summary");
+            expect(profileA.revisionId).toBe(`${ORG_PROFILE}-rev`);
+            const before = await readProcessing(ITEM, "private", OWNER);
+            const inputs = {
+                ...content,
+                itemProfileRevisionId: before?.profileRevisionId ?? null,
+            };
+            const write = (revisionId: string) =>
+                upsertEnhancement({
+                    userId: OWNER,
+                    recordingId: ITEM,
+                    transcriptionId: TRANSCRIPT,
+                    summary: "Shared planning",
+                    keyPoints: [],
+                    actionItems: [],
+                    source: "riffado",
+                    provider: "test",
+                    model: "test",
+                    profileRevisionId: revisionId,
+                    inputs,
+                });
+            if (finished)
+                expect(await write(profileA.revisionId)).toEqual({
+                    committed: true,
+                });
+            const settled = await readProcessing(ITEM, "private", OWNER);
+            await moveRecordingBetweenFolders({
+                userId: MEMBER,
+                recordingId: ITEM,
+                fromFolderId: "org-child",
+                toFolderId: "org-other",
+            });
+            const profileB = await resolved("summary");
+            expect(profileB.revisionId).toBe(`${OTHER_PROFILE}-rev`);
+            expect(
+                (await readProcessing(ITEM, "private", OWNER))
+                    ?.profileRevisionId,
+            ).toBe(before?.profileRevisionId);
+            if (finished) {
+                expect(
+                    (await readProcessing(ITEM, "private", OWNER))?.phases
+                        .summary,
+                ).toEqual(settled?.phases.summary);
+            } else {
+                expect(
+                    planAdvance(
+                        await gatherFacts(ITEM, "private", OWNER),
+                    ).actions.some((action) => action.type === "queueSummary"),
+                ).toBe(true);
+                expect(await write(profileB.revisionId)).toEqual({
+                    committed: true,
+                });
+            }
+            const facts = await gatherFacts(ITEM, "private", OWNER);
+            expect(facts.summary.current).toBe(true);
+            expect(facts.phases.summary?.state).not.toBe("outdated");
+            expect(
+                planAdvance(facts).actions.some(
+                    (action) => action.type === "queueSummary",
+                ),
+            ).toBe(false);
+            expect(
+                (await loadPrivateItemProcessing(OWNER, ITEM))?.processAgain,
+            ).toBe(false);
+            const [summary] = await db()
+                .select({ profileRevisionId: aiEnhancements.profileRevisionId })
+                .from(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, ITEM),
+                        eq(aiEnhancements.userId, OWNER),
+                    ),
+                );
+            expect(summary?.profileRevisionId).toBe(
+                finished ? profileA.revisionId : profileB.revisionId,
+            );
+        });
+
+        it("retries an Organization move after PostgreSQL aborts its real row-lock deadlock", async () => {
+            await share();
+            const before = await readProcessing(ITEM, "private", OWNER);
+            const movingSql = postgres(database.url, {
+                max: 1,
+                connection: { deadlock_timeout: "50ms", lock_timeout: 5000 },
+            });
+            const contenderSql = postgres(database.url, {
+                max: 1,
+                connection: { deadlock_timeout: "10s", lock_timeout: 5000 },
+            });
+            const movingDb = drizzle(movingSql);
+            const contenderDb = drizzle(contenderSql);
+            const processingLocked = Promise.withResolvers<void>();
+            const moveLocked = Promise.withResolvers<void>();
+            const contenderWaiting = Promise.withResolvers<void>();
+            const deadlocks: unknown[] = [];
+            const bind = placementBinding.bindPlacementProfileInTx;
+            const binding = vi
+                .spyOn(placementBinding, "bindPlacementProfileInTx")
+                .mockImplementation(async (tx, input) => {
+                    moveLocked.resolve();
+                    await contenderWaiting.promise;
+                    try {
+                        return await bind(tx, input);
+                    } catch (error) {
+                        deadlocks.push(error);
+                        throw error;
+                    }
+                });
+            const contender = contenderDb.transaction(async (tx) => {
+                await tx
+                    .select({ id: itemProcessing.itemId })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, ITEM),
+                            eq(itemProcessing.userId, OWNER),
+                            eq(itemProcessing.view, "private"),
+                        ),
+                    )
+                    .for("update");
+                processingLocked.resolve();
+                await moveLocked.promise;
+                contenderWaiting.resolve();
+                await tx
+                    .select({ id: recordings.id })
+                    .from(recordings)
+                    .where(
+                        and(
+                            eq(recordings.id, ITEM),
+                            eq(recordings.userId, OWNER),
+                        ),
+                    )
+                    .for("update");
+            });
+            try {
+                await processingLocked.promise;
+                mocks.ref.current = movingDb as unknown as Record<
+                    PropertyKey,
+                    unknown
+                >;
+                const results = await Promise.allSettled([
+                    moveRecordingBetweenFolders({
+                        userId: CURATOR,
+                        recordingId: ITEM,
+                        fromFolderId: "org-child",
+                        toFolderId: "org-other",
+                    }),
+                    contender,
+                ]);
+                expect(results).toEqual([
+                    { status: "fulfilled", value: undefined },
+                    { status: "fulfilled", value: undefined },
+                ]);
+                expect(deadlocks).toHaveLength(1);
+                expect(isDeadlock(deadlocks[0])).toBe(true);
+                expect(binding).toHaveBeenCalledTimes(2);
+            } finally {
+                moveLocked.resolve();
+                contenderWaiting.resolve();
+                await contender.catch(() => undefined);
+                mocks.ref.current = database.db as unknown as Record<
+                    PropertyKey,
+                    unknown
+                >;
+                binding.mockRestore();
+                await Promise.all([
+                    movingSql.end({ timeout: 5 }),
+                    contenderSql.end({ timeout: 5 }),
+                ]);
+            }
+            expect(
+                await db()
+                    .select({ folderId: recordingFolderAssignments.folderId })
+                    .from(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(recordingFolderAssignments.itemId, ITEM),
+                            eq(recordingFolderAssignments.userId, OWNER),
+                        ),
+                    ),
+            ).toEqual([{ folderId: "org-other" }]);
+            expect(
+                (await readProcessing(ITEM, "private", OWNER))
+                    ?.requestedGeneration,
+            ).toBe((before?.requestedGeneration ?? 0) + 1);
+            expect((await resolved("summary")).revisionId).toBe(
+                `${OTHER_PROFILE}-rev`,
+            );
+        }, 15_000);
 
         it("refuses a non-curator member without advancing either row", async () => {
             await share();

@@ -54,6 +54,7 @@ import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunCurrentScope, learnRunOpen } from "@/lib/learn/learn-open";
 import { learnScopeRestartPending } from "@/lib/learn/sharing";
 import { getOrgUserId } from "@/lib/org/config";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { markLearnReleasedInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveStepProvider } from "@/lib/profiles/providers";
@@ -101,7 +102,10 @@ export async function startAutomaticLearn(input: {
         const profile = await resolveItemProfile(itemId, "private", userId);
         const learn = profile.settings.steps.learn;
         const [processing] = await db
-            .select({ manualOnly: itemProcessing.manualOnly })
+            .select({
+                manualOnly: itemProcessing.manualOnly,
+                phases: itemProcessing.phases,
+            })
             .from(itemProcessing)
             .where(
                 and(
@@ -111,7 +115,7 @@ export async function startAutomaticLearn(input: {
                 ),
             )
             .limit(1);
-        if (processing?.manualOnly || !learn.automatic) {
+        if (effectiveManualOnly(processing) || !learn.automatic) {
             return { status: "skipped", reason: "profile_off" };
         }
         try {

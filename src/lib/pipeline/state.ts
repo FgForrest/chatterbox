@@ -148,7 +148,12 @@ export async function updatePhaseInTx(
         phase,
         record,
     );
-    if (updated)
+    if (
+        updated &&
+        holdsProfiles(
+            phase === "categorize" ? record : current?.phases.categorize,
+        )
+    )
         await pruneHeldProfilesInTx(
             tx,
             itemId,
@@ -160,6 +165,10 @@ export async function updatePhaseInTx(
                 : undefined,
         );
     return updated;
+}
+
+function holdsProfiles(categorize: PhaseRecord | undefined): boolean {
+    return Object.keys(categorize?.heldProfiles ?? {}).length > 0;
 }
 
 async function pruneHeldProfilesInTx(
@@ -356,7 +365,7 @@ async function settleSummaryStepInTx(
             steps,
         },
     );
-    if (updated)
+    if (updated && holdsProfiles(processing?.phases.categorize))
         await pruneHeldProfilesInTx(
             tx,
             input.itemId,
@@ -491,7 +500,8 @@ export async function markStoredSummaryStepFailedInTx(
     });
     if (!advance) return false;
     const now = new Date().toISOString();
-    await pruneHeldProfilesInTx(tx, input.itemId, input.view, input.userId);
+    if (holdsProfiles(processing?.phases.categorize))
+        await pruneHeldProfilesInTx(tx, input.itemId, input.view, input.userId);
     return updateProcessingPhaseInTx(
         tx,
         input.itemId,

@@ -670,7 +670,6 @@ async function runLearnJob({
     const profile = run.profileRevisionId
         ? await loadItemProfileRevision({
               itemId: run.itemId,
-              view: run.view,
               ownerUserId: run.userId,
               actorUserId: run.actorUserId ?? run.userId,
               revisionId: run.profileRevisionId,
