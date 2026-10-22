@@ -13,6 +13,7 @@ import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 
 vi.mock("next-intl", () => ({
@@ -40,7 +41,7 @@ const folder: RecordingFolder = {
     version: 0,
 };
 
-const processing: ItemProcessingPresentation = {
+const processing: ItemProcessingPresentation = processingFixture({
     itemId: "item-1",
     kind: "audio",
     legacy: false,
@@ -91,7 +92,7 @@ const processing: ItemProcessingPresentation = {
     taskReviewWaiting: 0,
     jobs: { transcription: null, summary: null },
     failures: [],
-};
+});
 
 const panel: CategorizationPanelPresentation = {
     itemId: "item-1",
@@ -124,7 +125,7 @@ const panel: CategorizationPanelPresentation = {
     canCreateOrganizationFolders: false,
 };
 
-const needsProfile: ItemProcessingPresentation = {
+const needsProfile: ItemProcessingPresentation = processingFixture({
     ...processing,
     manualOnly: false,
     phases: {
@@ -136,7 +137,7 @@ const needsProfile: ItemProcessingPresentation = {
         },
     },
     intents: [],
-};
+});
 
 function renderWorkflow(
     props: Partial<React.ComponentProps<typeof ItemWorkflow>> = {},
@@ -221,13 +222,13 @@ describe("processing folder row", () => {
         );
         vi.stubGlobal("fetch", fetchMock);
         renderWorkflow({
-            initialData: {
+            initialData: processingFixture({
                 ...processing,
                 legacy: true,
                 manualOnly: false,
                 profile: null,
                 outputs: { transcript: true, learn: true, summary: true },
-            },
+            }),
             onTranscribe,
         });
 
@@ -267,7 +268,12 @@ describe("processing folder row", () => {
 
     it("loads the owner's processing in the Organization view without actions", async () => {
         const onProcessingChange = vi.fn();
-        const fetchMock = vi.fn(async () => Response.json({ processing }));
+        const memberProcessing = structuredClone(processing);
+        for (const step of Object.values(memberProcessing.steps))
+            step.actions = [];
+        const fetchMock = vi.fn(async () =>
+            Response.json({ processing: memberProcessing }),
+        );
         vi.stubGlobal("fetch", fetchMock);
 
         renderWorkflow({
@@ -283,7 +289,7 @@ describe("processing folder row", () => {
             ),
         );
         await waitFor(() =>
-            expect(onProcessingChange).toHaveBeenCalledWith(processing),
+            expect(onProcessingChange).toHaveBeenCalledWith(memberProcessing),
         );
         expect(screen.getByLabelText("Workflow")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Share now" })).toBeNull();
@@ -297,7 +303,7 @@ describe("processing folder row", () => {
             );
         }
         renderWorkflow({
-            initialData: {
+            initialData: processingFixture({
                 ...processing,
                 manualOnly: false,
                 intents: [],
@@ -318,7 +324,7 @@ describe("processing folder row", () => {
                         at: "2026-10-16T08:00:00.000Z",
                     },
                 },
-            },
+            }),
             onTranscribe,
         });
 
@@ -329,7 +335,7 @@ describe("processing folder row", () => {
     it("forces a transcription retry after a failed run", () => {
         const onTranscribe = vi.fn();
         renderWorkflow({
-            initialData: {
+            initialData: processingFixture({
                 ...processing,
                 outputs: {
                     ...processing.outputs,
@@ -351,7 +357,7 @@ describe("processing folder row", () => {
                         retryAvailable: true,
                     },
                 ],
-            },
+            }),
             onTranscribe,
         });
 
@@ -399,7 +405,7 @@ describe("processing folder row", () => {
     it("shows the workflow strip and Categorize card when uploaded processing arrives late", async () => {
         vi.useFakeTimers();
         try {
-            const waiting: ItemProcessingPresentation = {
+            const waiting: ItemProcessingPresentation = processingFixture({
                 ...needsProfile,
                 phases: {
                     categorize: {
@@ -409,7 +415,7 @@ describe("processing folder row", () => {
                         at: "2026-10-16T08:00:03.000Z",
                     },
                 },
-            };
+            });
             const filingPanel: CategorizationPanelPresentation = {
                 ...panel,
                 selectedFolderIds: [],
@@ -434,11 +440,12 @@ describe("processing folder row", () => {
             invalidateItemProcessing("item-1");
             renderWorkflow({ initialData: null });
 
+            await act(async () => {});
             await act(async () => {
-                await Promise.resolve();
-                vi.advanceTimersByTime(4_000);
-                await Promise.resolve();
-                await Promise.resolve();
+                await vi.advanceTimersByTimeAsync(5_000);
+            });
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(5_000);
             });
 
             expect(

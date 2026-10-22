@@ -15,6 +15,7 @@ import {
 } from "@/components/dashboard/transcription-panel";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { canChangeItem } from "@/lib/sharing/change-permission";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
@@ -66,7 +67,7 @@ const recording: Recording = {
     deviceSn: "local",
 };
 
-const personTranscribing: ItemProcessingPresentation = {
+const personTranscribing: ItemProcessingPresentation = processingFixture({
     itemId: "rec-1",
     kind: "audio",
     legacy: false,
@@ -101,14 +102,14 @@ const personTranscribing: ItemProcessingPresentation = {
     jobs: { transcription: "running", summary: null },
     startedBy: { transcription: "person", summary: null, topics: null },
     failures: [],
-};
+});
 
-const idleProcessing: ItemProcessingPresentation = {
+const idleProcessing: ItemProcessingPresentation = processingFixture({
     ...personTranscribing,
     jobs: { transcription: null, summary: null },
-};
+});
 
-const completedProcessing: ItemProcessingPresentation = {
+const completedProcessing: ItemProcessingPresentation = processingFixture({
     ...personTranscribing,
     phases: {
         categorize: personTranscribing.phases.categorize,
@@ -120,9 +121,9 @@ const completedProcessing: ItemProcessingPresentation = {
     },
     outputs: { transcript: true, learn: false, summary: false },
     jobs: { transcription: null, summary: null },
-};
+});
 
-const workflowProcessing: ItemProcessingPresentation = {
+const workflowProcessing: ItemProcessingPresentation = processingFixture({
     ...completedProcessing,
     phases: {
         ...completedProcessing.phases,
@@ -153,7 +154,7 @@ const workflowProcessing: ItemProcessingPresentation = {
             confirmed: false,
         },
     ],
-};
+});
 
 function panel(
     isTranscribing: boolean,

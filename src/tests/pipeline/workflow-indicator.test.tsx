@@ -16,6 +16,7 @@ import type {
 } from "@/lib/pipeline/workflow-status";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted:
         () =>
         (

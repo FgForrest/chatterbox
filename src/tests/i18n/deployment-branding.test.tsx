@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProductNameProvider } from "@/components/product-name-provider";
 import type { AppLocale } from "@/lib/i18n/config";
 import { messagesForLocale } from "@/lib/i18n/messages";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const { envState, serverState } = vi.hoisted(() => ({
     envState: {
@@ -163,7 +164,7 @@ const cases = [
 
 function completedProcessing(): ItemProcessingPresentation {
     const at = "2026-10-16T10:00:00.000Z";
-    return {
+    return processingFixture({
         itemId: "recording-1",
         kind: "audio",
         legacy: false,
@@ -193,7 +194,7 @@ function completedProcessing(): ItemProcessingPresentation {
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 describe.each(

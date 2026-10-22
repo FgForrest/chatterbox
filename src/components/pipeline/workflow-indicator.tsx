@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,6 +68,7 @@ function stateColor(state: WorkflowStep["state"]): string {
             return "text-[var(--step-review)]";
         case "working":
             return "text-[var(--step-working)]";
+        case "stalled":
         case "problem":
             return "text-[var(--step-problem)]";
         default:
@@ -144,6 +145,7 @@ function StepCircle({
                     />
                 </span>
             );
+        case "stalled":
         case "problem":
             return (
                 <span
@@ -215,6 +217,7 @@ export function WorkflowStrip({
     readOnly = false,
 }: WorkflowStripProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
     const stripRef = useRef<HTMLElement>(null);
     const copyMeasureRefs = useRef<Array<HTMLSpanElement | null>>([]);
     const [density, setDensity] = useState<WorkflowDensity>("compact");
@@ -270,6 +273,8 @@ export function WorkflowStrip({
                 return i18n("Waiting");
             case "others":
                 return i18n("Waiting for a curator");
+            case "stalled":
+                return i18n("Stalled");
             case "problem":
                 return i18n("Failed");
             case "outdated":
@@ -330,7 +335,24 @@ export function WorkflowStrip({
     const message = () => {
         const status = workflow.status;
         if (!status) return "";
+        if (status.actor === "queued" && status.params?.position !== undefined)
+            return i18n("Queued, position {position}", {
+                position: String(status.params.position),
+            });
+        if (status.params?.until)
+            return i18n("Waiting for Learn review, until {deadline}", {
+                deadline: new Date(status.params.until).toLocaleString(locale, {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                }),
+            });
         switch (status.message) {
+            case "stalled":
+                return i18n("Processing stalled, recovering");
+            case "organizationUnavailable":
+                return i18n("Waiting for the Organization to become available");
+            case "waitingForProcessing":
+                return i18n("Waiting for processing");
             case "notFiled":
                 return status.params?.kind === "mail"
                     ? i18n(
@@ -467,6 +489,8 @@ export function WorkflowStrip({
     };
     const actionLabel = (action: WorkflowActionCode) => {
         switch (action) {
+            case "learn":
+                return i18n("Learn");
             case "file":
                 return i18n("File it");
             case "chooseProfile":
@@ -482,7 +506,7 @@ export function WorkflowStrip({
             case "shareNow":
                 return i18n("Share now");
             case "retry":
-                return i18n("Try again");
+                return i18n({ id: "processingRetry", message: "Try again" });
             case "processAgain":
                 return i18n("Re-process");
         }

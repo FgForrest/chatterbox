@@ -1,103 +1,44 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, renderHook } from "@testing-library/react";
-import { useEffect, useState } from "react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useItemProcessing } from "@/hooks/use-item-processing";
-import {
-    ITEM_PROCESSING_REVALIDATION_MS,
-    invalidateItemProcessing,
-} from "@/lib/pipeline/item-processing-events";
-import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("@/components/tasks/task-api", () => ({
     onTasksChanged: () => () => {},
 }));
 
-function processing(
-    job: "queued" | "running" | null,
-    itemId = "recording-1",
-): ItemProcessingPresentation {
+function processing(delay = 60_000, itemId = "item-veln") {
     return {
-        itemId,
-        kind: "audio",
-        legacy: false,
-        manualOnly: false,
-        phases: {
-            categorize: {
-                state: "done",
-                reason: "categorized",
-                generation: 0,
-                at: "2026-10-16T08:00:00.000Z",
-            },
-            transcribe: {
-                state: job ? "running" : "done",
-                generation: 0,
-                at: "2026-10-16T08:00:00.000Z",
-            },
-        },
-        profile: null,
-        placements: [],
-        intents: [],
-        outputs: {
-            transcript: job === null,
-            learn: false,
-            summary: false,
-        },
-        processAgain: false,
-        processAgainReason: null,
-        learnFindingsWaiting: 0,
-        taskReviewWaiting: 0,
-        jobs: { transcription: job, summary: null },
-        failures: [],
+        ...processingFixture({
+            itemId,
+            kind: "audio",
+            legacy: false,
+            manualOnly: false,
+            phases: {},
+            profile: null,
+            placements: [],
+            intents: [],
+            outputs: { transcript: false, summary: false, learn: false },
+            processAgain: false,
+            processAgainReason: null,
+            learnFindingsWaiting: 0,
+            taskReviewWaiting: 0,
+            jobs: { transcription: null, summary: null },
+            failures: [],
+        }),
+        nextCheckAt: new Date(Date.now() + delay).toISOString(),
     };
 }
-
-interface MailProcessingProbeProps {
-    itemId: string;
-    initialData: ItemProcessingPresentation | null;
-    onProcessingChange: (data: ItemProcessingPresentation | null) => void;
-}
-
-function MailProcessingProbe({
-    itemId,
-    initialData,
-    onProcessingChange,
-}: MailProcessingProbeProps) {
-    const { data } = useItemProcessing({
-        itemId,
-        kind: "mail",
-        initialData,
+function visibility(state: "hidden" | "visible") {
+    Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: state,
     });
-
-    useEffect(() => {
-        onProcessingChange(data);
-    }, [data, onProcessingChange]);
-
-    return null;
+    document.dispatchEvent(new Event("visibilitychange"));
 }
-
-function MailRoundTrip({
-    initialData,
-}: {
-    initialData: ItemProcessingPresentation;
-}) {
-    const [processingData, setProcessingData] =
-        useState<ItemProcessingPresentation | null>(initialData);
-
-    useEffect(() => {
-        setProcessingData(initialData);
-    }, [initialData]);
-
-    return (
-        <MailProcessingProbe
-            itemId={initialData.itemId}
-            initialData={processingData}
-            onProcessingChange={setProcessingData}
-        />
-    );
-}
-
 beforeEach(() => {
     vi.useFakeTimers();
     Object.defineProperty(document, "visibilityState", {
@@ -105,404 +46,296 @@ beforeEach(() => {
         value: "visible",
     });
 });
-
 afterEach(() => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
 });
 
-describe("useItemProcessing", () => {
-    it("polls every five seconds, refreshes on focus, and settles after work", async () => {
-        const done = processing(null);
-        const settled: ItemProcessingPresentation = {
-            ...done,
-            phases: {
-                ...done.phases,
-                learn: {
-                    state: "skipped",
-                    reason: "profile_off",
-                    generation: 0,
-                    at: "2026-10-16T08:00:01.000Z",
-                },
-            },
-        };
+describe("server-driven processing refresh", () => {
+    it("keeps one timer, follows successive deadlines, and continues while idle", async () => {
         const fetchMock = vi
             .fn()
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: processing("running") }),
-            })
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: done }),
-            })
-            .mockResolvedValue({
-                ok: true,
-                json: async () => ({ processing: settled }),
-            });
+            .mockImplementation(async () =>
+                Response.json({ processing: processing(60_000) }),
+            );
         vi.stubGlobal("fetch", fetchMock);
-        const initial = processing("queued");
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: "recording-1",
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
-
-        await act(async () => {
-            vi.advanceTimersByTime(5_000);
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(result.current.data?.jobs.transcription).toBe("running");
-
-        await act(async () => {
-            window.dispatchEvent(new Event("focus"));
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(result.current.data?.jobs.transcription).toBeNull();
-
-        await act(async () => {
-            vi.advanceTimersByTime(15_000);
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(3);
-    });
-
-    it("does not poll or focus-refresh a hidden tab", async () => {
-        Object.defineProperty(document, "visibilityState", {
-            configurable: true,
-            value: "hidden",
-        });
-        const fetchMock = vi.fn();
-        vi.stubGlobal("fetch", fetchMock);
-        const initial = processing("queued");
+        const initial = processing(3_000);
         renderHook(() =>
             useItemProcessing({
-                itemId: "recording-1",
+                itemId: initial.itemId,
                 kind: "audio",
                 initialData: initial,
             }),
         );
-
+        expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
-            vi.advanceTimersByTime(10_000);
-            window.dispatchEvent(new Event("focus"));
-            await Promise.resolve();
+            await vi.advanceTimersByTimeAsync(2_999);
         });
         expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it("moves a finished Learn review to the server's running state without a reload", async () => {
-        const review: ItemProcessingPresentation = {
-            ...processing(null),
-            phases: {
-                ...processing(null).phases,
-                learn: {
-                    state: "waiting",
-                    reason: "review_pending",
-                    generation: 1,
-                    at: "2026-10-16T08:01:00.000Z",
-                },
-            },
-            learnFindingsWaiting: 2,
-        };
-        const running: ItemProcessingPresentation = {
-            ...review,
-            phases: {
-                ...review.phases,
-                learn: {
-                    state: "running",
-                    reason: "started",
-                    generation: 2,
-                    at: "2026-10-16T08:02:00.000Z",
-                },
-            },
-            learnFindingsWaiting: 0,
-        };
-        const findingsCleared: ItemProcessingPresentation = {
-            ...review,
-            learnFindingsWaiting: 0,
-        };
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: findingsCleared }),
-            })
-            .mockResolvedValue({
-                ok: true,
-                json: async () => ({ processing: running }),
-            });
-        vi.stubGlobal("fetch", fetchMock);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: review.itemId,
-                kind: "audio",
-                initialData: review,
-            }),
-        );
-
-        await act(async () => {
-            invalidateItemProcessing(review.itemId);
-            await Promise.resolve();
-        });
-        expect(result.current.workflow?.status?.message).toBe(
-            "learnCorrecting",
-        );
-        expect(result.current.data?.learnFindingsWaiting).toBe(0);
-
-        await act(async () => {
-            vi.advanceTimersByTime(5_000);
-            await Promise.resolve();
-        });
-        expect(result.current.workflow?.status?.message).toBe("learnRunning");
-        expect(
-            result.current.workflow?.steps.find((step) => step.id === "learn")
-                ?.state,
-        ).toBe("working");
-    });
-
-    it("keeps revalidating a newly selected upload until categorization arrives", async () => {
-        const itemId = "uploaded-recording";
-        const waiting: ItemProcessingPresentation = {
-            ...processing(null, itemId),
-            phases: {
-                categorize: {
-                    state: "waiting",
-                    reason: "needs_folder",
-                    generation: 0,
-                    at: "2026-10-16T08:00:03.000Z",
-                },
-            },
-            outputs: { transcript: false, learn: false, summary: false },
-        };
-        const empty: ItemProcessingPresentation = {
-            ...processing(null, itemId),
-            phases: {},
-            outputs: { transcript: false, learn: false, summary: false },
-        };
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: empty }),
-            })
-            .mockResolvedValue({
-                ok: true,
-                json: async () => ({ processing: waiting }),
-            });
-        vi.stubGlobal("fetch", fetchMock);
-        invalidateItemProcessing(itemId);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId,
-                kind: "audio",
-                initialData: null,
-            }),
-        );
-
-        await act(async () => {
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(result.current.workflow?.visible).toBe(false);
-
-        await act(async () => {
-            vi.advanceTimersByTime(2_000);
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(result.current.workflow?.visible).toBe(true);
-        expect(result.current.workflow?.status?.message).toBe("notFiled");
-    });
-
-    it("fetches the follow-on phase after active work ends", async () => {
-        const itemId = "follow-on-recording";
-        const running = processing("running", itemId);
-        const done = processing(null, itemId);
-        const summaryQueued: ItemProcessingPresentation = {
-            ...done,
-            phases: {
-                ...done.phases,
-                summary: {
-                    state: "running",
-                    reason: "started",
-                    generation: 1,
-                    at: "2026-10-16T08:01:00.000Z",
-                },
-            },
-            jobs: { transcription: null, summary: "queued" },
-        };
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: done }),
-            })
-            .mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ processing: done }),
-            })
-            .mockResolvedValue({
-                ok: true,
-                json: async () => ({ processing: summaryQueued }),
-            });
-        vi.stubGlobal("fetch", fetchMock);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId,
-                kind: "audio",
-                initialData: running,
-            }),
-        );
-
-        await act(async () => {
-            vi.advanceTimersByTime(5_000);
-            await Promise.resolve();
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(result.current.data?.jobs.summary).toBeNull();
-
-        await act(async () => {
-            vi.advanceTimersByTime(2_000);
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(result.current.data?.jobs.summary).toBe("queued");
-        expect(
-            result.current.workflow?.steps.find((step) => step.id === "summary")
-                ?.state,
-        ).toBe("queued");
-    });
-
-    it("stops revalidating when the invalidation window expires", async () => {
-        const itemId = "unchanged-recording";
-        const unchanged = processing(null, itemId);
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({ processing: unchanged }),
-        });
-        vi.stubGlobal("fetch", fetchMock);
-        renderHook(() =>
-            useItemProcessing({
-                itemId,
-                kind: "audio",
-                initialData: unchanged,
-            }),
-        );
-
-        await act(async () => {
-            invalidateItemProcessing(itemId);
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-
-        await act(async () => {
-            await vi.advanceTimersByTimeAsync(
-                ITEM_PROCESSING_REVALIDATION_MS - 1,
-            );
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(15);
-
         await act(async () => {
             await vi.advanceTimersByTimeAsync(1);
         });
-        expect(fetchMock).toHaveBeenCalledTimes(15);
-
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(30_000);
+            await vi.advanceTimersByTimeAsync(59_999);
         });
-        expect(fetchMock).toHaveBeenCalledTimes(15);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
-
-    it("cleans up revalidation polling and listeners on unmount", async () => {
-        const itemId = "unmounted-recording";
-        const unchanged = processing(null, itemId);
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({ processing: unchanged }),
-        });
+    it("refetches on focus, pauses hidden polling, and immediately refreshes when visible", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockImplementation(async () =>
+                Response.json({ processing: processing(5_000) }),
+            );
         vi.stubGlobal("fetch", fetchMock);
-        const { unmount } = renderHook(() =>
+        const initial = processing(5_000);
+        renderHook(() =>
             useItemProcessing({
-                itemId,
+                itemId: initial.itemId,
                 kind: "audio",
-                initialData: unchanged,
+                initialData: initial,
             }),
         );
-
-        await act(async () => {
-            invalidateItemProcessing(itemId);
-            await Promise.resolve();
-        });
-        await act(async () => {
-            await vi.advanceTimersByTimeAsync(2_000);
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-
-        unmount();
         await act(async () => {
             window.dispatchEvent(new Event("focus"));
-            await vi.advanceTimersByTimeAsync(30_000);
         });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-
+        expect(fetchMock).toHaveBeenCalledTimes(1);
         await act(async () => {
-            invalidateItemProcessing(itemId);
-            await Promise.resolve();
+            visibility("hidden");
+        });
+        expect(vi.getTimerCount()).toBe(0);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(600_000);
+            window.dispatchEvent(new Event("focus"));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            visibility("visible");
         });
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(1);
     });
-
-    it("consumes a recent mail invalidation once across processing round trips", async () => {
-        const itemId = "mail-round-trip";
-        const initial: ItemProcessingPresentation = {
-            ...processing(null, itemId),
-            kind: "mail",
-            phases: {
-                categorize: {
-                    state: "done",
-                    reason: "categorized",
-                    generation: 0,
-                    at: "2026-10-16T08:00:00.000Z",
-                },
-            },
-            outputs: { transcript: false, learn: false, summary: false },
-        };
-        const fetchMock = vi.fn().mockImplementation(async () => ({
-            ok: true,
-            json: async () => ({ processing: { ...initial } }),
-        }));
+    it("shows staleness after two consecutive failures and clears it on retry success", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("offline"))
+            .mockResolvedValueOnce(new Response("", { status: 503 }))
+            .mockImplementation(async () =>
+                Response.json({ processing: processing() }),
+            );
         vi.stubGlobal("fetch", fetchMock);
-
-        const view = render(<MailRoundTrip initialData={{ ...initial }} />);
+        const initial = processing(5_000);
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
         await act(async () => {
-            await Promise.resolve();
+            await result.current.refresh();
+        });
+        expect(result.current.stale).toBe(false);
+        await act(async () => {
+            await result.current.refresh();
+        });
+        expect(result.current.stale).toBe(true);
+        await act(async () => {
+            await result.current.refresh();
+        });
+        expect(result.current.stale).toBe(false);
+        expect(vi.getTimerCount()).toBe(1);
+    });
+    it("resets the consecutive failure count on a successful read", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("offline"))
+            .mockImplementationOnce(async () =>
+                Response.json({ processing: processing() }),
+            )
+            .mockRejectedValueOnce(new Error("offline"));
+        vi.stubGlobal("fetch", fetchMock);
+        const initial = processing();
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
+        for (let i = 0; i < 3; i++)
+            await act(async () => {
+                await result.current.refresh();
+            });
+        expect(result.current.stale).toBe(false);
+    });
+    it("immediately refetches after a local action and keeps optimistic state while it waits", async () => {
+        let resolve: (value: Response) => void = () => {};
+        const fetchMock = vi.fn(
+            () =>
+                new Promise<Response>((r) => {
+                    resolve = r;
+                }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const initial = processing();
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
+        act(() => {
+            result.current.setData({ ...initial, processAgain: true });
+            invalidateItemProcessing(initial.itemId);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(result.current.data?.processAgain).toBe(true);
+        await act(async () => {
+            resolve(Response.json({ processing: processing() }));
+        });
+        expect(result.current.data?.processAgain).toBe(false);
+    });
+    it("deduplicates concurrent refresh triggers and ignores another item's late response", async () => {
+        let resolve: (value: Response) => void = () => {};
+        const fetchMock = vi.fn(
+            () =>
+                new Promise<Response>((r) => {
+                    resolve = r;
+                }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const first = processing(5_000, "item-zurna");
+        const second = processing(60_000, "item-tavro");
+        const { result, rerender } = renderHook(
+            ({ initial }) =>
+                useItemProcessing({
+                    itemId: initial.itemId,
+                    kind: "audio",
+                    initialData: initial,
+                }),
+            { initialProps: { initial: first } },
+        );
+        act(() => {
+            void result.current.refresh();
+            window.dispatchEvent(new Event("focus"));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        rerender({ initial: second });
+        await act(async () => {
+            resolve(Response.json({ processing: first }));
+        });
+        expect(result.current.data?.itemId).toBe(second.itemId);
+    });
+    it("refetches a local write after an older in-flight read finishes", async () => {
+        let resolve: (value: Response) => void = () => {};
+        const initial = processing(600_000, "item-race-veln");
+        const fetchMock = vi
+            .fn()
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>((r) => {
+                        resolve = r;
+                    }),
+            )
+            .mockImplementation(async () =>
+                Response.json({
+                    processing: {
+                        ...processing(60_000, initial.itemId),
+                        processAgain: true,
+                    },
+                }),
+            );
+        vi.stubGlobal("fetch", fetchMock);
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
+        act(() => {
+            void result.current.refresh();
+            invalidateItemProcessing(initial.itemId);
+            invalidateItemProcessing(initial.itemId);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            resolve(Response.json({ processing: initial }));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.current.data?.processAgain).toBe(true);
+        expect(vi.getTimerCount()).toBe(1);
+    });
+    it("cancels a write's pending follow-up refresh when the item unmounts", async () => {
+        let resolve: (response: Response) => void = () => {};
+        const initial = processing(600_000, "item-unmounted-request-felno");
+        const fetchMock = vi.fn(
+            () =>
+                new Promise<Response>((r) => {
+                    resolve = r;
+                }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const { result, unmount } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
+        act(() => {
+            void result.current.refresh();
+            invalidateItemProcessing(initial.itemId);
+        });
+        unmount();
+        await act(async () => {
+            resolve(Response.json({ processing: initial }));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+    it("cleans up its timer and listeners on unmount", async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        const initial = processing(60_000, "item-unmount-felno");
+        const { unmount } = renderHook(() =>
+            useItemProcessing({
+                itemId: initial.itemId,
+                kind: "audio",
+                initialData: initial,
+            }),
+        );
+        unmount();
+        expect(vi.getTimerCount()).toBe(0);
+        await act(async () => {
+            window.dispatchEvent(new Event("focus"));
+            invalidateItemProcessing(initial.itemId);
+            await vi.advanceTimersByTimeAsync(120_000);
         });
         expect(fetchMock).not.toHaveBeenCalled();
-
+    });
+    it("does not fetch or schedule while disabled", async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        renderHook(() =>
+            useItemProcessing({
+                itemId: "item-disabled",
+                kind: "audio",
+                enabled: false,
+            }),
+        );
         await act(async () => {
-            invalidateItemProcessing(itemId);
-            await Promise.resolve();
+            window.dispatchEvent(new Event("focus"));
         });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-
-        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
-        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
-        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
-        await act(async () => {
-            await Promise.resolve();
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-
-        await act(async () => {
-            await vi.advanceTimersByTimeAsync(2_000);
-        });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
     });
 });

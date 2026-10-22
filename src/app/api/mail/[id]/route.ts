@@ -6,6 +6,7 @@ import { resolveMailAccess } from "@/lib/mail/access";
 import { loadMailDetail } from "@/lib/mail/detail";
 import { deleteMail } from "@/lib/mail/manage";
 import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
+import { requestedRecordingView } from "@/lib/sharing/access";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -24,6 +25,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             id,
             session.user.id,
             localeFromAcceptLanguage(request.headers.get("accept-language")),
+            requestedRecordingView(request),
         ),
     ]);
     if (!detail) {

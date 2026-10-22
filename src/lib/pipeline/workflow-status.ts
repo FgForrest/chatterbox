@@ -1,5 +1,7 @@
+import type { PipelineWait } from "@/lib/pipeline/outcome";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
-import type { PhaseName, PhaseRecord } from "@/lib/pipeline/types";
+import type { ProcessingStep } from "@/lib/pipeline/processing-status";
+import type { PhaseName } from "@/lib/pipeline/types";
 
 export type WorkflowStepId = "record" | "receive" | PhaseName;
 
@@ -14,13 +16,16 @@ export type WorkflowStepState =
     | "problem"
     | "outdated"
     | "manual"
-    | "skipped";
+    | "skipped"
+    | "stalled";
 
 export interface WorkflowStep {
     id: WorkflowStepId;
     state: WorkflowStepState;
     reason?: string;
     current: boolean;
+    waitingFor?: PipelineWait | null;
+    actions?: WorkflowActionCode[];
 }
 
 export type WorkflowActor =
@@ -31,6 +36,9 @@ export type WorkflowActor =
     | "others";
 
 export type WorkflowMessageCode =
+    | "stalled"
+    | "organizationUnavailable"
+    | "waitingForProcessing"
     | "notFiled"
     | "profilesDisagree"
     | "profileUnavailable"
@@ -66,6 +74,7 @@ export type WorkflowMessageCode =
     | "profileChanged";
 
 export type WorkflowActionCode =
+    | "learn"
     | "file"
     | "chooseProfile"
     | "transcribe"
@@ -81,6 +90,8 @@ export interface WorkflowStatusSentence {
     message: WorkflowMessageCode;
     params?: {
         count?: number;
+        position?: number;
+        until?: string;
         folders?: string[];
         kind?: "audio" | "mail";
         step?: PhaseName;
@@ -94,284 +105,41 @@ export interface WorkflowStatus {
     status: WorkflowStatusSentence | null;
 }
 
-const phaseOrder = [
+const phaseOrder: PhaseName[] = [
     "categorize",
     "transcribe",
     "learn",
     "summary",
     "taskReview",
     "share",
-] as const;
+];
 
-function outputExists(
-    data: ItemProcessingPresentation,
-    phase: PhaseName,
-): boolean {
-    if (phase === "transcribe") return data.outputs.transcript;
-    if (phase === "learn") return data.outputs.learn;
-    if (phase === "summary") return data.outputs.summary;
-    return false;
-}
-
-function isManualPhase(
-    data: ItemProcessingPresentation,
-    phase: PhaseName,
-): boolean {
-    if (phase !== "transcribe" && phase !== "learn" && phase !== "summary") {
-        return false;
-    }
-    if (data.manualOnly) return true;
-    return data.profile !== null && !data.profile.automatic[phase];
-}
-
-function recordState(record: PhaseRecord | undefined): WorkflowStepState {
-    switch (record?.state) {
-        case "done":
-            return "done";
-        case "running":
-            return "working";
-        case "failed":
-        case "not_processed":
-            return "problem";
-        case "outdated":
-            return "outdated";
-        case "skipped":
-            return "skipped";
-        default:
-            return "waiting";
-    }
-}
-
-function currentLearnRun(data: ItemProcessingPresentation) {
-    const run = data.latestLearnRun;
-    if (!run) return null;
-    if (run.status === "queued" || run.status === "running") return run;
-    if (run.status !== "failed") return null;
-    const phaseAt = data.phases.learn?.at;
-    return !phaseAt || Date.parse(run.updatedAt) > Date.parse(phaseAt)
-        ? run
-        : null;
-}
-
-function summaryJobState(data: ItemProcessingPresentation) {
-    return (
-        data.jobs.summary ??
-        (data.outputs.summary
-            ? null
-            : (data.jobs.topics ?? data.jobs.title ?? null))
-    );
-}
-
-function displayState(
-    data: ItemProcessingPresentation,
-    phase: PhaseName,
-): WorkflowStepState {
-    const record = data.phases[phase];
-    const learnRun = phase === "learn" ? currentLearnRun(data) : null;
-    if (phase === "categorize") {
-        if (
-            record?.reason === "needs_folder" ||
-            record?.reason === "needs_profile"
-        ) {
-            return "next";
-        }
-        if (record?.reason === "waiting_for_curator") return "others";
-        if (record?.reason === "profile_unavailable") return "problem";
-    }
-    if (phase === "transcribe" && data.jobs.transcription) {
-        return data.jobs.transcription === "queued" ? "queued" : "working";
-    }
-    if (learnRun?.status === "queued") return "queued";
-    if (learnRun?.status === "running") return "working";
-    if (learnRun?.status === "failed") return "problem";
-    if (phase === "learn" && record?.state === "waiting") {
-        if (data.learnFindingsWaiting > 0) return "review";
-        if (record.reason === "review_pending") return "working";
-    }
-    if (phase === "summary" && summaryJobState(data)) {
-        return summaryJobState(data) === "queued" ? "queued" : "working";
-    }
+function displayState(step: ProcessingStep): WorkflowStepState {
+    if (step.state === "queued") return "queued";
+    if (step.state === "running") return "working";
+    if (step.state === "stalled") return "stalled";
+    if (step.state === "failed" || step.state === "not_processed")
+        return "problem";
     if (
-        phase === "learn" &&
-        record?.state === "skipped" &&
-        record.reason === "erased"
-    ) {
-        return "manual";
-    }
-    if (
-        phase === "summary" &&
-        !data.outputs.summary &&
-        record?.state === "done" &&
-        Object.values(record.steps ?? {}).some(
-            (step) => step.state === "skipped" && step.reason === "no_provider",
+        step.state === "manual" &&
+        ["needs_transcript", "no_provider"].includes(step.reason) &&
+        step.actions.some(
+            (action) => action === "transcribe" || action === "summarize",
         )
     )
         return "next";
+    if (["done", "skipped", "manual", "outdated"].includes(step.state))
+        return step.state as "done" | "skipped" | "manual" | "outdated";
+    if (step.waitingFor?.kind === "organization") return "others";
     if (
-        data.failures.some(
-            (failure) =>
-                failure.phase === phase &&
-                failure.reasonCode !== "profile_unavailable",
+        ["folder", "profile", "shareConfirmation"].includes(
+            step.waitingFor?.kind ?? "",
         )
-    ) {
-        return "problem";
-    }
-    if (
-        phase === "taskReview" &&
-        record?.state === "waiting" &&
-        data.taskReviewWaiting > 0
-    ) {
-        return "review";
-    }
-    if (
-        phase === "share" &&
-        data.intents.some(
-            (intent) => intent.confirmationRequired && !intent.confirmed,
-        )
-    ) {
+    )
         return "next";
-    }
-    if (
-        record &&
-        [
-            "done",
-            "running",
-            "failed",
-            "not_processed",
-            "outdated",
-            "skipped",
-        ].includes(record.state)
-    ) {
-        return recordState(record);
-    }
-    if (outputExists(data, phase)) {
-        return "done";
-    }
-    if (isManualPhase(data, phase)) {
-        if (
-            !record ||
-            record.state === "pending" ||
-            record.state === "waiting" ||
-            (record.state === "skipped" &&
-                ["manual_only", "profile_off", "disabled"].includes(
-                    record.reason ?? "",
-                ))
-        ) {
-            return "manual";
-        }
-    }
-    return recordState(record);
-}
-
-function settledState(state: WorkflowStepState | undefined): boolean {
-    return state === "done" || state === "skipped";
-}
-
-function mayInferQueued(record: PhaseRecord | undefined): boolean {
-    return record === undefined || record.state === "pending";
-}
-
-function inferUpcomingStates(
-    data: ItemProcessingPresentation,
-    kind: "audio" | "mail",
-    steps: WorkflowStep[],
-): void {
-    if (data.legacy) return;
-    const state = (id: WorkflowStepId) =>
-        steps.find((step) => step.id === id)?.state;
-    const setState = (id: WorkflowStepId, next: WorkflowStepState) => {
-        const step = steps.find((candidate) => candidate.id === id);
-        if (step) step.state = next;
-    };
-    const categorized = settledState(state("categorize"));
-    const profile = data.profile;
-
-    if (
-        kind === "audio" &&
-        categorized &&
-        !data.manualOnly &&
-        profile !== null &&
-        !profile.automatic.transcribe &&
-        !data.outputs.transcript &&
-        state("transcribe") === "manual" &&
-        (profile.automatic.learn || profile.automatic.summary)
-    ) {
-        setState("transcribe", "next");
-    }
-
-    if (data.manualOnly || !categorized || profile === null) return;
-
-    if (
-        kind === "audio" &&
-        profile.automatic.transcribe &&
-        !data.outputs.transcript &&
-        state("transcribe") === "waiting" &&
-        mayInferQueued(data.phases.transcribe)
-    ) {
-        setState("transcribe", "queued");
-        return;
-    }
-
-    const contentReady = kind === "mail" || data.outputs.transcript;
-    if (!contentReady) return;
-
-    if (
-        profile.automatic.learn &&
-        !data.outputs.learn &&
-        state("learn") === "waiting" &&
-        mayInferQueued(data.phases.learn)
-    ) {
-        setState("learn", "queued");
-        return;
-    }
-
-    const learnSettled =
-        !profile.automatic.learn ||
-        settledState(state("learn")) ||
-        data.outputs.learn;
-    if (!learnSettled) return;
-
-    if (
-        profile.automatic.summary &&
-        !data.outputs.summary &&
-        state("summary") === "waiting" &&
-        mayInferQueued(data.phases.summary)
-    ) {
-        setState("summary", "queued");
-        return;
-    }
-
-    const summarySettled =
-        settledState(state("summary")) || data.outputs.summary;
-    if (!summarySettled) return;
-
-    if (
-        data.taskReviewWaiting > 0 &&
-        profile.automatic.taskReview === true &&
-        state("taskReview") === "waiting" &&
-        mayInferQueued(data.phases.taskReview)
-    ) {
-        setState("taskReview", "queued");
-        return;
-    }
-
-    const taskReviewSettled =
-        data.taskReviewWaiting === 0 ||
-        settledState(state("taskReview")) ||
-        profile.automatic.taskReview === false;
-    const shareStartsByItself =
-        data.intents.length > 0 &&
-        data.intents.every(
-            (intent) => !intent.confirmationRequired || intent.confirmed,
-        );
-    if (
-        taskReviewSettled &&
-        shareStartsByItself &&
-        state("share") === "waiting" &&
-        mayInferQueued(data.phases.share)
-    ) {
-        setState("share", "queued");
-    }
+    if (["learnReview", "taskReview"].includes(step.waitingFor?.kind ?? ""))
+        return "review";
+    return "waiting";
 }
 
 function failureMessage(reasonCode: string): WorkflowMessageCode {
@@ -419,275 +187,125 @@ function failureMessage(reasonCode: string): WorkflowMessageCode {
     return "stepFailed";
 }
 
-function active(status: string | null | undefined): boolean {
-    return status === "queued" || status === "running";
-}
-
-function failureStatus(
+function sentence(
+    phase: PhaseName,
+    step: ProcessingStep,
     data: ItemProcessingPresentation,
 ): WorkflowStatusSentence | null {
-    const learnRun = currentLearnRun(data);
-    const retrying: Partial<Record<PhaseName, boolean>> = {
-        learn: active(learnRun?.status),
-        summary: active(data.jobs.summary),
-    };
-    const failure =
-        learnRun?.status === "failed"
-            ? {
-                  phase: "learn" as const,
-                  reasonCode: learnRun.errorCode ?? "UNKNOWN_FAILURE",
-                  retryAvailable: true,
-              }
-            : phaseOrder.flatMap((phase) =>
-                  data.failures.filter(
-                      (candidate) =>
-                          candidate.phase === phase && !retrying[phase],
-                  ),
-              )[0];
-    if (!failure || failure.reasonCode === "profile_unavailable") return null;
-    return {
-        actor: "problem",
-        message: failureMessage(failure.reasonCode),
-        params: {
-            step: failure.phase,
-        },
-        ...(failure.retryAvailable ? { action: "retry" as const } : {}),
-    };
-}
-
-function learnReviewMessage(reason: string | undefined): WorkflowMessageCode {
-    if (reason === "review_pending_timeout") return "learnTimedOut";
-    if (reason === "manual_review_pending") return "manualLearnReview";
-    return "learnReview";
-}
-
-function queuedMessage(step: WorkflowStepId): WorkflowMessageCode {
-    switch (step) {
-        case "transcribe":
-            return "transcriptionQueued";
-        case "learn":
-            return "learnQueued";
-        case "summary":
-            return "summaryQueued";
-        case "taskReview":
-            return "taskReviewQueued";
-        default:
-            return "shareQueued";
-    }
-}
-
-function deriveStatus(
-    data: ItemProcessingPresentation,
-    steps: WorkflowStep[],
-): WorkflowStatusSentence | null {
-    const categorize = data.phases.categorize;
-    if (categorize?.reason === "needs_folder") {
-        return {
-            actor: "yours",
-            message: "notFiled",
-            params: { kind: data.kind },
-        };
-    }
-    if (categorize?.reason === "needs_profile") {
-        return {
-            actor: "yours",
-            message: "profilesDisagree",
-            action: "chooseProfile",
-        };
-    }
-    if (categorize?.reason === "profile_unavailable") {
+    const action = step.actions[0];
+    const withAction = (
+        value: WorkflowStatusSentence,
+    ): WorkflowStatusSentence => (action ? { ...value, action } : value);
+    if (step.state === "stalled")
         return {
             actor: "problem",
-            message: "profileUnavailable",
-            action: "chooseProfile",
+            message: "stalled",
+            params: { step: phase },
+        };
+    if (step.state === "queued") {
+        const message: WorkflowMessageCode =
+            phase === "transcribe"
+                ? "transcriptionQueued"
+                : phase === "learn"
+                  ? "learnQueued"
+                  : phase === "summary"
+                    ? "summaryQueued"
+                    : phase === "taskReview"
+                      ? "taskReviewQueued"
+                      : "shareQueued";
+        return {
+            actor: "queued",
+            message,
+            params: { position: step.waitingFor?.position },
         };
     }
-    if (categorize?.reason === "waiting_for_curator") {
-        return { actor: "others", message: "curatorProfile" };
-    }
-
-    if (data.jobs.transcription === "queued") {
-        return { actor: "queued", message: "transcriptionQueued" };
-    }
-    if (data.jobs.transcription === "running") {
-        return { actor: "working", message: "transcribing" };
-    }
-    const failed = failureStatus(data);
-    if (failed) return failed;
-
-    const learnRun = currentLearnRun(data);
-    if (learnRun?.status === "queued") {
-        return { actor: "queued", message: "learnQueued" };
-    }
-    if (learnRun?.status === "running") {
-        return { actor: "working", message: "learnRunning" };
-    }
-    if (data.phases.learn?.state === "running") {
+    if (step.state === "running")
         return {
             actor: "working",
             message:
-                data.phases.learn.reason === "correcting"
-                    ? "learnCorrecting"
-                    : "learnRunning",
+                phase === "transcribe"
+                    ? "transcribing"
+                    : phase === "learn"
+                      ? step.reason === "correcting"
+                          ? "learnCorrecting"
+                          : "learnRunning"
+                      : "summaryRunning",
         };
-    }
-    if (
-        data.phases.learn?.state === "waiting" &&
-        data.learnFindingsWaiting > 0
-    ) {
-        return {
+    if (step.reason === "profile_unavailable")
+        return withAction({ actor: "problem", message: "profileUnavailable" });
+    if (step.state === "failed" || step.state === "not_processed")
+        return withAction({
+            actor: "problem",
+            message: failureMessage(step.reason),
+            params: { step: phase },
+        });
+    if (step.waitingFor?.kind === "folder")
+        return withAction({
             actor: "yours",
-            message: learnReviewMessage(data.phases.learn.reason),
-            params: { count: data.learnFindingsWaiting },
-            action: "reviewLearn",
-        };
-    }
-    if (
-        data.phases.learn?.state === "waiting" &&
-        data.phases.learn.reason === "review_pending"
-    ) {
-        return { actor: "working", message: "learnCorrecting" };
-    }
-    if (summaryJobState(data) === "queued") {
-        return { actor: "queued", message: "summaryQueued" };
-    }
-    if (summaryJobState(data) === "running") {
-        return { actor: "working", message: "summaryRunning" };
-    }
-    if (
-        data.phases.taskReview?.state === "waiting" &&
-        data.taskReviewWaiting > 0
-    ) {
+            message: "notFiled",
+            params: { kind: data.kind },
+        });
+    if (step.waitingFor?.kind === "profile")
+        return withAction({ actor: "yours", message: "profilesDisagree" });
+    if (step.waitingFor?.kind === "organization")
         return {
+            actor: "others",
+            message:
+                step.reason === "waiting_for_curator"
+                    ? "curatorProfile"
+                    : "organizationUnavailable",
+        };
+    if (step.waitingFor?.kind === "learnReview")
+        return withAction({
+            actor: "yours",
+            message:
+                step.reason === "review_pending_timeout"
+                    ? "learnTimedOut"
+                    : step.reason === "manual_review_pending"
+                      ? "manualLearnReview"
+                      : "learnReview",
+            params: {
+                count: data.learnFindingsWaiting,
+                ...(step.waitingFor.until
+                    ? { until: step.waitingFor.until }
+                    : {}),
+            },
+        });
+    if (step.waitingFor?.kind === "taskReview")
+        return withAction({
             actor: "yours",
             message: "taskReview",
             params: { count: data.taskReviewWaiting },
-            action: "reviewTasks",
-        };
-    }
-    const confirmationIntents = data.intents.filter(
-        (intent) => intent.confirmationRequired && !intent.confirmed,
-    );
-    if (confirmationIntents.length > 0) {
-        return {
+        });
+    if (step.waitingFor?.kind === "shareConfirmation")
+        return withAction({
             actor: "yours",
             message: "shareConfirmation",
             params: {
-                folders: confirmationIntents.map((intent) => intent.path),
+                folders: data.intents
+                    .filter(
+                        (intent) =>
+                            intent.confirmationRequired && !intent.confirmed,
+                    )
+                    .map((intent) => intent.path),
             },
-            action: "shareNow",
-        };
-    }
-    if (data.processAgain) {
+        });
+    if (action === "transcribe" && step.reason === "needs_transcript")
+        return { actor: "yours", message: "manualTranscription", action };
+    if (action === "summarize" && step.reason === "no_provider")
+        return { actor: "yours", message: "manualSummary", action };
+    if (step.state === "outdated" && action === "processAgain")
+        return withAction({ actor: "yours", message: "profileChanged" });
+    if (step.state === "pending" && data.phases[phase])
         return {
-            actor: "yours",
-            message: "profileChanged",
-            action: "processAgain",
+            actor: "others",
+            message: "waitingForProcessing",
+            params: { step: phase },
         };
-    }
-    if (steps.find((step) => step.id === "transcribe")?.state === "next") {
-        return {
-            actor: "yours",
-            message: "manualTranscription",
-            action: "transcribe",
-        };
-    }
-    if (learnBlockedByProvider(data)) {
-        return {
-            actor: "problem",
-            message: "failureNoProvider",
-            params: { step: "learn" },
-            action: "retry",
-        };
-    }
-    if (steps.find((step) => step.id === "summary")?.state === "next") {
-        return {
-            actor: "yours",
-            message: "manualSummary",
-            action: "summarize",
-        };
-    }
-    const inferredQueued = steps.find((step) => step.state === "queued");
-    if (inferredQueued) {
-        const message = queuedMessage(inferredQueued.id);
-        return { actor: "queued", message };
-    }
     return null;
 }
 
-function learnBlockedByProvider(data: ItemProcessingPresentation): boolean {
-    return (
-        !data.manualOnly &&
-        data.phases.learn?.state === "skipped" &&
-        data.phases.learn.reason === "no_provider" &&
-        data.profile?.automatic.learn === true
-    );
-}
-
-function currentStepId(
-    steps: WorkflowStep[],
-    status: WorkflowStatusSentence | null,
-): WorkflowStepId | null {
-    if (!status) {
-        return (
-            steps.find(
-                (step) => step.state === "manual" && step.reason === "erased",
-            )?.id ?? null
-        );
-    }
-    if (status.action === "chooseProfile" || status.message === "notFiled") {
-        return "categorize";
-    }
-    if (
-        status.message === "transcriptionQueued" ||
-        status.message === "transcribing" ||
-        status.message === "manualTranscription"
-    ) {
-        return "transcribe";
-    }
-    if (
-        status.message === "learnQueued" ||
-        status.message === "learnRunning" ||
-        status.message === "learnCorrecting" ||
-        status.message === "learnReview" ||
-        status.message === "manualLearnReview" ||
-        status.message === "learnTimedOut"
-    ) {
-        return "learn";
-    }
-    if (
-        status.message === "manualSummary" ||
-        status.message === "summaryQueued" ||
-        status.message === "summaryRunning"
-    ) {
-        return "summary";
-    }
-    if (status.message === "taskReview") return "taskReview";
-    if (status.message === "taskReviewQueued") return "taskReview";
-    if (
-        status.message === "shareConfirmation" ||
-        status.message === "shareQueued"
-    ) {
-        return "share";
-    }
-    if (status.actor === "problem") return status.params?.step ?? null;
-    return (
-        steps.find((step) => step.state === "outdated")?.id ??
-        steps.find((step) =>
-            [
-                "next",
-                "review",
-                "working",
-                "queued",
-                "problem",
-                "others",
-            ].includes(step.state),
-        )?.id ??
-        null
-    );
-}
-
-/** Derive the client-safe workflow strip from one processing presentation. */
+/** Map the server's explicit states, waits and allowed actions to presentation only. */
 export function deriveWorkflowStatus(
     data: ItemProcessingPresentation,
     kind: "audio" | "mail",
@@ -695,51 +313,74 @@ export function deriveWorkflowStatus(
     const ids: WorkflowStepId[] = [
         kind === "audio" ? "record" : "receive",
         "categorize",
-        ...(kind === "audio" ? (["transcribe"] as const) : []),
+        ...(kind === "audio" ? ["transcribe" as const] : []),
         "learn",
         "summary",
-        ...(data.taskReviewWaiting > 0 ? (["taskReview"] as const) : []),
-        ...(data.intents.length > 0 ? (["share"] as const) : []),
+        ...(data.taskReviewWaiting > 0 ||
+        data.phases.taskReview?.state === "failed"
+            ? ["taskReview" as const]
+            : []),
+        ...(data.intents.length > 0 || data.phases.share
+            ? ["share" as const]
+            : []),
     ];
-    const steps = ids.map<WorkflowStep>((id) => ({
-        id,
-        state:
-            id === "record" || id === "receive"
-                ? "done"
-                : displayState(data, id),
-        ...(id !== "record" && id !== "receive" && data.phases[id]?.reason
-            ? { reason: data.phases[id]?.reason }
-            : {}),
-        current: false,
+    const steps = ids.map<WorkflowStep>((id) =>
+        id === "record" || id === "receive"
+            ? { id, state: "done", current: false }
+            : {
+                  id,
+                  state: displayState(data.steps[id]),
+                  reason: data.steps[id].reason,
+                  waitingFor: data.steps[id].waitingFor,
+                  actions: data.steps[id].actions,
+                  current: false,
+              },
+    );
+    const visiblePhases = phaseOrder.filter((phase) => ids.includes(phase));
+    const actionable = visiblePhases.map((phase) => ({
+        phase,
+        step: data.steps[phase],
+        status: sentence(phase, data.steps[phase], data),
     }));
-    inferUpcomingStates(data, kind, steps);
-    const status = deriveStatus(data, steps);
-    const current = currentStepId(steps, status);
+    const selected =
+        actionable.find(
+            ({ phase, status }) => phase === "categorize" && status,
+        ) ??
+        actionable.find(
+            ({ phase, step }) =>
+                phase === "transcribe" &&
+                ["queued", "running", "stalled"].includes(step.state),
+        ) ??
+        actionable.find(({ step }) =>
+            ["failed", "stalled", "not_processed"].includes(step.state),
+        ) ??
+        actionable.find(({ status }) => status !== null);
+    const status = selected?.status ?? null;
+    const current =
+        selected?.phase ??
+        steps.find(
+            (step) => step.state === "manual" && step.reason === "erased",
+        )?.id;
     const visible =
         !data.legacy &&
-        (learnBlockedByProvider(data) ||
+        (status !== null ||
             steps.some(
                 (step) => step.state === "skipped" && step.reason === "shared",
             ) ||
-            steps.some((step) =>
-                step.reason === "erased"
-                    ? step.state === "manual"
-                    : [
-                          "next",
-                          "review",
-                          "working",
-                          "queued",
-                          "others",
-                          "problem",
-                          "outdated",
-                      ].includes(step.state),
+            steps.some(
+                (step) =>
+                    step.state === "outdated" ||
+                    (step.state === "manual" && step.reason === "erased"),
+            ) ||
+            visiblePhases.some(
+                (phase) =>
+                    data.steps[phase].state === "pending" &&
+                    data.profile !== null &&
+                    !data.manualOnly,
             ));
     return {
         visible,
-        steps: steps.map((step) => ({
-            ...step,
-            current: step.id === current,
-        })),
+        steps: steps.map((step) => ({ ...step, current: step.id === current })),
         status,
     };
 }

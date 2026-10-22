@@ -51,6 +51,7 @@ import {
     JobTimeoutError,
 } from "./retryable";
 import { afterTerminalJobFailure } from "./terminal-failure";
+import { JOB_HEARTBEAT_MS, JOB_STALE_MS } from "./timing";
 import type { JobHandler, JobProgress } from "./types";
 
 /**
@@ -62,17 +63,6 @@ import type { JobHandler, JobProgress } from "./types";
  * process, and for anything a restart left behind.
  */
 const TICK_MS = 5_000;
-
-/**
- * How long a claimed job may go without a heartbeat before another worker may
- * take it.
- *
- * Generous relative to `HEARTBEAT_MS`: a garbage-collection pause, a slow
- * database or a busy event loop can all delay a beat, and reclaiming a job
- * that is merely late means running it twice. Ten missed beats is not late.
- */
-const STALE_MS = 120_000;
-const HEARTBEAT_MS = 12_000;
 
 const HOUSEKEEPING_EVERY_MS = 60 * 60 * 1000;
 
@@ -139,10 +129,10 @@ async function runJob(
                 })
                 .catch(() => {
                     // A failed heartbeat is not evidence of anything. Losing
-                    // the claim needs `STALE_MS` of silence, and one blip is
+                    // the claim needs `JOB_STALE_MS` of silence, and one blip is
                     // far short of that.
                 });
-        }, HEARTBEAT_MS);
+        }, JOB_HEARTBEAT_MS);
         heartbeat.unref?.();
 
         const timedOut = new Promise<never>((_, reject) => {
@@ -367,14 +357,14 @@ export async function tick(): Promise<void> {
     if (ticking) return;
     ticking = true;
     try {
-        const reclaimed = await reclaimStaleJobs(STALE_MS);
+        const reclaimed = await reclaimStaleJobs(JOB_STALE_MS);
         if (reclaimed > 0) {
             console.log(
                 `[job-worker] reclaimed ${reclaimed} job(s) from workers that stopped responding`,
             );
         }
         const buried = await buryExhaustedStaleJobs(
-            STALE_MS,
+            JOB_STALE_MS,
             afterTerminalJobFailure,
         );
         if (buried > 0) {

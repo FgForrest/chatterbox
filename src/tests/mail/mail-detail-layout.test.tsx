@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 vi.mock("next/navigation", () => ({
@@ -314,7 +315,7 @@ describe("mail detail layout", () => {
     });
 
     it("shows a pending share only through the shared intent chip", async () => {
-        const processing: ItemProcessingPresentation = {
+        const processing: ItemProcessingPresentation = processingFixture({
             itemId: mail.id,
             kind: "mail",
             legacy: false,
@@ -338,7 +339,7 @@ describe("mail detail layout", () => {
             taskReviewWaiting: 0,
             jobs: { transcription: null, summary: null },
             failures: [],
-        };
+        });
         stubMailFetch({ processing });
 
         render(

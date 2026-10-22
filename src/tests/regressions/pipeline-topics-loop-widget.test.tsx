@@ -7,6 +7,7 @@ import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({ useSummary: vi.fn() }));
 vi.mock("next-intl", () => ({
@@ -38,7 +39,7 @@ function presentation(
     hasSummary: boolean,
 ): ItemProcessingPresentation {
     const at = new Date().toISOString();
-    return {
+    return processingFixture({
         itemId: "item",
         kind,
         legacy: false,
@@ -76,7 +77,7 @@ function presentation(
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 function renderSummary(
@@ -97,7 +98,7 @@ function renderSummary(
         handleSummarize: vi.fn(),
         recheckSummary: vi.fn(),
     });
-    const widgets = deriveWorkflowWidgets(data);
+    const widgets = deriveWorkflowWidgets(processingFixture(data));
     render(
         <SummaryWidget
             itemId="item"
@@ -126,7 +127,9 @@ describe.each([
     ] as const)("keeps the existing summary visible when topics/title were aggregated into a %s summary job", (state) => {
         const data = presentation(kind, true);
         data.jobs.summary = state;
-        expect(deriveWorkflowWidgets(data).summary).toMatchObject({
+        expect(
+            deriveWorkflowWidgets(processingFixture(data)).summary,
+        ).toMatchObject({
             active: true,
             tone: "working",
         });
@@ -143,19 +146,22 @@ describe.each([
     ] as const)("does not show an existing summary as regenerating while a %s job is %s", (step, state) => {
         const data = presentation(kind, true);
         data.jobs[step] = state;
-        const summary = deriveWorkflowStatus(data, kind).steps.find(
-            (one) => one.id === "summary",
-        );
+        const summary = deriveWorkflowStatus(
+            processingFixture(data),
+            kind,
+        ).steps.find((one) => one.id === "summary");
         expect(summary?.state).not.toBe("queued");
         expect(summary?.state).not.toBe("working");
-        expect(deriveWorkflowWidgets(data).summary.active).toBe(false);
+        expect(
+            deriveWorkflowWidgets(processingFixture(data)).summary.active,
+        ).toBe(false);
     });
 
-    it("shows the first-summary spinner while a companion job waits", () => {
+    it("does not invent first-summary work while a companion job waits", () => {
         const data = presentation(kind, false);
         data.jobs.topics = "queued";
         renderSummary(data, false);
-        expect(screen.getByText("Generating summary…")).toBeTruthy();
+        expect(screen.queryByText("Generating summary…")).toBeNull();
     });
 
     it("keeps existing content visible with an older aggregated working state", () => {

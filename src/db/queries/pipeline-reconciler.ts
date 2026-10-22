@@ -14,6 +14,7 @@ import {
     wakePipelineInTx,
 } from "@/db/queries/pipeline-jobs";
 import { asyncJobs, itemProcessing } from "@/db/schema";
+import { JOB_STALE_MS } from "@/lib/jobs/timing";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
 import type {
     PhaseName,
@@ -78,9 +79,9 @@ export async function reconcilePipelineSteps(
                     where coalesce(leaf.record ->> 'state', 'pending') in ('pending', 'running', 'waiting')
                       and case when leaf.record ->> 'jobId' is not null then
                         j.id is null or j.status in ('completed', 'failed') or
-                        (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at) < now() - interval '120 seconds')
+                        (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at) < now() - make_interval(secs => ${JOB_STALE_MS / 1000}::double precision))
                       else
-                        coalesce(leaf.record ->> 'at', phase.value ->> 'at')::timestamp <= ${now.toISOString()}::timestamp - interval '120 seconds'
+                        coalesce(leaf.record ->> 'at', phase.value ->> 'at')::timestamp <= ${now.toISOString()}::timestamp - make_interval(secs => ${JOB_STALE_MS / 1000}::double precision)
                         and (leaf.record ->> 'replannedAt' is null or
                             (leaf.record ->> 'replannedAt')::timestamp <= ${now.toISOString()}::timestamp -
                             case coalesce((leaf.record ->> 'replanAttempts')::int, 0)
@@ -168,7 +169,7 @@ export async function reconcilePipelineSteps(
                     const [selected] = await tx
                         .select({
                             job: asyncJobs,
-                            stale: sql<boolean>`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}, ${asyncJobs.updatedAt}) < now() - interval '120 seconds'`,
+                            stale: sql<boolean>`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}, ${asyncJobs.updatedAt}) < now() - make_interval(secs => ${JOB_STALE_MS / 1000}::double precision)`,
                         })
                         .from(asyncJobs)
                         .where(
@@ -333,7 +334,7 @@ export async function reconcilePipelineSteps(
                               : 3_600_000;
                     if (
                         !Number.isFinite(createdAt) ||
-                        createdAt > now.getTime() - 120_000 ||
+                        createdAt > now.getTime() - JOB_STALE_MS ||
                         (record.replannedAt &&
                             Date.parse(record.replannedAt) >
                                 now.getTime() - delay)

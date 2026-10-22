@@ -7,7 +7,7 @@
  * matches zero rows. See `asyncJobs.claimToken` in the schema.
  */
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     bindAvailableCorrectionInTx,
@@ -720,16 +720,27 @@ export async function lockClaimedPipelineJobInTx(
     claimToken: string,
     skipLocked = false,
 ): Promise<AsyncJobRow | null> {
+    return lockPipelineJobInTx(
+        tx,
+        jobId,
+        and(
+            eq(asyncJobs.claimToken, claimToken),
+            eq(asyncJobs.status, "processing"),
+        ),
+        skipLocked,
+    );
+}
+
+async function lockPipelineJobInTx(
+    tx: EnqueueExecutor,
+    jobId: string,
+    guard: SQL | undefined,
+    skipLocked = false,
+): Promise<AsyncJobRow | null> {
     const [snapshot] = await tx
         .select()
         .from(asyncJobs)
-        .where(
-            and(
-                eq(asyncJobs.id, jobId),
-                eq(asyncJobs.claimToken, claimToken),
-                eq(asyncJobs.status, "processing"),
-            ),
-        )
+        .where(and(eq(asyncJobs.id, jobId), guard))
         .limit(1);
     if (!snapshot) return null;
     const targets = jobBindings(snapshot.payload);
@@ -752,8 +763,7 @@ export async function lockClaimedPipelineJobInTx(
             and(
                 eq(asyncJobs.id, jobId),
                 eq(asyncJobs.userId, snapshot.userId),
-                eq(asyncJobs.claimToken, claimToken),
-                eq(asyncJobs.status, "processing"),
+                guard,
             ),
         )
         .for("update", skipLocked ? { skipLocked: true } : {})
@@ -802,24 +812,32 @@ export async function completeJob(input: {
     );
 }
 
-/** Settle the claimed job and all of its still-current step bindings atomically. */
+/** Settle a worker claim or an explicitly cancelled user's active job and its current step bindings atomically. */
 export async function settleTerminalJobInTx(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
     input: {
         jobId: string;
-        claimToken: string;
-        status: "completed" | "failed";
         result?: Record<string, unknown> | null;
         message?: string;
         code?: string | null;
         retryable?: boolean;
-    },
+    } & (
+        | {
+              claimToken: string;
+              status: "completed" | "failed";
+              cancelForUserId?: never;
+          }
+        | { cancelForUserId: string; status: "failed"; claimToken?: never }
+    ),
 ): Promise<boolean> {
-    const job = await lockClaimedPipelineJobInTx(
-        tx,
-        input.jobId,
-        input.claimToken,
-    );
+    const cancelling = input.cancelForUserId !== undefined;
+    const job = cancelling
+        ? await lockPipelineJobInTx(
+              tx,
+              input.jobId,
+              and(eq(asyncJobs.userId, input.cancelForUserId), isActive()),
+          )
+        : await lockClaimedPipelineJobInTx(tx, input.jobId, input.claimToken);
     if (!job) {
         console.debug("[pipeline] superseded job claim", {
             jobId: input.jobId,
@@ -829,17 +847,23 @@ export async function settleTerminalJobInTx(
     const bindings = jobBindings(job.payload);
     const now = new Date();
     let outcome: StepOutcome =
-        input.status === "failed"
-            ? {
-                  kind: "failed",
-                  code: input.code ?? "INTERNAL_ERROR",
-                  retryable: input.retryable ?? true,
-              }
-            : terminalStepOutcome({
+        cancelling && input.result?.outcome
+            ? terminalStepOutcome({
                   status: input.status,
-                  result: input.result ?? null,
-                  errorCode: null,
-              });
+                  result: input.result,
+                  errorCode: input.code ?? null,
+              })
+            : input.status === "failed"
+              ? {
+                    kind: "failed",
+                    code: input.code ?? "INTERNAL_ERROR",
+                    retryable: input.retryable ?? true,
+                }
+              : terminalStepOutcome({
+                    status: input.status,
+                    result: input.result ?? null,
+                    errorCode: null,
+                });
     if (
         outcome.kind === "waiting" &&
         outcome.waitingFor.kind === "learnReview" &&
@@ -877,15 +901,20 @@ export async function settleTerminalJobInTx(
             lastError: input.message ?? null,
             errorCode: input.code ?? null,
             completedAt: now,
-            heartbeatAt: now,
+            heartbeatAt: cancelling ? null : now,
+            ...(cancelling ? { claimToken: null } : {}),
             updatedAt: now,
         })
         .where(
             and(
                 eq(asyncJobs.id, job.id),
                 eq(asyncJobs.userId, job.userId),
-                eq(asyncJobs.claimToken, input.claimToken),
-                eq(asyncJobs.status, "processing"),
+                cancelling
+                    ? isActive()
+                    : and(
+                          eq(asyncJobs.claimToken, input.claimToken),
+                          eq(asyncJobs.status, "processing"),
+                      ),
             ),
         );
     for (const binding of bindings) {

@@ -6,11 +6,12 @@ import {
     deriveWorkflowWidgets,
     isWorkflowWidgetLineVisible,
 } from "@/lib/pipeline/workflow-widgets";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 function presentation(
     overrides: Partial<ItemProcessingPresentation> = {},
 ): ItemProcessingPresentation {
-    return {
+    return processingFixture({
         itemId: "item-1",
         kind: "audio",
         legacy: false,
@@ -45,7 +46,7 @@ function presentation(
         jobs: { transcription: null, summary: null },
         failures: [],
         ...overrides,
-    };
+    });
 }
 
 function phase(state: PhaseState, reason?: string): PhaseRecord {
@@ -64,21 +65,23 @@ afterEach(() => {
 describe("workflow widgets", () => {
     it("hides future widgets and expands the active pipeline widget", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                phases: {
-                    categorize: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:00:00.000Z",
+            processingFixture(
+                presentation({
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:00:00.000Z",
+                        },
+                        transcribe: {
+                            state: "running",
+                            generation: 1,
+                            at: "2026-10-16T00:01:00.000Z",
+                        },
                     },
-                    transcribe: {
-                        state: "running",
-                        generation: 1,
-                        at: "2026-10-16T00:01:00.000Z",
-                    },
-                },
-                jobs: { transcription: "running", summary: null },
-            }),
+                    jobs: { transcription: "running", summary: null },
+                }),
+            ),
         );
 
         expect(widgets.transcript).toMatchObject({
@@ -94,39 +97,41 @@ describe("workflow widgets", () => {
 
     it("shows Summary after Learn is skipped", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                profile: {
-                    id: "profile-1",
-                    name: "Manual Learn",
-                    scope: "personal",
-                    revisionId: "revision-1",
-                    automatic: {
-                        transcribe: true,
-                        learn: false,
-                        summary: false,
-                        taskReview: false,
+            processingFixture(
+                presentation({
+                    profile: {
+                        id: "profile-1",
+                        name: "Manual Learn",
+                        scope: "personal",
+                        revisionId: "revision-1",
+                        automatic: {
+                            transcribe: true,
+                            learn: false,
+                            summary: false,
+                            taskReview: false,
+                        },
                     },
-                },
-                phases: {
-                    categorize: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:00:00.000Z",
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:00:00.000Z",
+                        },
+                        transcribe: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:01:00.000Z",
+                        },
+                        learn: {
+                            state: "skipped",
+                            reason: "profile_off",
+                            generation: 1,
+                            at: "2026-10-16T00:02:00.000Z",
+                        },
                     },
-                    transcribe: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:01:00.000Z",
-                    },
-                    learn: {
-                        state: "skipped",
-                        reason: "profile_off",
-                        generation: 1,
-                        at: "2026-10-16T00:02:00.000Z",
-                    },
-                },
-                outputs: { transcript: true, learn: false, summary: false },
-            }),
+                    outputs: { transcript: true, learn: false, summary: false },
+                }),
+            ),
         );
 
         expect(widgets.transcript.collapsed).toBe(false);
@@ -142,16 +147,18 @@ describe("workflow widgets", () => {
 
     it("restores the Learn run action after its results are erased", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                phases: {
-                    categorize: phase("done", "categorized"),
-                    transcribe: phase("done", "content-available"),
-                    learn: phase("skipped", "erased"),
-                    summary: phase("done", "completed"),
-                    taskReview: phase("done", "reviewed"),
-                },
-                outputs: { transcript: true, learn: false, summary: true },
-            }),
+            processingFixture(
+                presentation({
+                    phases: {
+                        categorize: phase("done", "categorized"),
+                        transcribe: phase("done", "content-available"),
+                        learn: phase("skipped", "erased"),
+                        summary: phase("done", "completed"),
+                        taskReview: phase("done", "reviewed"),
+                    },
+                    outputs: { transcript: true, learn: false, summary: true },
+                }),
+            ),
         );
 
         expect(widgets.workflowVisible).toBe(true);
@@ -170,30 +177,34 @@ describe("workflow widgets", () => {
             outputs: { transcript: true, learn: false, summary: false },
             learnFindingsWaiting: 2,
         });
-        const pipeline = deriveWorkflowWidgets({
-            ...base,
-            phases: {
-                ...base.phases,
-                learn: {
-                    state: "waiting",
-                    reason: "review_pending",
-                    generation: 1,
-                    at: "2026-10-16T00:02:00.000Z",
+        const pipeline = deriveWorkflowWidgets(
+            processingFixture({
+                ...base,
+                phases: {
+                    ...base.phases,
+                    learn: {
+                        state: "waiting",
+                        reason: "review_pending",
+                        generation: 1,
+                        at: "2026-10-16T00:02:00.000Z",
+                    },
                 },
-            },
-        });
-        const manual = deriveWorkflowWidgets({
-            ...base,
-            phases: {
-                ...base.phases,
-                learn: {
-                    state: "waiting",
-                    reason: "manual_review_pending",
-                    generation: 2,
-                    at: "2026-10-16T00:03:00.000Z",
+            }),
+        );
+        const manual = deriveWorkflowWidgets(
+            processingFixture({
+                ...base,
+                phases: {
+                    ...base.phases,
+                    learn: {
+                        state: "waiting",
+                        reason: "manual_review_pending",
+                        generation: 2,
+                        at: "2026-10-16T00:03:00.000Z",
+                    },
                 },
-            },
-        });
+            }),
+        );
 
         expect(pipeline.learn.frame).toBe("inline");
         expect(manual.learn.frame).toBe("dialog");
@@ -211,22 +222,26 @@ describe("workflow widgets", () => {
                 taskReview: phase("waiting", "review_pending"),
             },
         });
-        const pipeline = deriveWorkflowWidgets({
-            ...base,
-            startedBy: {
-                transcription: "pipeline",
-                summary: "pipeline",
-                topics: "pipeline",
-            },
-        });
-        const person = deriveWorkflowWidgets({
-            ...base,
-            startedBy: {
-                transcription: "person",
-                summary: "person",
-                topics: "person",
-            },
-        });
+        const pipeline = deriveWorkflowWidgets(
+            processingFixture({
+                ...base,
+                startedBy: {
+                    transcription: "pipeline",
+                    summary: "pipeline",
+                    topics: "pipeline",
+                },
+            }),
+        );
+        const person = deriveWorkflowWidgets(
+            processingFixture({
+                ...base,
+                startedBy: {
+                    transcription: "person",
+                    summary: "person",
+                    topics: "person",
+                },
+            }),
+        );
 
         expect(pipeline.transcript.frame).toBe("inline");
         expect(pipeline.summary.frame).toBe("inline");
@@ -238,32 +253,34 @@ describe("workflow widgets", () => {
 
     it("collapses completed phases while the strip is visible", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                phases: {
-                    categorize: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:00:00.000Z",
+            processingFixture(
+                presentation({
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:00:00.000Z",
+                        },
+                        transcribe: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:01:00.000Z",
+                        },
+                        learn: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:02:00.000Z",
+                        },
+                        summary: {
+                            state: "running",
+                            generation: 1,
+                            at: "2026-10-16T00:03:00.000Z",
+                        },
                     },
-                    transcribe: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:01:00.000Z",
-                    },
-                    learn: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:02:00.000Z",
-                    },
-                    summary: {
-                        state: "running",
-                        generation: 1,
-                        at: "2026-10-16T00:03:00.000Z",
-                    },
-                },
-                outputs: { transcript: true, learn: true, summary: false },
-                jobs: { transcription: null, summary: "running" },
-            }),
+                    outputs: { transcript: true, learn: true, summary: false },
+                    jobs: { transcription: null, summary: "running" },
+                }),
+            ),
         );
 
         expect(widgets.transcript.collapsed).toBe(true);
@@ -276,36 +293,38 @@ describe("workflow widgets", () => {
 
     it("restores the normal transcript and summary layout after completion", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                phases: {
-                    categorize: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:00:00.000Z",
+            processingFixture(
+                presentation({
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:00:00.000Z",
+                        },
+                        transcribe: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:01:00.000Z",
+                        },
+                        learn: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:02:00.000Z",
+                        },
+                        summary: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:03:00.000Z",
+                        },
+                        taskReview: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:04:00.000Z",
+                        },
                     },
-                    transcribe: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:01:00.000Z",
-                    },
-                    learn: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:02:00.000Z",
-                    },
-                    summary: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:03:00.000Z",
-                    },
-                    taskReview: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:04:00.000Z",
-                    },
-                },
-                outputs: { transcript: true, learn: true, summary: true },
-            }),
+                    outputs: { transcript: true, learn: true, summary: true },
+                }),
+            ),
         );
 
         expect(widgets.workflowVisible).toBe(false);
@@ -316,21 +335,23 @@ describe("workflow widgets", () => {
 
     it("shows a mail message and active Learn widget before its future summary", () => {
         const widgets = deriveWorkflowWidgets(
-            presentation({
-                kind: "mail",
-                phases: {
-                    categorize: {
-                        state: "done",
-                        generation: 1,
-                        at: "2026-10-16T00:00:00.000Z",
+            processingFixture(
+                presentation({
+                    kind: "mail",
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            generation: 1,
+                            at: "2026-10-16T00:00:00.000Z",
+                        },
+                        learn: {
+                            state: "running",
+                            generation: 1,
+                            at: "2026-10-16T00:01:00.000Z",
+                        },
                     },
-                    learn: {
-                        state: "running",
-                        generation: 1,
-                        at: "2026-10-16T00:01:00.000Z",
-                    },
-                },
-            }),
+                }),
+            ),
         );
 
         expect(widgets.message.visible).toBe(true);
@@ -370,7 +391,10 @@ describe("workflow widgets", () => {
             ],
         });
 
-        const workflow = workflowStatus.deriveWorkflowStatus(data, "audio");
+        const workflow = workflowStatus.deriveWorkflowStatus(
+            processingFixture(data),
+            "audio",
+        );
         expect(
             workflow.steps.find((candidate) => candidate.id === "summary"),
         ).toMatchObject({ state: "problem", current: true });
@@ -416,11 +440,16 @@ describe("workflow widgets", () => {
             ],
         });
 
-        const workflow = workflowStatus.deriveWorkflowStatus(data, "audio");
+        const workflow = workflowStatus.deriveWorkflowStatus(
+            processingFixture(data),
+            "audio",
+        );
         expect(
             workflow.steps.find((candidate) => candidate.id === "summary"),
         ).toMatchObject({ state, current: true });
-        expect(deriveWorkflowWidgets(data).summary).toMatchObject({
+        expect(
+            deriveWorkflowWidgets(processingFixture(data)).summary,
+        ).toMatchObject({
             active: true,
             tone: "working",
         });
@@ -434,23 +463,37 @@ describe.each([
     function deriveManualWidget(state: "working" | "queued" | "manual") {
         vi.spyOn(workflowStatus, "deriveWorkflowStatus").mockReturnValue({
             visible: true,
-            steps: [{ id: step, state, current: true }],
+            steps: [
+                {
+                    id: step,
+                    state,
+                    current: true,
+                    actions:
+                        state === "manual"
+                            ? [step === "learn" ? "learn" : "summarize"]
+                            : [],
+                },
+            ],
             status: null,
         });
         return deriveWorkflowWidgets(
-            presentation({
-                manualOnly: true,
-                phases: {
-                    categorize: phase("done"),
-                    transcribe: phase("done"),
-                    ...(widget === "summary" ? { learn: phase("done") } : {}),
-                },
-                outputs: {
-                    transcript: true,
-                    learn: widget === "summary",
-                    summary: false,
-                },
-            }),
+            processingFixture(
+                presentation({
+                    manualOnly: true,
+                    phases: {
+                        categorize: phase("done"),
+                        transcribe: phase("done"),
+                        ...(widget === "summary"
+                            ? { learn: phase("done") }
+                            : {}),
+                    },
+                    outputs: {
+                        transcript: true,
+                        learn: widget === "summary",
+                        summary: false,
+                    },
+                }),
+            ),
         )[widget];
     }
 

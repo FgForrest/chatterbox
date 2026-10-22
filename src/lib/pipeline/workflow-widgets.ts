@@ -91,22 +91,27 @@ function stateFor(
     };
 }
 
-function learnAction(
+function widgetAction(
     step: WorkflowStep | undefined,
-    manual: boolean,
-    hasOutput: boolean,
 ): WorkflowWidgetState["action"] {
-    if (step?.state === "review") return "review";
-    return manualRunAction(step, manual, hasOutput);
-}
-
-function manualRunAction(
-    step: WorkflowStep | undefined,
-    manual: boolean,
-    hasOutput: boolean,
-): WorkflowWidgetState["action"] {
-    if (step?.state === "working" || step?.state === "queued") return null;
-    if (manual && !hasOutput) return "run";
+    if (
+        step?.state === "working" ||
+        step?.state === "queued" ||
+        step?.state === "stalled"
+    )
+        return null;
+    if (
+        step?.actions?.some(
+            (action) => action === "reviewLearn" || action === "reviewTasks",
+        )
+    )
+        return "review";
+    if (
+        step?.actions?.some((action) =>
+            ["learn", "transcribe", "summarize"].includes(action),
+        )
+    )
+        return "run";
     return null;
 }
 
@@ -132,16 +137,12 @@ export function deriveWorkflowWidgets(
         data.kind === "audio" &&
         categorized &&
         (data.outputs.transcript || hasReached(transcriptStep));
-    const learnManual =
-        data.manualOnly ||
-        data.profile?.automatic.learn === false ||
-        data.phases.learn?.reason === "erased";
+    const learnManual = data.steps.learn.state === "manual";
     const learnVisible =
         categorized &&
         contentReady &&
         (data.outputs.learn || hasReached(learnStep) || learnManual);
-    const summaryManual =
-        data.manualOnly || data.profile?.automatic.summary === false;
+    const summaryManual = data.steps.summary.state === "manual";
     const learnCompleted =
         data.outputs.learn ||
         data.phases.learn?.state === "done" ||
@@ -177,34 +178,28 @@ export function deriveWorkflowWidgets(
             transcriptStep,
             transcriptVisible,
             "inline",
-            transcriptStep?.state === "manual" ? "run" : null,
+            widgetAction(transcriptStep),
         ),
         learn: stateFor(
             workflow.visible,
             learnStep,
             learnVisible,
             manualLearnReview ? "dialog" : "inline",
-            learnAction(learnStep, learnManual, data.outputs.learn),
+            widgetAction(learnStep),
         ),
         summary: stateFor(
             workflow.visible,
             summaryStep,
             summaryVisible,
             "inline",
-            manualRunAction(
-                summaryStep,
-                summaryManual ||
-                    summaryStep?.state === "next" ||
-                    data.phases.learn?.state === "skipped",
-                data.outputs.summary,
-            ),
+            widgetAction(summaryStep),
         ),
         taskReview: stateFor(
             workflow.visible,
             taskStep,
             taskVisible,
             manualSummaryRun ? "dialog" : "inline",
-            taskVisible ? "review" : null,
+            widgetAction(taskStep),
         ),
     };
 }

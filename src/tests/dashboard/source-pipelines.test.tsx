@@ -7,7 +7,9 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const { summaryOptions, transcriptSources, speakerTagMounts } = vi.hoisted(
     () => ({
@@ -43,8 +45,7 @@ vi.mock("@/components/dashboard/transcript-view", () => ({
     },
 }));
 
-vi.mock("@/components/people/speaker-tags", async () => {
-    const { useEffect } = await import("react");
+vi.mock("@/components/people/speaker-tags", () => {
     return {
         SpeakerTags: ({ source }: { source: string }) => {
             useEffect(() => {
@@ -70,7 +71,7 @@ import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 
 function completedProcessing(): ItemProcessingPresentation {
     const at = "2026-10-16T10:00:00.000Z";
-    return {
+    return processingFixture({
         itemId: "rec-focus",
         kind: "audio",
         legacy: false,
@@ -110,7 +111,7 @@ function completedProcessing(): ItemProcessingPresentation {
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 function activeProcessing(
@@ -118,7 +119,7 @@ function activeProcessing(
 ): ItemProcessingPresentation {
     const processing = completedProcessing();
     if (widget === "transcript") {
-        return {
+        return processingFixture({
             ...processing,
             phases: {
                 categorize: processing.phases.categorize,
@@ -131,9 +132,9 @@ function activeProcessing(
             outputs: { transcript: false, learn: false, summary: false },
             jobs: { transcription: "running", summary: null },
             intents: [],
-        };
+        });
     }
-    return {
+    return processingFixture({
         ...processing,
         phases: {
             categorize: processing.phases.categorize,
@@ -148,7 +149,7 @@ function activeProcessing(
         outputs: { transcript: true, learn: true, summary: false },
         jobs: { transcription: null, summary: "running" },
         intents: [],
-    };
+    });
 }
 
 describe("independent transcript and summary pipelines", () => {

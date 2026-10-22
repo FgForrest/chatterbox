@@ -502,7 +502,10 @@ export const correctionPassJobHandler: JobHandler<CorrectionPassPayload> = {
                 outcome:
                     typeof result.skipped === "string"
                         ? { kind: "skipped", reason: result.skipped }
-                        : { kind: "done", reason: "released" },
+                        : result.status !== "finished" &&
+                            result.status !== "ready"
+                          ? { kind: "skipped", reason: String(result.status) }
+                          : { kind: "done", reason: "released" },
             };
         } catch (caught) {
             const retrying =

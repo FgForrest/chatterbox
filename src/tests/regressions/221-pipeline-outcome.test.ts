@@ -4,6 +4,7 @@ import { planAdvance } from "@/lib/pipeline/plan";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { PipelineFacts } from "@/lib/pipeline/types";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 describe("#221 pipeline outcomes", () => {
     it.each([
@@ -130,7 +131,7 @@ describe("#221 pipeline outcomes", () => {
         "summary",
         "share",
     ] as const)("shows interrupted %s with the existing retry action", (phase) => {
-        const data: ItemProcessingPresentation = {
+        const data: ItemProcessingPresentation = processingFixture({
             itemId: "item-veln",
             kind: "audio",
             legacy: false,
@@ -154,7 +155,7 @@ describe("#221 pipeline outcomes", () => {
             taskReviewWaiting: 0,
             jobs: { transcription: null, summary: null },
             failures: [{ phase, reasonCode: "lost", retryAvailable: true }],
-        };
+        });
         expect(deriveWorkflowStatus(data, "audio").status).toMatchObject({
             message: "failureInterrupted",
             action: "retry",

@@ -4,6 +4,9 @@ import type { PhaseState } from "./types";
 export interface PipelineWait {
     kind: string;
     until?: string;
+    jobId?: string;
+    status?: "queued" | "running";
+    position?: number;
 }
 
 /** Use one wait representation for planner decisions and job outcomes. */

@@ -89,6 +89,7 @@ import { settlePipelineBindingInTx } from "@/db/queries/pipeline-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
+import { supersedeCorrectionPassesInTx } from "@/lib/learn/correction-pass-queue";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
 const url = getTestDatabaseUrl();
@@ -626,6 +627,145 @@ const input = {
                 reason: "lost",
                 generation: 9,
             });
+        });
+
+        it("finishes caller A without changing caller B's real higher-generation binding", async () => {
+            await seed();
+            await queue();
+            const first = await claim();
+            const firstGeneration =
+                (await stored()).phases.learn?.generation ?? 0;
+            const second = await enqueueJob({
+                userId: owner,
+                kind: "test.pipeline",
+                subjectId: "replacement-veln",
+                pipeline: {
+                    itemId: "item-veln",
+                    userId: owner,
+                    phase: "learn",
+                },
+            });
+            const secondBinding = (await stored()).phases.learn;
+            expect(secondBinding?.jobId).toBe(second.job.id);
+            expect(secondBinding?.generation).toBeGreaterThan(firstGeneration);
+            expect(
+                await completeJob({
+                    jobId: first.id,
+                    claimToken: first.claimToken,
+                    result: { outcome: { kind: "done" } },
+                }),
+            ).toBe(true);
+            expect((await getJobForUser(first.id, owner))?.status).toBe(
+                "completed",
+            );
+            expect((await stored()).phases.learn).toEqual(secondBinding);
+            const next = await claim();
+            expect(next.id).toBe(second.job.id);
+            expect(
+                await completeJob({
+                    jobId: next.id,
+                    claimToken: next.claimToken,
+                    result: { outcome: { kind: "done" } },
+                }),
+            ).toBe(true);
+            expect((await stored()).phases.learn).toMatchObject({
+                state: "done",
+                generation: secondBinding?.generation,
+            });
+        });
+
+        it.each([
+            "pending",
+            "processing",
+        ] as const)("settles a superseded %s correction and its bound Learn step immediately", async (status) => {
+            await seed();
+            await db()
+                .update(chatterItems)
+                .set({ kind: "audio" })
+                .where(
+                    and(
+                        eq(chatterItems.id, "item-veln"),
+                        eq(chatterItems.userId, owner),
+                    ),
+                );
+            await db()
+                .insert(recordings)
+                .values({
+                    id: "item-veln",
+                    userId: owner,
+                    deviceSn: "device-veln",
+                    plaudFileId: "file-veln",
+                    duration: 1000,
+                    endTime: new Date(at),
+                    filesize: 1,
+                    fileMd5: "0".repeat(32),
+                    storageType: "local",
+                    storagePath: "fixture.mp3",
+                    plaudVersion: "1",
+                });
+            await db().insert(transcriptions).values({
+                id: "transcript-veln",
+                userId: owner,
+                recordingId: "item-veln",
+                text: "Fictional note",
+                provider: "fixture",
+                model: "fixture",
+                revision: 1,
+            });
+            const [pass] = await db()
+                .insert(transcriptCorrectionPasses)
+                .values({
+                    userId: owner,
+                    scopeUserId: owner,
+                    recordingId: "item-veln",
+                    transcriptionId: "transcript-veln",
+                    transcriptRevision: 0,
+                    view: "private",
+                    actorUserId: other,
+                })
+                .returning();
+            const correction = await enqueueJob({
+                userId: other,
+                kind: "learn.correct",
+                subjectId: "item-veln",
+                payload: { passId: pass.id },
+                pipeline: {
+                    itemId: "item-veln",
+                    userId: owner,
+                    phase: "learn",
+                },
+            });
+            const claimed =
+                status === "processing"
+                    ? (await claimDueJobs("learn.correct", 1))[0]
+                    : null;
+            await db().transaction((tx) =>
+                supersedeCorrectionPassesInTx(tx, owner, "transcript-veln"),
+            );
+            expect(await getJobForUser(correction.job.id, other)).toMatchObject(
+                {
+                    status: "failed",
+                    errorCode: "superseded",
+                    claimToken: null,
+                    result: {
+                        outcome: { kind: "skipped", reason: "superseded" },
+                    },
+                },
+            );
+            expect((await stored()).phases.learn).toMatchObject({
+                state: "skipped",
+                reason: "superseded",
+                outcome: { kind: "skipped", reason: "superseded" },
+            });
+            expect((await stored()).phases.learn?.jobId).toBeUndefined();
+            expect(await reconcilePipelineSteps()).toBe(0);
+            if (claimed)
+                expect(
+                    await completeJob({
+                        jobId: claimed.id,
+                        claimToken: claimed.claimToken,
+                    }),
+                ).toBe(false);
         });
 
         it.each([

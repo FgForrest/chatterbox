@@ -23,6 +23,7 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetFrame,
 } from "@/lib/pipeline/workflow-widgets";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
@@ -105,7 +106,7 @@ function processing(
     frame: WorkflowWidgetFrame = "inline",
 ): ItemProcessingPresentation {
     const at = "2026-10-19T10:00:00.000Z";
-    return {
+    return processingFixture({
         itemId: kind === "mail" ? mail.id : "rec-1",
         kind,
         legacy: false,
@@ -133,7 +134,7 @@ function processing(
         taskReviewWaiting: 0,
         jobs: { transcription: null, summary: null },
         failures: [],
-    };
+    });
 }
 
 function Strip({ data }: { data: ItemProcessingPresentation }) {
@@ -340,7 +341,7 @@ describe.each(["audio", "mail"] as const)("%s summary strip action", (kind) => {
     ] as const)("reveals a summary from its %s state through the retry strip action", async (mode) => {
         const base = processing(kind);
         const workflowVisible = mode !== "body";
-        const data: ItemProcessingPresentation = {
+        const data: ItemProcessingPresentation = processingFixture({
             ...base,
             phases: {
                 ...base.phases,
@@ -365,7 +366,7 @@ describe.each(["audio", "mail"] as const)("%s summary strip action", (kind) => {
                     retryAvailable: true,
                 },
             ],
-        };
+        });
         render(
             <>
                 <Strip data={data} />
@@ -427,7 +428,7 @@ describe.each([
         "dialog",
     ] as const)("opens the %s review and focuses its heading", async (frame) => {
         const base = processing(kind);
-        const data: ItemProcessingPresentation = {
+        const data: ItemProcessingPresentation = processingFixture({
             ...base,
             phases: {
                 ...base.phases,
@@ -450,7 +451,7 @@ describe.each([
             outputs: { transcript: true, learn: true, summary: true },
             learnFindingsWaiting: 0,
             taskReviewWaiting: 1,
-        };
+        });
         const state: RecordingTasksState = {
             itemId: data.itemId,
             data: {
@@ -508,7 +509,7 @@ it.each([
     "mail",
 ] as const)("focuses the %s filing control after its options finish loading", async (kind) => {
     const base = processing(kind);
-    const data: ItemProcessingPresentation = {
+    const data: ItemProcessingPresentation = processingFixture({
         ...base,
         phases: {
             categorize: {
@@ -519,7 +520,7 @@ it.each([
             },
         },
         learnFindingsWaiting: 0,
-    };
+    });
     let resolveOptions: (response: Response) => void = () => {};
     vi.stubGlobal(
         "fetch",
