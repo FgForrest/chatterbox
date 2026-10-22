@@ -1,11 +1,11 @@
 ---
 title: Own tasks share the task table, follows stay personal, and assignees merge with explicit disclosure
 date: 2026-10-22
-updated: 2026-10-23 01:40
+updated: 2026-10-23 02:05
 status: accepted
 kind: feature
 issues: [253]
-prs: []
+prs: [264]
 areas: [src/lib/tasks, src/lib/folders, src/components/tasks, src/app/api/tasks, src/lib/mcp/tools/tasks.ts, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: []
