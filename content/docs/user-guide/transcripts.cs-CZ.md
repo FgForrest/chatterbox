@@ -44,6 +44,16 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. **Sbalit přepis** na pravém konci záhlaví přepis skryje; na stejném místě se pak zobrazí **Rozbalit přepis**. V zápatí vidíte, který poskytovatel a model jej vytvořil, v jakém jazyce a jak je dlouhý.
 
+<span id="recording-language" />
+
+### Jazyk nahrávky
+
+Dokud jazyk nepotvrdíte, zápatí označuje odhad poskytovatele jako **Rozpoznaný jazyk**. Poté ukazuje **Potvrzený jazyk**. Změnit jej může každý, kdo smí upravovat přepis: vlastník nebo kurátor v pohledu Organizace. Volba patří nahrávce a zůstane zachována i po novém přepisu. Volba **Automaticky** potvrzení smaže a vrátí automatické určování jazyka.
+
+Výslovně zvolený jazyk výstupu v profilu nebo nastavení účtu má přednost. Jinak potvrzený jazyk určuje jazyk shrnutí, názvu a témat a poskytuje jazykový kontext Učení, opravám a pravopisu. Bez potvrzení automatický výstup následuje převládající jazyk přepisu.
+
+Změna jazyka sama nic znovu nespouští. Pokud se existující výstup jazykově liší, ovládací prvek nabídne **Znovu shrnout** se stávající akcí shrnutí. Pokud se odhad poskytovatele liší od potvrzeného jazyka, **Znovu přepsat v jazyce …** vyžaduje obvyklé potvrzení nahrazení a nastaví daný jazyk jen pro tento běh. Běžný přepis si ponechá dosavadní volbu jazyka z profilu nebo účtu. Exporty a zálohy uchovávají potvrzený jazyk odděleně od odhadu poskytovatele.
+
 <span id="naming-speakers" />
 
 ### Pojmenování mluvčích

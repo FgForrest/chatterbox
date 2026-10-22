@@ -145,6 +145,7 @@ export function LearnResults({
     }
 
     const sections = [
+        { kind: "language", title: i18n("Transcript language") },
         { kind: "new_record", title: i18n("New in the Almanac") },
         { kind: "speaker", title: i18n("Speakers") },
         { kind: "correction", title: i18n("Corrections") },

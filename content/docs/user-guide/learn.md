@@ -5,6 +5,7 @@ description: Let Chatterbox propose speaker names, corrections and facts, and re
 
 Learn reads a transcript against your [Almanac](almanac.md) and proposes what it found:
 
+- **transcript language** when Learn confidently reads a different language from the transcription provider,
 - **speaker names** for speakers nobody named yet,
 - **corrections** of names the transcription misheard ("Path finder" for Pathfinder),
 - **new people and things** worth adding to the Almanac,
@@ -28,6 +29,7 @@ The review has the same contents inline or in a window. **Review** on the widget
 
 ![The Learn review](images/learn-review.png)
 
+- **Transcript language**: Learn’s reading is preselected. Keep it, keep the provider’s detected language, or pick another from the language list. **Finish review** confirms the choice for this recording in both private and Organization views. Agreement or uncertainty creates no language item and stores nothing. This check applies to audio recordings; mail keeps its existing language handling.
 - **Speakers**: who Learn thinks each unnamed speaker is, and why. **▷** plays the evidence. **Someone else…** picks another person, **Unknown** marks the speaker unknown.
 - **New in the Almanac**: people and things Learn heard that the Almanac does not know. These start unticked. Correct the name or type before ticking, choose **It is something known…** if it is a record you already have under another name, or **Never propose it** to stop it being proposed on any recording.
 - **Corrections**: misheard names, how often, and where. These start ticked.

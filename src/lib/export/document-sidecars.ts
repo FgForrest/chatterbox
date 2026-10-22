@@ -60,6 +60,7 @@ export interface TranscriptSidecarInput {
     recordedAt: Date;
     durationMs: number;
     language: string | null;
+    confirmedLanguage?: string | null;
     provider: string;
     model: string;
     source: string;
@@ -75,6 +76,7 @@ export interface SummarySidecarInput {
     source: string;
     transcriptSource: string;
     language?: string | null;
+    confirmedLanguage?: string | null;
     summary: string | null;
     keyPoints: string[];
     actionItems: string[];
@@ -115,6 +117,7 @@ export function buildTranscriptMarkdown(input: TranscriptSidecarInput): string {
         ...participantsFrontMatter(input.participants),
         `duration: ${formatDuration(input.durationMs)}`,
         `language: ${input.language ? yamlString(input.language) : "null"}`,
+        `confirmed_language: ${input.confirmedLanguage ? yamlString(input.confirmedLanguage) : "null"}`,
         `source: ${yamlString(input.source)}`,
         `provider: ${yamlString(input.provider)}`,
         `model: ${yamlString(input.model)}`,
@@ -131,6 +134,7 @@ export function buildSummaryMarkdown(input: SummarySidecarInput): string {
         `title: ${yamlString(input.title)}`,
         `recorded: ${input.recordedAt.toISOString()}`,
         ...participantsFrontMatter(input.participants),
+        `confirmed_language: ${input.confirmedLanguage ? yamlString(input.confirmedLanguage) : "null"}`,
         `source: ${yamlString(input.source)}`,
         `transcript_source: ${yamlString(input.transcriptSource)}`,
         `provider: ${yamlString(input.provider)}`,
@@ -551,7 +555,9 @@ async function renderRecordingMarkdownDocument(
                 title,
                 recordedAt: recording.occurredAt,
                 durationMs: recording.duration,
-                language: primary.detectedLanguage,
+                language:
+                    recording.confirmedLanguage ?? primary.detectedLanguage,
+                confirmedLanguage: recording.confirmedLanguage,
                 provider: primary.provider,
                 model: primary.model,
                 source: primary.source,
@@ -655,7 +661,11 @@ async function renderRecordingMarkdownDocument(
             model: enhancement.model,
             source: enhancement.source,
             transcriptSource: projection.primary?.source ?? enhancement.source,
-            language: projection.summaryLanguage,
+            language:
+                enhancement.outputLanguage ??
+                recording.confirmedLanguage ??
+                projection.summaryLanguage,
+            confirmedLanguage: recording.confirmedLanguage,
             summary,
             keyPoints,
             actionItems,

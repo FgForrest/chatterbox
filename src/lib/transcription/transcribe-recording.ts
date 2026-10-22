@@ -369,6 +369,8 @@ export interface TranscribeOptions {
     providerId?: string;
     /** Override the provider's default model for this single call. */
     model?: string;
+    /** Override the language for one explicitly requested re-transcription. */
+    language?: string;
     /** Transcript source whose confirmed speaker assignments may be carried forward. */
     attributionSource?: "riffado" | "plaud" | "mixed";
     /**
@@ -619,9 +621,10 @@ async function transcribeRecordingInner(
                   .limit(1);
 
         const defaultLanguage =
-            (opts.trigger ?? "manual") === "manual" && !orgView
+            opts.language ??
+            ((opts.trigger ?? "manual") === "manual" && !orgView
                 ? settings?.defaultTranscriptionLanguage || undefined
-                : transcribeStep.language || undefined;
+                : transcribeStep.language || undefined);
         const quality = transcribeStep.quality;
         void quality;
 
@@ -668,7 +671,11 @@ async function transcribeRecordingInner(
                 return await almanacTermsFor({
                     ownerUserId: ctx.ownerUserId,
                     shared: orgView,
-                    language: defaultLanguage ?? null,
+                    language:
+                        opts.language ??
+                        recording.confirmedLanguage ??
+                        defaultLanguage ??
+                        null,
                     itemId: recordingId,
                     scopeFolderIds: await itemScopeFolderIds(
                         recordingId,
@@ -985,6 +992,7 @@ async function transcribeRecordingInner(
             inputs: {
                 contentId: recording.id,
                 contentRevision: recording.fileMd5,
+                ...(opts.language ? { language: opts.language } : {}),
             },
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,

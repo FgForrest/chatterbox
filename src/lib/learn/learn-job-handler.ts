@@ -58,6 +58,7 @@ import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnChatClients } from "@/lib/learn/chat-clients";
 import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { isFinalLearnError } from "@/lib/learn/errors";
+import { learnLanguageCandidate } from "@/lib/learn/language";
 import {
     failLearnRunAfterTerminalJob,
     LEARN_JOB_KIND,
@@ -99,6 +100,7 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import type { ProviderPin } from "@/lib/profiles/settings";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import {
     type contentWriterRefusal,
     contentWriterScope,
@@ -752,10 +754,16 @@ async function runLearnJob({
         }
 
         const shared = run.view === "org";
+        const confirmedLanguage = await readConfirmedLanguage(
+            run.userId,
+            run.itemId,
+        );
+        const contentLanguage =
+            confirmedLanguage ?? transcript.detectedLanguage;
         const tools: LearnToolContext = {
             read: { kind: "recording", ownerUserId: run.userId, shared },
             budget: { remaining: TOOL_BUDGET },
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
         };
         const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
             sharedOnly: shared,
@@ -768,7 +776,7 @@ async function runLearnJob({
         const frameBefore = await frameFor(run, {
             revision: transcript.revision,
             turns,
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
@@ -865,7 +873,7 @@ async function runLearnJob({
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             run,
-            transcript.detectedLanguage ??
+            contentLanguage ??
                 detectLanguage(turns.map((turn) => turn.text).join("\n")),
         );
         reportProgress({ phase: "reading" });
@@ -875,7 +883,7 @@ async function runLearnJob({
                       chat: bridge,
                       token: issueLearnRunToken(run.id),
                       turns,
-                      language: transcript.detectedLanguage,
+                      language: contentLanguage,
                       reviewLocale,
                       relations,
                       entityTypes,
@@ -893,7 +901,7 @@ async function runLearnJob({
                       },
                       lookupBudget: TOOL_BUDGET,
                       turns,
-                      language: transcript.detectedLanguage,
+                      language: contentLanguage,
                       reviewLocale,
                       relations,
                       entityTypes,
@@ -927,31 +935,29 @@ async function runLearnJob({
             const frame = await frameFor(run, {
                 revision: transcript.revision,
                 turns,
-                language: transcript.detectedLanguage,
+                language: contentLanguage,
                 provider: transcript.provider,
             });
             const validated = validateLearnOutput(pass.output, frame);
+            const languageItem = learnLanguageCandidate(
+                pass.output.language,
+                transcript.detectedLanguage,
+                confirmedLanguage,
+            );
+            if (
+                languageItem &&
+                !frame.dismissed.has(
+                    learnFingerprintHmac(languageItem.fingerprint),
+                )
+            )
+                validated.items.unshift(languageItem);
             const items: ReviewCandidate[] = lastAttempt
-                ? validated.items.map(
-                      (item) =>
-                          ({
-                              ...item,
-                              preTicked: false,
-                          }) as ReviewCandidate,
+                ? validated.items.map((item) =>
+                      item.kind === "language"
+                          ? item
+                          : { ...item, preTicked: false },
                   )
                 : validated.items;
-            const stats = counts(items, {
-                ...baseStats,
-                ...(fenceAttempt > 1
-                    ? { fence_retries: fenceAttempt - 1 }
-                    : {}),
-                ...Object.fromEntries(
-                    Object.entries(validated.dropped).map(([reason, n]) => [
-                        `dropped_${reason}`,
-                        n ?? 0,
-                    ]),
-                ),
-            });
             // Decided before the transaction: it may ask the identity
             // provider, which no transaction waits on.
             const curatesNow =
@@ -959,10 +965,18 @@ async function runLearnJob({
                     ? await userCuratesOrganizationNow(run.actorUserId)
                     : false;
             const outcome = await db.transaction(async (tx) => {
-                await tx
-                    .select({ id: recordings.id })
+                const [currentRecording] = await tx
+                    .select({
+                        id: recordings.id,
+                        confirmedLanguage: recordings.confirmedLanguage,
+                    })
                     .from(recordings)
-                    .where(eq(recordings.id, run.itemId))
+                    .where(
+                        and(
+                            eq(recordings.id, run.itemId),
+                            eq(recordings.userId, run.userId),
+                        ),
+                    )
                     .for("share");
                 // Speaker answers are written under the transcript held
                 // for update: holding it for share keeps them still.
@@ -979,6 +993,24 @@ async function runLearnJob({
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
+                if (currentRecording?.confirmedLanguage) {
+                    const index = items.findIndex(
+                        (item) => item.kind === "language",
+                    );
+                    if (index >= 0) items.splice(index, 1);
+                }
+                const stats = counts(items, {
+                    ...baseStats,
+                    ...(fenceAttempt > 1
+                        ? { fence_retries: fenceAttempt - 1 }
+                        : {}),
+                    ...Object.fromEntries(
+                        Object.entries(validated.dropped).map(([reason, n]) => [
+                            `dropped_${reason}`,
+                            n ?? 0,
+                        ]),
+                    ),
+                });
                 const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
                 ) => {

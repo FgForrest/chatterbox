@@ -112,6 +112,7 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
             attributionSource?: string,
             view: RecordingView = "private",
             retranscribe = false,
+            language?: string,
         ) => {
             const key = recordingJobSubject(id, view);
             if (!beginTracking(key)) return;
@@ -123,6 +124,7 @@ export function useTranscribeQueue({ onTranscribeComplete }: Options) {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             attributionSource,
+                            ...(language ? { language } : {}),
                             ...(retranscribe ? { retranscribe: true } : {}),
                         }),
                     },

@@ -366,6 +366,7 @@ export async function recordingFilterConditions(
 
 /** A recording row as the filtered query loads it; `filename` is encrypted. */
 export interface FilteredRecording {
+    confirmedLanguage?: string | null;
     id: string;
     userId: string;
     filename: string;
@@ -390,6 +391,7 @@ export function loadFilteredRecordings(
             filename: chatterItems.title,
             startTime: chatterItems.occurredAt,
             duration: recordings.duration,
+            confirmedLanguage: recordings.confirmedLanguage,
         })
         .from(recordings)
         .innerJoin(chatterItems, recordingItemJoin)

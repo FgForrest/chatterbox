@@ -47,7 +47,11 @@ interface Props {
     transcripts: TranscriptOption[] | undefined;
     isCurrentTranscribing: boolean;
     visibleRecordings: Recording[];
-    onTranscribe: (attributionSource?: string, retranscribe?: boolean) => void;
+    onTranscribe: (
+        attributionSource?: string,
+        retranscribe?: boolean,
+        language?: string,
+    ) => void;
     /** Called after a browser-side transcription completes (refresh data). */
     onTranscribeComplete?: () => void;
     /** Reload the page's transcripts; see `TranscriptionPanel`. */

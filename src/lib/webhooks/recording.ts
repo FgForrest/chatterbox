@@ -44,6 +44,7 @@ function serializeWebhookTranscript(
         truncated: text.length > TRANSCRIPT_PREVIEW_CHARS,
         length: text.length,
         language: transcript.language,
+        confirmed_language: transcript.confirmed_language,
         provider: transcript.provider,
         model: transcript.model,
         created_at: transcript.created_at,

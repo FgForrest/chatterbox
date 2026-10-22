@@ -71,9 +71,36 @@ describe("Learn output", () => {
         const parsed = parseLearnOutput(JSON.stringify(valid));
         expect(parsed.ok).toBe(true);
         if (parsed.ok)
-            expect(parsed.output).toEqual({ newRecords: [], ...valid });
+            expect(parsed.output).toEqual({
+                language: null,
+                newRecords: [],
+                ...valid,
+            });
     });
 
+    it.each([
+        { code: "cs-CZ", confidence: 0.95 },
+        { code: "CS", confidence: 0.95 },
+        { code: "ces", confidence: 0.95 },
+        { code: "cs", confidence: 95 },
+        "cs",
+    ])("keeps the answer when its language field is malformed: %j", (language) => {
+        expect(
+            parseLearnOutput(JSON.stringify({ ...valid, language })),
+        ).toEqual({
+            ok: true,
+            output: { ...valid, newRecords: [], language: null },
+        });
+    });
+    it("keeps language required and nullable in the bridge schema", () => {
+        const schema = learnOutputJsonSchema();
+        expect(schema.required).toContain("language");
+        expect(schema).toMatchObject({
+            properties: {
+                language: { anyOf: expect.arrayContaining([{ type: "null" }]) },
+            },
+        });
+    });
     it("takes new records, and refers to them by ref", () => {
         const parsed = parseLearnOutput(
             JSON.stringify({
@@ -118,6 +145,7 @@ describe("Learn output", () => {
         ).toEqual({
             ok: true,
             output: {
+                language: null,
                 newRecords: [],
                 speakers: [],
                 corrections: [],

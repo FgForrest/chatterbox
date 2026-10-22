@@ -189,6 +189,7 @@ curl -H "Authorization: Bearer op_..." \
 ```json
 {
   "language": "en",
+  "confirmed_language": null,
   "text": "Full plaintext transcript...",
   "provider": "groq",
   "model": "whisper-large-v3",
@@ -215,6 +216,8 @@ curl -H "Authorization: Bearer op_..." \
   ]
 }
 ```
+
+`language` remains the transcription provider’s detected language. `confirmed_language` is the recording’s user-confirmed ISO 639-1 code, or `null` in Automatic mode. Recording list/detail metadata and webhook recording payloads also include `confirmed_language`; confirmation never replaces provider detection.
 
 `text` is the transcript as it was heard; corrections never rewrite it.
 `corrections` lists the confirmed ones as an overlay: an index into

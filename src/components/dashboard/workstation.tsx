@@ -1017,13 +1017,18 @@ export function Workstation({
         : inFlightActions;
 
     const handleTranscribe = useCallback(
-        async (attributionSource?: string, retranscribe = false) => {
+        async (
+            attributionSource?: string,
+            retranscribe = false,
+            language?: string,
+        ) => {
             if (!currentRecording) return;
             await transcribeById(
                 currentRecording.id,
                 attributionSource,
                 currentRecording.view,
                 retranscribe,
+                language,
             );
         },
         [currentRecording, transcribeById],

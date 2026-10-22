@@ -325,7 +325,7 @@ export const AI_OUTPUT_LANGUAGES: readonly AiOutputLanguageOption[] = [
 
 const LANGUAGE_CODES = new Set(AI_OUTPUT_LANGUAGES.map((l) => l.code));
 
-const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+export const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
     eng: "en",
     spa: "es",
     fra: "fr",

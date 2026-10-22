@@ -120,6 +120,7 @@ describe("buildTranscriptMarkdown", () => {
             recordedAt: RECORDED_AT,
             durationMs: 3_723_000,
             language: "cs",
+            confirmedLanguage: "cs",
             provider: "ElevenLabs",
             model: "scribe_v2",
             source: "riffado",
@@ -137,6 +138,7 @@ describe("buildTranscriptMarkdown", () => {
                 '  - "Speaker 1"',
                 "duration: 01:02:03",
                 'language: "cs"',
+                'confirmed_language: "cs"',
                 'source: "riffado"',
                 'provider: "ElevenLabs"',
                 'model: "scribe_v2"',
@@ -165,6 +167,7 @@ describe("buildTranscriptMarkdown", () => {
 
         expect(md).toContain('title: "Q4: \\"budget\\" review"');
         expect(md).toContain("language: null");
+        expect(md).toContain("confirmed_language: null");
         expect(md).toContain("duration: 00:00:00");
         expect(md).toContain("participants: []");
     });

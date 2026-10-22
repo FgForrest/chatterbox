@@ -5,11 +5,9 @@ import { chatterItems, recordings, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
-    explicitAiOutputLanguage,
     getAiOutputLanguageDirective,
     localizedSummaryPrompt,
     normalizeSummaryPromptConfig,
-    resolveAiOutputLanguage,
     SUMMARY_MARKDOWN_DIRECTIVE,
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
@@ -32,6 +30,10 @@ import {
 } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import {
+    normalizeDetectedLanguage,
+    recordingOutputLanguage,
+} from "@/lib/recordings/language";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -270,7 +272,8 @@ export async function generateSummaryForRecording(
         ? await loadTasksPromptContext({
               recording,
               transcriptionId: transcription.id,
-              language: transcription.detectedLanguage,
+              language:
+                  recording.confirmedLanguage ?? transcription.detectedLanguage,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,
@@ -330,17 +333,22 @@ export async function generateSummaryForRecording(
     if (!usedPromptId) throw new Error("Summary prompt resolution failed");
 
     const contentLanguage =
+        recording.confirmedLanguage ??
         transcription.detectedLanguage ??
         userSettingsRow?.defaultTranscriptionLanguage;
-    const outputLanguage = explicitAiOutputLanguage(
-        profileSettings
-            ? profileSettings.steps.summary.outputLanguage
-            : userSettingsRow?.aiOutputLanguage,
-    );
+    const outputLanguage = profileSettings
+        ? recordingOutputLanguage(
+              profileSettings.steps.summary.outputLanguage,
+              recording.confirmedLanguage,
+          )
+        : recordingOutputLanguage(
+              userSettingsRow?.aiOutputLanguage,
+              recording.confirmedLanguage,
+          );
     const profilePrompt = profileSettings
         ? resolveSummaryPrompt({
               settings: profileSettings.steps.summary,
-              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              outputLanguage: outputLanguage ?? "auto",
               contentLanguage,
               uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
           })
@@ -390,10 +398,7 @@ export async function generateSummaryForRecording(
         : localizedSummaryPrompt(
               usedPromptId,
               promptTemplate,
-              resolveAiOutputLanguage(
-                  userSettingsRow?.aiOutputLanguage,
-                  contentLanguage,
-              ),
+              outputLanguage ?? normalizeDetectedLanguage(contentLanguage),
               selectedTemplate?.prompt === null,
           );
     const plaudActionItems = tasksEnabled
@@ -475,7 +480,8 @@ export async function generateSummaryForRecording(
               ownerUserId: ctx.ownerUserId,
               transcriptionId: transcription.id,
               turns: input.turns,
-              language: transcription.detectedLanguage,
+              language:
+                  recording.confirmedLanguage ?? transcription.detectedLanguage,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,

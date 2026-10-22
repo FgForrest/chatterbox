@@ -26,6 +26,7 @@ import {
     LearnOutputUnusable,
     LearnToolBudgetExhausted,
 } from "@/lib/learn/errors";
+import { joinLearnLanguages, LEARN_LANGUAGE_RULE } from "@/lib/learn/language";
 import { replaceRefs } from "@/lib/learn/new-refs";
 import {
     LEARN_LIMITS,
@@ -226,7 +227,7 @@ const MAIL_ANSWER_SYSTEM = [
     MAIL_DATA_RULE,
     "Propose only what the mail itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
     'newRecords: people and things the mail names that the knowledge base does not have: a person named with their surname (signatures name people and their titles), an organization, team, project, product or system, a location or document the work relies on, a specialist term. Never a generic word or anything the knowledge base already has. Each has a ref (n1, n2, ...), kind (`person` or `entity`), typeKey (one of the listed entityTypes keys for an entity, null for a person), name (as it is written, in its base form), speakerLabel (the participant reference when the new person is a participant of the mail, else null), evidence (1-3 markers copied from the parts where it is named) and a short reason. Wherever the answer refers to a new record, it uses {"newRef": ref} in place of an id.',
-    "speakers: always an empty array. corrections: always an empty array.",
+    "language: always null. speakers: always an empty array. corrections: always an empty array.",
     'facts: lasting work facts the mail states about known or new people and things: who works on, leads or works for what, their title or position, which client uses which product, what a term means. Not a request or to-do of this mail, nor a detail only this mail needs. Use only the listed relation keys and shapes; start and end are markers copied from the parts where it is written; speakerLabel is the participant reference whose writer the fact is about or depends on, else null. What a writer says about themselves takes the subject {"speakerLabel":ref}. sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
     "relationPhrases: a relation between known or new people or things that none of the listed keys expresses, as a short phrase in the mail's language, with the same sensitivity category as a fact.",
     `Answer with one raw JSON object and nothing else, valid against this JSON Schema, with exactly its field names: ${ANSWER_SHAPE}`,
@@ -238,6 +239,7 @@ const ANSWER_SYSTEM = [
     DATA_RULE,
     "Propose only what the transcript itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
     SPEAKER_RULE,
+    LEARN_LANGUAGE_RULE,
     RECORDER_RULE,
     NEW_RECORDS_RULE,
     "corrections: only for a listed record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs, never put the record's base name into an inflected place). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
@@ -420,6 +422,10 @@ export async function runFallbackPass(
         repairs: 0,
         failedWindows: 0,
     };
+    const languageVotes: {
+        language: LearnOutput["language"];
+        weight: number;
+    }[] = [];
     let lookupsSpent = false;
     let lastError = "";
     const found = new Map<string, FoundEntity>();
@@ -653,6 +659,13 @@ export async function runFallbackPass(
         );
         // A mail has no voices to name and no words to correct.
         if (!mail) {
+            languageVotes.push({
+                language: output.language,
+                weight: window.turns.reduce(
+                    (sum, turn) => sum + turn.text.length,
+                    0,
+                ),
+            });
             result.output.speakers.push(...output.speakers);
             result.output.corrections.push(
                 ...anchorCorrections(output.corrections, input.turns),
@@ -664,6 +677,11 @@ export async function runFallbackPass(
     if (result.windows > 0 && result.failedWindows === result.windows) {
         throw new LearnOutputUnusable(lastError);
     }
+    if (!mail)
+        result.output.language = joinLearnLanguages(
+            languageVotes,
+            input.turns.reduce((sum, turn) => sum + turn.text.length, 0),
+        );
     result.output = await repairLearnReviewProse(
         result.output,
         input.reviewLocale,

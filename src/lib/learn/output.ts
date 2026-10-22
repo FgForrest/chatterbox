@@ -122,7 +122,16 @@ const relationPhrase = z.strictObject({
     sensitivity: z.enum(SENSITIVITY_CATEGORIES),
 });
 
+const transcriptLanguage = z.strictObject({
+    code: z
+        .string()
+        .regex(/^[a-z]{2}$/)
+        .meta({ learnText: "identifier" }),
+    confidence: z.number().min(0).max(1),
+});
+
 export const learnOutputSchema = z.strictObject({
+    language: transcriptLanguage.nullable().default(null).catch(null),
     // First, so an answer names what it adds before it refers to it. An
     // answer from before there were any may leave it out.
     newRecords: z.array(newRecord).max(LEARN_LIMITS.newRecords).default([]),
@@ -132,7 +141,12 @@ export const learnOutputSchema = z.strictObject({
     relationPhrases: z.array(relationPhrase).max(LEARN_LIMITS.relationPhrases),
 });
 
-export type LearnOutput = z.infer<typeof learnOutputSchema>;
+export type LearnOutput = Omit<
+    z.infer<typeof learnOutputSchema>,
+    "language"
+> & {
+    language?: z.infer<typeof transcriptLanguage> | null;
+};
 export type LearnNewRecord = LearnOutput["newRecords"][number];
 export type LearnSpeaker = LearnOutput["speakers"][number];
 export type LearnCorrection = LearnOutput["corrections"][number];
