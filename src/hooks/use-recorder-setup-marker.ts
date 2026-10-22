@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { getAppHistoryState } from "@/lib/history-state";
 
 /** Expose the visible recorder setup to the extension without adding history. */
 export function useRecorderSetupMarker(visible: boolean) {
@@ -9,7 +10,7 @@ export function useRecorderSetupMarker(visible: boolean) {
         const url = new URL(window.location.href);
         const previous = url.searchParams.get("section");
         url.searchParams.set("section", "recorder");
-        window.history.replaceState(window.history.state, "", url);
+        window.history.replaceState(getAppHistoryState(), "", url);
         return () => {
             const current = new URL(window.location.href);
             if (current.searchParams.get("section") !== "recorder") return;
@@ -18,7 +19,7 @@ export function useRecorderSetupMarker(visible: boolean) {
             } else {
                 current.searchParams.delete("section");
             }
-            window.history.replaceState(window.history.state, "", current);
+            window.history.replaceState(getAppHistoryState(), "", current);
         };
     }, [visible]);
 }

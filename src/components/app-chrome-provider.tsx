@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useTheme } from "@/hooks/use-theme";
+import { getAppHistoryState } from "@/lib/history-state";
 import {
     requestNotificationPermission,
     showNewRecordingNotification,
@@ -115,7 +116,7 @@ function useChromeState(config: AppChromeConfig) {
         setOnboardingInitialStep("google");
         setOnboardingOpen(true);
         url.searchParams.delete("onboarding");
-        window.history.replaceState(window.history.state, "", url);
+        window.history.replaceState(getAppHistoryState(), "", url);
     }, []);
     useEffect(() => {
         if (!settingsOpen) return;
