@@ -5,6 +5,7 @@ import { chatterItems, recordings, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
+    explicitAiOutputLanguage,
     getAiOutputLanguageDirective,
     localizedSummaryPrompt,
     normalizeSummaryPromptConfig,
@@ -331,16 +332,11 @@ export async function generateSummaryForRecording(
     const contentLanguage =
         transcription.detectedLanguage ??
         userSettingsRow?.defaultTranscriptionLanguage;
-    const outputLanguage = profileSettings
-        ? resolveAiOutputLanguage(
-              profileSettings.steps.summary.outputLanguage,
-              contentLanguage,
-          )
-        : resolveAiOutputLanguage(
-              userSettingsRow?.aiOutputLanguage,
-              transcription.detectedLanguage ??
-                  userSettingsRow?.defaultTranscriptionLanguage,
-          );
+    const outputLanguage = explicitAiOutputLanguage(
+        profileSettings
+            ? profileSettings.steps.summary.outputLanguage
+            : userSettingsRow?.aiOutputLanguage,
+    );
     const profilePrompt = profileSettings
         ? resolveSummaryPrompt({
               settings: profileSettings.steps.summary,
@@ -394,7 +390,10 @@ export async function generateSummaryForRecording(
         : localizedSummaryPrompt(
               usedPromptId,
               promptTemplate,
-              outputLanguage,
+              resolveAiOutputLanguage(
+                  userSettingsRow?.aiOutputLanguage,
+                  contentLanguage,
+              ),
               selectedTemplate?.prompt === null,
           );
     const plaudActionItems = tasksEnabled

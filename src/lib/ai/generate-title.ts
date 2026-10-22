@@ -12,8 +12,8 @@ import type { RecordingView } from "@/lib/sharing/view";
 import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import {
+    explicitAiOutputLanguage,
     getAiOutputLanguageDirective,
-    resolveAiOutputLanguage,
 } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
@@ -63,9 +63,8 @@ export async function generateTitleFromTranscription(
         .from(users)
         .where(eq(users.id, ownerUserId))
         .limit(1);
-    const outputLanguage = resolveAiOutputLanguage(
+    const outputLanguage = explicitAiOutputLanguage(
         settings.steps.summary.outputLanguage,
-        contentLanguage,
     );
     const promptTemplate = resolveTitlePrompt({
         settings: settings.steps.title,

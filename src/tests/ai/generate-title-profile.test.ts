@@ -69,7 +69,7 @@ describe("profile-backed title generation", () => {
         "riffado",
         "mixed",
         "plaud",
-    ])("uses a resolved Czech directive and Czech capitalization for ces from %s", async (source) => {
+    ])("uses a generic language directive and Czech prompt wording for ces from %s", async (source) => {
         selectRows([{ source, detectedLanguage: "ces" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
 
@@ -83,7 +83,7 @@ describe("profile-backed title generation", () => {
 
         const request = mocks.create.mock.calls[0]?.[0];
         expect(request.messages[0].content).toContain(
-            "Write all natural-language output in Czech",
+            "Write all natural-language output in the language the transcription is predominantly spoken in",
         );
         expect(request.messages[0].content).toContain(
             "Use English Title Case only for English; Czech and most other European languages use sentence case.",
