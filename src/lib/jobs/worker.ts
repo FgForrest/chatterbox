@@ -32,9 +32,12 @@ import {
     deferJob,
     failJobAttempt,
     heartbeatJob,
+    prepareClaimedPipelineJob,
     reclaimStaleJobs,
     releaseClaimedJobs,
 } from "@/db/queries/async-jobs";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
+import { StepFailedError } from "@/lib/pipeline/outcome";
 import { captureServerException } from "@/lib/posthog-server";
 import { backoffDelayMs } from "./backoff";
 import { runHousekeeping } from "./housekeeping";
@@ -47,6 +50,8 @@ import {
     JobDeferredError,
     JobTimeoutError,
 } from "./retryable";
+import { afterTerminalJobFailure } from "./terminal-failure";
+import { JOB_HEARTBEAT_MS, JOB_STALE_MS } from "./timing";
 import type { JobHandler, JobProgress } from "./types";
 
 /**
@@ -59,18 +64,8 @@ import type { JobHandler, JobProgress } from "./types";
  */
 const TICK_MS = 5_000;
 
-/**
- * How long a claimed job may go without a heartbeat before another worker may
- * take it.
- *
- * Generous relative to `HEARTBEAT_MS`: a garbage-collection pause, a slow
- * database or a busy event loop can all delay a beat, and reclaiming a job
- * that is merely late means running it twice. Ten missed beats is not late.
- */
-const STALE_MS = 120_000;
-const HEARTBEAT_MS = 12_000;
-
 const HOUSEKEEPING_EVERY_MS = 60 * 60 * 1000;
+const COMPLETION_RETRY_DELAYS_MS = [500, 2_000, 5_000];
 
 /** Default wait between attempts when a handler does not set its own. */
 const DEFAULT_JOB_BACKOFF = { baseMs: 20_000, maxMs: 10 * 60_000, jitter: 0.3 };
@@ -109,6 +104,12 @@ async function runJob(
     };
 
     try {
+        if (!(await prepareClaimedPipelineJob(job.id, job.claimToken))) {
+            console.debug("[job-worker] superseded claim before handler", {
+                jobId: job.id,
+            });
+            return;
+        }
         const payload = handler.parsePayload(job.payload ?? {});
         parsedPayload = payload;
 
@@ -129,10 +130,10 @@ async function runJob(
                 })
                 .catch(() => {
                     // A failed heartbeat is not evidence of anything. Losing
-                    // the claim needs `STALE_MS` of silence, and one blip is
+                    // the claim needs `JOB_STALE_MS` of silence, and one blip is
                     // far short of that.
                 });
-        }, HEARTBEAT_MS);
+        }, JOB_HEARTBEAT_MS);
         heartbeat.unref?.();
 
         const timedOut = new Promise<never>((_, reject) => {
@@ -177,12 +178,53 @@ async function runJob(
             timedOut,
         ]);
 
+        const stepOutcome = result?.outcome;
+        if (
+            stepOutcome &&
+            typeof stepOutcome === "object" &&
+            "kind" in stepOutcome &&
+            stepOutcome.kind === "failed" &&
+            "code" in stepOutcome &&
+            typeof stepOutcome.code === "string" &&
+            "retryable" in stepOutcome &&
+            typeof stepOutcome.retryable === "boolean"
+        )
+            throw new StepFailedError(stepOutcome.code, stepOutcome.retryable);
         stop();
-        await completeJob({
-            jobId: job.id,
-            claimToken: job.claimToken,
-            result: result ?? null,
-        });
+        for (
+            let attempt = 0;
+            attempt <= COMPLETION_RETRY_DELAYS_MS.length;
+            attempt++
+        ) {
+            try {
+                const settled = await retryOnDeadlock(() =>
+                    completeJob({
+                        jobId: job.id,
+                        claimToken: job.claimToken,
+                        result: result ?? null,
+                    }),
+                );
+                if (!settled)
+                    console.debug("[job-worker] superseded completion claim", {
+                        jobId: job.id,
+                    });
+                break;
+            } catch (error) {
+                const delay = COMPLETION_RETRY_DELAYS_MS[attempt];
+                if (delay !== undefined) {
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                    continue;
+                }
+                console.error(
+                    `[job-worker] could not settle completed job ${job.id}:`,
+                    error,
+                );
+                captureServerException(error, {
+                    source: `worker:settle:${job.kind}`,
+                    distinctId: job.userId,
+                });
+            }
+        }
     } catch (error) {
         stop();
         if (error instanceof JobDeferredError) {
@@ -199,8 +241,14 @@ async function runJob(
             });
             return;
         }
-        const retryable = (handler.isRetryable ?? isRetryableError)(error);
-        const { message, code } = describeJobError(error);
+        const retryable =
+            error instanceof StepFailedError
+                ? error.retryable
+                : (handler.isRetryable ?? isRetryableError)(error);
+        const { message, code } =
+            error instanceof StepFailedError
+                ? { message: error.code, code: error.code }
+                : describeJobError(error);
         const delayMs = backoffDelayMs(job.attempts, {
             ...DEFAULT_JOB_BACKOFF,
             ...handler.backoff,
@@ -224,9 +272,9 @@ async function runJob(
         });
 
         if (outcome === null) {
-            console.warn(
-                `[job-worker] job ${job.id} (${job.kind}) failed but its claim was superseded; not recording`,
-            );
+            console.debug(`[job-worker] superseded failure settlement`, {
+                jobId: job.id,
+            });
         } else if (outcome.status === "failed") {
             if (handler.onTerminalFailure && parsedPayload !== undefined) {
                 await handler
@@ -235,6 +283,7 @@ async function runJob(
                         userId: job.userId,
                         payload: parsedPayload,
                         errorCode: code ?? "INTERNAL_ERROR",
+                        errorMessage: message,
                     })
                     .catch((notificationError) => {
                         console.error(
@@ -317,13 +366,16 @@ export async function tick(): Promise<void> {
     if (ticking) return;
     ticking = true;
     try {
-        const reclaimed = await reclaimStaleJobs(STALE_MS);
+        const reclaimed = await reclaimStaleJobs(JOB_STALE_MS);
         if (reclaimed > 0) {
             console.log(
                 `[job-worker] reclaimed ${reclaimed} job(s) from workers that stopped responding`,
             );
         }
-        const buried = await buryExhaustedStaleJobs(STALE_MS);
+        const buried = await buryExhaustedStaleJobs(
+            JOB_STALE_MS,
+            afterTerminalJobFailure,
+        );
         if (buried > 0) {
             console.warn(
                 `[job-worker] buried ${buried} job(s) that exhausted their attempts without reporting`,

@@ -144,6 +144,7 @@ export function TaskRow({
                         <AssigneePicker
                             value={task.assignee}
                             hint={task.assigneeHint}
+                            check={task.assigneeCheck}
                             speakers={speakers}
                             organizationOnly={organizationOnly}
                             disabled={!editable}

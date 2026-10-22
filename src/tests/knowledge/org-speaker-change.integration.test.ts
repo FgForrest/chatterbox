@@ -3,8 +3,8 @@
  *
  * A shared recording is one recording: the organization account's change
  * lands on the owner's transcript, and only on the text it was made on.
- * The owner and members may not change it, and after a withdrawal the
- * organization account may not either, while the owner may again.
+ * The owner may change it too, members may not, and after a withdrawal the
+ * organization account may no longer change it.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -426,7 +426,7 @@ describeWithDatabase(
             ).toBe(200);
         });
 
-        it("refuses members, and the owner until they withdraw it", async () => {
+        it("refuses members and lets the owner change it while shared", async () => {
             const named = await namedTranscript();
             await share();
 
@@ -443,18 +443,15 @@ describeWithDatabase(
                 { label: "speaker_0", unknown: true },
                 "private",
             );
-            expect(owner.status).toBe(409);
-            await expect(owner.json()).resolves.toMatchObject({
-                code: "RECORDING_SHARED",
-            });
+            expect(owner.status).toBe(200);
             expect(await orgPeopleNamed("Karel")).toEqual([]);
             expect(await byLabel(named.transcriptionId)).toEqual({
-                speaker_0: { name: named.jana, by: OWNER },
+                speaker_0: { name: "unknown", by: OWNER },
                 speaker_1: { name: named.petr, by: OWNER },
             });
         });
 
-        it("refuses the owner's change the share committed under, whoever waited", async () => {
+        it("accepts the owner's change when sharing committed while it waited", async () => {
             const named = await namedTranscript();
             const seen = await shownVersion(OWNER, "private");
             // Shared after the route let the owner through.
@@ -467,9 +464,9 @@ describeWithDatabase(
                 "private",
             );
 
-            expect(response.status).toBe(409);
+            expect(response.status).toBe(200);
             expect(await byLabel(named.transcriptionId)).toMatchObject({
-                speaker_0: { name: named.jana },
+                speaker_0: { name: "unknown", by: OWNER },
             });
         });
 

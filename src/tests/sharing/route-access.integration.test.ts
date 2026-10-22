@@ -510,7 +510,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             expect(still?.deletedAt).toBeNull();
         });
 
-        it("names Organization speakers only by its account, with Organization people", async () => {
+        it("lets the owner and Organization account name only Organization speakers", async () => {
             const speakers = await call(
                 getSpeakers,
                 MEMBER,
@@ -561,20 +561,28 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 }),
             ).toBe(200);
 
-            // The owner may not change it while shared.
+            // The owner writes into the Organization from the private view.
             const privatePath = `/api/recordings/${REC}/speakers`;
-            const frozen = await call(putSpeaker, OWNER, privatePath, {
+            const changed = await call(putSpeaker, OWNER, privatePath, {
                 method: "PUT",
                 ...json({
                     ...(await seenVersion(OWNER, privatePath)),
                     label: "speaker_0",
-                    displayName: "Eva",
+                    displayName: "Owner named",
                 }),
             });
-            expect(frozen.status).toBe(409);
-            await expect(frozen.json()).resolves.toMatchObject({
-                code: "RECORDING_SHARED",
-            });
+            expect(changed.status).toBe(200);
+            const [created] = await db()
+                .select()
+                .from(people)
+                .where(eq(people.createdByUserId, OWNER));
+            expect(created?.userId).toBe(orgUserId);
+            expect(
+                await change(OWNER, {
+                    label: "speaker_0",
+                    personId: privatePerson?.id,
+                }),
+            ).toBe(404);
             // Refused before anyone was created.
             expect(
                 await db()
@@ -600,7 +608,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             expect(change.status).toBe(404);
         });
 
-        it("queues Organization work for its account only and lets every viewer follow it", async () => {
+        it("queues shared work for owners and curators and lets every viewer follow it", async () => {
             // Members read a shared recording; its account re-transcribes it.
             expect(
                 (
@@ -640,24 +648,20 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 params: { id: jobId },
             });
             expect(followed.status).toBe(200);
-            // The owner's private view has its own job slot, and may not
-            // run while shared.
+            // The owner's private view has its own job slot while shared.
             const privateView = await call(
                 getTranscribe,
                 OWNER,
                 `/api/recordings/${REC}/transcribe`,
             );
             await expect(privateView.json()).resolves.toEqual({});
-            const frozen = await call(
+            const ownerQueued = await call(
                 postTranscribe,
                 OWNER,
                 `/api/recordings/${REC}/transcribe`,
-                { method: "POST" },
+                { method: "POST", ...json({ retranscribe: true }) },
             );
-            expect(frozen.status).toBe(409);
-            await expect(frozen.json()).resolves.toMatchObject({
-                code: "RECORDING_SHARED",
-            });
+            expect(ownerQueued.status).toBe(202);
         });
 
         it("lets members move but not withdraw, and lets the owner withdraw", async () => {
@@ -751,7 +755,12 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 method: "DELETE",
             });
             const jobs = await db().select().from(asyncJobs);
-            expect(jobs).toHaveLength(4);
+            expect(jobs).toHaveLength(3);
+            expect(jobs.map((job) => job.kind).sort()).toEqual([
+                "pipeline.advance",
+                "summary",
+                "transcription",
+            ]);
             expect(jobs.every((job) => job.status === "failed")).toBe(true);
         });
 

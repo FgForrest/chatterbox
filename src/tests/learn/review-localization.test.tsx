@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -146,8 +147,9 @@ function Czech({ children }: { children: ReactNode }) {
     );
 }
 
-afterEach(() => {
+afterEach(async () => {
     cleanup();
+    await act(async () => {});
     vi.unstubAllGlobals();
     vi.clearAllMocks();
 });

@@ -63,6 +63,7 @@ vi.mock("@/lib/posthog-server", () => ({
 import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvance,
+    requestAdvanceForViewInTx,
 } from "@/lib/pipeline/trigger";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -300,7 +301,7 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
         expect(await pipelineJobs(OTHER_USER_ID)).toEqual([]);
     });
 
-    it("keeps the Organization view and subject separate", async () => {
+    it("routes an Organization content event to the owner's existing private driver", async () => {
         await requestAdvance({
             itemId: ITEM_ID,
             userId: USER_ID,
@@ -313,25 +314,34 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
             view: "org",
             reason: "learn-released",
         });
+        expect(result).toEqual({ requestedGeneration: 2, enqueued: false });
+        expect(await processingRows()).toMatchObject([
+            { view: "private", requestedGeneration: 2 },
+        ]);
+        expect(await pipelineJobs()).toMatchObject([
+            { subjectId: ITEM_ID, payload: { view: "private" } },
+        ]);
+        expect(await processingRows()).toHaveLength(1);
+        expect(await pipelineJobs()).toHaveLength(1);
+    });
 
-        expect(result).toEqual({ requestedGeneration: 1, enqueued: true });
-        const rows = await processingRows();
-        expect(rows).toHaveLength(2);
-        expect(rows).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    view: "private",
-                    requestedGeneration: 1,
-                }),
-                expect.objectContaining({
-                    view: "org",
-                    requestedGeneration: 1,
-                }),
-            ]),
+    it("keeps exact-view maintenance separate for legacy Organization rows", async () => {
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "arrival",
+        });
+        await db().transaction((tx) =>
+            requestAdvanceForViewInTx(tx, {
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                view: "org",
+                reason: "summary-step-failed",
+            }),
         );
-        const jobs = await pipelineJobs();
-        expect(jobs).toHaveLength(2);
-        expect(jobs).toEqual(
+        expect(await processingRows()).toHaveLength(2);
+        expect(await pipelineJobs()).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ subjectId: ITEM_ID }),
                 expect.objectContaining({
@@ -339,7 +349,7 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
                     payload: {
                         itemId: ITEM_ID,
                         view: "org",
-                        reason: "learn-released",
+                        reason: "summary-step-failed",
                     },
                 }),
             ]),

@@ -17,6 +17,9 @@ describe("legacy title jobs", () => {
                 signal: new AbortController().signal,
                 reportProgress: () => {},
             }),
-        ).resolves.toEqual({ skipped: "superseded" });
+        ).resolves.toEqual({
+            skipped: "superseded",
+            outcome: { kind: "skipped", reason: "superseded" },
+        });
     });
 });

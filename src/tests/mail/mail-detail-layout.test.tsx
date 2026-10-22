@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
 vi.mock("next/navigation", () => ({
@@ -192,6 +193,10 @@ describe("mail detail layout", () => {
             screen.getByTestId("folder-row").getAttribute("data-can-curate"),
         ).toBe("true");
         await screen.findByTestId("mail-summary");
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/mail/mail-1?view=org",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
     });
     it.each([
         "Recent",
@@ -213,6 +218,10 @@ describe("mail detail layout", () => {
                 onRemoveFromFolder={vi.fn()}
                 onMoveBetweenFolders={vi.fn()}
             />,
+        );
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/mail/mail-1",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
         expect(
             screen.getByRole("button", { name: backLabel }).className,
@@ -364,7 +373,7 @@ describe("mail detail layout", () => {
     });
 
     it("shows a pending share only through the shared intent chip", async () => {
-        const processing: ItemProcessingPresentation = {
+        const processing: ItemProcessingPresentation = processingFixture({
             itemId: mail.id,
             kind: "mail",
             legacy: false,
@@ -388,7 +397,7 @@ describe("mail detail layout", () => {
             taskReviewWaiting: 0,
             jobs: { transcription: null, summary: null },
             failures: [],
-        };
+        });
         stubMailFetch({ processing });
 
         render(
@@ -460,10 +469,13 @@ describe("mail detail layout", () => {
         expect(screen.queryByText(/Retention removed/)).toBeNull();
     });
 
-    it("keeps a shared mail read-only on its private view", async () => {
+    it.each([
+        "private",
+        "org",
+    ] as const)("lets the owner edit shared mail from its %s view", async (view) => {
         render(
             <MailDetailPane
-                mail={mail}
+                mail={{ ...mail, isOwn: true, view }}
                 shared
                 dateTimeFormat="absolute"
                 onBackToList={vi.fn()}
@@ -479,14 +491,14 @@ describe("mail detail layout", () => {
         );
 
         await screen.findByTestId("mail-summary");
-        expect(screen.queryByRole("button", { name: "Summarize" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Learn" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Learn" })).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Re-match tasks" }),
-        ).toBeNull();
+            screen.getByRole("button", { name: "Re-match tasks" }),
+        ).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Rename {name}" }),
-        ).toBeNull();
+            screen.getByRole("button", { name: "Rename {name}" }),
+        ).toBeTruthy();
     });
 
     it("uses the shared Organization marker without Organization view text", async () => {
@@ -528,6 +540,14 @@ describe("mail detail layout", () => {
         );
         expect(screen.getByText("Shared by {owner}")).toBeTruthy();
         expect(screen.queryByText("Organization view")).toBeNull();
+        for (const name of [
+            "Summarize",
+            "Learn",
+            "Re-match tasks",
+            "Rename {name}",
+        ]) {
+            expect(screen.queryByRole("button", { name })).toBeNull();
+        }
         expect(
             screen.queryByRole("link", { name: "Download the message" }),
         ).toBeNull();

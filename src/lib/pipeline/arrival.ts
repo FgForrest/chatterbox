@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { db } from "@/db";
+import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     itemProcessing,
@@ -76,6 +77,14 @@ export async function requestArrivalInTx(
                 .onConflictDoNothing();
         }
     }
+    if (input.profile && view === "private") {
+        await lockPipelineTargetsInTx(
+            tx,
+            [{ itemId: input.itemId, userId: input.userId }],
+            true,
+        );
+        await lockProfileMutation(tx, input.profile.ownerUserId);
+    }
     const advance = await requestAdvanceInTx(tx, {
         itemId: input.itemId,
         userId: input.userId,
@@ -84,7 +93,6 @@ export async function requestArrivalInTx(
     });
     if (!advance || !input.profile || view !== "private") return advance;
 
-    await lockProfileMutation(tx, input.profile.ownerUserId);
     const [latest] = await tx
         .select({
             id: processingProfiles.id,
@@ -121,6 +129,7 @@ export async function requestArrivalInTx(
     await updatePhaseInTx(tx, input.itemId, view, input.userId, "categorize", {
         state: "done",
         reason: "categorized",
+        profileChoice: "placement",
         generation: advance.requestedGeneration,
         at: new Date().toISOString(),
     });

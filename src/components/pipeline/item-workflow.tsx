@@ -307,7 +307,7 @@ export function ItemWorkflow({
     const i18n = useExtracted();
     const canEdit = isOwn && view !== "org";
     const processingEnabled = canEdit || view === "org";
-    const { data, setData, workflow } = useItemProcessing({
+    const { data, setData, workflow, refresh, stale } = useItemProcessing({
         itemId,
         kind,
         view,
@@ -383,6 +383,18 @@ export function ItemWorkflow({
                 intents: data.intents.filter(
                     (intent) => intent.folderId !== folderId,
                 ),
+                steps:
+                    data.intents.length === 1
+                        ? {
+                              ...data.steps,
+                              share: {
+                                  state: "skipped",
+                                  reason: "cancelled",
+                                  waitingFor: null,
+                                  actions: [],
+                              },
+                          }
+                        : data.steps,
             });
             try {
                 const response = await fetch(
@@ -414,6 +426,15 @@ export function ItemWorkflow({
                 confirmationRequired: false,
                 confirmed: true,
             })),
+            steps: {
+                ...data.steps,
+                share: {
+                    state: "pending",
+                    reason: "confirmed",
+                    waitingFor: { kind: "pending" },
+                    actions: [],
+                },
+            },
         });
         try {
             const response = await fetch(
@@ -486,7 +507,25 @@ export function ItemWorkflow({
     const processAgain = useCallback(async () => {
         if (!data) return;
         const previous = data;
-        setData({ ...data, processAgain: false, processAgainReason: null });
+        setData({
+            ...data,
+            processAgain: false,
+            processAgainReason: null,
+            steps: Object.fromEntries(
+                Object.entries(data.steps).map(([phase, step]) => [
+                    phase,
+                    step.actions.includes("processAgain")
+                        ? {
+                              ...step,
+                              state: "pending",
+                              reason: "requested",
+                              waitingFor: { kind: "pending" },
+                              actions: [],
+                          }
+                        : step,
+                ]),
+            ) as ItemProcessingPresentation["steps"],
+        });
         try {
             const response = await fetch(
                 `/api/recordings/${encodeURIComponent(itemId)}/process-again`,
@@ -544,6 +583,15 @@ export function ItemWorkflow({
                           },
                       }
                     : data.profile,
+                steps: {
+                    ...data.steps,
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        waitingFor: null,
+                        actions: [],
+                    },
+                },
                 phases: {
                     ...data.phases,
                     categorize: {
@@ -585,6 +633,9 @@ export function ItemWorkflow({
 
     const handleAction = (action: WorkflowActionCode) => {
         switch (action) {
+            case "learn":
+                onLearn?.();
+                break;
             case "file":
             case "chooseProfile":
                 loadPanel();
@@ -613,6 +664,8 @@ export function ItemWorkflow({
                 if (failedStep === "transcribe") onTranscribe?.(true);
                 else if (failedStep === "learn") onLearn?.();
                 else if (failedStep === "summary") onSummary?.();
+                else if (workflow?.status?.message === "failureInterrupted")
+                    void processAgain();
                 break;
             }
         }
@@ -663,8 +716,19 @@ export function ItemWorkflow({
                     workflow={workflow}
                     kind={kind}
                     onAction={handleAction}
-                    readOnly={!canEdit}
                 />
+            )}
+            {stale && (
+                <output className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {i18n("Status may be out of date")} ·{" "}
+                    <button
+                        type="button"
+                        className="underline underline-offset-2"
+                        onClick={() => void refresh()}
+                    >
+                        {i18n({ id: "processingRetry", message: "Try again" })}
+                    </button>
+                </output>
             )}
             {canEdit && filingMode ? (
                 <div ref={filingRef}>

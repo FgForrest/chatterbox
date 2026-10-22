@@ -1,6 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
+import type { StepOutcome } from "@/lib/pipeline/outcome";
 import {
     markAutomaticStepShared,
     markAutomaticTitleSkipped,
@@ -20,13 +22,15 @@ export async function updateTitleAfterSummary(input: {
     summary: string;
     keyPoints: string[];
     fence?: TitleInputFence;
-}): Promise<void> {
+    jobId?: string;
+}): Promise<StepOutcome> {
     const processing = await readProcessing(
         input.recordingId,
         "private",
         input.userId,
     );
-    if (processing && automaticTitleSettled(processing.phases)) return;
+    if (processing && automaticTitleSettled(processing.phases))
+        return { kind: "skipped", reason: "already_generated" };
     const skipIfShared = async () => {
         const refusal = await contentWriterRefusalNow({
             recordingId: input.recordingId,
@@ -34,19 +38,23 @@ export async function updateTitleAfterSummary(input: {
             actorUserId: input.userId,
         });
         if (refusal !== "shared") return false;
-        await markAutomaticStepShared({
-            itemId: input.recordingId,
-            userId: input.userId,
-            view: "private",
-            step: "title",
-        });
+        if (!input.jobId)
+            await markAutomaticStepShared({
+                itemId: input.recordingId,
+                userId: input.userId,
+                view: "private",
+                step: "title",
+            });
         return true;
     };
-    if (await skipIfShared()) return;
+    if (await skipIfShared()) return { kind: "skipped", reason: "shared" };
     const profile = await resolveItemProfile(
         input.recordingId,
         "private",
         input.userId,
+        input.userId,
+        "title",
+        input.jobId,
     );
     const title = profile.settings.steps.title;
     const summaryInputs = processing?.phases.summary?.inputs;
@@ -64,7 +72,7 @@ export async function updateTitleAfterSummary(input: {
             | "first_summary_title_edited"
             | "first_summary_title_failed",
     ) => {
-        if (!fence) return;
+        if (!fence || input.jobId) return;
         await markAutomaticTitleSkipped({
             itemId: input.recordingId,
             userId: input.userId,
@@ -72,9 +80,9 @@ export async function updateTitleAfterSummary(input: {
             reason,
         });
     };
-    if (!title.automatic) {
+    if (effectiveManualOnly(processing) || !title.automatic) {
         await settleSkipped("first_summary_title_disabled");
-        return;
+        return { kind: "skipped", reason: "first_summary_title_disabled" };
     }
     const [item] = await db
         .select({
@@ -98,10 +106,10 @@ export async function updateTitleAfterSummary(input: {
             ),
         )
         .limit(1);
-    if (!item) return;
+    if (!item) return { kind: "skipped", reason: "gone" };
     if (item.titleEditedAt) {
         await settleSkipped("first_summary_title_edited");
-        return;
+        return { kind: "skipped", reason: "first_summary_title_edited" };
     }
     const [settings] =
         item.kind === "audio"
@@ -125,6 +133,7 @@ export async function updateTitleAfterSummary(input: {
             syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
             ...(fence ? { fence } : {}),
             skipIfAutomaticTitleSettled: true,
+            jobId: input.jobId,
         });
     } catch (error) {
         await settleSkipped("first_summary_title_failed");
@@ -132,8 +141,10 @@ export async function updateTitleAfterSummary(input: {
     }
     if (retitled) {
         await emitEvent("recording.updated", input.userId, input.recordingId);
+        return { kind: "done" };
     } else {
-        if (await skipIfShared()) return;
+        if (await skipIfShared()) return { kind: "skipped", reason: "shared" };
         await settleSkipped("first_summary_title_failed");
+        return { kind: "skipped", reason: "first_summary_title_failed" };
     }
 }

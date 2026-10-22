@@ -1,15 +1,17 @@
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError } from "@/lib/errors";
+import { getOrgUserId } from "@/lib/org/config";
 import {
     type AccessOptions,
     type RecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 /**
  * Whose data a transcription or summary run touches.
  *
- * On the private view these are all the owner. On the Organization view
+ * On an unshared recording these are all the owner. While shared
  * they split: the recording and the rows written stay the owner's (a shared
  * recording is one recording), the run follows the Organization's prompts
  * and language, and the provider, model and keys are the actor's, who pays
@@ -55,12 +57,19 @@ export async function resolveRunContext(
     view: RecordingView,
     options: AccessOptions = {},
 ): Promise<ContentRunContext | null> {
-    if (view === "private") return privateRunContext(actorUserId);
+    if (view === "private") {
+        const context = privateRunContext(actorUserId);
+        const orgUserId = await getOrgUserId();
+        if (orgUserId && (await isRecordingShared(recordingId, orgUserId))) {
+            context.settingsUserId = orgUserId;
+        }
+        return context;
+    }
     try {
         const access = await requireRecordingView(
             actorUserId,
             recordingId,
-            "org",
+            view,
             options,
         );
         return {
@@ -69,8 +78,12 @@ export async function resolveRunContext(
             ownerUserId: access.ownerUserId,
             contentUserId: access.contentUserId,
             // Never null here: the Organization view requires the account.
-            settingsUserId: access.orgUserId ?? access.ownerUserId,
-            actsForOrganization: await userCuratesOrganizationNow(actorUserId),
+            settingsUserId: access.shared
+                ? (access.orgUserId ?? access.ownerUserId)
+                : access.ownerUserId,
+            actsForOrganization:
+                view === "org" &&
+                (await userCuratesOrganizationNow(actorUserId)),
         };
     } catch (error) {
         if (error instanceof AppError && error.statusCode === 404) return null;

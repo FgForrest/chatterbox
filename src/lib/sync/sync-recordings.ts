@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, not, notInArray, or } from "drizzle-orm";
+import { and, eq, isNull, ne, notInArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { insertAudioItem, recordingItemJoin } from "@/db/items";
@@ -23,7 +23,6 @@ import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
-import { getOrgUserId } from "@/lib/org/config";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     findInlineContent,
@@ -39,10 +38,6 @@ import {
 } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
-import {
-    isRecordingShared,
-    sharedRecordingCondition,
-} from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
     upsertEnhancement,
@@ -92,14 +87,6 @@ interface SyncContext {
     notificationEmail: string | null;
     locale: AppLocale | null;
     barkPushUrl: string | null;
-    /**
-     * The organization account, or null without an Organization. A
-     * recording shared with it takes no Plaud transcript, no new Plaud
-     * version and no automatic transcription: only the organization account
-     * changes it until it is withdrawn, and the next sync after that fills
-     * the gap.
-     */
-    orgUserId: string | null;
 }
 
 /** A freshly-synced recording that Plaud may hold transcript/summary content
@@ -197,7 +184,7 @@ function buildImportCandidate(
 }
 
 async function loadPlaudContentGaps(
-    { userId, orgUserId }: Pick<SyncContext, "userId" | "orgUserId">,
+    { userId }: Pick<SyncContext, "userId">,
     recordingId: string,
     flags: {
         isTrans: boolean;
@@ -244,30 +231,12 @@ async function loadPlaudContentGaps(
         if (!existing) needsSummary = true;
     }
 
-    // Shared, the recording is not the owner's to change: Plaud's transcript
-    // would be refused, and its summary is imported only beside it.
-    // Neither is a gap, so nothing is fetched from Plaud for them; the
-    // first sync after an unshare finds both again.
-    if (
-        !hasPlaudTranscript &&
-        (needsTranscript || needsSummary) &&
-        orgUserId &&
-        (await isRecordingShared(recordingId, orgUserId))
-    ) {
-        return {
-            needsTranscript: false,
-            needsSummary: false,
-            hasPlaudTranscript,
-        };
-    }
-
     return { needsTranscript, needsSummary, hasPlaudTranscript };
 }
 
 async function hasUnseenPlaudContentGaps(
     userId: string,
     seenRecordingIds: Set<string>,
-    orgUserId: string | null,
 ): Promise<boolean> {
     const conditions = [
         eq(recordings.userId, userId),
@@ -284,8 +253,6 @@ async function hasUnseenPlaudContentGaps(
             ),
         ),
     ];
-    // Shared: no gap this sync may fill.
-    if (orgUserId) conditions.push(not(sharedRecordingCondition(orgUserId)));
     if (seenRecordingIds.size > 0) {
         conditions.push(notInArray(recordings.id, [...seenRecordingIds]));
     }
@@ -439,18 +406,6 @@ async function processRecording(
             return { status: "skipped" };
         }
 
-        // Shared, the recording is the organization account's to change,
-        // and a new version from Plaud would replace the audio under the
-        // Organization's transcript. It waits: the version is not advanced,
-        // so the first sync after a withdrawal applies it.
-        if (
-            existingRecording &&
-            context.orgUserId &&
-            (await isRecordingShared(existingRecording.id, context.orgUserId))
-        ) {
-            return { status: "skipped" };
-        }
-
         // Storage cap: gate NEW recordings before spending Plaud egress.
         // Updates replace an existing blob (roughly size-neutral) and are
         // left untouched so a near-cap user can still receive edits.
@@ -545,17 +500,6 @@ async function processRecording(
                     .limit(1);
 
                 if (!locked || locked.deletedAt) return false;
-                // Shared during the download: the version waits, as above.
-                if (
-                    context.orgUserId &&
-                    (await isRecordingShared(
-                        existingRecording.id,
-                        context.orgUserId,
-                        tx,
-                    ))
-                ) {
-                    return "shared" as const;
-                }
                 if (overwrites) {
                     await storage.uploadFile(
                         storageKey,
@@ -598,21 +542,6 @@ async function processRecording(
                 return true;
             });
 
-            if (updated === "shared") {
-                // Its row still names the audio it had, which was not
-                // touched; a blob uploaded beside it is an orphan.
-                if (!overwrites) {
-                    try {
-                        await storage.deleteFile(storageKey);
-                    } catch (cleanupError) {
-                        console.error(
-                            `Failed to clean up storage object ${storageKey} of a shared recording:`,
-                            cleanupError,
-                        );
-                    }
-                }
-                return { status: "skipped" };
-            }
             if (!updated) {
                 // Best-effort cleanup of the orphaned blob, when one was
                 // written beside the recording's audio.
@@ -879,7 +808,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 settings?.notificationEmail || user?.email || null,
             locale: normalizeLocale(user?.uiLocale),
             barkPushUrl: settings?.barkPushUrl || null,
-            orgUserId: await getOrgUserId(),
         };
 
         const plaudClient = await createPlaudClient(
@@ -963,7 +891,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                             !(await hasUnseenPlaudContentGaps(
                                 userId,
                                 seenRecordingIds,
-                                context.orgUserId,
                             ))
                         ) {
                             hasMore = false;

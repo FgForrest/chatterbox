@@ -1,5 +1,15 @@
-import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import {
+    and,
+    count,
+    desc,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
+import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
 import {
     aiEnhancements,
     asyncJobs,
@@ -16,16 +26,24 @@ import {
     transcriptions,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
-import { getOrgUserId } from "@/lib/org/config";
+import { learnRunCurrentScope } from "@/lib/learn/learn-open";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { pipelineDriver } from "@/lib/pipeline/driver";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import {
     type ProcessingRequestOrigin,
     processingStartedBy,
 } from "@/lib/pipeline/processing-origin";
+import {
+    type ProcessingStep,
+    projectProcessing,
+} from "@/lib/pipeline/processing-status";
 import type {
     PhaseName,
     PipelinePhases,
@@ -33,7 +51,6 @@ import type {
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
-import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -71,6 +88,9 @@ export interface ItemProcessingPresentation {
     legacy: boolean;
     manualOnly: boolean;
     phases: PipelinePhases;
+    steps: Record<PhaseName, ProcessingStep>;
+    nextCheckAt: string;
+    nextCheckInMs: number;
     profile:
         | (ProcessingProfileSummary & {
               revisionId: string;
@@ -129,16 +149,6 @@ interface StoredFolder {
     name: string;
 }
 
-/** Reduce active database jobs to the state shown for one pipeline phase. */
-export function processingJobState(
-    jobs: Array<{
-        status: "pending" | "processing" | "completed" | "failed";
-    }>,
-): ProcessingJobState | null {
-    if (jobs.some((job) => job.status === "processing")) return "running";
-    return jobs.some((job) => job.status === "pending") ? "queued" : null;
-}
-
 /** Describe failed phase and Summary-step records for the status sentence. */
 export function processingFailures(
     phases: PipelinePhases,
@@ -158,7 +168,8 @@ export function processingFailures(
             failures.push({
                 phase,
                 reasonCode: record.reason ?? "UNKNOWN_FAILURE",
-                retryAvailable: retryable.has(phase),
+                retryAvailable:
+                    record.reason === "lost" || retryable.has(phase),
             });
         }
         if (phase !== "summary") continue;
@@ -304,10 +315,13 @@ export async function loadPrivateItemProcessing(
     itemId: string,
     viewerUserId = ownerUserId,
     fallbackLocale: AppLocale = "en",
+    view: "private" | "org" = "private",
 ): Promise<ItemProcessingPresentation | null> {
+    const driver = pipelineDriver(ownerUserId);
     const [item] = await db
         .select({
             kind: chatterItems.kind,
+            summaryDueAt: chatterItems.summaryDueAt,
             processingItemId: itemProcessing.itemId,
             manualOnly: itemProcessing.manualOnly,
             phases: itemProcessing.phases,
@@ -326,19 +340,22 @@ export async function loadPrivateItemProcessing(
             and(
                 eq(itemProcessing.itemId, chatterItems.id),
                 eq(itemProcessing.userId, ownerUserId),
-                eq(itemProcessing.view, "private"),
+                eq(itemProcessing.view, driver.view),
             ),
         )
         .leftJoin(
             processingProfiles,
-            eq(processingProfiles.id, itemProcessing.profileId),
+            eq(
+                processingProfiles.id,
+                sql<string>`coalesce(${itemProcessing.phases}->'categorize'->'placementProfile'->>'profileId', ${itemProcessing.profileId})`,
+            ),
         )
         .leftJoin(
             processingProfileRevisions,
             and(
                 eq(
                     processingProfileRevisions.id,
-                    itemProcessing.profileRevisionId,
+                    sql<string>`coalesce(${itemProcessing.phases}->'categorize'->'placementProfile'->>'profileRevisionId', ${itemProcessing.profileRevisionId})`,
                 ),
                 eq(processingProfileRevisions.profileId, processingProfiles.id),
             ),
@@ -353,11 +370,12 @@ export async function loadPrivateItemProcessing(
         .limit(1);
     if (!item) return null;
 
+    const orgUserId = await getOrgUserId();
     const [
-        orgUserId,
         placementRows,
         intentRows,
-        activeJobs,
+        processingJobs,
+        curates,
         recentTranscriptionJobs,
         recentTopicsJobs,
         recentSummaryJobs,
@@ -367,7 +385,6 @@ export async function loadPrivateItemProcessing(
         summaries,
         learnRunRows,
     ] = await Promise.all([
-        getOrgUserId(),
         db
             .select({
                 id: recordingFolders.id,
@@ -407,25 +424,10 @@ export async function loadPrivateItemProcessing(
                     eq(mailPendingShares.userId, ownerUserId),
                 ),
             ),
-        db
-            .select({ kind: asyncJobs.kind, status: asyncJobs.status })
-            .from(asyncJobs)
-            .where(
-                and(
-                    eq(asyncJobs.userId, ownerUserId),
-                    eq(
-                        asyncJobs.subjectId,
-                        recordingJobSubject(itemId, "private"),
-                    ),
-                    inArray(asyncJobs.kind, [
-                        TRANSCRIPTION_JOB_KIND,
-                        SUMMARY_JOB_KIND,
-                        TOPICS_JOB_KIND,
-                        TITLE_JOB_KIND,
-                    ]),
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                ),
-            ),
+        loadPipelineProcessingJobs(ownerUserId, itemId, item.phases ?? {}),
+        viewerUserId === ownerUserId
+            ? Promise.resolve(false)
+            : userCuratesOrganizationNow(viewerUserId),
         db
             .select({
                 kind: asyncJobs.kind,
@@ -497,7 +499,7 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                 ),
@@ -562,7 +564,7 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
-                    eq(learnRuns.view, "private"),
+                    learnRunCurrentScope(orgUserId),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt)),
@@ -591,7 +593,7 @@ export async function loadPrivateItemProcessing(
                       name: summary.name,
                       path: summary.path,
                       confirmationRequired:
-                          (item.manualOnly ?? false) &&
+                          effectiveManualOnly(item) &&
                           folder.confirmedAt === null,
                       confirmed: folder.confirmedAt !== null,
                   },
@@ -713,22 +715,18 @@ export async function loadPrivateItemProcessing(
     );
     const processAgain =
         !legacy &&
-        !(item.manualOnly ?? false) &&
+        !effectiveManualOnly(item) &&
         automatic !== null &&
         Object.values(automatic).some(Boolean) &&
         processAgainPending(item.phases ?? {});
-    const transcriptionJobs = activeJobs.filter(
-        (job) => job.kind === TRANSCRIPTION_JOB_KIND,
-    );
-    const summaryJobs = activeJobs.filter(
-        (job) => job.kind === SUMMARY_JOB_KIND,
-    );
-
-    return {
+    const presentation: Omit<
+        ItemProcessingPresentation,
+        "steps" | "nextCheckAt" | "nextCheckInMs"
+    > = {
         itemId,
         kind: item.kind,
         legacy,
-        manualOnly: item.manualOnly ?? false,
+        manualOnly: effectiveManualOnly(item),
         phases,
         profile,
         placements,
@@ -751,16 +749,7 @@ export async function loadPrivateItemProcessing(
               }
             : null,
         taskReviewWaiting,
-        jobs: {
-            transcription: processingJobState(transcriptionJobs),
-            summary: processingJobState(summaryJobs),
-            topics: processingJobState(
-                activeJobs.filter((job) => job.kind === TOPICS_JOB_KIND),
-            ),
-            title: processingJobState(
-                activeJobs.filter((job) => job.kind === TITLE_JOB_KIND),
-            ),
-        },
+        jobs: { transcription: null, summary: null, topics: null, title: null },
         startedBy: processingStartedBy(
             [
                 ...recentTranscriptionJobs,
@@ -775,4 +764,13 @@ export async function loadPrivateItemProcessing(
         ),
         failures: processingFailures(phases),
     };
+    return projectProcessing(presentation, processingJobs, {
+        canChange:
+            (viewerUserId === ownerUserId || curates) &&
+            (!placementRows.some((folder) => folder.userId === orgUserId) ||
+                isOrgScopeEnabled()),
+        canFile: viewerUserId === ownerUserId && view === "private",
+        canProcessAgain: viewerUserId === ownerUserId,
+        reviewUntil: item.summaryDueAt?.toISOString(),
+    });
 }

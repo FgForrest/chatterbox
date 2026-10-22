@@ -17,10 +17,9 @@ Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstan
 
 - u nahrávky existuje přepis,
 - každý mluvčí je pojmenovaný nebo označený jako neznámý,
-- žádná kontrola [Učení](learn.md) nečeká,
 - [navržené úkoly](summaries-and-tasks.md#tasks-across-items) jsou zkontrolovány.
 
-Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Kontrola Učení blokuje sdílení i po třídenním vypršení čekání na shrnutí.
+Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Sdílení zruší otevřený soukromý běh [Učení](learn.md). Jeho zjištění zůstanou soukromá. Pokud profil Organizace zapíná automatické Učení, spustí se nový běh v rozsahu Organizace a shrnutí počká na jeho kontrolu.
 
 Položka zařazená s volbou **Bez automatického zpracování** se sama nenasdílí. U zamýšlené složky jsou v řádku akce **Sdílet nyní** a zrušení. Pruh uvádí **Na vás.** a čeká, dokud položku nenasdílíte nebo umístění nezrušíte.
 
@@ -30,11 +29,11 @@ Pošta poslaná přímo na adresu složky Organizace také začíná jako soukro
 
 ![Nahrávka sdílená kolegou](images/organization-recording.png)
 
-Každý může sdílenou položku otevřít a číst, přehrát nebo stáhnout sdílený zvuk a zařadit položku do dalších složek Organizace. V záhlaví je uvedeno, kdo ji sdílel, a u mluvčích nahrávky je uvedeno **Spravuje Organizace**.
+Každý může sdílenou položku otevřít a číst, přehrát nebo stáhnout sdílený zvuk a zařadit položku do dalších složek Organizace. V záhlaví je uvedeno, kdo ji sdílel, a u mluvčích nahrávky jen pro čtení je uvedeno **Spravuje Organizace**.
 
-Během sdílení mění název, přepis, mluvčí, shrnutí, témata a kontrolu Učení kurátoři Organizace. Tím se udržuje jedna verze, kterou mají všichni k dispozici. Vlastník položku před soukromou změnou tohoto sdíleného obsahu odebere z Organizace.
+Během sdílení mohou název, přepis, mluvčí, shrnutí, témata a kontrolu Učení měnit vlastník položky a kurátoři Organizace. Ostatní členové mají obsah jen pro čtení. Změny z obou pohledů upravují jednu společnou verzi v rozsahu Organizace. Zpracování používá nastavení a šablony Organizace; mluvčí lze vybírat jen z osob Organizace a nové jméno se stane osobou Organizace. Sdílení nechá automatické zpracování vlastníka pokračovat a neoznačí dokončené kroky jako zastaralé.
 
-Úkoly jsou výjimka. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
+Úkoly mají vlastní oprávnění. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
 
 Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, viditelnými pro všechny v [Almanachu](almanac.md). Kurátoři se o ně starají: přejmenovávají je, slučují a mažou pro všechny. Stále si k osobám Organizace můžete vést soukromé poznámky a přiřadit jim vlastní přezdívky.
 

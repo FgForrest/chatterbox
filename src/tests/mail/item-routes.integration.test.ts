@@ -295,7 +295,7 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
         });
     });
 
-    it("renames own mail, freezes its private view when shared, and lets the Organization rename it", async () => {
+    it("lets owners and curators rename shared mail while refusing members", async () => {
         const own = await call(rename, OWNER, MAIL, `/api/recordings/${MAIL}`, {
             method: "PATCH",
             ...json({ filename: "Renamed subject" }),
@@ -310,7 +310,7 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
             `/api/recordings/${MAIL}`,
             { method: "PATCH", ...json({ filename: "Private rename" }) },
         );
-        expect(frozen.status).toBe(409);
+        expect(frozen.status).toBe(200);
         const member = await call(
             rename,
             OTHER,
@@ -366,7 +366,7 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
                     { method: "POST" },
                 )
             ).status,
-        ).toBe(409);
+        ).toBe(200);
         expect(
             (
                 await call(
@@ -462,11 +462,15 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
         });
 
         await share();
+        expect(
+            (await call(getMailDetail, OTHER, MAIL, `/api/mail/${MAIL}`))
+                .status,
+        ).toBe(404);
         const member = await call(
             getMailDetail,
             OTHER,
             MAIL,
-            `/api/mail/${MAIL}`,
+            `/api/mail/${MAIL}?view=org`,
         );
         expect(member.status).toBe(200);
         await expect(member.json()).resolves.toMatchObject({

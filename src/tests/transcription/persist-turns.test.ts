@@ -217,11 +217,22 @@ describe("upsertTranscription and turns", () => {
         expect(await upsert(TURNS)).toEqual({ committed: false });
     });
 
-    it("writes nothing to the owner's transcript while it is shared", async () => {
+    it("lets the owner rewrite the transcript while shared", async () => {
         const harness = stubTransaction({ id: "tr-1" });
         (isRecordingShared as Mock).mockResolvedValueOnce(true);
 
-        expect(await upsert(TURNS)).toEqual({
+        expect(await upsert(TURNS)).toEqual({ committed: true });
+        expect(harness.updated[0]).toMatchObject({
+            producedByUserId: "user-1",
+        });
+        expect(transcriptRewrittenInTx).toHaveBeenCalledOnce();
+    });
+
+    it("writes nothing for another member while shared", async () => {
+        const harness = stubTransaction({ id: "tr-1" });
+        (isRecordingShared as Mock).mockResolvedValueOnce(true);
+
+        expect(await upsert(TURNS, false, "other-member")).toEqual({
             committed: false,
             reason: "shared",
         });

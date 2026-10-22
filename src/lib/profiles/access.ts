@@ -1,3 +1,4 @@
+import type { db } from "@/db";
 import { type HolderAccess, holderAccess } from "@/lib/authz/access-state";
 import { actsForOrganization } from "@/lib/authz/curator";
 import type { ActorContext } from "@/lib/authz/model";
@@ -15,6 +16,7 @@ export async function mayUseOrganizationProfiles(
     userId: string,
     options: {
         readOnly?: boolean;
+        executor?: Pick<typeof db, "select">;
         readOnlyAccess?: () => Promise<HolderAccess>;
     } = {},
 ): Promise<boolean> {
@@ -43,6 +45,7 @@ export async function mayUseProfile(
     profile: ProfileAccessSubject,
     options: {
         readOnly?: boolean;
+        executor?: Pick<typeof db, "select">;
         readOnlyAccess?: () => Promise<HolderAccess>;
     } = {},
 ): Promise<boolean> {

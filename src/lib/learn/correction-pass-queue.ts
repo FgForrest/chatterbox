@@ -7,7 +7,12 @@
 
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import { enqueueJobInTx } from "@/db/queries/async-jobs";
+import { enqueueJobInTx, settleTerminalJobInTx } from "@/db/queries/async-jobs";
+import {
+    bindAvailableCorrectionInTx,
+    jobBindings,
+    lockPipelineTargetsInTx,
+} from "@/db/queries/pipeline-jobs";
 import {
     asyncJobs,
     type learnRuns,
@@ -41,6 +46,7 @@ export async function supersedeCorrectionPassesInTx(
     const passes = await tx
         .select({
             id: transcriptCorrectionPasses.id,
+            itemId: transcriptCorrectionPasses.recordingId,
             actorUserId: transcriptCorrectionPasses.actorUserId,
         })
         .from(transcriptCorrectionPasses)
@@ -67,29 +73,37 @@ export async function supersedeCorrectionPassesInTx(
             ),
         ),
     ];
+    const jobs =
+        actorUserIds.length > 0
+            ? await tx
+                  .select()
+                  .from(asyncJobs)
+                  .where(
+                      and(
+                          inArray(asyncJobs.userId, actorUserIds),
+                          eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
+                          inArray(asyncJobs.status, ["pending", "processing"]),
+                          inArray(
+                              sql<string>`${asyncJobs.payload} ->> 'passId'`,
+                              passIds,
+                          ),
+                      ),
+                  )
+            : [];
+    await lockPipelineTargetsInTx(tx, [
+        ...passes.map((pass) => ({ itemId: pass.itemId, userId })),
+        ...jobs.flatMap((job) => jobBindings(job.payload)),
+    ]);
     const now = new Date();
-    if (actorUserIds.length > 0) {
-        await tx
-            .update(asyncJobs)
-            .set({
-                status: "failed",
-                completedAt: now,
-                updatedAt: now,
-                heartbeatAt: null,
-                claimToken: null,
-                lastError: "Cancelled because the transcript was rewritten",
-            })
-            .where(
-                and(
-                    inArray(asyncJobs.userId, actorUserIds),
-                    eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                    inArray(
-                        sql<string>`${asyncJobs.payload} ->> 'passId'`,
-                        passIds,
-                    ),
-                ),
-            );
+    for (const job of jobs) {
+        await settleTerminalJobInTx(tx, {
+            jobId: job.id,
+            cancelForUserId: job.userId,
+            status: "failed",
+            code: "superseded",
+            message: "Cancelled because the transcript was rewritten",
+            result: { outcome: { kind: "skipped", reason: "superseded" } },
+        });
     }
     await tx
         .update(transcriptCorrectionPasses)
@@ -128,6 +142,9 @@ export async function queueCorrectionPassInTx(
 ): Promise<boolean> {
     if (!run.actorUserId) return false;
     if (!correctAfterLearn) return false;
+    await lockPipelineTargetsInTx(tx, [
+        { itemId: run.itemId, userId: run.userId },
+    ]);
     const [pass] = await tx
         .insert(transcriptCorrectionPasses)
         .values({
@@ -154,5 +171,6 @@ export async function queueCorrectionPassInTx(
             .delete(transcriptCorrectionPasses)
             .where(eq(transcriptCorrectionPasses.id, pass.id));
     }
+    if (queued) await bindAvailableCorrectionInTx(tx, run.itemId, run.userId);
     return queued;
 }

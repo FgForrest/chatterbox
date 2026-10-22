@@ -35,8 +35,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
 
-    if (view === "org") {
-        const access = await requireRecordingView(session.user.id, id, view);
+    const access = await requireRecordingView(session.user.id, id, view);
+    if (access.shared) {
         const transcript = await requireTranscript(
             access.ownerUserId,
             id,
@@ -51,12 +51,13 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             transcriptionId: transcript.id,
             revision: transcript.revision,
             speakers: orgViewSpeakers(speakers, {
-                curator: await actsForOrganization(actor),
+                curator:
+                    access.ownerUserId === session.user.id ||
+                    (await actsForOrganization(actor)),
             }),
         });
     }
 
-    const access = await requireRecordingView(session.user.id, id, "private");
     const transcript = await requireTranscript(session.user.id, id, request);
     const speakers = await getTranscriptSpeakers(
         session.user.id,
@@ -261,12 +262,9 @@ function personNotFound(): AppError {
  * is the only evidence this feature treats as strong enough to reach a
  * summary or an export.
  *
- * A shared recording is one recording, and only a curator of the
- * Organization (or the organization account) changes its speakers, on the
- * Organization view (403 for anyone else): only Organization people may
- * be picked there, and a new name becomes an Organization person, created
- * by the curator. Its owner withdraws it before changing them (409
- * RECORDING_SHARED); both are checked again under the recording lock.
+ * The owner and Organization curators may change shared speakers. Only
+ * Organization people may be picked while shared, and new names belong
+ * to the Organization. The writer rule is checked under the recording lock.
  */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     const { session, actor } = await requireApiSessionActor(request);
@@ -274,8 +272,8 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
     const change = readChange(await request.json().catch(() => null));
-    const orgView = view === "org";
-    const curates = orgView && (await actsForOrganization(actor));
+    const orgView = access.shared;
+    const curates = view === "org" && (await actsForOrganization(actor));
 
     assertMayChange(access, session.user.id, curates);
 

@@ -294,7 +294,7 @@ describe("Learn hold and timeout planning", () => {
                 resolution: "resolved",
             },
             share: {
-                problems: [{ kind: "learn_unfinished", runs: 1 }],
+                problems: [],
             },
             phases: {
                 learn: {
@@ -323,14 +323,13 @@ describe("Learn hold and timeout planning", () => {
         expect(result.actions).toContainEqual(
             expect.objectContaining({ type: "queueSummary" }),
         );
-        expect(result.actions).toContainEqual(
+        expect(result.actions).not.toContainEqual({ type: "executeShares" });
+        expect(result.actions).not.toContainEqual(
             expect.objectContaining({
                 type: "markPhase",
                 phase: "share",
-                record: expect.objectContaining({ state: "waiting" }),
             }),
         );
-        expect(result.actions).not.toContainEqual({ type: "executeShares" });
         expect(timedOut.phases.learn).toMatchObject({
             state: "waiting",
             reason: "review_pending_timeout",
@@ -338,7 +337,7 @@ describe("Learn hold and timeout planning", () => {
         expect(timedOut.learnRunOpen).toBe(true);
     });
 
-    it("lets Summary proceed during a manual Learn run but gates Share until it closes", () => {
+    it("lets Summary proceed during a manual Learn run without a review share blocker", () => {
         const open = facts({
             learnRunOpen: true,
             learnRunInFlight: true,
@@ -349,7 +348,7 @@ describe("Learn hold and timeout planning", () => {
                 resolution: "resolved",
             },
             share: {
-                problems: [{ kind: "learn_unfinished", runs: 1 }],
+                problems: [],
             },
         });
 
@@ -365,17 +364,13 @@ describe("Learn hold and timeout planning", () => {
         expect(openPlan.actions).toContainEqual(
             expect.objectContaining({ type: "queueSummary" }),
         );
-        expect(openPlan.actions).toContainEqual(
+        expect(openPlan.actions).not.toContainEqual({ type: "executeShares" });
+        expect(openPlan.actions).not.toContainEqual(
             expect.objectContaining({
                 type: "markPhase",
                 phase: "share",
-                record: expect.objectContaining({
-                    state: "waiting",
-                    reason: "gate_blocked",
-                }),
             }),
         );
-        expect(openPlan.actions).not.toContainEqual({ type: "executeShares" });
 
         const ready = facts({
             learnRunOpen: true,
@@ -428,7 +423,7 @@ describe("Learn hold and timeout planning", () => {
                 },
                 share: {
                     ...phase("waiting", "gate_blocked"),
-                    problems: [{ kind: "learn_unfinished", runs: 1 }],
+                    problems: [],
                 },
             },
         });
@@ -487,7 +482,13 @@ describe("Share planning", () => {
     it("waits with gate problems, then executes and records a completed share", () => {
         const blocked = shareReady({
             share: {
-                problems: [{ kind: "tasks_unreviewed", proposals: 2 }],
+                problems: [
+                    {
+                        kind: "unresolved_speakers",
+                        source: "riffado",
+                        labels: ["speaker_0"],
+                    },
+                ],
             },
         });
         expect(planAdvance(blocked).actions).toContainEqual(
@@ -497,7 +498,13 @@ describe("Share planning", () => {
                 record: expect.objectContaining({
                     state: "waiting",
                     reason: "gate_blocked",
-                    problems: [{ kind: "tasks_unreviewed", proposals: 2 }],
+                    problems: [
+                        {
+                            kind: "unresolved_speakers",
+                            source: "riffado",
+                            labels: ["speaker_0"],
+                        },
+                    ],
                 }),
             }),
         );
@@ -508,7 +515,13 @@ describe("Share planning", () => {
                 ...blocked.phases,
                 share: {
                     ...phase("waiting", "gate_blocked"),
-                    problems: [{ kind: "tasks_unreviewed", proposals: 2 }],
+                    problems: [
+                        {
+                            kind: "unresolved_speakers",
+                            source: "riffado",
+                            labels: ["speaker_0"],
+                        },
+                    ],
                 },
             },
         });

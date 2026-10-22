@@ -42,11 +42,11 @@ export async function contentWriterRefusalNow(input: {
     });
 }
 
-/** The refusal of an owner's change to a shared recording. */
+/** The refusal of an unauthorized change to a shared recording. */
 export function recordingShared(): AppError {
     return new AppError(
         ErrorCode.RECORDING_SHARED,
-        "This recording is shared with the Organization; only the organization account changes it. Withdraw it to change it yourself",
+        "Only the owner, the organization account or a curator may change this shared recording",
         409,
     );
 }
@@ -65,28 +65,23 @@ export function writerRefusalError(refusal: WriterRefusal): AppError {
     return refusal === "shared" ? recordingShared() : recordingGone();
 }
 
-/**
- * Refuse a request to change a recording in a view, before any work: on
- * the Organization view anyone who does not act for the Organization (the
- * organization account, or a curator the server vouched for) (403), and
- * the owner of a shared recording on the private view (409). The write
- * checks again under the recording lock (`contentWriterRefusal`).
- */
+/** Authorize a content change before checking again under the recording lock. */
 export function assertMayChange(
-    access: Pick<RecordingViewContext, "view" | "shared" | "orgUserId">,
+    access: Pick<
+        RecordingViewContext,
+        "view" | "shared" | "orgUserId" | "ownerUserId"
+    >,
     actorUserId: string,
     actsForOrganization = actorUserId === access.orgUserId,
 ): void {
-    if (access.view === "org") {
+    if (access.view === "org" || access.shared) {
         assertOrgScopeWritable();
-        if (!actsForOrganization) {
+        if (actorUserId !== access.ownerUserId && !actsForOrganization) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
-                "Only a curator of the Organization changes a shared recording",
+                "Only the owner, the organization account or a curator may change this shared recording",
                 403,
             );
         }
-    } else if (access.shared) {
-        throw recordingShared();
     }
 }

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as errors from "@/lib/errors";
+import type * as summaryJob from "@/lib/summary/summary-job";
+import type * as sessionActor from "@/tests/helpers/session-actor";
 
 /**
  * The manual `POST /api/recordings/[id]/summary` contract.
@@ -42,9 +45,9 @@ vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@/lib/auth-server", async () => {
-    const { withSessionActor } = await vi.importActual<
-        typeof import("@/tests/helpers/session-actor")
-    >("@/tests/helpers/session-actor");
+    const { withSessionActor } = await vi.importActual<typeof sessionActor>(
+        "@/tests/helpers/session-actor",
+    );
     return withSessionActor({
         requireApiSession: vi.fn().mockResolvedValue({
             user: { id: "user-1", email: "u@example.com" },
@@ -53,8 +56,7 @@ vi.mock("@/lib/auth-server", async () => {
 });
 
 vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
-    const actual =
-        await importOriginal<typeof import("@/lib/summary/summary-job")>();
+    const actual = await importOriginal<typeof summaryJob>();
     return { ...actual, enqueueSummaryJob: vi.fn() };
 });
 
@@ -82,7 +84,7 @@ const { recordingAccess } = vi.hoisted(() => ({
 // real database; here it answers "owner" unless a test says otherwise.
 vi.mock("@/lib/sharing/access", async () => {
     const { AppError, ErrorCode } =
-        await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
+        await vi.importActual<typeof errors>("@/lib/errors");
     return {
         requestedRecordingView: (request: Request) =>
             new URL(request.url).searchParams.get("view") === "org"
@@ -221,6 +223,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         });
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: "user-1",
+            ownerUserId: "user-1",
             recordingId: "rec-1",
             presetId: "meeting-notes",
             trigger: "manual",
@@ -233,6 +236,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
 
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: "user-1",
+            ownerUserId: "user-1",
             recordingId: "rec-1",
             presetId: undefined,
             trigger: "manual",
@@ -260,6 +264,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         });
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: "user-1",
+            ownerUserId: "user-1",
             recordingId: "rec-1",
             presetId: undefined,
             profileRevisionId: "profile-revision-1",
@@ -342,6 +347,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         expect(response.status).toBe(200);
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: "user-1",
+            ownerUserId: "user-1",
             recordingId: "rec-1",
             presetId: undefined,
             trigger: "manual",

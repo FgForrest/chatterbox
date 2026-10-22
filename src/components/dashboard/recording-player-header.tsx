@@ -15,11 +15,11 @@ interface RecordingPlayerHeaderProps {
     recording: Recording;
     action?: ReactNode;
     onRenamed?: (filename: string) => void;
-    /** Shared: its title is the organization account's to change, too. */
+    /** Whether the item is shared into the Organization. */
     shared?: boolean;
     /**
      * Whether the viewer may rename it, when the caller knows better than
-     * `shared`: on the Organization view, only the organization account.
+     * its ownership alone: Organization curators may rename shared items.
      */
     titleReadOnly?: boolean;
 }
@@ -93,7 +93,7 @@ export function RecordingPlayerHeader({
             shared={shared}
             isOwn={recording.isOwn}
             ownerName={recording.ownerName}
-            readOnly={titleReadOnly ?? (recording.isOwn === false || shared)}
+            readOnly={titleReadOnly ?? recording.isOwn === false}
             onRenamed={onRenamed}
             action={action}
             retentionNotes={retentionNotes}

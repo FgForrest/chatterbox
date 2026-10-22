@@ -911,7 +911,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             ).toEqual([[ALICE, org, "shared transcript"]]);
         });
 
-        it("refuses the owner's and a member's writes while shared", async () => {
+        it("allows owner writes and refuses member writes while shared", async () => {
             await insertRecording("rec-a", ALICE);
             const root = await orgRootId();
             await addRecordingToFolder({
@@ -931,7 +931,11 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                         provider: "openai",
                         model: "whisper-1",
                     }),
-                ).toEqual({ committed: false, reason: "shared" });
+                ).toEqual(
+                    actorUserId === ALICE
+                        ? { committed: true }
+                        : { committed: false, reason: "shared" },
+                );
             }
         });
 
@@ -1265,7 +1269,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 expect(await assignments()).toEqual([]);
             });
 
-            it("shares the answer, and refuses taking it back, when that comes after the share", async () => {
+            it("lets the owner clear an answer after a concurrent share commits", async () => {
                 const { transcript } = await answeredMeeting();
                 let clearing: Promise<unknown> = Promise.resolve();
                 hooks.afterPublish = async () => {
@@ -1283,8 +1287,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
 
                 await share(root);
 
-                const error = await refusal(clearing);
-                expect(error.code).toBe("RECORDING_SHARED");
+                await expect(clearing).resolves.toBeNull();
                 const [own] = await db()
                     .select()
                     .from(transcriptSpeakers)
@@ -1294,10 +1297,10 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                             eq(transcriptSpeakers.label, "speaker_1"),
                         ),
                     );
-                expect(own?.markedUnknown).toBe(true);
+                expect(own).toBeUndefined();
             });
 
-            it("refuses a transcript from the browser that waited for the share", async () => {
+            it("saves an owner browser transcript that waited for sharing", async () => {
                 const { transcript } = await answeredMeeting();
                 let storing: Promise<{ errorCode?: string }> = Promise.resolve(
                     {},
@@ -1315,12 +1318,14 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
 
                 await share(root);
 
-                expect((await storing).errorCode).toBe("RECORDING_SHARED");
+                await expect(storing).resolves.toMatchObject({ success: true });
                 const [own] = await db()
                     .select({ text: transcriptions.text })
                     .from(transcriptions)
                     .where(eq(transcriptions.id, transcript));
-                expect(decryptText(own?.text ?? "")).toBe(DIALOG);
+                expect(decryptText(own?.text ?? "")).toBe(
+                    "Made in the browser.",
+                );
             });
 
             it("refuses when a named person is deleted first", async () => {

@@ -21,7 +21,10 @@ export async function profileHistoryReferences(
     profileId: string,
 ): Promise<boolean> {
     const revisions = await executor
-        .select({ id: processingProfileRevisions.id })
+        .select({
+            id: processingProfileRevisions.id,
+            scope: processingProfiles.scope,
+        })
         .from(processingProfileRevisions)
         .innerJoin(
             processingProfiles,
@@ -77,18 +80,24 @@ export async function profileHistoryReferences(
             .limit(1);
         if (output.length > 0) return true;
     }
+    const revisionPredicate = revisionIds
+        .map((id) => `@ == ${JSON.stringify(id)}`)
+        .join(" || ");
     const phase = await executor
         .select({ id: itemProcessing.itemId })
         .from(itemProcessing)
         .where(
-            and(
-                eq(itemProcessing.userId, ownerUserId),
-                or(
-                    ...revisionIds.map(
-                        (id) =>
-                            sql`${itemProcessing.phases} @? ${`$.**.profileRevisionId ? (@ == ${JSON.stringify(id)})`}::jsonpath`,
-                    ),
+            or(
+                and(
+                    eq(itemProcessing.userId, ownerUserId),
+                    sql`${itemProcessing.phases} @? ${`$.**.profileRevisionId ? (${revisionPredicate})`}::jsonpath`,
                 ),
+                revisions[0]?.scope === "organization"
+                    ? or(
+                          sql`${itemProcessing.phases}->'categorize'->'placementProfile'->>'profileId' = ${profileId}`,
+                          sql`${itemProcessing.phases} @? ${`$.categorize.heldProfiles.*.profileRevisionId ? (${revisionPredicate})`}::jsonpath`,
+                      )
+                    : undefined,
             ),
         )
         .limit(1);

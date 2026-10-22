@@ -8,8 +8,9 @@
  * Only schema and drizzle, so the share gate can use it.
  */
 
-import { and, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, not, or, sql } from "drizzle-orm";
 import { asyncJobs, learnRuns } from "@/db/schema";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 /** How long a run may wait for its job to be queued. */
 const JOB_GRACE = sql`interval '2 minutes'`;
@@ -44,4 +45,18 @@ export function learnRunDead() {
 /** SQL predicate: open (in flight, or ready for review). */
 export function learnRunOpen() {
     return or(sql`${learnRuns.status} = 'ready'`, learnRunInFlight());
+}
+
+/** Match Learn runs to the item's current knowledge scope in the same statement. */
+export function learnRunCurrentScope(orgUserId: string | null) {
+    if (!orgUserId) return eq(learnRuns.view, "private");
+    const shared = sharedItemCondition(orgUserId, learnRuns.itemId);
+    return or(
+        and(
+            shared,
+            eq(learnRuns.view, "org"),
+            eq(learnRuns.scopeUserId, orgUserId),
+        ),
+        and(not(shared), eq(learnRuns.view, "private")),
+    );
 }

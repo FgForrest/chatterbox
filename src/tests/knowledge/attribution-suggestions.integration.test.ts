@@ -677,11 +677,12 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         expect(await labelsSeenBy(BOB, "?view=org")).toEqual([
             "speaker_1:confirmed",
         ]);
-        // The owner may not act on it while shared, in either view.
-        expect(await labelsSeenBy(ALICE, "?view=org")).toEqual([
-            "speaker_1:confirmed",
-        ]);
-        expect(await labelsSeenBy(ALICE, "")).toEqual(["speaker_1:confirmed"]);
+        for (const query of ["", "?view=org"]) {
+            expect((await labelsSeenBy(ALICE, query)).sort()).toEqual([
+                "speaker_0:suggested",
+                "speaker_1:confirmed",
+            ]);
+        }
     });
 
     it("keeps unknown and the confirmer when shared", async () => {
@@ -929,7 +930,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             return orgUserId;
         }
 
-        it("lets only the organization account refuse a suggestion", async () => {
+        it("lets owners and the organization account refuse a suggestion", async () => {
             const orgUserId = await share();
             // Take the answer back, leaving the label open to a suggestion.
             await put(orgUserId, { label: "speaker_0" }, "?view=org");
@@ -959,6 +960,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
                 );
             expect(refused).toEqual([]);
 
+            expect((await put(ALICE, reject, "")).status).toBe(200);
             expect((await put(orgUserId, reject, "?view=org")).status).toBe(
                 200,
             );
@@ -974,7 +976,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             expect(kept).toEqual([{ label: "speaker_0" }]);
         });
 
-        it("tells only the organization account who confirmed a name", async () => {
+        it("tells owners and the organization account who confirmed a name", async () => {
             const orgUserId = await share();
             const confirmers = async (user: string) => {
                 const response = await (getSpeakersRoute as unknown as Handler)(
@@ -987,7 +989,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
                 return body.speakers.map((row) => row.confirmedByUserId);
             };
             expect(await confirmers(BOB)).toEqual([null, null]);
-            expect(await confirmers(ALICE)).toEqual([null, null]);
+            expect(await confirmers(ALICE)).toEqual([ALICE, ALICE]);
             expect(await confirmers(orgUserId)).toEqual([ALICE, ALICE]);
         });
     });

@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    asyncJobs,
     chatterItems,
     itemProcessing,
     processingProfileRevisions,
@@ -10,6 +11,8 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { pipelineDriver } from "@/lib/pipeline/driver";
+import type { ProfileStepName } from "@/lib/pipeline/types";
 import { mayUseProfile } from "@/lib/profiles/access";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { ensureProfiles } from "@/lib/profiles/seed";
@@ -23,6 +26,7 @@ import {
     getProfile,
     type ProfileRecord,
 } from "@/lib/profiles/store";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import type { RecordingView } from "@/lib/sharing/view";
 
 type StoredProfile = typeof processingProfiles.$inferSelect;
@@ -58,6 +62,7 @@ export interface ResolvedItemProfile {
     settings: ProfileSettings;
     /** True when this immutable revision is frozen on the item's pipeline. */
     assigned?: boolean;
+    manualOnly?: boolean;
 }
 
 function present(
@@ -303,6 +308,8 @@ export async function resolveItemProfile(
     view: RecordingView,
     ownerUserId: string,
     actorUserId = ownerUserId,
+    step?: ProfileStepName,
+    jobId?: string,
 ): Promise<ResolvedItemProfile> {
     const [item] = await db
         .select({ kind: chatterItems.kind })
@@ -322,23 +329,96 @@ export async function resolveItemProfile(
             404,
         );
     }
+    const orgUserId = await getOrgUserId();
     const channel = item.kind;
-    const [processing] = await db
+    const shared = Boolean(
+        orgUserId && (await isRecordingShared(itemId, orgUserId)),
+    );
+    let [processing] = await db
         .select({
             profileId: itemProcessing.profileId,
             profileRevisionId: itemProcessing.profileRevisionId,
+            phases: itemProcessing.phases,
         })
         .from(itemProcessing)
         .where(
             and(
                 eq(itemProcessing.itemId, itemId),
                 eq(itemProcessing.userId, ownerUserId),
-                eq(itemProcessing.view, view),
+                eq(
+                    itemProcessing.view,
+                    view === "org" && !shared
+                        ? "org"
+                        : pipelineDriver(ownerUserId).view,
+                ),
             ),
         )
         .limit(1);
-    const orgUserId = await getOrgUserId();
-
+    const assignedRevision = async (revisionId: string) => {
+        try {
+            return await loadItemProfileRevision({
+                itemId,
+                ownerUserId,
+                actorUserId,
+                revisionId,
+            });
+        } catch (error) {
+            if (error instanceof AppError && error.code === ErrorCode.NOT_FOUND)
+                throw new AssignedProfileUnavailableError();
+            throw error;
+        }
+    };
+    const binding = processing?.phases.categorize?.placementProfile;
+    const held = step
+        ? processing?.phases.categorize?.heldProfiles?.[step]
+        : undefined;
+    if (held && held.jobId === jobId) {
+        const [job] = await db
+            .select({ status: asyncJobs.status })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.id, held.jobId),
+                    eq(asyncJobs.userId, ownerUserId),
+                ),
+            )
+            .limit(1);
+        if (job?.status === "pending" || job?.status === "processing") {
+            return {
+                ...(await assignedRevision(held.profileRevisionId)),
+                assigned: true,
+            };
+        }
+    }
+    if (binding) {
+        return {
+            ...(await assignedRevision(binding.profileRevisionId)),
+            assigned: true,
+            manualOnly: binding.manualOnly,
+        };
+    }
+    if (shared && actorUserId !== ownerUserId) {
+        view = "org";
+        [processing] = await db
+            .select({
+                profileId: itemProcessing.profileId,
+                profileRevisionId: itemProcessing.profileRevisionId,
+                phases: itemProcessing.phases,
+            })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ownerUserId),
+                    eq(itemProcessing.view, "org"),
+                ),
+            )
+            .limit(1);
+    } else if (processing?.profileId && (view === "private" || shared)) {
+        view = "private";
+    } else if (shared) {
+        view = "org";
+    }
     if (processing?.profileId) {
         if (view === "private") {
             const personal = await readProfileRevision({
@@ -412,7 +492,6 @@ export async function resolveItemProfile(
 /** Read the exact immutable revision already recorded for a run. */
 export async function loadItemProfileRevision(input: {
     itemId: string;
-    view: RecordingView;
     ownerUserId: string;
     actorUserId?: string;
     revisionId: string;
@@ -436,25 +515,12 @@ export async function loadItemProfileRevision(input: {
     }
     const orgUserId = await getOrgUserId();
     const actorUserId = input.actorUserId ?? input.ownerUserId;
-    const candidates =
-        input.view === "org"
-            ? orgUserId
-                ? [{ ownerUserId: orgUserId, scope: "organization" as const }]
-                : []
-            : [
-                  {
-                      ownerUserId: input.ownerUserId,
-                      scope: "personal" as const,
-                  },
-                  ...(orgUserId
-                      ? [
-                            {
-                                ownerUserId: orgUserId,
-                                scope: "organization" as const,
-                            },
-                        ]
-                      : []),
-              ];
+    const candidates = [
+        { ownerUserId: input.ownerUserId, scope: "personal" as const },
+        ...(orgUserId
+            ? [{ ownerUserId: orgUserId, scope: "organization" as const }]
+            : []),
+    ];
     let resolved: ResolvedItemProfile | null = null;
     for (const candidate of candidates) {
         const [revision] = await db
@@ -476,7 +542,10 @@ export async function loadItemProfileRevision(input: {
         resolved = await readProfileRevision({
             profileId: revision.profileId,
             ownerUserId: candidate.ownerUserId,
-            actorUserId,
+            actorUserId:
+                candidate.scope === "personal"
+                    ? input.ownerUserId
+                    : actorUserId,
             channel: item.kind,
             revisionId: input.revisionId,
             scope: candidate.scope,

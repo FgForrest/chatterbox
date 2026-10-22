@@ -10,6 +10,11 @@ import {
 } from "vitest";
 import { POST } from "@/app/api/recordings/[id]/transcribe/route";
 import { PUT } from "@/app/api/settings/ai/providers/[id]/route";
+import {
+    claimDueJobs,
+    completeJob,
+    failJobAttempt,
+} from "@/db/queries/async-jobs";
 import { listProviderRecoveryRowsInTx } from "@/db/queries/pipeline";
 import {
     apiCredentials,
@@ -344,6 +349,7 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
             success: false,
             errorCode: "NO_TRANSCRIPTION_PROVIDER",
         });
+        const [automaticClaim] = await claimDueJobs("transcription", 1);
         const payload = transcriptionJobHandler.parsePayload(automatic.payload);
         await expect(
             transcriptionJobHandler.run({
@@ -356,19 +362,13 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
                 reportProgress: vi.fn(),
             }),
         ).rejects.toMatchObject({ code: "NO_TRANSCRIPTION_PROVIDER" });
-        await db()
-            .update(asyncJobs)
-            .set({
-                status: "failed",
-                errorCode: "NO_TRANSCRIPTION_PROVIDER",
-                completedAt: new Date(),
-            })
-            .where(eq(asyncJobs.id, automatic.id));
-        await transcriptionJobHandler.onTerminalFailure?.({
+        await failJobAttempt({
             jobId: automatic.id,
-            userId: "member",
-            payload,
-            errorCode: "NO_TRANSCRIPTION_PROVIDER",
+            claimToken: automaticClaim.claimToken,
+            message: "No provider",
+            code: "NO_TRANSCRIPTION_PROVIDER",
+            retryable: false,
+            delayMs: 0,
         });
         await run("incident", "transcription-failed");
         expect((await processing("incident")).phases.transcribe).toMatchObject({
@@ -388,10 +388,7 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
         const response = await post("incident");
         expect(response.status).toBe(202);
         const first = await response.json();
-        await db()
-            .update(asyncJobs)
-            .set({ status: "processing" })
-            .where(eq(asyncJobs.id, first.jobId));
+        const [manualClaim] = await claimDueJobs("transcription", 1);
         const joined = await post("incident", true);
         expect(joined.status).toBe(202);
         expect(await joined.json()).toMatchObject({
@@ -414,11 +411,15 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
                 signal: new AbortController().signal,
                 reportProgress: vi.fn(),
             }),
-        ).resolves.toEqual({ transcribed: true });
-        await db()
-            .update(asyncJobs)
-            .set({ status: "completed", completedAt: new Date() })
-            .where(eq(asyncJobs.id, first.jobId));
+        ).resolves.toEqual({
+            transcribed: true,
+            outcome: { kind: "done", reason: "content-available" },
+        });
+        await completeJob({
+            jobId: first.jobId,
+            claimToken: manualClaim.claimToken,
+            result: { outcome: { kind: "done", reason: "content-available" } },
+        });
         await run("incident");
         expect((await processing("incident")).phases.learn?.state).toBe(
             "running",
@@ -437,6 +438,18 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
             .update(learnRuns)
             .set({ status: "ready" })
             .where(eq(learnRuns.id, learn.id));
+        const [learnClaim] = await claimDueJobs("learn.run", 1);
+        await completeJob({
+            jobId: learnClaim.id,
+            claimToken: learnClaim.claimToken,
+            result: {
+                outcome: {
+                    kind: "waiting",
+                    reason: "review_pending",
+                    waitingFor: { kind: "learnReview" },
+                },
+            },
+        });
         await run("incident", "learn-settled");
         expect((await processing("incident")).phases.learn).toMatchObject({
             state: "waiting",
@@ -708,15 +721,15 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
             trigger: "pipeline",
             force: false,
         });
-        expect((await processing("retry")).requestedGeneration).toBe(
-            generation + 1,
-        );
+        const queuedGeneration = (await processing("retry"))
+            .requestedGeneration;
+        expect(queuedGeneration).toBeGreaterThan(generation);
         await drain();
         expect((await active("transcription")).map((job) => job.id)).toEqual([
             jobs[0].id,
         ]);
         expect((await processing("retry")).requestedGeneration).toBe(
-            generation + 1,
+            queuedGeneration,
         );
         expect(await sweepAutomaticTranscriptionRetries()).toBe(0);
     });

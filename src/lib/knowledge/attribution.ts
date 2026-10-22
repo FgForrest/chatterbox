@@ -24,7 +24,7 @@ import {
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
-import { contentWriterRefusal } from "@/lib/sharing/writer-rule";
+import { contentWriterScope } from "@/lib/sharing/writer-rule";
 import type { SpeakerNameResolver } from "@/lib/transcription/turns";
 
 export type AttributionSource =
@@ -165,15 +165,12 @@ export async function copyMatchingSpeakerAttributions({
                 ),
             )
             .for("share");
-        if (
-            await contentWriterRefusal(tx, {
-                recordingId,
-                ownerUserId: userId,
-                ...writer,
-            })
-        ) {
-            return 0;
-        }
+        const { refusal, scopeUserId } = await contentWriterScope(tx, {
+            recordingId,
+            ownerUserId: userId,
+            ...writer,
+        });
+        if (refusal) return 0;
         const rows = await tx
             .select({
                 id: transcriptions.id,
@@ -222,6 +219,17 @@ export async function copyMatchingSpeakerAttributions({
                 evidenceStartMs: transcriptSpeakers.evidenceStartMs,
             })
             .from(transcriptSpeakers)
+            .innerJoin(
+                people,
+                and(
+                    eq(people.id, transcriptSpeakers.personId),
+                    namePeopleCondition(userId, {
+                        orgPeopleOnly:
+                            writer.orgUserId !== null &&
+                            scopeUserId === writer.orgUserId,
+                    }),
+                ),
+            )
             .where(
                 and(
                     eq(transcriptSpeakers.userId, userId),

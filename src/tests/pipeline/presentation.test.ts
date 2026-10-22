@@ -29,7 +29,6 @@ import {
 import {
     countItemTaskReviewWaiting,
     processingFailures,
-    processingJobState,
     processingOutdatedReason,
     settleTaskReviewPhase,
 } from "@/lib/pipeline/presentation";
@@ -82,18 +81,6 @@ describe("pipeline presentation", () => {
                 reason: "reviewed",
             },
         });
-    });
-
-    it("distinguishes queued jobs from jobs a worker is running", () => {
-        expect(processingJobState([{ status: "pending" }])).toBe("queued");
-        expect(
-            processingJobState([
-                { status: "pending" },
-                { status: "processing" },
-            ]),
-        ).toBe("running");
-        expect(processingJobState([])).toBeNull();
-        expect(processingJobState([{ status: "completed" }])).toBeNull();
     });
 
     it("presents failure reason codes and retry availability", () => {

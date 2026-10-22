@@ -18,6 +18,7 @@ import {
 import { nudge } from "@/lib/jobs/nudge";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
@@ -126,6 +127,7 @@ export async function executeIntendedSharesWithOutcome(
             folderId: mailPendingShares.folderId,
             confirmedAt: mailPendingShares.confirmedAt,
             manualOnly: itemProcessing.manualOnly,
+            phases: itemProcessing.phases,
         })
         .from(mailPendingShares)
         .innerJoin(
@@ -158,7 +160,7 @@ export async function executeIntendedSharesWithOutcome(
     if (
         intents.some(
             (intent) =>
-                intent.manualOnly === true && intent.confirmedAt === null,
+                effectiveManualOnly(intent) && intent.confirmedAt === null,
         )
     ) {
         return {
@@ -198,7 +200,10 @@ export async function executeIntendedSharesWithOutcome(
                     };
                 }
                 const [processing] = await tx
-                    .select({ manualOnly: itemProcessing.manualOnly })
+                    .select({
+                        manualOnly: itemProcessing.manualOnly,
+                        phases: itemProcessing.phases,
+                    })
                     .from(itemProcessing)
                     .where(
                         and(
@@ -208,7 +213,10 @@ export async function executeIntendedSharesWithOutcome(
                         ),
                     )
                     .limit(1);
-                if (processing?.manualOnly && current.confirmedAt === null) {
+                if (
+                    effectiveManualOnly(processing) &&
+                    current.confirmedAt === null
+                ) {
                     return {
                         problems: [],
                         shared: false,
@@ -318,7 +326,10 @@ export async function confirmIntendedPlacements(
     const confirmed = await db.transaction(async (tx) => {
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const [processing] = await tx
-            .select({ manualOnly: itemProcessing.manualOnly })
+            .select({
+                manualOnly: itemProcessing.manualOnly,
+                phases: itemProcessing.phases,
+            })
             .from(itemProcessing)
             .where(
                 and(
@@ -328,7 +339,7 @@ export async function confirmIntendedPlacements(
                 ),
             )
             .limit(1);
-        if (!processing?.manualOnly) {
+        if (!effectiveManualOnly(processing)) {
             throw new AppError(
                 ErrorCode.CONFLICT,
                 "Only a manual-only item needs share confirmation",

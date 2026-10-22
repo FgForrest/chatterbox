@@ -132,6 +132,8 @@ export interface ListProfilesInput {
     offset?: number;
     limit?: number;
     includeArchived?: boolean;
+    executor?: Pick<typeof db, "select">;
+    readOnly?: boolean;
 }
 
 export interface ProfilePage {
@@ -148,7 +150,7 @@ export interface ProfilePage {
 export async function listProfiles(
     input: ListProfilesInput,
 ): Promise<ProfilePage> {
-    const rows = await db
+    const rows = await (input.executor ?? db)
         .select({
             profile: processingProfiles,
             revisionSettings: processingProfileRevisions.settings,
@@ -179,7 +181,10 @@ export async function listProfiles(
     const permitted = await Promise.all(
         rows.map(async (row) => {
             const profile = present(row);
-            return (await mayUseProfile(input.actorUserId, profile))
+            return (await mayUseProfile(input.actorUserId, profile, {
+                readOnly: input.readOnly,
+                executor: input.executor,
+            }))
                 ? profile
                 : null;
         }),
@@ -343,9 +348,10 @@ export async function getProfile(
         includeArchived?: boolean;
         readOnly?: boolean;
         readOnlyAccess?: () => Promise<HolderAccess>;
+        executor?: Pick<typeof db, "select">;
     } = {},
 ): Promise<ProfileRecord | null> {
-    const [row] = await db
+    const [row] = await (options.executor ?? db)
         .select({
             profile: processingProfiles,
             revisionSettings: processingProfileRevisions.settings,
@@ -386,9 +392,10 @@ async function getOwnedDefaultProfile(
     options: {
         readOnly?: boolean;
         readOnlyAccess?: () => Promise<HolderAccess>;
+        executor?: Pick<typeof db, "select">;
     } = {},
 ): Promise<ProfileRecord | null> {
-    const [row] = await db
+    const [row] = await (options.executor ?? db)
         .select({
             profile: processingProfiles,
             revisionSettings: processingProfileRevisions.settings,
@@ -452,13 +459,18 @@ async function pointedProfile(input: {
     pointerId: string | null;
     readOnly?: boolean;
     readOnlyAccess?: () => Promise<HolderAccess>;
+    executor?: Pick<typeof db, "select">;
 }): Promise<ProfileRecord | null> {
     if (!input.pointerId) return null;
     const personal = await getProfile(
         input.ownerUserId,
         input.pointerId,
         input.actorUserId,
-        { readOnly: input.readOnly, readOnlyAccess: input.readOnlyAccess },
+        {
+            readOnly: input.readOnly,
+            readOnlyAccess: input.readOnlyAccess,
+            executor: input.executor,
+        },
     );
     if (personal?.channel === input.channel) return personal;
     if (!input.organizationUserId) return null;
@@ -466,7 +478,11 @@ async function pointedProfile(input: {
         input.organizationUserId,
         input.pointerId,
         input.actorUserId,
-        { readOnly: input.readOnly, readOnlyAccess: input.readOnlyAccess },
+        {
+            readOnly: input.readOnly,
+            readOnlyAccess: input.readOnlyAccess,
+            executor: input.executor,
+        },
     );
     return organization?.channel === input.channel ? organization : null;
 }
@@ -478,15 +494,21 @@ export async function getDefaultProfileState(
     actorUserId = ownerUserId,
     options: {
         seed?: boolean;
+        executor?: Pick<typeof db, "select">;
+        organizationUserId?: string | null;
         readOnlyAccess?: () => Promise<HolderAccess>;
     } = {},
 ): Promise<DefaultProfileState> {
     const accessOptions = {
+        executor: options.executor,
         readOnly: options.seed === false,
         readOnlyAccess: options.readOnlyAccess,
     };
     if (options.seed !== false) await ensureProfiles(ownerUserId);
-    const organizationUserId = await getOrgUserId();
+    const organizationUserId =
+        options.organizationUserId !== undefined
+            ? options.organizationUserId
+            : await getOrgUserId();
     const organizationAccount = organizationUserId === ownerUserId;
     if (organizationAccount) {
         const organizationDefault = await getOwnedDefaultProfile(
@@ -506,7 +528,7 @@ export async function getDefaultProfileState(
         };
     }
 
-    const [settings] = await db
+    const [settings] = await (options.executor ?? db)
         .select({
             defaultAudioProfileId: userSettings.defaultAudioProfileId,
             defaultMailProfileId: userSettings.defaultMailProfileId,
@@ -543,6 +565,7 @@ export async function getDefaultProfileState(
         organizationUserId: organizationAvailable ? organizationUserId : null,
         channel,
         pointerId,
+        executor: options.executor,
         readOnly: accessOptions.readOnly,
         readOnlyAccess: accessOptions.readOnlyAccess,
     });
@@ -595,11 +618,17 @@ export async function getDefaultProfile(
     ownerUserId: string,
     channel: ProfileChannel,
     actorUserId: string,
+    options: {
+        seed?: boolean;
+        executor?: Pick<typeof db, "select">;
+        organizationUserId?: string | null;
+    } = {},
 ): Promise<ProfileRecord | null> {
     const state = await getDefaultProfileState(
         ownerUserId,
         channel,
         actorUserId,
+        options,
     );
     if (state.explicitUnavailable) {
         throw new ExplicitDefaultProfileUnavailableError();

@@ -480,6 +480,19 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             {
                 state: "done",
                 reason: "categorized",
+                profileChoice:
+                    parsed.data.profileId || parsed.data.manualOnly
+                        ? "manual"
+                        : (current?.phases.categorize?.profileChoice ??
+                          "placement"),
+                ...(parsed.data.profileId || parsed.data.manualOnly
+                    ? { placementProfile: undefined, heldProfiles: undefined }
+                    : {
+                          placementProfile:
+                              current?.phases.categorize?.placementProfile,
+                          heldProfiles:
+                              current?.phases.categorize?.heldProfiles,
+                      }),
                 generation: advance.requestedGeneration,
                 at: now.toISOString(),
             },

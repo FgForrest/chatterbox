@@ -1,3 +1,4 @@
+import type { PipelineJobResult, StepOutcome } from "@/lib/pipeline/outcome";
 /**
  * Running a Learn run (job kind `learn.run`): read the transcript the run
  * was started on, find what it says through the run's scopes, validate
@@ -98,7 +99,11 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import type { ProviderPin } from "@/lib/profiles/settings";
-import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
+import {
+    type contentWriterRefusal,
+    contentWriterScope,
+    sharingOrgUserId,
+} from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import "@/lib/learn/review-message-catalog";
 
@@ -221,7 +226,7 @@ export async function mayStillRun(
         run.view === "org"
             ? (curates ?? (await userCuratesOrganizationNow(run.actorUserId)))
             : false;
-    const refusal = await contentWriterRefusal(executor, {
+    const { refusal, scopeUserId } = await contentWriterScope(executor, {
         recordingId: run.itemId,
         ownerUserId: run.userId,
         actorUserId: run.actorUserId,
@@ -230,8 +235,10 @@ export async function mayStillRun(
     });
     if (refusal) return false;
     return run.view === "private"
-        ? run.actorUserId === run.userId
-        : orgUserId !== null && actsForOrganization;
+        ? run.actorUserId === run.userId && scopeUserId === run.userId
+        : orgUserId !== null &&
+              scopeUserId === orgUserId &&
+              (run.actorUserId === run.userId || actsForOrganization);
 }
 
 type Executor = Pick<typeof db, "select">;
@@ -612,9 +619,25 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseLearnJobPayload,
 
-    async run(context): Promise<JobResult> {
+    async run(context): Promise<PipelineJobResult> {
         try {
-            return await runLearnJob(context);
+            const result = await runLearnJob(context);
+            const outcome: StepOutcome =
+                typeof result.skipped === "string"
+                    ? { kind: "skipped", reason: result.skipped }
+                    : result.status === "ready"
+                      ? {
+                            kind: "waiting",
+                            reason: "review_pending",
+                            waitingFor: { kind: "learnReview" },
+                        }
+                      : result.status === "finished"
+                        ? { kind: "done", reason: "released" }
+                        : {
+                              kind: "skipped",
+                              reason: String(result.status ?? "gone"),
+                          };
+            return { ...result, outcome };
         } finally {
             await settled(context.payload.runId).catch(() => undefined);
         }
@@ -647,7 +670,6 @@ async function runLearnJob({
     const profile = run.profileRevisionId
         ? await loadItemProfileRevision({
               itemId: run.itemId,
-              view: run.view,
               ownerUserId: run.userId,
               actorUserId: run.actorUserId ?? run.userId,
               revisionId: run.profileRevisionId,

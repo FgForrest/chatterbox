@@ -2,6 +2,10 @@ import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import { processingProfileRevisions, processingProfiles } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    lockPipelineTargetsInTx,
+    type PipelineJobTarget,
+} from "./pipeline-jobs";
 import { lockProfileMutation } from "./profile-mutations";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -41,12 +45,15 @@ export async function withProfileRevisionGuard<T>(
         revisionId: string;
         actorUserId: string;
         organizationUserId: string | null;
+        pipelineTarget?: Pick<PipelineJobTarget, "itemId" | "userId">;
     },
     queue: (
         tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
     ) => Promise<T>,
 ): Promise<T> {
     return db.transaction(async (tx) => {
+        if (input.pipelineTarget)
+            await lockPipelineTargetsInTx(tx, [input.pipelineTarget], true);
         async function findOwner() {
             const [profile] = await tx
                 .select({ ownerUserId: processingProfiles.ownerUserId })

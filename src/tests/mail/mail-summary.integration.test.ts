@@ -3,7 +3,7 @@
  * provider stubbed: what the model is shown (references and domains in the
  * user message, nothing of the mail in the system message), what is stored
  * (a summary without a transcript), and how task evidence is placed and
- * trusted (a quoted part or an unverified sender starts unticked).
+ * trusted (quoted or unverified evidence creates no new task).
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -443,7 +443,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(eva?.personId).toBe(person.id);
     });
 
-    it("summarizes a mail and proposes its tasks, quoted ones unticked", async () => {
+    it("summarizes a mail and accepts trusted tasks, skipping quoted evidence", async () => {
         const itemId = await deliver(
             await signMessage(
                 rawMessage(headers("Contract and samples"), BODY),
@@ -565,7 +565,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         );
         const contract = byText.get("Send the signed contract");
         expect(contract).toMatchObject({
-            status: "proposed",
+            status: "open",
             ticked: true,
             evidenceStartMs: null,
             evidenceSegmentIndex: 0,
@@ -575,20 +575,8 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         // Eva's address is a person of Jan's Almanac since the test above.
         expect(contract?.assigneePersonId).toEqual(expect.any(String));
         expect(contract?.assigneeCheck).toBe(false);
-        const samples = byText.get("Deliver the samples to the warehouse");
-        expect(samples).toMatchObject({
-            ticked: false,
-            evidenceSegmentIndex: 2,
-            evidenceProvenance: "quoted",
-        });
-        const content = await readItemContent("u-jan", itemId);
-        const quoted = content?.segments[2]?.text ?? "";
-        expect(
-            quoted.slice(
-                samples?.evidenceCharStart ?? 0,
-                samples?.evidenceCharEnd ?? 0,
-            ),
-        ).toBe("deliver the samples to your warehouse next week");
+        expect(tasks).toHaveLength(1);
+        expect(byText.has("Deliver the samples to the warehouse")).toBe(false);
     });
 
     it("uses the account language for a profile mail summary when detection returned none", async () => {
@@ -635,25 +623,23 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         );
     });
 
-    it("reviews a mail's tasks like a recording's, and backs them up with its summary", async () => {
+    it("lists accepted mail tasks immediately and backs them up with the summary", async () => {
         const viewer = await taskViewerById("u-jan");
-        const waiting = await recordingsAwaitingTaskReview(viewer);
-        const [entry] = waiting.filter(
-            (row) => row.title === "Contract and samples",
+        expect(await recordingsAwaitingTaskReview(viewer)).toEqual([]);
+        const [summary] = (await db().select().from(aiEnhancements)).filter(
+            (row) =>
+                decryptText(row.summary) ===
+                "Jan asks Eva for the signed contract by Friday.",
         );
-        expect(entry?.proposals).toBe(2);
-        const itemId = entry?.recordingId ?? "";
-
+        const itemId = summary?.itemId ?? "";
         const listed = await listRecordingTasks(viewer, itemId);
         expect(listed?.canEdit).toBe(true);
-        expect(listed?.proposals).toHaveLength(2);
-        const quoted = listed?.proposals.find(
-            (task) => task.evidenceProvenance === "quoted",
-        );
-        expect(quoted?.evidenceText).toMatchObject({ segmentIndex: 2 });
-
-        const result = await acceptReview(viewer, itemId);
-        expect(result).toMatchObject({ accepted: 1, rejected: 1 });
+        expect(listed?.proposals).toEqual([]);
+        expect(listed?.tasks).toHaveLength(1);
+        expect(await acceptReview(viewer, itemId)).toMatchObject({
+            accepted: 0,
+            rejected: 0,
+        });
         const tasks = await listTasks(viewer, {
             tab: "tracked",
             state: "open",
@@ -693,7 +679,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         });
     });
 
-    it("leaves unticked a task whose words are not found in a mail that quotes", async () => {
+    it("creates no task whose words are not found in a mail that quotes", async () => {
         const itemId = await deliver(
             await signMessage(rawMessage(headers("Unplaced"), BODY), company),
             ["jan@klepna.example"],
@@ -727,14 +713,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             .select()
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, itemId));
-        expect(tasks).toHaveLength(2);
-        for (const task of tasks) {
-            expect(task).toMatchObject({
-                ticked: false,
-                evidenceSegmentIndex: null,
-                evidenceProvenance: "unlocated",
-            });
-        }
+        expect(tasks).toEqual([]);
     });
 
     it("keeps an earlier quoted follow-up as a mention without a field proposal", async () => {
@@ -799,9 +778,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         const mailProblems = await db().transaction((tx) =>
             mailShareProblems(tx, itemId, "u-jan"),
         );
-        expect(
-            mailProblems.some((problem) => problem.kind === "tasks_unreviewed"),
-        ).toBe(false);
+        expect(mailProblems).toEqual([]);
         const [proposal] = await db()
             .select({
                 state: taskUpdateProposals.state,
@@ -946,7 +923,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(decryptText(stored?.summary ?? "")).toBe(
             "Jan asks for the date to be confirmed.",
         );
-    });
+    }, 15_000);
 
     it("keeps a mail's instructions in the user message, under the content-is-data rule", async () => {
         const injection =

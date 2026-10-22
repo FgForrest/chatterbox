@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
 import { nudge } from "@/lib/jobs/nudge";
+import { itemProfileFenceMatches } from "@/lib/pipeline/effective-profile";
 import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -48,9 +49,9 @@ async function titleFenceMatches(
     itemId: string,
     kind: "audio" | "mail",
     fence: TitleInputFence,
-    profileRevisionId: string | null,
+    processing: Awaited<ReturnType<typeof readTitleProcessingInTx>>,
 ): Promise<boolean> {
-    if (profileRevisionId !== fence.profileRevisionId) {
+    if (!itemProfileFenceMatches(fence.profileRevisionId, processing)) {
         return false;
     }
     if (kind === "mail") {
@@ -115,10 +116,9 @@ async function requestTitleAfterFenceInTx(
         reason: "title",
     });
     if (!advance) return false;
-    const reason =
-        processing.profileRevisionId !== fence.profileRevisionId
-            ? "profile_changed"
-            : "content_changed";
+    const reason = !itemProfileFenceMatches(fence.profileRevisionId, processing)
+        ? "profile_changed"
+        : "content_changed";
     const summary = processing.phases.summary;
     await updatePhaseInTx(tx, itemId, "private", userId, "summary", {
         ...(summary ?? {
@@ -228,7 +228,7 @@ export async function storeGeneratedTitle(
                     recordingId,
                     "audio",
                     fence,
-                    processing?.profileRevisionId ?? null,
+                    processing,
                 ))
             ) {
                 return {
@@ -334,7 +334,7 @@ export async function storeGeneratedMailTitle(
                     itemId,
                     "mail",
                     fence,
-                    processing?.profileRevisionId ?? null,
+                    processing,
                 ))
             ) {
                 return {

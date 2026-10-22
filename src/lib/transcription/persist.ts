@@ -20,11 +20,14 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import { pipelineDriver } from "@/lib/pipeline/driver";
+import { itemProfileFenceMatches } from "@/lib/pipeline/effective-profile";
 import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
-import type { PipelineView } from "@/lib/pipeline/types";
+import type { PipelinePhases, PipelineView } from "@/lib/pipeline/types";
 import {
     contentWriterRefusal,
+    contentWriterScope,
     sharingOrgUserId,
     type WriterRefusal,
 } from "@/lib/sharing/writer";
@@ -82,8 +85,8 @@ export interface UpsertTranscriptionArgs {
      */
     dropSummaryOnReplace?: EnhancementSource;
     /**
-     * Who makes the change; defaults to `userId`. The organization account
-     * on a shared recording, the owner otherwise (see `writerRefusal`).
+     * Who makes the change; defaults to `userId`. The owner or a vouched-for
+     * Organization writer on a shared recording (see `writerRefusal`).
      */
     actorUserId?: string;
     /**
@@ -179,7 +182,7 @@ export interface UpsertEnhancementArgs {
  * Result of a tombstone-aware upsert. `committed: false` means nothing was
  * written — callers should treat that as a skip, not a hard error:
  * - `reason: "shared"`: the recording is shared with the Organization and
- *   only the organization account changes it (RECORDING_SHARED);
+ *   the actor is neither its owner nor an Organization writer;
  * - `reason: "withdrawn"`: an Organization change, and the recording is no
  *   longer shared;
  * - `reason: "cancelled"`: the job it finishes was cancelled meanwhile;
@@ -204,6 +207,7 @@ interface CurrentFenceInput {
     contentSourceId: string;
     contentRevision: number;
     profileRevisionId: string | null;
+    phases?: PipelinePhases;
 }
 
 async function currentFenceInput(
@@ -211,13 +215,16 @@ async function currentFenceInput(
     args: UpsertEnhancementArgs,
 ): Promise<CurrentFenceInput | null> {
     const [processing] = await tx
-        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .select({
+            profileRevisionId: itemProcessing.profileRevisionId,
+            phases: itemProcessing.phases,
+        })
         .from(itemProcessing)
         .where(
             and(
                 eq(itemProcessing.itemId, args.recordingId),
                 eq(itemProcessing.userId, args.userId),
-                eq(itemProcessing.view, args.view ?? "private"),
+                eq(itemProcessing.view, pipelineDriver(args.userId).view),
             ),
         )
         .limit(1);
@@ -238,6 +245,7 @@ async function currentFenceInput(
                   contentSourceId: "mail",
                   contentRevision: content.revision,
                   profileRevisionId: processing?.profileRevisionId ?? null,
+                  phases: processing?.phases,
               }
             : null;
     }
@@ -262,6 +270,7 @@ async function currentFenceInput(
               contentSourceId: source,
               contentRevision: content.revision,
               profileRevisionId: processing?.profileRevisionId ?? null,
+              phases: processing?.phases,
           }
         : null;
 }
@@ -277,7 +286,7 @@ function fenceMatches(
         inputs.contentRevision === current.contentRevision;
     const sameProfile =
         !("itemProfileRevisionId" in inputs) ||
-        inputs.itemProfileRevisionId === current.profileRevisionId;
+        itemProfileFenceMatches(inputs.itemProfileRevisionId, current);
     return sameContent && sameProfile;
 }
 
@@ -370,8 +379,7 @@ export async function upsertTranscription(
             }
             // From every writer: a provider run, a browser transcript, a
             // Plaud import. Under the lock sharing and withdrawal take, so
-            // a run that began before either and ends after it writes
-            // nothing.
+            // the actor's permission follows the current sharing state.
             const refusal = await contentWriterRefusal(tx, {
                 recordingId,
                 ownerUserId: userId,
@@ -590,7 +598,7 @@ export async function upsertEnhancement(
             ) {
                 throw RECORDING_WRITE_BLOCKED;
             }
-            const refusal = await contentWriterRefusal(tx, {
+            const { refusal, scopeUserId } = await contentWriterScope(tx, {
                 recordingId,
                 ownerUserId: userId,
                 actorUserId,
@@ -613,11 +621,13 @@ export async function upsertEnhancement(
                                   view: args.view ?? "private",
                                   reason: "summary",
                               });
-                    if (advance && current) {
+                    if (advance && current && !args.jobId) {
                         const profileChanged =
                             "itemProfileRevisionId" in args.inputs &&
-                            args.inputs.itemProfileRevisionId !==
-                                current.profileRevisionId;
+                            !itemProfileFenceMatches(
+                                args.inputs.itemProfileRevisionId,
+                                current,
+                            );
                         await updatePhaseInTx(
                             tx,
                             recordingId,
@@ -717,7 +727,10 @@ export async function upsertEnhancement(
                     recordingId,
                     ownerUserId: userId,
                     actorUserId,
-                    view: args.view ?? "private",
+                    view:
+                        orgUserId !== null && scopeUserId === orgUserId
+                            ? "org"
+                            : (args.view ?? "private"),
                     contentSourceId:
                         typeof args.inputs?.contentSourceId === "string"
                             ? args.inputs.contentSourceId
@@ -757,6 +770,7 @@ export async function upsertEnhancement(
                       });
             if (
                 advance &&
+                !args.jobId &&
                 args.inputs &&
                 typeof args.inputs.contentSourceId === "string" &&
                 typeof args.inputs.contentRevision === "number"

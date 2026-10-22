@@ -5,6 +5,7 @@ import {
     wakePendingPipelineAdvanceInTx,
 } from "@/db/queries/pipeline";
 import { nudge } from "@/lib/jobs/nudge";
+import { pipelineDriver } from "@/lib/pipeline/driver";
 import type { PipelineView } from "@/lib/pipeline/types";
 import { recordingJobSubject } from "@/lib/sharing/view";
 
@@ -46,6 +47,17 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Increment a pipeline request and enqueue its driver in the caller's transaction. */
 export async function requestAdvanceInTx(
+    tx: Tx,
+    input: RequestAdvanceInput,
+): Promise<RequestAdvanceResult | null> {
+    return requestAdvanceForViewInTx(tx, {
+        ...input,
+        ...pipelineDriver(input.userId),
+    });
+}
+
+/** Advance an exact stored row when maintaining a legacy pipeline view. */
+export async function requestAdvanceForViewInTx(
     tx: Tx,
     input: RequestAdvanceInput,
 ): Promise<RequestAdvanceResult | null> {
