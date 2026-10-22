@@ -88,20 +88,48 @@ describe("library browser preferences", () => {
         act(() =>
             first.result.current.setPreferences((value) => ({
                 ...value,
-                expanded: ["private", "f1"],
+                expanded: ["f0", "f1"],
                 collapsed: true,
             })),
         );
         first.unmount();
         const second = renderHook(() => usePreferences("viewer-a"));
         expect(second.result.current.preferences.expanded).toEqual([
-            "private",
+            "f0",
             "f1",
         ]);
         expect(second.result.current.preferences.collapsed).toBe(true);
         const other = renderHook(() => usePreferences("viewer-b"));
         expect(other.result.current.preferences.collapsed).toBe(false);
         expect(other.result.current.preferences.expanded).toBeNull();
+    });
+    it("prunes deleted folders from restored and live preferences before persisting", () => {
+        localStorage.setItem(
+            "klepna:library:viewer",
+            JSON.stringify({
+                expanded: ["f1", "gone"],
+                recent: ["gone", "f1"],
+                collapsed: true,
+            }),
+        );
+        const { result, rerender } = renderHook(
+            ({ available }) =>
+                useLibraryPreferencesState(
+                    "viewer",
+                    available,
+                    assignments,
+                    items,
+                ),
+            { initialProps: { available: folders } },
+        );
+        expect(result.current.preferences.expanded).toEqual(["f1"]);
+        expect(result.current.preferences.recent).toEqual(["f1"]);
+        rerender({ available: folders.filter((folder) => folder.id !== "f1") });
+        expect(result.current.preferences.expanded).toEqual([]);
+        expect(result.current.preferences.recent).toEqual([]);
+        expect(
+            JSON.parse(localStorage.getItem("klepna:library:viewer") ?? "null"),
+        ).toEqual(result.current.preferences);
     });
     it("renders and remembers within the session when storage throws", () => {
         vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

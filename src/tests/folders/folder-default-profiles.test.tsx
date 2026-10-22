@@ -63,6 +63,12 @@ describe("folder default profile picker", () => {
             !readOnly,
         );
         expect(screen.queryByRole("button", { name: "Processing" })).toBeNull();
+        const requested = vi
+            .mocked(fetch)
+            .mock.calls.map(([input]) => String(input));
+        expect(
+            requested.filter((url) => url.includes("/api/settings/profiles")),
+        ).toHaveLength(readOnly ? 0 : 2);
     });
     it("shows inherited defaults and saves an own channel default", async () => {
         const fetchMock = vi.fn(

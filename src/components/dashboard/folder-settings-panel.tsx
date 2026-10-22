@@ -2,10 +2,13 @@
 
 import { FolderInput, FolderPlus, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
-import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
+import {
+    FolderExportActions,
+    type FolderExportStatus,
+} from "@/components/dashboard/folder-export-actions";
 import {
     FolderDeletionAddresses,
     FolderMailAddresses,
@@ -21,11 +24,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import type {
-    ExportProvidersAvailability,
-    FolderExportConfigurationDto,
-} from "@/lib/folder-exports/types";
-import { descendantFolderIds } from "@/lib/folders/hierarchy";
+import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
+import { canManageOrganization } from "@/lib/folders/drag";
+import {
+    ancestorFolderIds,
+    descendantFolderIds,
+} from "@/lib/folders/hierarchy";
 import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -71,13 +75,35 @@ export function FolderSettingsPanel({
     const [renaming, setRenaming] = useState(false);
     const [creating, setCreating] = useState(initialAction === "create");
     const [moving, setMoving] = useState(false);
-    const [exports, setExports] = useState<FolderExportConfigurationDto[]>([]);
+    const [exportStatus, setExportStatus] = useState<FolderExportStatus>({
+        configured: [],
+        loading: true,
+        failed: false,
+        inheritedFolderId: null,
+    });
+    const exports = exportStatus.configured;
     const [subfolder, setSubfolder] = useState("");
     const [parentId, setParentId] = useState(folder.parentId ?? "");
     const [saving, setSaving] = useState(false);
     const [exportOpen, setExportOpen] = useState(false);
     const [exportPicking, setExportPicking] = useState(false);
-    const canManage = folder.scope !== "org" || canCurate;
+    const canManage =
+        folder.scope !== "org" ||
+        canManageOrganization(canCurate, isOrgAccount);
+    const exportAncestors = useMemo(
+        () =>
+            [...ancestorFolderIds(folders, folder.id)]
+                .slice(1)
+                .flatMap((id) => folders.find((item) => item.id === id) ?? []),
+        [folders, folder.id],
+    );
+    const root = exportAncestors.at(-1) ?? folder;
+    const privateTree =
+        root.kind === "private" || (isOrgAccount && root.kind === "public");
+    const managedExport = folder.scope === "org" && !isOrgAccount;
+    const inheritedExportFolder = folders.find(
+        (item) => item.id === exportStatus.inheritedFolderId,
+    );
     const canCreate =
         folder.scope !== "org" || folder.parentId !== null || canCurate;
     const subtree = descendantFolderIds(folders, folder.id);
@@ -174,29 +200,51 @@ export function FolderSettingsPanel({
                         <div className="min-w-0 text-sm">
                             <h3 className="font-medium">{i18n("Export")}</h3>
                             <p className="break-words text-muted-foreground">
-                                {folder.scope === "org" && !isOrgAccount
+                                {managedExport
                                     ? i18n(
                                           "Managed by the Organization account",
                                       )
-                                    : exports.length
-                                      ? exports
-                                            .map((configuration) =>
-                                                configuration.googleDrive
-                                                    ? i18n(
-                                                          "Google Drive: {folder}",
-                                                          {
-                                                              folder: configuration
-                                                                  .googleDrive
-                                                                  .rootFolderName,
-                                                          },
-                                                      )
-                                                    : configuration.targetPath,
-                                            )
-                                            .join(", ")
-                                      : i18n("Not configured")}
+                                    : exportStatus.loading
+                                      ? i18n("Loading…")
+                                      : exportStatus.failed
+                                        ? i18n("Could not load folder exports.")
+                                        : exports.length
+                                          ? exports
+                                                .map((configuration) =>
+                                                    configuration.googleDrive
+                                                        ? i18n(
+                                                              "Google Drive: {folder}",
+                                                              {
+                                                                  folder: configuration
+                                                                      .googleDrive
+                                                                      .rootFolderName,
+                                                              },
+                                                          )
+                                                        : configuration.targetPath,
+                                                )
+                                                .join(", ")
+                                          : inheritedExportFolder
+                                            ? i18n("Inherited from {folder}", {
+                                                  folder: label(
+                                                      inheritedExportFolder,
+                                                  ),
+                                              })
+                                            : i18n("Not configured")}
+                                {exports.length > 0 &&
+                                    inheritedExportFolder && (
+                                        <>
+                                            {" "}
+                                            ·{" "}
+                                            {i18n("Inherited from {folder}", {
+                                                folder: label(
+                                                    inheritedExportFolder,
+                                                ),
+                                            })}
+                                        </>
+                                    )}
                             </p>
                         </div>
-                        {canManage && (
+                        {canManage && !managedExport && (
                             <Button
                                 variant="outline"
                                 onClick={() => setExportOpen(true)}
@@ -355,17 +403,15 @@ export function FolderSettingsPanel({
             <FolderExportActions
                 folder={folder}
                 providers={exportProviders}
-                privateTree={
-                    folder.scope === "personal" ||
-                    (isOrgAccount && folder.scope === "org")
-                }
+                privateTree={privateTree && !managedExport}
+                ancestors={exportAncestors}
                 open={exportOpen}
                 onOpenChange={setExportOpen}
                 onPickerChange={setExportPicking}
                 hideTrigger
                 reopen={reopenExport}
                 onReopenHandled={onReopenHandled}
-                onStatusChange={setExports}
+                onStatusChange={setExportStatus}
             />
         </>
     );

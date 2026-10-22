@@ -194,6 +194,9 @@ export function Workstation({
     // toggle between them instead of stacking. Desktop ignores this
     // state entirely (both panes render via the grid).
     const [mobileView, setMobileView] = useState<"list" | "detail">("list");
+    const mobileViewRef = useRef(mobileView);
+    mobileViewRef.current = mobileView;
+    const locationRecordingsRef = useRef<Recording[]>([]);
     const [location, setLocation] = useState<string>(initialLocation);
     const selectedFolderId = location === "recent" ? null : location;
     const setSelectedFolderId = useCallback(
@@ -262,6 +265,7 @@ export function Workstation({
             recording: Recording | null,
             folderId: string | null,
             method: "push" | "replace" = "replace",
+            intendedMobileView = mobileViewRef.current,
         ) => {
             const params = new URLSearchParams(window.location.search);
             clearItemLinkContext(params);
@@ -277,13 +281,16 @@ export function Workstation({
                 if (recording.view === "org") params.set("view", "org");
             }
             handledLocationQuery.current = params.toString();
-            if (
+            const sameUrl =
                 params.toString() ===
-                new URLSearchParams(window.location.search).toString()
+                new URLSearchParams(window.location.search).toString();
+            if (
+                sameUrl &&
+                window.history.state?.mobileView === intendedMobileView
             )
                 return;
             window.history[method === "push" ? "pushState" : "replaceState"](
-                null,
+                { ...window.history.state, mobileView: intendedMobileView },
                 "",
                 dashboardLocation(params),
             );
@@ -297,9 +304,38 @@ export function Workstation({
             setItemLinkQuery("");
             setCurrentRecording(recording);
             setMobileView("detail");
-            writeSelection(recording, selectedFolderIdRef.current, method);
+            let folderId = selectedFolderIdRef.current;
+            if (
+                !locationRecordingsRef.current.some(
+                    (item) =>
+                        item.id === recording.id &&
+                        item.view === recording.view,
+                )
+            ) {
+                folderId =
+                    recording.view === "org" && !isOrgAccount
+                        ? (folderOrganization.folders.find(
+                              (folder) =>
+                                  folder.scope === "org" &&
+                                  folderOrganization.assignments.some(
+                                      (assignment) =>
+                                          assignment.recordingId ===
+                                              recording.id &&
+                                          assignment.folderId === folder.id,
+                                  ),
+                          )?.id ??
+                          folderOrganization.folders.find(
+                              (folder) =>
+                                  folder.scope === "org" &&
+                                  folder.parentId === null,
+                          )?.id ??
+                          null)
+                        : null;
+                setSelectedFolderId(folderId);
+            }
+            writeSelection(recording, folderId, method, "detail");
         },
-        [writeSelection],
+        [writeSelection, folderOrganization, isOrgAccount, setSelectedFolderId],
     );
     const selectRecordingByUser = useCallback(
         (recording: Recording) => {
@@ -347,7 +383,7 @@ export function Workstation({
                 null;
             setCurrentRecording(first);
             setMobileView("list");
-            writeSelection(first, folder.id, "push");
+            writeSelection(first, folder.id, "push", "list");
         },
         [
             currentRecording,
@@ -373,18 +409,9 @@ export function Workstation({
                 fallback.find((item) => item.id === hit.id);
             if (!linked || hiddenIds.has(linked.id)) return false;
             selectRecordingByUser(linked);
-            setSelectedFolderId(null);
-            writeSelection(linked, null, "replace");
             return true;
         },
-        [
-            orgRecordings,
-            recordings,
-            hiddenIds,
-            selectRecordingByUser,
-            setSelectedFolderId,
-            writeSelection,
-        ],
+        [orgRecordings, recordings, hiddenIds, selectRecordingByUser],
     );
 
     const readLocation = useCallback(
@@ -422,7 +449,7 @@ export function Workstation({
             handledLocationQuery.current = params.toString();
             if (traversing)
                 window.history.replaceState(
-                    null,
+                    window.history.state,
                     "",
                     dashboardLocation(params),
                 );
@@ -457,14 +484,26 @@ export function Workstation({
                 if (linked?.view === "org") params.set("view", "org");
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
-                setMobileView("detail");
+                const restoredView = window.history.state?.mobileView;
+                const nextMobileView =
+                    restoredView === "list" || restoredView === "detail"
+                        ? restoredView
+                        : traversing && locationFolder
+                          ? "list"
+                          : "detail";
+                setMobileView(nextMobileView);
                 if (!linked)
                     toast.error(
                         i18n(
                             "This item is not available to you. It may belong to someone else, no longer be shared with your Organization, or have been deleted.",
                         ),
                     );
-                writeSelection(linked ?? null, locationFolder?.id ?? null);
+                writeSelection(
+                    linked ?? null,
+                    locationFolder?.id ?? null,
+                    "replace",
+                    nextMobileView,
+                );
                 return;
             }
             setItemLinkQuery("");
@@ -496,7 +535,12 @@ export function Workstation({
                     : null;
             setCurrentRecording(initial);
             setMobileView("list");
-            writeSelection(initial, locationFolder?.id ?? null);
+            writeSelection(
+                initial,
+                locationFolder?.id ?? null,
+                "replace",
+                "list",
+            );
         },
         [
             folderOrganization,
@@ -603,6 +647,7 @@ export function Workstation({
         visibleOrgRecordings,
         visibleRecordings,
     ]);
+    locationRecordingsRef.current = locationRecordings;
     const rowLocations = useMemo(
         () =>
             folderRowLocations(
@@ -1152,44 +1197,58 @@ export function Workstation({
                 );
                 throw new Error(i18n("Could not delete folder"));
             }
+            const removeDeleted = (
+                current: FolderOrganization,
+            ): FolderOrganization => {
+                const deletedFolder = current.folders.find(
+                    (folder) => folder.id === folderId,
+                );
+                const orgRoot = current.folders.find(
+                    (folder) =>
+                        folder.scope === "org" && folder.parentId === null,
+                );
+                const remainingFolders = current.folders.filter(
+                    (folder) => !deletedIds.has(folder.id),
+                );
+                const remainingAssignments = current.assignments.filter(
+                    (assignment) => !deletedIds.has(assignment.folderId),
+                );
+                if (deletedFolder?.scope === "org" && orgRoot) {
+                    const remainingOrgIds = new Set(
+                        remainingFolders
+                            .filter((folder) => folder.scope === "org")
+                            .map((folder) => folder.id),
+                    );
+                    for (const assignment of current.assignments) {
+                        if (
+                            deletedIds.has(assignment.folderId) &&
+                            !remainingAssignments.some(
+                                (item) =>
+                                    item.recordingId ===
+                                        assignment.recordingId &&
+                                    remainingOrgIds.has(item.folderId),
+                            )
+                        )
+                            remainingAssignments.push({
+                                recordingId: assignment.recordingId,
+                                folderId: orgRoot.id,
+                            });
+                    }
+                }
+                return {
+                    folders: remainingFolders,
+                    assignments: remainingAssignments,
+                };
+            };
+            setFolderOrganization(removeDeleted);
+            const {
+                folders: remainingFolders,
+                assignments: remainingAssignments,
+            } = removeDeleted(folderOrganization);
             const deletedFolder = folderOrganization.folders.find(
                 (folder) => folder.id === folderId,
             );
-            const orgRoot = folderOrganization.folders.find(
-                (folder) => folder.scope === "org" && folder.parentId === null,
-            );
-            const remainingFolders = folderOrganization.folders.filter(
-                (folder) => !deletedIds.has(folder.id),
-            );
-            const remainingAssignments = folderOrganization.assignments.filter(
-                (assignment) => !deletedIds.has(assignment.folderId),
-            );
-            if (deletedFolder?.scope === "org" && orgRoot) {
-                const remainingOrgIds = new Set(
-                    remainingFolders
-                        .filter((folder) => folder.scope === "org")
-                        .map((folder) => folder.id),
-                );
-                for (const assignment of folderOrganization.assignments) {
-                    if (
-                        deletedIds.has(assignment.folderId) &&
-                        !remainingAssignments.some(
-                            (item) =>
-                                item.recordingId === assignment.recordingId &&
-                                remainingOrgIds.has(item.folderId),
-                        )
-                    )
-                        remainingAssignments.push({
-                            recordingId: assignment.recordingId,
-                            folderId: orgRoot.id,
-                        });
-                }
-                refresh();
-            }
-            setFolderOrganization({
-                folders: remainingFolders,
-                assignments: remainingAssignments,
-            });
+            if (deletedFolder?.scope === "org") refresh();
             const currentFolderId = selectedFolderIdRef.current;
             if (currentFolderId && deletedIds.has(currentFolderId)) {
                 const parent =
@@ -1450,7 +1509,7 @@ export function Workstation({
             ) ?? newest(visibleRecordings);
         setCurrentRecording(next);
         setMobileView("list");
-        writeSelection(next, null, "push");
+        writeSelection(next, null, "push", "list");
     };
     const assignRecording = (id: string, folderId: string) =>
         handleFolderAssignment(id, folderId, true);
@@ -1459,6 +1518,7 @@ export function Workstation({
         recordings: treeRecordings,
         navigation,
         canCurate,
+        isOrgAccount,
         folder: selectedFolder,
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
@@ -1519,6 +1579,7 @@ export function Workstation({
                                 onAssignRecording={assignRecording}
                                 onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
+                                isOrgAccount={isOrgAccount}
                                 navigation={navigation}
                                 recentCount={visibleRecordings.length}
                                 onSettings={(folder) =>
@@ -1747,7 +1808,15 @@ export function Workstation({
                                         ? folderLabel(selectedFolder)
                                         : i18n("Recent")
                                 }
-                                onBackToList={() => setMobileView("list")}
+                                onBackToList={() => {
+                                    setMobileView("list");
+                                    writeSelection(
+                                        selectedRecording,
+                                        selectedFolderId,
+                                        "replace",
+                                        "list",
+                                    );
+                                }}
                                 hiddenOnMobile={mobileView === "list"}
                                 onChanged={refresh}
                                 onFolderCreated={handleFolderCreated}
@@ -1803,7 +1872,15 @@ export function Workstation({
                                         ? folderLabel(selectedFolder)
                                         : i18n("Recent")
                                 }
-                                onBackToList={() => setMobileView("list")}
+                                onBackToList={() => {
+                                    setMobileView("list");
+                                    writeSelection(
+                                        selectedRecording,
+                                        selectedFolderId,
+                                        "replace",
+                                        "list",
+                                    );
+                                }}
                                 hiddenOnMobile={mobileView === "list"}
                                 initialPlaybackSpeed={
                                     initialSettings.defaultPlaybackSpeed

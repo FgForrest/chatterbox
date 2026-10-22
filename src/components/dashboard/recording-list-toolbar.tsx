@@ -177,10 +177,15 @@ export function RecordingListToolbar({
             </div>
             <div className="order-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                    {i18n("{count, plural, one {# item} other {# items}}", {
-                        count: filteredCount,
-                    })}
-                    {includesSubfolders && i18n(", including subfolders")}
+                    {includesSubfolders
+                        ? i18n(
+                              "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
+                              { count: filteredCount },
+                          )
+                        : i18n(
+                              "{count, plural, one {# item} other {# items}}",
+                              { count: filteredCount },
+                          )}
                 </span>
                 <div className="flex items-center gap-1">
                     <DropdownMenu>

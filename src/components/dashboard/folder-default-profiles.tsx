@@ -73,29 +73,33 @@ export function FolderDefaultProfiles({
     );
 
     const load = useCallback(async () => {
-        const [defaultsResponse, audioResponse, mailResponse] =
-            await Promise.all([
-                fetch(
-                    `/api/folders/${encodeURIComponent(folderId)}/default-profiles`,
-                ),
-                fetch("/api/settings/profiles?channel=audio&pageSize=100"),
-                fetch("/api/settings/profiles?channel=mail&pageSize=100"),
-            ]);
-        if (!defaultsResponse.ok || !audioResponse.ok || !mailResponse.ok) {
+        const defaultsRequest = fetch(
+            `/api/folders/${encodeURIComponent(folderId)}/default-profiles`,
+        );
+        const profilesRequest = readOnly
+            ? null
+            : Promise.all([
+                  fetch("/api/settings/profiles?channel=audio&pageSize=100"),
+                  fetch("/api/settings/profiles?channel=mail&pageSize=100"),
+              ]);
+        const [defaultsResponse, profileResponses] = await Promise.all([
+            defaultsRequest,
+            profilesRequest,
+        ]);
+        if (
+            !defaultsResponse.ok ||
+            profileResponses?.some((response) => !response.ok)
+        ) {
             throw new Error("folder default profiles unavailable");
         }
-        const [nextDefaults, audio, mail] = (await Promise.all([
-            defaultsResponse.json(),
-            audioResponse.json(),
-            mailResponse.json(),
-        ])) as [
-            DefaultsResponse,
-            { profiles: ProfileOption[] },
-            { profiles: ProfileOption[] },
-        ];
-        setDefaults(nextDefaults);
-        setProfiles({ audio: audio.profiles, mail: mail.profiles });
-    }, [folderId]);
+        setDefaults((await defaultsResponse.json()) as DefaultsResponse);
+        if (profileResponses) {
+            const [audio, mail] = (await Promise.all(
+                profileResponses.map((response) => response.json()),
+            )) as { profiles: ProfileOption[] }[];
+            setProfiles({ audio: audio.profiles, mail: mail.profiles });
+        }
+    }, [folderId, readOnly]);
 
     useEffect(() => {
         void load().catch(() => setFailed(true));

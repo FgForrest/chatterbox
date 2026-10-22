@@ -32,6 +32,7 @@ import {
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
+    canFileRecording,
     FOLDER_DRAG_TYPE,
     RECORDING_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -79,6 +80,7 @@ interface FolderTreeProps {
     ) => Promise<void>;
     onNewFolder?: () => void;
     canCurate?: boolean;
+    isOrgAccount?: boolean;
     onSettings: (folder: RecordingFolder) => void;
     navigation?: FolderNavigation;
     recentCount?: number;
@@ -97,6 +99,7 @@ export function FolderTree({
     onMoveRecording,
     onNewFolder,
     canCurate = false,
+    isOrgAccount = false,
     onSettings,
     navigation,
     recentCount,
@@ -104,6 +107,8 @@ export function FolderTree({
 }: FolderTreeProps) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
+    const [isMac, setIsMac] = useState(false);
+    useEffect(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
     const { ready, preferences, setPreferences, recentFolders } =
         useLibraryPreferences();
     const [allLevels, setAllLevels] = useState<Set<string>>(new Set());
@@ -326,14 +331,24 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (folder.kind === "private") return;
+                                if (folder.kind === "private") {
+                                    event.dataTransfer.dropEffect = "none";
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
+                                const effect = recordingDropEffect(
+                                    Array.from(event.dataTransfer.types),
+                                    folder.scope,
+                                    !!onMoveRecording,
+                                    canCurate,
+                                    isOrgAccount,
+                                );
+                                event.dataTransfer.dropEffect = effect;
+                                if (effect === "none") {
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
                                 event.preventDefault();
-                                event.dataTransfer.dropEffect =
-                                    recordingDropEffect(
-                                        Array.from(event.dataTransfer.types),
-                                        folder.scope,
-                                        !!onMoveRecording,
-                                    );
                                 setDropTarget(null);
                                 setRecordingDropFolderId(folder.id);
                                 return;
@@ -366,6 +381,37 @@ export function FolderTree({
                                   )
                                 : "";
                             if (recordingId) {
+                                const recording =
+                                    recordings.find(
+                                        (item) =>
+                                            item.id === recordingId &&
+                                            item.view === "org",
+                                    ) ??
+                                    recordings.find(
+                                        (item) => item.id === recordingId,
+                                    );
+                                if (
+                                    folder.kind === "private" ||
+                                    recordingDropEffect(
+                                        Array.from(event.dataTransfer.types),
+                                        folder.scope,
+                                        !!onMoveRecording,
+                                        canCurate,
+                                        isOrgAccount,
+                                    ) === "none" ||
+                                    (recording &&
+                                        (!canFileRecording(
+                                            recording,
+                                            canCurate,
+                                            isOrgAccount,
+                                        ) ||
+                                            (recording.isOwn === false &&
+                                                folder.scope !== "org")))
+                                ) {
+                                    event.dataTransfer.dropEffect = "none";
+                                    setRecordingDropFolderId(null);
+                                    return;
+                                }
                                 event.preventDefault();
                                 setDropTarget(null);
                                 setRecordingDropFolderId(null);
@@ -386,7 +432,7 @@ export function FolderTree({
                                             folder.id,
                                         ).catch(() => {});
                                     }
-                                } else if (folder.kind !== "private") {
+                                } else {
                                     void onAssignRecording(
                                         recordingId,
                                         folder.id,
@@ -502,7 +548,10 @@ export function FolderTree({
                             )
                         }
                     >
-                        {i18n("All {count}", { count: String(level.length) })}
+                        {i18n(
+                            "{count, plural, one {All # folder} other {All # folders}}",
+                            { count: level.length },
+                        )}
                     </Button>
                 )}
             </>
@@ -527,7 +576,7 @@ export function FolderTree({
                         />
                         {!query && (
                             <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                                ⌘K
+                                {isMac ? "⌘K" : "Ctrl K"}
                             </kbd>
                         )}
                         {query && (

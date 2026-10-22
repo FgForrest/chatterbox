@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
+    canFileRecording,
     RECORDING_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     recordingDropEffect,
@@ -43,6 +44,7 @@ export function LibraryLocationHeader({
     navigation,
     part = "all",
     canCurate = false,
+    isOrgAccount = false,
 }: {
     variant: "rail" | "walk";
     organization: FolderOrganization;
@@ -57,6 +59,7 @@ export function LibraryLocationHeader({
     navigation?: FolderNavigation;
     part?: "all" | "header" | "tiles";
     canCurate?: boolean;
+    isOrgAccount?: boolean;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -92,21 +95,51 @@ export function LibraryLocationHeader({
             onClick={() => onNavigate(item)}
             onDragOver={(event) => {
                 const types = Array.from(event.dataTransfer.types);
-                if (
-                    item.kind !== "private" &&
-                    types.includes(RECORDING_DRAG_TYPE)
-                ) {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = recordingDropEffect(
+                if (types.includes(RECORDING_DRAG_TYPE)) {
+                    if (item.kind === "private") {
+                        event.dataTransfer.dropEffect = "none";
+                        return;
+                    }
+                    const effect = recordingDropEffect(
                         types,
                         item.scope,
+                        true,
+                        canCurate,
+                        isOrgAccount,
                     );
+                    event.dataTransfer.dropEffect = effect;
+                    if (effect === "none") return;
+                    event.preventDefault();
                 }
             }}
             onDrop={(event) => {
                 if (item.kind === "private") return;
                 const id = event.dataTransfer.getData(RECORDING_DRAG_TYPE);
                 if (!id) return;
+                const recording =
+                    recordings.find(
+                        (entry) => entry.id === id && entry.view === "org",
+                    ) ?? recordings.find((entry) => entry.id === id);
+                if (
+                    recordingDropEffect(
+                        Array.from(event.dataTransfer.types),
+                        item.scope,
+                        true,
+                        canCurate,
+                        isOrgAccount,
+                    ) === "none" ||
+                    (recording &&
+                        (!canFileRecording(
+                            recording,
+                            canCurate,
+                            isOrgAccount,
+                        ) ||
+                            (recording.isOwn === false &&
+                                item.scope !== "org")))
+                ) {
+                    event.dataTransfer.dropEffect = "none";
+                    return;
+                }
                 event.preventDefault();
                 const source = event.dataTransfer.getData(
                     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -142,13 +175,14 @@ export function LibraryLocationHeader({
             </span>
             {!folder && (
                 <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {i18n("{count, plural, one {# item} other {# items}}", {
-                        count: data.counts.get(item.id) ?? 0,
-                    })}
-                    ,{" "}
-                    {i18n("{count, plural, one {# folder} other {# folders}}", {
-                        count: descendantFolderIds(folders, item.id).size - 1,
-                    })}
+                    {i18n(
+                        "{items, plural, one {# item} other {# items}}, {folders, plural, one {# folder} other {# folders}}",
+                        {
+                            items: data.counts.get(item.id) ?? 0,
+                            folders:
+                                descendantFolderIds(folders, item.id).size - 1,
+                        },
+                    )}
                 </span>
             )}
         </button>
@@ -210,6 +244,18 @@ export function LibraryLocationHeader({
                                         )}
                                         <button
                                             type="button"
+                                            aria-label={
+                                                item.id === folder.id
+                                                    ? i18n(
+                                                          "Folder settings for {folder}",
+                                                          {
+                                                              folder: label(
+                                                                  item,
+                                                              ),
+                                                          },
+                                                      )
+                                                    : undefined
+                                            }
                                             aria-current={
                                                 item.id === folder.id
                                                     ? "location"
@@ -255,14 +301,19 @@ export function LibraryLocationHeader({
                                     setAllLocation(folder?.id ?? "recent")
                                 }
                             >
-                                {i18n("All {count}", {
-                                    count: String(level.length),
-                                })}
+                                {i18n(
+                                    "{count, plural, one {All # folder} other {All # folders}}",
+                                    {
+                                        count: level.length,
+                                    },
+                                )}
                             </Button>
                         )}
                     </div>
                     {!folder && recentFolders.length > 0 && (
-                        <fieldset
+                        // biome-ignore lint/a11y/useSemanticElements: These shortcuts navigate folders, rather than grouping form inputs.
+                        <div
+                            role="group"
                             className="flex flex-wrap gap-1.5"
                             aria-label={i18n("Recently used")}
                         >
@@ -289,7 +340,7 @@ export function LibraryLocationHeader({
                                     </span>
                                 </Button>
                             ))}
-                        </fieldset>
+                        </div>
                     )}
                     <div className="flex justify-end">
                         <Button

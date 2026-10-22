@@ -17,6 +17,7 @@ import { RecordingList } from "@/components/dashboard/recording-list";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
     RECORDING_DRAG_TYPE,
+    RECORDING_OTHER_OWNER_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     RECORDING_SOURCE_SCOPE_DRAG_TYPES,
 } from "@/lib/folders/drag";
@@ -148,7 +149,149 @@ function transfer() {
     };
 }
 
+const orgSource: RecordingFolder = {
+    ...nested,
+    id: "org-source",
+    parentId: org.id,
+    scope: "org",
+    name: "Shared source",
+};
+const orgTarget: RecordingFolder = {
+    ...orgSource,
+    id: "org-target",
+    name: "Shared target",
+};
+const sharedFolders = [root, org, orgSource, orgTarget, children[0]];
+const roles = [
+    {
+        role: "owner",
+        isOwn: true,
+        canCurate: false,
+        isOrgAccount: false,
+        writable: true,
+    },
+    {
+        role: "curator",
+        isOwn: false,
+        canCurate: true,
+        isOrgAccount: false,
+        writable: true,
+    },
+    {
+        role: "organization account",
+        isOwn: false,
+        canCurate: false,
+        isOrgAccount: true,
+        writable: true,
+    },
+    {
+        role: "member",
+        isOwn: false,
+        canCurate: false,
+        isOrgAccount: false,
+        writable: false,
+    },
+];
+
+function organizationDropTests(variant: "rail" | "walk") {
+    it.each(roles)("accepts shared items only for $role", ({
+        isOwn,
+        canCurate,
+        isOrgAccount,
+        writable,
+    }) => {
+        const item = { ...recordings[0], view: "org" as const, isOwn };
+        const placements = [{ recordingId: item.id, folderId: orgSource.id }];
+        render(
+            variant === "rail" ? (
+                <FolderTree
+                    {...treeProps}
+                    folders={sharedFolders}
+                    recordings={[item]}
+                    assignments={placements}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                />
+            ) : (
+                <LibraryLocationHeader
+                    {...headerProps}
+                    variant="walk"
+                    organization={{
+                        folders: sharedFolders,
+                        assignments: placements,
+                    }}
+                    recordings={[item]}
+                    folder={org}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                />
+            ),
+        );
+        const dataTransfer = transfer();
+        dataTransfer.setData(RECORDING_DRAG_TYPE, item.id);
+        dataTransfer.setData(RECORDING_SOURCE_FOLDER_DRAG_TYPE, orgSource.id);
+        dataTransfer.setData(RECORDING_SOURCE_SCOPE_DRAG_TYPES.org, "org");
+        if (!isOwn)
+            dataTransfer.setData(RECORDING_OTHER_OWNER_DRAG_TYPE, "true");
+        const target = screen.getByRole("button", { name: /^Shared target/ });
+        fireEvent.dragOver(target, { dataTransfer });
+        expect(dataTransfer.dropEffect).toBe(writable ? "move" : "none");
+        fireEvent.drop(target, { dataTransfer });
+        expect(move).toHaveBeenCalledTimes(writable ? 1 : 0);
+        if (writable)
+            expect(move).toHaveBeenCalledWith(
+                item.id,
+                orgSource.id,
+                orgTarget.id,
+            );
+        expect(assign).not.toHaveBeenCalled();
+    });
+    it("refuses a colleague's item on a personal target even for curators", () => {
+        const item = { ...recordings[0], view: "org" as const, isOwn: false };
+        render(
+            variant === "rail" ? (
+                <FolderTree
+                    {...treeProps}
+                    folders={sharedFolders}
+                    recordings={[item]}
+                    canCurate
+                />
+            ) : (
+                <LibraryLocationHeader
+                    {...headerProps}
+                    variant="walk"
+                    organization={{ folders: sharedFolders, assignments: [] }}
+                    recordings={[item]}
+                    folder={root}
+                    canCurate
+                />
+            ),
+        );
+        const dataTransfer = transfer();
+        dataTransfer.setData(RECORDING_DRAG_TYPE, item.id);
+        dataTransfer.setData(RECORDING_OTHER_OWNER_DRAG_TYPE, "true");
+        const target = screen.getByRole("button", { name: /^Folder 0/ });
+        fireEvent.dragOver(target, { dataTransfer });
+        expect(dataTransfer.dropEffect).toBe("none");
+        fireEvent.drop(target, { dataTransfer });
+        expect(move).not.toHaveBeenCalled();
+        expect(assign).not.toHaveBeenCalled();
+    });
+}
+
 describe("library rail", () => {
+    organizationDropTests("rail");
+    it.each([
+        ["MacIntel", "⌘K"],
+        ["Linux x86_64", "Ctrl K"],
+    ])("uses the platform shortcut for %s", (platform, hint) => {
+        const platformSpy = vi
+            .spyOn(navigator, "platform", "get")
+            .mockReturnValue(platform);
+        render(<FolderTree {...treeProps} />);
+        expect(screen.getByText(hint)).toBeTruthy();
+        platformSpy.mockRestore();
+    });
     it("uses an icon collapse button beside the folder filter and shows Recent's count", () => {
         const collapse = vi.fn();
         render(
@@ -164,7 +307,7 @@ describe("library rail", () => {
                 screen.getByPlaceholderText("Find a folder"),
             ),
         ).toBe(true);
-        expect(screen.getByText("⌘K")).toBeTruthy();
+        expect(screen.getByText("Ctrl K")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Recent12" })).toBeTruthy();
         fireEvent.click(button);
         expect(collapse).toHaveBeenCalledOnce();
@@ -213,7 +356,7 @@ describe("library rail", () => {
             "Folder 101",
             "Folder 111",
         ]);
-        fireEvent.click(screen.getByRole("button", { name: "All 12" }));
+        fireEvent.click(screen.getByRole("button", { name: "All 12 folders" }));
         expect(
             screen.getAllByRole("button", { name: /^Folder \d+,/ }),
         ).toHaveLength(12);
@@ -335,6 +478,7 @@ describe("rail tiles", () => {
 });
 
 describe("walk-in navigation", () => {
+    organizationDropTests("walk");
     it("shows root tiles with item and folder counts", () => {
         render(<LibraryLocationHeader {...headerProps} variant="walk" />);
         expect(
@@ -366,7 +510,7 @@ describe("walk-in navigation", () => {
             "Folder 101",
             "Folder 111",
         ]);
-        fireEvent.click(screen.getByRole("button", { name: "All 12" }));
+        fireEvent.click(screen.getByRole("button", { name: "All 12 folders" }));
         expect(
             screen.getAllByRole("button", { name: /^Folder \d+/ }),
         ).toHaveLength(12);
@@ -437,7 +581,9 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
             />,
         );
         const nav = screen.getByRole("navigation", { name: "Folder path" });
-        const current = within(nav).getByRole("button", { name: "Nested" });
+        const current = within(nav).getByRole("button", {
+            name: "Folder settings for Nested",
+        });
         expect(current.getAttribute("aria-current")).toBe("location");
         fireEvent.click(within(nav).getByRole("button", { name: "Private" }));
         expect(headerProps.onNavigate).toHaveBeenCalledWith(root);
@@ -447,6 +593,74 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
 });
 
 describe("library item list", () => {
+    it.each(roles)("gates dragging and row picker for $role", async ({
+        isOwn,
+        canCurate,
+        isOrgAccount,
+        writable,
+    }) => {
+        const item = { ...recordings[0], view: "org" as const, isOwn };
+        const select = vi.fn();
+        render(
+            <ConfirmDialogProvider>
+                <RecordingList
+                    recordings={[item]}
+                    transcriptions={new Map()}
+                    currentRecording={null}
+                    pendingUploads={[]}
+                    inFlightActions={new Map()}
+                    onSelect={select}
+                    onDelete={vi.fn()}
+                    initialDateTimeFormat="relative"
+                    initialSortOrder="newest"
+                    initialChunkSize={50}
+                    folder={orgSource}
+                    folders={sharedFolders}
+                    rowLocations={new Map([[item.id, [orgSource]]])}
+                    assignments={[
+                        { recordingId: item.id, folderId: orgSource.id },
+                    ]}
+                    onAssignRecording={assign}
+                    onMoveRecording={move}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                />
+            </ConfirmDialogProvider>,
+        );
+        const row = screen.getByRole("button", { name: /Item 0/ });
+        expect(row.draggable).toBe(writable);
+        const dataTransfer = transfer();
+        fireEvent.dragStart(row, { dataTransfer });
+        expect(dataTransfer.getData(RECORDING_DRAG_TYPE)).toBe(
+            writable ? item.id : "",
+        );
+        fireEvent.click(row);
+        expect(select).toHaveBeenCalledWith(item);
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "Row actions" }),
+            { button: 0, ctrlKey: false },
+        );
+        expect(
+            screen.queryByRole("menuitem", { name: "Move to…" }) !== null,
+        ).toBe(writable);
+        if (writable) {
+            fireEvent.click(screen.getByRole("menuitem", { name: "Move to…" }));
+            expect(
+                screen.queryByRole("option", { name: /Private|Folder 0/ }),
+            ).toBeNull();
+            fireEvent.click(
+                screen.getByRole("option", { name: "Shared target" }),
+            );
+            await act(async () => {});
+            expect(move).toHaveBeenCalledWith(
+                item.id,
+                orgSource.id,
+                orgTarget.id,
+            );
+            expect(assign).not.toHaveBeenCalled();
+        }
+    });
+
     it("observes the page below lg and keeps header and toolbar outside the desktop scroller", () => {
         vi.stubGlobal(
             "matchMedia",

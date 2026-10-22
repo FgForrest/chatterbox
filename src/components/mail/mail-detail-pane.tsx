@@ -340,6 +340,7 @@ export function MailDetailPane({
             <ItemWorkflow
                 itemId={mail.id}
                 kind="mail"
+                canCurate={canCurate}
                 initialData={processing}
                 onProcessingChange={setProcessing}
                 folders={folders}

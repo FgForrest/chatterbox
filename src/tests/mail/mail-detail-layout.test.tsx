@@ -46,12 +46,14 @@ vi.mock("@/components/mail/mail-learn-card", () => ({
 vi.mock("@/components/pipeline/item-workflow", () => ({
     ItemWorkflow: ({
         initialData,
+        canCurate,
     }: {
+        canCurate?: boolean;
         initialData?: ItemProcessingPresentation | null;
     }) => (
         <>
             <div data-testid="workflow-strip" />
-            <div data-testid="folder-row" />
+            <div data-testid="folder-row" data-can-curate={canCurate} />
             {initialData?.intents.map((intent) => (
                 <span key={intent.folderId}>
                     {intent.path}
@@ -169,6 +171,28 @@ afterEach(() => {
 });
 
 describe("mail detail layout", () => {
+    it("passes curation permissions to the mail folder workflow", async () => {
+        render(
+            <MailDetailPane
+                mail={{ ...mail, view: "org", isOwn: false }}
+                canCurate
+                dateTimeFormat="absolute"
+                onBackToList={vi.fn()}
+                hiddenOnMobile={false}
+                onChanged={vi.fn()}
+                folders={[]}
+                folderAssignments={[]}
+                onSelectFolder={vi.fn()}
+                onAddToFolder={vi.fn()}
+                onRemoveFromFolder={vi.fn()}
+                onMoveBetweenFolders={vi.fn()}
+            />,
+        );
+        expect(
+            screen.getByTestId("folder-row").getAttribute("data-can-curate"),
+        ).toBe("true");
+        await screen.findByTestId("mail-summary");
+    });
     it.each([
         "Recent",
         "Private",

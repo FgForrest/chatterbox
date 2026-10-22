@@ -46,7 +46,7 @@ interface RecordingFolderTagsProps {
     /**
      * Whether the viewer owns the recording. Only the owner files it in
      * Private folders or shares it with (and withdraws it from) the
-     * Organization; anyone else may only move it within the Organization.
+     * Organization; curators and the organization account may move it within the Organization.
      */
     isOwn?: boolean;
     /**
@@ -104,10 +104,22 @@ export function RecordingFolderTags({
         (folder) => assignedIds.has(folder.id) && inScope(folder),
     );
     const assignedOrg = assigned.filter((folder) => folder.scope === "org");
-    // Someone else's recording can be refiled but not shared or withdrawn,
-    // and refiling needs to know which folder it leaves.
     const moveSource =
-        !isOwn && onMove && assignedOrg.length === 1 ? assignedOrg[0] : null;
+        !isOwn &&
+        (canCurate || canWithdraw) &&
+        onMove &&
+        assignedOrg.length === 1
+            ? assignedOrg[0]
+            : null;
+
+    const hasMoveTarget =
+        moveSource &&
+        folders.some(
+            (folder) =>
+                folder.scope === "org" &&
+                folder.kind !== "private" &&
+                !assignedIds.has(folder.id),
+        );
 
     return (
         <fieldset className="flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
@@ -167,7 +179,7 @@ export function RecordingFolderTags({
                     )}
                 </span>
             ))}
-            {(isOwn || moveSource) && (
+            {(isOwn || hasMoveTarget) && (
                 <>
                     <Button
                         type="button"
@@ -192,6 +204,7 @@ export function RecordingFolderTags({
                             open={pickerOpen}
                             onOpenChange={setPickerOpen}
                             organizationOnly={organizationOnly || !isOwn}
+                            sharing={!organizationOnly && isOwn}
                             onSelect={(folderId) =>
                                 moveSource && onMove
                                     ? onMove(

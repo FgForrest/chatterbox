@@ -28,7 +28,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
+    canFileRecording,
     RECORDING_DRAG_TYPE,
+    RECORDING_OTHER_OWNER_DRAG_TYPE,
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     RECORDING_SOURCE_SCOPE_DRAG_TYPES,
 } from "@/lib/folders/drag";
@@ -101,6 +103,7 @@ export function RecordingRow({
                   (folder) => folder.id === sourceFolder?.id,
               ) ?? folderLocations[0])
             : null;
+    const canFile = canFileRecording(recording, canCurate, isOrgAccount);
     const subfolders = folderLocations.filter(
         (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
     );
@@ -125,8 +128,17 @@ export function RecordingRow({
                     registerRef(recording.id, el);
                 }}
                 type="button"
-                draggable={!!onAssignRecording}
+                draggable={!!onAssignRecording && canFile}
                 onDragStart={(event) => {
+                    if (!canFile) {
+                        event.preventDefault();
+                        return;
+                    }
+                    if (recording.isOwn === false)
+                        event.dataTransfer.setData(
+                            RECORDING_OTHER_OWNER_DRAG_TYPE,
+                            "true",
+                        );
                     event.dataTransfer.setData(
                         RECORDING_DRAG_TYPE,
                         recording.id,
@@ -256,7 +268,7 @@ export function RecordingRow({
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
-                        {onAssignRecording && (
+                        {onAssignRecording && canFile && (
                             <DropdownMenuItem
                                 onSelect={() => setPickerOpen(true)}
                             >
@@ -338,7 +350,7 @@ export function RecordingRow({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
-            {onAssignRecording && pickerOpen && (
+            {onAssignRecording && canFile && pickerOpen && (
                 <FolderPicker
                     folders={folders}
                     canCurate={canCurate}

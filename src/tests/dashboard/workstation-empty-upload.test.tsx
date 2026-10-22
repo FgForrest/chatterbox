@@ -1114,6 +1114,128 @@ describe("Workstation folder locations", () => {
         },
     };
     it.each([
+        "palette",
+        "search",
+    ])("opens a %s item outside the folder in Recent with working list navigation", (source) => {
+        const outside = recording("outside", "Outside folder");
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=first",
+        );
+        render(
+            <Workstation
+                {...folderProps}
+                recordings={[first, second, outside]}
+            />,
+        );
+        expect(
+            screen.queryByRole("button", { name: outside.filename }),
+        ).toBeNull();
+        act(() => {
+            if (source === "palette")
+                mocks.paletteProps?.onSelectRecording?.(outside);
+            else
+                mocks.paletteProps?.onOpenSearchHit?.({
+                    id: outside.id,
+                    title: outside.filename,
+                    snippet: null,
+                    href: "/dashboard?recording=outside",
+                });
+        });
+        expect(screen.getByTestId("location").textContent).toBe("recent");
+        expect(
+            screen
+                .getByRole("button", { name: outside.filename })
+                .getAttribute("aria-pressed"),
+        ).toBe("true");
+        expect(window.location.search).toBe("?recording=outside");
+        fireEvent.keyDown(window, { key: "k" });
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+    });
+    it("opens a cross-scope search hit in its known Organization folder", () => {
+        const shared = {
+            ...recording("shared", "Shared outside folder"),
+            view: "org" as const,
+            isOwn: false,
+        };
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=first",
+        );
+        render(
+            <Workstation
+                {...folderProps}
+                initialFolderOrganization={{
+                    ...folderProps.initialFolderOrganization,
+                    assignments: [
+                        ...folderProps.initialFolderOrganization.assignments,
+                        { recordingId: shared.id, folderId: organization.id },
+                    ],
+                }}
+                organizationLibrary={{
+                    recordings: [shared],
+                    transcriptions: new Map(),
+                    transcriptVariants: new Map(),
+                }}
+            />,
+        );
+        act(() => {
+            mocks.paletteProps?.onOpenSearchHit?.({
+                id: shared.id,
+                title: shared.filename,
+                snippet: null,
+                href: "/dashboard?recording=shared&view=org",
+            });
+        });
+        expect(screen.getByTestId("location").textContent).toBe(
+            organization.id,
+        );
+        expect(
+            screen
+                .getByRole("button", { name: shared.filename })
+                .getAttribute("aria-pressed"),
+        ).toBe("true");
+        expect(window.location.search).toBe(
+            "?folder=org-root&recording=shared&view=org",
+        );
+    });
+    it.each([
+        false,
+        true,
+    ])("restores the phone folder list on Back after opening an item: missing state=%s", async (missingState) => {
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+        expect(window.history.state.mobileView).toBe("list");
+        if (missingState)
+            window.history.replaceState(null, "", window.location.href);
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(window.history.state.mobileView).toBe("detail");
+        const list = screen.getByRole("region", { name: "Recent recordings" });
+        expect(list.parentElement?.className).toContain("hidden");
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(screen.getByTestId("location").textContent).toBe(
+            personalChildFolder.id,
+        );
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(list.parentElement?.className).not.toContain("hidden");
+        expect(window.history.state.mobileView).toBe("list");
+        await act(async () => {
+            window.history.forward();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(list.parentElement?.className).toContain("hidden");
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+    });
+    it.each([
         "personal-child",
         "personal-child.list",
     ])("consumes a Google export return before an item link and requests the matching export dialog: %s", (googleExport) => {
@@ -1326,6 +1448,75 @@ describe("Workstation folder locations", () => {
         expect(window.location.search).toBe(
             "?folder=personal-child&recording=second",
         );
+    });
+    it("keeps folders created while a deletion request is pending", async () => {
+        let finishDelete: ((response: Response) => void) | undefined;
+        const created = {
+            ...personalChildFolder,
+            id: "concurrent-folder",
+            name: "Created during deletion",
+        };
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+                if (init?.method === "DELETE")
+                    return new Promise<Response>((resolve) => {
+                        finishDelete = resolve;
+                    });
+                return Response.json({ folder: created });
+            }),
+        );
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Folder settings" }),
+        );
+        let deletion: Promise<void> | undefined;
+        act(() => {
+            deletion = mocks.settingsProps?.onDelete(personalChildFolder.id);
+        });
+        await act(async () => {
+            await mocks.settingsProps?.onCreate(rootFolder.id, created.name);
+        });
+        expect(
+            mocks.paletteProps?.folders?.some(
+                (folder) => folder.id === created.id,
+            ),
+        ).toBe(true);
+        await act(async () => {
+            finishDelete?.(Response.json({ ok: true }));
+            await deletion;
+        });
+        expect(
+            mocks.paletteProps?.folders?.some(
+                (folder) => folder.id === created.id,
+            ),
+        ).toBe(true);
+        expect(
+            mocks.paletteProps?.folders?.some(
+                (folder) => folder.id === personalChildFolder.id,
+            ),
+        ).toBe(false);
+        vi.unstubAllGlobals();
+    });
+    it("pushes detail history when opening the folder's auto-selected item with the same URL", async () => {
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
+        const folderUrl = window.location.search;
+        fireEvent.click(screen.getByRole("button", { name: first.filename }));
+        expect(window.location.search).toBe(folderUrl);
+        expect(window.history.state.mobileView).toBe("detail");
+        await act(async () => {
+            window.history.back();
+            await new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+        });
+        expect(window.location.search).toBe(folderUrl);
+        expect(window.history.state.mobileView).toBe("list");
+        expect(
+            screen.getByRole("region", { name: "Recent recordings" })
+                .parentElement?.className,
+        ).not.toContain("hidden");
     });
     it("returns from a deleted Organization folder to its parent, keeps the visible item, and re-enables j/k", async () => {
         const orgChild = {

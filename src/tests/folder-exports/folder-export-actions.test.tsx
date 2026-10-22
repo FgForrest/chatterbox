@@ -7,6 +7,7 @@
  */
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -16,6 +17,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const followJob = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/jobs/client", () => ({ followJob }));
 const pickDriveFolder = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: toastMock }));
 vi.mock("@/lib/integrations/google/picker-client", () => ({
@@ -115,6 +118,56 @@ describe("folder export dialog with Google Drive", () => {
         vi.unstubAllGlobals();
     });
 
+    it("shows synchronization progress on the in-dialog button", async () => {
+        let finish: ((result: { status: string }) => void) | undefined;
+        followJob.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+                Response.json(
+                    init?.method === "POST"
+                        ? { jobId: "audit" }
+                        : {
+                              configured: [],
+                              applicableIds: ["inherited-export"],
+                          },
+                ),
+            ),
+        );
+        render(
+            <FolderExportActions
+                folder={folder}
+                providers={{
+                    filesystem: true,
+                    googleDrive: false,
+                    mail: false,
+                }}
+                privateTree
+                hideTrigger
+                open
+            />,
+        );
+        const button = await screen.findByRole("button", {
+            name: "Synchronize",
+        });
+        expect(button.getAttribute("type")).toBe("button");
+        fireEvent.click(button);
+        await waitFor(() => expect(followJob).toHaveBeenCalledWith("audit"));
+        expect(button).toHaveProperty("disabled", true);
+        expect(
+            button.querySelector("svg")?.classList.contains("animate-spin"),
+        ).toBe(true);
+        await act(async () => finish?.({ status: "completed" }));
+        expect(button).toHaveProperty("disabled", false);
+        expect(
+            button.querySelector("svg")?.classList.contains("animate-spin"),
+        ).toBe(false);
+    });
     it("picks a folder and saves a Drive export with Docs by default", async () => {
         const requests = mockServer({ connection: "active" });
         pickDriveFolder.mockResolvedValue({

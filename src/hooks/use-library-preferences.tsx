@@ -80,15 +80,32 @@ export function useLibraryPreferencesState(
         } catch {}
         setState({ key, value });
     }, [key]);
+    useEffect(() => {
+        if (state.key !== key) return;
+        const ids = new Set(folders.map((folder) => folder.id));
+        const expanded =
+            state.value.expanded?.filter((id) => ids.has(id)) ?? null;
+        const recent = state.value.recent.filter((id) => ids.has(id));
+        if (
+            expanded?.length !== state.value.expanded?.length ||
+            recent.length !== state.value.recent.length
+        ) {
+            setState((current) => ({
+                ...current,
+                value: { ...current.value, expanded, recent },
+            }));
+            return;
+        }
+        try {
+            if (key) localStorage.setItem(key, JSON.stringify(state.value));
+        } catch {}
+    }, [key, state, folders]);
     const setPreferences = useCallback<Dispatch<SetStateAction<Preferences>>>(
         (update) => {
             setState((current) => {
                 const previous = current.key === key ? current.value : defaults;
                 const value =
                     typeof update === "function" ? update(previous) : update;
-                try {
-                    if (key) localStorage.setItem(key, JSON.stringify(value));
-                } catch {}
                 return { key, value };
             });
         },

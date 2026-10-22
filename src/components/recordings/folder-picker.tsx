@@ -30,6 +30,7 @@ export function FolderPicker({
     onOpenChange,
     onSelect,
     organizationOnly = false,
+    sharing = false,
     scope,
     canCurate = false,
     onCreated,
@@ -40,6 +41,7 @@ export function FolderPicker({
     onOpenChange: (open: boolean) => void;
     onSelect: (folderId: string) => Promise<void>;
     organizationOnly?: boolean;
+    sharing?: boolean;
     scope?: RecordingFolder["scope"];
     canCurate?: boolean;
     onCreated?: (folder: RecordingFolder) => void;
@@ -253,13 +255,26 @@ export function FolderPicker({
                                             })}
                                         </Command.Group>
                                     )}
-                                    {(["personal", "org"] as const).map(
-                                        (group) => (
+                                    {(["personal", "org"] as const)
+                                        .filter((group) =>
+                                            matches.some(
+                                                (entry) =>
+                                                    entry.folder.scope ===
+                                                    group,
+                                            ),
+                                        )
+                                        .map((group) => (
                                             <Command.Group
                                                 key={group}
                                                 heading={
                                                     group === "org"
-                                                        ? i18n("Organization")
+                                                        ? sharing
+                                                            ? i18n(
+                                                                  "Share with the Organization",
+                                                              )
+                                                            : i18n(
+                                                                  "Organization",
+                                                              )
                                                         : i18n("Private")
                                                 }
                                                 className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -275,8 +290,7 @@ export function FolderPicker({
                                                         row(entry, group),
                                                     )}
                                             </Command.Group>
-                                        ),
-                                    )}
+                                        ))}
                                 </>
                             )}
                             {matches.length === 0 &&

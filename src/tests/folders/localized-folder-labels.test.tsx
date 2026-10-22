@@ -90,6 +90,48 @@ afterEach(() => {
 });
 
 describe("localized folder labels", () => {
+    it.each([
+        [
+            1,
+            "1 položka, i z podsložek",
+            "1 položka, 1 složka",
+            "1 složka celkem",
+        ],
+        [
+            3,
+            "3 položky, i z podsložek",
+            "3 položky, 3 složky",
+            "3 složky celkem",
+        ],
+        [
+            8,
+            "8 položek, i z podsložek",
+            "8 položek, 8 složek",
+            "8 složek celkem",
+        ],
+    ] as const)("keeps Czech count messages whole and pluralizes %s", (count, items, combined, all) => {
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
+                { count },
+            ),
+        ).toBe(items);
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{items, plural, one {# item} other {# items}}, {folders, plural, one {# folder} other {# folders}}",
+                { items: count, folders: count },
+            ),
+        ).toBe(combined);
+        expect(
+            translatedSourceMessage(
+                "cs-CZ",
+                "{count, plural, one {All # folder} other {All # folders}}",
+                { count },
+            ),
+        ).toBe(all);
+    });
     it("shows and searches the Czech root label, including accessible actions, without allowing rename", () => {
         render(
             <FolderTree
