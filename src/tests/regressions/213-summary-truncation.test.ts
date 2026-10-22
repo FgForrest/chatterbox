@@ -199,7 +199,14 @@ describe("summary generation — no transcript truncation (#213)", () => {
             [{ deletedAt: null }],
         ]);
         selectResults.set(transcriptions, [
-            [{ recordingId: "rec-1", userId: "user-1", text: transcript }],
+            [
+                {
+                    recordingId: "rec-1",
+                    userId: "user-1",
+                    source: "riffado",
+                    text: transcript,
+                },
+            ],
         ]);
         selectResults.set(userSettings, [
             [{ summaryPrompt: null, aiOutputLanguage: null }],

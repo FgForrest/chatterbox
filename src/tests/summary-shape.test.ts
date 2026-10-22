@@ -158,7 +158,14 @@ async function summarize(modelContent: string) {
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
-        [{ recordingId: "rec-1", userId: "user-1", text: "a transcript" }],
+        [
+            {
+                recordingId: "rec-1",
+                userId: "user-1",
+                source: "riffado",
+                text: "a transcript",
+            },
+        ],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null }],

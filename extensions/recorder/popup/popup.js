@@ -7,6 +7,7 @@
 
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
+import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
 import { microphonePermission } from "../lib/microphone.js";
 import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
@@ -248,6 +249,7 @@ async function render(state) {
 
     const paired = await isPaired();
     if (version !== renderVersion) return;
+    void renderMeetingPromptOffer(paired).catch(() => {});
     if (!paired) {
         await renderUnpaired();
         return;
@@ -357,6 +359,11 @@ el("dismiss-mic").addEventListener("click", async () => {
     await saveSettings({ micReminderDismissed: true });
     await renderMicrophoneWarning(currentState);
     await sendMessage({ type: "reevaluate-tabs" });
+});
+
+const renderMeetingPromptOffer = bindMeetingPromptOffer({
+    offer: el("meeting-prompt-offer"), enable: el("enable-meeting-prompt"),
+    dismiss: el("dismiss-meeting-prompt"), status: el("meeting-prompt-offer-status"),
 });
 
 // ---- Live updates --------------------------------------------------------

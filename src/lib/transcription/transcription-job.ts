@@ -1,6 +1,7 @@
 import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
+import { recordingLanguage } from "@/lib/recordings/language";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 
 export const TRANSCRIPTION_JOB_KIND = "transcription";
@@ -15,6 +16,7 @@ export interface TranscriptionJobPayload {
     providerId?: string;
     model?: string;
     attributionSource?: "riffado" | "plaud" | "mixed";
+    language?: string;
     force: boolean;
     /** Absent on the private view, which is every job queued before views existed. */
     view?: RecordingView;
@@ -80,11 +82,23 @@ export function parseTranscriptionJobPayload(
             'view must be "private" or "org" when present',
         );
     }
+    if (
+        raw.language !== undefined &&
+        (!recordingLanguage(raw.language) ||
+            raw.trigger !== "manual" ||
+            raw.force !== true)
+    ) {
+        throw new InvalidJobPayloadError(
+            TRANSCRIPTION_JOB_KIND,
+            "language requires a manual re-transcription and an ISO 639-1 code",
+        );
+    }
     return {
         recordingId: raw.recordingId,
         trigger: raw.trigger,
         providerId: raw.providerId,
         model: raw.model,
+        ...(typeof raw.language === "string" ? { language: raw.language } : {}),
         attributionSource: raw.attributionSource,
         force: raw.force ?? raw.trigger === "manual",
         ...(raw.view === "org" ? { view: "org" as const } : {}),
@@ -99,6 +113,7 @@ export async function enqueueTranscriptionJob(input: {
     providerId?: string;
     model?: string;
     attributionSource?: "riffado" | "plaud" | "mixed";
+    language?: string;
     force?: boolean;
     view?: RecordingView;
 }): Promise<EnqueueJobResult> {
@@ -119,6 +134,7 @@ export async function enqueueTranscriptionJob(input: {
             trigger: input.trigger,
             ...(input.providerId ? { providerId: input.providerId } : {}),
             ...(input.model ? { model: input.model } : {}),
+            ...(input.language ? { language: input.language } : {}),
             ...(input.attributionSource
                 ? { attributionSource: input.attributionSource }
                 : {}),

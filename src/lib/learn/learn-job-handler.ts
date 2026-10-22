@@ -15,7 +15,6 @@ import type { PipelineJobResult, StepOutcome } from "@/lib/pipeline/outcome";
 
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { recordingItemJoin } from "@/db/items";
 import {
     chatterItems,
     knowledgeAliases,
@@ -29,6 +28,7 @@ import {
     recordings,
     transcriptCorrections,
     transcriptions,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
     users,
 } from "@/db/schema";
@@ -40,24 +40,27 @@ import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
-import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
-import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { insertSuggestionsInTx } from "@/lib/knowledge/attribution";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { nodeKey } from "@/lib/knowledge/fact-rules";
 import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { findPersonByEmail } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
+import { learnGuessRowId } from "@/lib/knowledge/speaker-label-rules";
 import { detectLanguage } from "@/lib/knowledge/stemming/detect-language";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnChatClients } from "@/lib/learn/chat-clients";
 import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { isFinalLearnError } from "@/lib/learn/errors";
+import { learnLanguageCandidate } from "@/lib/learn/language";
 import {
     failLearnRunAfterTerminalJob,
     LEARN_JOB_KIND,
@@ -81,6 +84,7 @@ import {
     runFallbackPass,
 } from "@/lib/learn/run-fallback";
 import { issueLearnRunToken } from "@/lib/learn/run-token";
+import { speakerPromptContext } from "@/lib/learn/speaker-prompt-context";
 import { findEntities, type LearnToolContext } from "@/lib/learn/tools";
 import {
     currentFactKey,
@@ -99,6 +103,7 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import type { ProviderPin } from "@/lib/profiles/settings";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import {
     type contentWriterRefusal,
     contentWriterScope,
@@ -304,6 +309,27 @@ async function fenceOf(
               )
               .orderBy(asc(transcriptSpeakers.label))
         : [];
+    const rejected = run.transcriptionId
+        ? await executor
+              .select({
+                  label: transcriptSpeakerRejections.label,
+                  personId: transcriptSpeakerRejections.personId,
+              })
+              .from(transcriptSpeakerRejections)
+              .where(
+                  and(
+                      eq(
+                          transcriptSpeakerRejections.transcriptionId,
+                          run.transcriptionId,
+                      ),
+                      eq(transcriptSpeakerRejections.userId, run.userId),
+                  ),
+              )
+              .orderBy(
+                  asc(transcriptSpeakerRejections.label),
+                  asc(transcriptSpeakerRejections.personId),
+              )
+        : [];
     const dismissed = await executor
         .select({ hmac: learnDismissals.fingerprintHmac })
         .from(learnDismissals)
@@ -313,6 +339,7 @@ async function fenceOf(
         [...generations.entries()].sort(),
         vocabulary?.version ?? 0,
         answered,
+        rejected,
         dismissed.map((row) => row.hmac),
     ]);
 }
@@ -539,7 +566,27 @@ async function frameFor(
             markedUnknown: transcriptSpeakers.markedUnknown,
         })
         .from(transcriptSpeakers)
-        .where(eq(transcriptSpeakers.transcriptionId, run.transcriptionId));
+        .where(
+            and(
+                eq(transcriptSpeakers.transcriptionId, run.transcriptionId),
+                eq(transcriptSpeakers.userId, run.userId),
+            ),
+        );
+    const rejectedSpeakers = await db
+        .select({
+            label: transcriptSpeakerRejections.label,
+            personId: transcriptSpeakerRejections.personId,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(
+            and(
+                eq(
+                    transcriptSpeakerRejections.transcriptionId,
+                    run.transcriptionId,
+                ),
+                eq(transcriptSpeakerRejections.userId, run.userId),
+            ),
+        );
     const recorder = await recorderOf(run, known.people);
     return {
         ...known,
@@ -559,6 +606,7 @@ async function frameFor(
                     row.markedUnknown ? null : row.personId,
                 ]),
         ),
+        rejectedSpeakers,
         recorderPersonId: recorder?.personId ?? null,
         // The words that already carry a confirmed correction, as everyone
         // reading the transcript in its view sees them.
@@ -752,10 +800,16 @@ async function runLearnJob({
         }
 
         const shared = run.view === "org";
+        const confirmedLanguage = await readConfirmedLanguage(
+            run.userId,
+            run.itemId,
+        );
+        const contentLanguage =
+            confirmedLanguage ?? transcript.detectedLanguage;
         const tools: LearnToolContext = {
             read: { kind: "recording", ownerUserId: run.userId, shared },
             budget: { remaining: TOOL_BUDGET },
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
         };
         const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
             sharedOnly: shared,
@@ -768,12 +822,37 @@ async function runLearnJob({
         const frameBefore = await frameFor(run, {
             revision: transcript.revision,
             turns,
-            language: transcript.detectedLanguage,
+            language: contentLanguage,
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
         const { chat, bridge, provider, baseUrl, model, payerUserId } =
             await chatFor(run, signal, profile.settings.steps.learn.provider);
+        const mayChooseEvent =
+            run.view === "private" && run.actorUserId === run.userId;
+        const storedEventId =
+            typeof run.inputs?.calendarEventId === "string"
+                ? run.inputs.calendarEventId
+                : undefined;
+        const storedAutoSelected =
+            run.inputs?.calendarEventAutoSelected === true;
+        const chosenEventId = mayChooseEvent
+            ? payload.calendarEventId
+            : undefined;
+        let selectedEventId: string | undefined;
+        if (mayChooseEvent) {
+            selectedEventId = chosenEventId ?? storedEventId;
+        } else if (storedAutoSelected) {
+            selectedEventId = storedEventId;
+        }
+        const eventAutoSelected =
+            selectedEventId === undefined ||
+            (chosenEventId === undefined && storedAutoSelected);
+        const roster = await resolveMeetingRoster({
+            ownerUserId: run.userId,
+            itemId: run.itemId,
+            calendarEventId: selectedEventId,
+        });
         await db
             .update(learnRuns)
             .set({
@@ -782,6 +861,8 @@ async function runLearnJob({
                 payerUserId,
                 inputs: {
                     ...run.inputs,
+                    calendarEventId: roster?.eventId ?? selectedEventId ?? "",
+                    calendarEventAutoSelected: eventAutoSelected,
                     contentId: transcript.id,
                     contentRevision: transcript.revision,
                 },
@@ -815,57 +896,19 @@ async function runLearnJob({
             ![...frameBefore.answeredLabels.values()].includes(recorderId)
                 ? { personId: recorderId, name: recorderName }
                 : null;
-        const [recording] =
-            payload.calendarEventId &&
-            run.view === "private" &&
-            run.actorUserId === run.userId
-                ? await db
-                      .select({
-                          start: chatterItems.occurredAt,
-                          end: recordings.endTime,
-                      })
-                      .from(recordings)
-                      .innerJoin(chatterItems, recordingItemJoin)
-                      .where(
-                          and(
-                              eq(recordings.id, run.itemId),
-                              eq(recordings.userId, run.userId),
-                          ),
-                      )
-                      .limit(1)
-                : [];
-        const calendarEvents = recording
-            ? await listCalendarEventsForRecording({
-                  userId: run.userId,
-                  start: recording.start,
-                  end: recording.end,
-              }).catch(() => [])
-            : [];
-        const selectedEvent = calendarEvents.find(
-            (event) => event.id === payload.calendarEventId,
-        );
-        const calendarSpeakerCandidates =
-            selectedEvent?.attendees.map((attendee) => ({
-                name: attendee.name,
-                source: "calendar" as const,
-            })) ?? [];
-        const meetSpeakerCandidates =
-            selectedEvent && recording
-                ? await getMeetSpeakerCandidates({
-                      userId: run.userId,
-                      event: selectedEvent,
-                      recordingStartedAt: recording.start,
-                      recordingEndedAt: recording.end,
-                  })
-                : [];
-        const speakerCandidates = [
-            ...calendarSpeakerCandidates,
-            ...meetSpeakerCandidates,
-        ];
+        const speakerCandidates = roster?.attendees ?? [];
+        const facts = (await knowledgeView(tools.read)).facts;
+        const promptContext = (personIds: readonly string[] = []) =>
+            speakerPromptContext(
+                { ...frameBefore, speakerCandidates },
+                facts,
+                personIds,
+            );
+        const { knownPeople, answeredSpeakers, knownFacts } = promptContext();
         const reviewLocale = await resolveLearnReviewLocale(
             db,
             run,
-            transcript.detectedLanguage ??
+            contentLanguage ??
                 detectLanguage(turns.map((turn) => turn.text).join("\n")),
         );
         reportProgress({ phase: "reading" });
@@ -875,12 +918,15 @@ async function runLearnJob({
                       chat: bridge,
                       token: issueLearnRunToken(run.id),
                       turns,
-                      language: transcript.detectedLanguage,
+                      language: contentLanguage,
                       reviewLocale,
                       relations,
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      knownPeople,
+                      answeredSpeakers,
+                      knownFacts,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),
@@ -891,14 +937,18 @@ async function runLearnJob({
                       lookup: {
                           findEntities: (query) => findEntities(tools, query),
                       },
+                      speakerContext: promptContext,
                       lookupBudget: TOOL_BUDGET,
                       turns,
-                      language: transcript.detectedLanguage,
+                      language: contentLanguage,
                       reviewLocale,
                       relations,
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      knownPeople,
+                      answeredSpeakers,
+                      knownFacts,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),
@@ -927,31 +977,32 @@ async function runLearnJob({
             const frame = await frameFor(run, {
                 revision: transcript.revision,
                 turns,
-                language: transcript.detectedLanguage,
+                language: contentLanguage,
                 provider: transcript.provider,
             });
-            const validated = validateLearnOutput(pass.output, frame);
+            const validated = validateLearnOutput(pass.output, {
+                ...frame,
+                speakerCandidates,
+            });
+            const languageItem = learnLanguageCandidate(
+                pass.output.language,
+                transcript.detectedLanguage,
+                confirmedLanguage,
+            );
+            if (
+                languageItem &&
+                !frame.dismissed.has(
+                    learnFingerprintHmac(languageItem.fingerprint),
+                )
+            )
+                validated.items.unshift(languageItem);
             const items: ReviewCandidate[] = lastAttempt
-                ? validated.items.map(
-                      (item) =>
-                          ({
-                              ...item,
-                              preTicked: false,
-                          }) as ReviewCandidate,
+                ? validated.items.map((item) =>
+                      item.kind === "language"
+                          ? item
+                          : { ...item, preTicked: false },
                   )
                 : validated.items;
-            const stats = counts(items, {
-                ...baseStats,
-                ...(fenceAttempt > 1
-                    ? { fence_retries: fenceAttempt - 1 }
-                    : {}),
-                ...Object.fromEntries(
-                    Object.entries(validated.dropped).map(([reason, n]) => [
-                        `dropped_${reason}`,
-                        n ?? 0,
-                    ]),
-                ),
-            });
             // Decided before the transaction: it may ask the identity
             // provider, which no transaction waits on.
             const curatesNow =
@@ -959,18 +1010,30 @@ async function runLearnJob({
                     ? await userCuratesOrganizationNow(run.actorUserId)
                     : false;
             const outcome = await db.transaction(async (tx) => {
-                await tx
-                    .select({ id: recordings.id })
+                await lockOrgPeopleShared(tx);
+                const [currentRecording] = await tx
+                    .select({
+                        id: recordings.id,
+                        confirmedLanguage: recordings.confirmedLanguage,
+                    })
                     .from(recordings)
-                    .where(eq(recordings.id, run.itemId))
+                    .where(
+                        and(
+                            eq(recordings.id, run.itemId),
+                            eq(recordings.userId, run.userId),
+                        ),
+                    )
                     .for("share");
-                // Speaker answers are written under the transcript held
-                // for update: holding it for share keeps them still.
                 const [current] = await tx
                     .select({ revision: transcriptions.revision })
                     .from(transcriptions)
-                    .where(eq(transcriptions.id, run.transcriptionId))
-                    .for("share");
+                    .where(
+                        and(
+                            eq(transcriptions.id, run.transcriptionId),
+                            eq(transcriptions.userId, run.userId),
+                        ),
+                    )
+                    .for("update");
                 const [still] = await tx
                     .select({ status: learnRuns.status })
                     .from(learnRuns)
@@ -979,6 +1042,24 @@ async function runLearnJob({
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
+                if (currentRecording?.confirmedLanguage) {
+                    const index = items.findIndex(
+                        (item) => item.kind === "language",
+                    );
+                    if (index >= 0) items.splice(index, 1);
+                }
+                const stats = counts(items, {
+                    ...baseStats,
+                    ...(fenceAttempt > 1
+                        ? { fence_retries: fenceAttempt - 1 }
+                        : {}),
+                    ...Object.fromEntries(
+                        Object.entries(validated.dropped).map(([reason, n]) => [
+                            `dropped_${reason}`,
+                            n ?? 0,
+                        ]),
+                    ),
+                });
                 const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
                 ) => {
@@ -1021,7 +1102,57 @@ async function runLearnJob({
                 ) {
                     return { status: "stale" as const, items: 0 };
                 }
+                await tx
+                    .delete(transcriptSpeakers)
+                    .where(
+                        and(
+                            eq(transcriptSpeakers.userId, run.userId),
+                            eq(
+                                transcriptSpeakers.transcriptionId,
+                                run.transcriptionId,
+                            ),
+                            eq(transcriptSpeakers.status, "suggested"),
+                            inArray(transcriptSpeakers.source, [
+                                "llm",
+                                "calendar",
+                                "meet",
+                            ]),
+                        ),
+                    );
                 if (items.length > 0) {
+                    await insertSuggestionsInTx(tx, {
+                        userId: run.userId,
+                        transcriptionId: run.transcriptionId,
+                        rows: items.flatMap((item) =>
+                            item.kind === "speaker" &&
+                            item.payload.personId &&
+                            item.payload.guess
+                                ? [
+                                      {
+                                          id: learnGuessRowId(
+                                              run.id,
+                                              item.payload.label,
+                                          ),
+                                          label: item.payload.label,
+                                          personId: item.payload.personId,
+                                          source:
+                                              item.payload.source ===
+                                                  "calendar" ||
+                                              item.payload.source === "meet"
+                                                  ? item.payload.source
+                                                  : "llm",
+                                          confidence: Math.min(
+                                              0.49,
+                                              item.payload.guess.confidence,
+                                          ),
+                                          evidenceStartMs:
+                                              item.payload.evidenceMs[0] ??
+                                              null,
+                                      },
+                                  ]
+                                : [],
+                        ),
+                    });
                     await tx.insert(learnReviewItems).values(
                         items.map((item) => ({
                             runId: run.id,

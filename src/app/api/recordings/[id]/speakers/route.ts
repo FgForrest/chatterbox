@@ -17,6 +17,7 @@ import {
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
+import { withSpeakerProposalContext } from "@/lib/learn/speaker-proposal-context";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -50,11 +51,17 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         return NextResponse.json({
             transcriptionId: transcript.id,
             revision: transcript.revision,
-            speakers: orgViewSpeakers(speakers, {
-                curator:
-                    access.ownerUserId === session.user.id ||
-                    (await actsForOrganization(actor)),
-            }),
+            speakers: await withSpeakerProposalContext(
+                access.ownerUserId,
+                access.orgUserId ?? access.ownerUserId,
+                transcript.id,
+                transcript.revision,
+                orgViewSpeakers(speakers, {
+                    curator:
+                        access.ownerUserId === session.user.id ||
+                        (await actsForOrganization(actor)),
+                }),
+            ),
         });
     }
 
@@ -67,10 +74,13 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     return NextResponse.json({
         transcriptionId: transcript.id,
         revision: transcript.revision,
-        // Shared, a suggestion is the organization account's to review.
-        speakers: access.shared
-            ? speakers.filter((speaker) => speaker.status === "confirmed")
-            : speakers,
+        speakers: await withSpeakerProposalContext(
+            session.user.id,
+            session.user.id,
+            transcript.id,
+            transcript.revision,
+            speakers,
+        ),
     });
 });
 
@@ -257,8 +267,8 @@ function personNotFound(): AppError {
  * never heard of and making the user create them first would be a needless
  * step.
  *
- * A name or an "unknown" set here is `confirmed` with source `user` and the
- * person who said it: it came from a human looking at the transcript, which
+ * A name or an "unknown" set here is `confirmed` with the human confirmer
+ * and the accepted roster source, or `user`: it came from a human looking at the transcript, which
  * is the only evidence this feature treats as strong enough to reach a
  * summary or an export.
  *
@@ -332,9 +342,13 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     return NextResponse.json({
         transcriptionId: transcript.id,
         revision: transcript.revision,
-        speakers: orgView
-            ? orgViewSpeakers(speakers, { curator: true })
-            : speakers,
+        speakers: await withSpeakerProposalContext(
+            ownerUserId,
+            orgView ? (access.orgUserId ?? ownerUserId) : ownerUserId,
+            transcript.id,
+            transcript.revision,
+            orgView ? orgViewSpeakers(speakers, { curator: true }) : speakers,
+        ),
     });
 });
 

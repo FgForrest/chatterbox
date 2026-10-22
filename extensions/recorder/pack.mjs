@@ -40,6 +40,7 @@ archive.append(`${JSON.stringify(storeManifest, null, 4)}\n`, {
 for (const entry of [
     "service-worker.js",
     "content-pairing.js",
+    "content-meeting.js",
     "probe.png",
     "lib",
     "_locales",

@@ -96,4 +96,6 @@ into a profile** to keep editing one.
 - **API Keys** and **Webhooks**: connect Chatterbox to other tools.
 - **Google Account**: connect the Google account used for [Google Drive exports](exports-backups-retention.md#to-google-drive).
 
+Calendar and Meet access is optional and read-only. When connected, every manual and automatic audio Learn run uses the owner's meeting attendees for **?** speaker suggestions, and supported transcription providers and the correction pass use their names for spelling. Confirm suggestions yourself; unticked guesses stay unconfirmed. The review shows invitations, Meet attendance, transcript evidence or a guess with its reason. No attendee emails or voice data are used.
+
 Next: [Chatterbox in Claude](claude.md)

@@ -17,6 +17,8 @@ export interface CalendarEventCandidate {
     start: string;
     end: string;
     attendees: { name: string }[];
+    /** Meet code read from the event list; never returned to the browser. */
+    meetingCode?: string | null;
 }
 
 interface CalendarEventResponse {
@@ -26,6 +28,10 @@ interface CalendarEventResponse {
         status?: string;
         start?: { dateTime?: string };
         end?: { dateTime?: string };
+        hangoutLink?: string;
+        conferenceData?: {
+            entryPoints?: { entryPointType?: string; uri?: string }[];
+        };
         attendeesOmitted?: boolean;
         attendees?: {
             displayName?: string;
@@ -73,7 +79,7 @@ export async function listCalendarEventsForRecording(input: {
     url.searchParams.set("maxAttendees", "100");
     url.searchParams.set(
         "fields",
-        "nextPageToken,items(id,summary,status,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,responseStatus,resource,self))",
+        "nextPageToken,items(id,summary,status,hangoutLink,conferenceData,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,responseStatus,resource,self))",
     );
     const token = await getGoogleAccessToken(input.userId, {
         expectedSubject: connection.subject,
@@ -105,6 +111,7 @@ export async function listCalendarEventsForRecording(input: {
         return [
             {
                 id: event.id,
+                meetingCode: extractMeetCode(event),
                 title: (typeof event.summary === "string"
                     ? event.summary
                     : "Meeting"
@@ -134,56 +141,4 @@ export async function listCalendarEventsForRecording(input: {
             },
         ];
     });
-}
-
-/** Reads the selected event's Meet code server-side without exposing it to the browser. */
-export async function getSelectedCalendarMeetCode(input: {
-    userId: string;
-    event: CalendarEventCandidate;
-    fetchImpl?: typeof fetch;
-}): Promise<string | null> {
-    if (!input.event.id || input.event.id.length > 1024) return null;
-    const connection = await getGoogleConnectionStatus(input.userId);
-    if (
-        connection?.status !== "active" ||
-        !connection.scopes.includes(GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE)
-    ) {
-        return null;
-    }
-    const token = await getGoogleAccessToken(input.userId, {
-        expectedSubject: connection.subject,
-        requiredScope: GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
-        fetchImpl: input.fetchImpl,
-    });
-    const url = new URL(`${API_URL}/${encodeURIComponent(input.event.id)}`);
-    url.searchParams.set(
-        "fields",
-        "id,status,start,end,conferenceData,hangoutLink",
-    );
-    const response = await (input.fetchImpl ?? fetch)(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(8_000),
-    });
-    if (response.status === 401) invalidateGoogleAccessToken(input.userId);
-    if (!response.ok) return null;
-    const event = (await response.json()) as {
-        id?: string;
-        status?: string;
-        start?: { dateTime?: string };
-        end?: { dateTime?: string };
-        hangoutLink?: string;
-        conferenceData?: {
-            entryPoints?: { entryPointType?: string; uri?: string }[];
-        };
-    };
-    if (
-        event.id !== input.event.id ||
-        event.status === "cancelled" ||
-        Date.parse(event.start?.dateTime ?? "") !==
-            Date.parse(input.event.start) ||
-        Date.parse(event.end?.dateTime ?? "") !== Date.parse(input.event.end)
-    ) {
-        return null;
-    }
-    return extractMeetCode(event);
 }

@@ -1,11 +1,9 @@
 import type { LearnSpeakerCandidate } from "@/lib/learn/run-fallback";
-import {
-    type CalendarEventCandidate,
-    getSelectedCalendarMeetCode,
-} from "./calendar-events";
+import type { CalendarEventCandidate } from "./calendar-events";
 import { getGoogleAccessToken, getGoogleConnectionStatus } from "./connection";
 import { GOOGLE_MEET_READ_SCOPE } from "./meet-consent";
 import { getMeetParticipantContext } from "./meet-context";
+import { attendeeNameKey } from "./meeting-roster-names";
 
 const MAX_LEARN_CANDIDATES = 80;
 
@@ -16,6 +14,7 @@ export async function getMeetSpeakerCandidates(input: {
     recordingStartedAt: Date;
     recordingEndedAt: Date;
     fetchImpl?: typeof fetch;
+    onGoogleError?: () => void;
 }): Promise<LearnSpeakerCandidate[]> {
     try {
         const connection = await getGoogleConnectionStatus(input.userId);
@@ -25,11 +24,7 @@ export async function getMeetSpeakerCandidates(input: {
         ) {
             return [];
         }
-        const meetingCode = await getSelectedCalendarMeetCode({
-            userId: input.userId,
-            event: input.event,
-            fetchImpl: input.fetchImpl,
-        });
+        const meetingCode = input.event.meetingCode;
         if (!meetingCode) return [];
         const accessToken = await getGoogleAccessToken(input.userId, {
             expectedSubject: connection.subject,
@@ -43,16 +38,20 @@ export async function getMeetSpeakerCandidates(input: {
             recordingEndedAt: input.recordingEndedAt,
             fetchImpl: input.fetchImpl,
         });
-        if (context.status !== "available") return [];
+        if (context.status !== "available") {
+            if (context.reason === "request_failed") input.onGoogleError?.();
+            return [];
+        }
         const names = new Map<string, string>();
         for (const participant of context.participants) {
             const name = participant.displayName.slice(0, 120);
-            const key = name.toLocaleLowerCase();
+            const key = attendeeNameKey(name);
             if (!names.has(key)) names.set(key, name);
             if (names.size >= MAX_LEARN_CANDIDATES) break;
         }
         return [...names.values()].map((name) => ({ name, source: "meet" }));
     } catch {
+        input.onGoogleError?.();
         return [];
     }
 }

@@ -7,6 +7,7 @@ import { decryptText } from "@/lib/encryption/fields";
 import { modelInput } from "@/lib/learn/llm-input";
 import { maskedContentForModel } from "@/lib/mail/redact";
 import { readStoredSummary } from "@/lib/summary/read-summary";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 
 export interface TitleInputFence {
     contentId: string;
@@ -40,7 +41,7 @@ async function readDetectedLanguage(
     return transcript?.detectedLanguage ?? null;
 }
 
-/** Prefer the complete summary, then the corrected Riffado transcript. */
+/** Prefer the complete summary, then the preferred corrected transcript. */
 export async function readTitleInput(
     userId: string,
     recordingId: string,
@@ -108,17 +109,7 @@ export async function readTitleInput(
               }
             : null;
     }
-    const [transcript] = await db
-        .select()
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, userId),
-                eq(transcriptions.source, "riffado"),
-            ),
-        )
-        .limit(1);
+    const transcript = await readPreferredTranscript(recordingId, userId);
     if (!transcript) return null;
     const input = await modelInput(transcript);
     const fence =

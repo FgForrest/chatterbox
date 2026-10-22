@@ -2,6 +2,7 @@
 
 import {
     ArrowLeft,
+    BookOpen,
     Folder,
     FolderPlus,
     PanelLeftOpen,
@@ -37,6 +38,8 @@ export function LibraryLocationHeader({
     folder,
     onNavigate,
     onSettings,
+    onKnowledge,
+    knowledgeOpen = false,
     onNewFolder,
     onAssign,
     onMove,
@@ -52,6 +55,8 @@ export function LibraryLocationHeader({
     folder: RecordingFolder | null;
     onNavigate: (folder: RecordingFolder | null) => void;
     onSettings: (folder: RecordingFolder) => void;
+    onKnowledge?: (folder: RecordingFolder) => void;
+    knowledgeOpen?: boolean;
     onNewFolder: () => void;
     onAssign: (recordingId: string, folderId: string) => Promise<void>;
     onMove: (recordingId: string, from: string, to: string) => Promise<void>;
@@ -260,6 +265,22 @@ export function LibraryLocationHeader({
                             </>
                         )}
                     </nav>
+                    {folder && onKnowledge && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            aria-pressed={knowledgeOpen}
+                            className={
+                                folder.scope === "org"
+                                    ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
+                                    : "shrink-0"
+                            }
+                            onClick={() => onKnowledge(folder)}
+                        >
+                            <BookOpen className="size-4" />
+                            {i18n("Knowledge")}
+                        </Button>
+                    )}
                     {variant === "walk" && onShowRail && (
                         <Button
                             variant="ghost"

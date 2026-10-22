@@ -7,7 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     CategorizePanel,
     type CategorizePanelData,
@@ -108,7 +108,17 @@ function renderPanel(
     );
 }
 
+class Observer {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+}
+
 describe("CategorizePanel", () => {
+    beforeEach(() => {
+        vi.stubGlobal("ResizeObserver", Observer);
+        Element.prototype.scrollIntoView = vi.fn();
+    });
     afterEach(() => {
         cleanup();
         vi.unstubAllGlobals();
@@ -140,7 +150,7 @@ describe("CategorizePanel", () => {
         ).toBe(true);
 
         fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
-        fireEvent.click(screen.getByText("New folder…"));
+        fireEvent.click(screen.getByRole("option", { name: "New folder…" }));
         expect(
             folder.contains(
                 screen.getByRole("textbox", { name: "Folder name" }),
@@ -197,6 +207,79 @@ describe("CategorizePanel", () => {
         expect(
             screen.getByRole("combobox", { name: "Folder" }).textContent,
         ).toContain("Private › Notes");
+        expect(
+            screen
+                .getByRole("combobox", { name: "Folder" })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+    });
+
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("recovers the disabled folder display and submits current placements after deletion in %s profile mode", async (kind) => {
+        const fetchMock = vi.fn(async () =>
+            Response.json({ requestedGeneration: 2 }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const onCategorized = vi.fn();
+        const view = (data: CategorizePanelData) => (
+            <CategorizePanel
+                data={data}
+                kind={kind}
+                mode="profile"
+                profileDetails={details}
+                onCategorized={onCategorized}
+            />
+        );
+        const { rerender } = render(
+            view({ ...base, selectedFolderIds: ["notes", "sales"] }),
+        );
+        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
+        fireEvent.click(screen.getByText("Sales calls"));
+        const remaining = {
+            ...base,
+            folders: base.folders.filter(({ id }) => id !== "notes"),
+            selectedFolderIds: ["sales"],
+        };
+        rerender(view(remaining));
+        expect(
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain("Organization › Sales");
+        expect(
+            screen.getByRole("combobox", { name: "Profile" }).textContent,
+        ).toContain("Sales calls");
+        const submit = screen.getByRole("button", {
+            name: kind === "mail" ? "Categorize email" : "Categorize recording",
+        });
+        expect(submit.hasAttribute("disabled")).toBe(false);
+        fireEvent.click(submit);
+        await waitFor(() =>
+            expect(onCategorized).toHaveBeenCalledWith(["sales"]),
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/item-1/categorize",
+            expect.objectContaining({
+                body: JSON.stringify({
+                    folderIds: ["sales"],
+                    profileId: "profile-2",
+                }),
+            }),
+        );
+        rerender(view({ ...remaining, selectedFolderIds: [] }));
+        expect(submit.hasAttribute("disabled")).toBe(true);
+        expect(
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toBe("Choose a folder");
+    });
+
+    it("gates profile submission on server placements while folder entries are loading", () => {
+        renderPanel({ ...base, folders: [] }, { mode: "profile" });
+        expect(
+            screen
+                .getByRole("button", { name: "Categorize recording" })
+                .hasAttribute("disabled"),
+        ).toBe(false);
     });
 
     it("hides the profile description panel when the description is empty", () => {
@@ -297,6 +380,18 @@ describe("CategorizePanel", () => {
         ).toBe(false);
     });
 
+    it("prefills the new folder name with the autocomplete query", () => {
+        renderPanel();
+        fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
+            target: { value: "Velnora" },
+        });
+        fireEvent.click(screen.getByRole("option", { name: "New folder…" }));
+        expect(
+            screen.getByRole("textbox", { name: "Folder name" }),
+        ).toHaveProperty("value", "Velnora");
+    });
+
     it("creates a first-level folder without a parent picker", async () => {
         const onFolderCreated = vi.fn();
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -322,7 +417,7 @@ describe("CategorizePanel", () => {
         renderPanel(base, { onFolderCreated });
 
         fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
-        fireEvent.click(screen.getByText("New folder…"));
+        fireEvent.click(screen.getByRole("option", { name: "New folder…" }));
         expect(screen.queryByText("Parent folder")).toBeNull();
         fireEvent.change(screen.getByRole("textbox", { name: "Folder name" }), {
             target: { value: "Clients" },
@@ -345,6 +440,70 @@ describe("CategorizePanel", () => {
         expect(
             screen.getByRole("combobox", { name: "Folder" }).textContent,
         ).toContain("Clients");
+    });
+
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("searches folders and previews then submits the selected folder for %s", async (kind) => {
+        const fetchMock = vi.fn(async () =>
+            Response.json({
+                resolution: {
+                    ...base.resolution,
+                    profile: base.profiles[1],
+                },
+            }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const onCategorized = vi.fn();
+        renderPanel(base, { kind, onCategorized });
+        fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+        expect(screen.queryByRole("option", { name: "Private" })).toBeNull();
+        expect(
+            screen.queryByRole("option", { name: "Organization" }),
+        ).toBeNull();
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
+            target: { value: "sales" },
+        });
+        fireEvent.click(
+            screen.getByRole("option", { name: "Sales Organization" }),
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByRole("combobox", { name: "Profile" }).textContent,
+            ).toContain("Sales calls"),
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/item-1/categorize/preview",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ folderIds: ["sales"] }),
+            }),
+        );
+        expect(screen.queryByRole("listbox")).toBeNull();
+        expect(
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain("Organization › Sales");
+        fireEvent.click(
+            screen.getByRole("button", {
+                name:
+                    kind === "mail"
+                        ? "Categorize email"
+                        : "Categorize recording",
+            }),
+        );
+        await waitFor(() =>
+            expect(onCategorized).toHaveBeenCalledWith(["sales"]),
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/item-1/categorize",
+            expect.objectContaining({
+                body: JSON.stringify({
+                    folderIds: ["sales"],
+                    profileId: "profile-2",
+                }),
+            }),
+        );
     });
 
     it("posts the single folder and chosen profile optimistically", async () => {

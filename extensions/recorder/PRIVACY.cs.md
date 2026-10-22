@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 19. října 2026
+Aktualizováno: 22. října 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -13,6 +13,25 @@ Při nastavení rozšíření požádá o přístup k mikrofonu a krátce otevř
 - Do úložiště rozšíření ukládá adresu serveru, nastavení, náhodný identifikátor instalace a stav nahrávání. Identifikátor instalace sdílí po souhlasu s nakládáním s daty pouze s právě nastavovaným nebo propojeným serverem, mimo jiné pro zneplatnění starších klíčů této instalace; stránky pro místní vývoj na localhostu mohou používat také deklarovaný přímý kanál pro nastavení. Nejde o otisk zařízení ani o tajný údaj. Klíč pro nahrávání může vytvářet nahrávky a vyhledávat názvy složek pro jejich zařazení, ale nemůže číst nahrávky. Před uložením do `chrome.storage.local` ho šifruje. Neexportovatelný klíč Web Crypto ukládá do IndexedDB rozšíření. Toto opatření brání běžnému čtení místního úložiště, ale kód spuštěný v rozšíření nebo osoba s kopií celého profilu prohlížeče může klíč stále použít.
 - Každou přibližně pětisekundovou zvukovou část šifruje klíčem vydaným vaším serverem ještě před zápisem do soukromého souborového systému Chromu. Šifrované části odesílá na zvolený server přes HTTPS. Server je dešifruje pro běžné uložení, přepis a export. V prohlížeči zůstanou do potvrzení dokončení serverem nebo do vašeho výslovného zahození. Pád prohlížeče či plný disk může nahrávání přerušit; obnovitelný může být jen ověřený začátek. Samotný prohlížeč může při práci se zvukem dočasně ukládat data mimo šifrované úložiště rozšíření.
 - Přehratelná místní kopie se automaticky nestahuje. Po dokončení záznamu na serveru ji můžete stáhnout na stránce nahrávky po přihlášení do Klepny. Stažený soubor zůstane v počítači, dokud jej nesmažete.
+
+## Volitelná výzva přímo ve schůzce
+
+Teprve po zapnutí **Výzvy ve schůzce** a povolení volitelného přístupu v Chromu
+běží izolovaný skript lišty na Google Meetu (`meet.google.com`), webovém Zoomu
+(`zoom.us`), Microsoft Teams (`teams.microsoft.com`, `teams.live.com`,
+`teams.cloud.microsoft`), Webexu (`webex.com`) a Whereby (`whereby.com`), včetně
+jejich subdomén. Chrome pro těchto sedm adres zobrazí obecné upozornění
+**Čtení a úprava dat na různých webech**, nikoli seznam jednotlivých webů. Ovládání zobrazuje jen v podporovaných místnostech schůzek.
+Nečte obsah stránek, neprovádí síťové požadavky a nikam neodesílá obsah stránek
+ani údaje z webu schůzky. Komunikuje pouze s procesem rozšíření na pozadí kvůli
+ovládání nahrávání a výběru složky. Hledání složek používá již propojený server;
+klíč pro nahrávání se stránce schůzky nezpřístupňuje. Vypnutí přepínače odebere
+přístup k těmto webům, odregistruje skript a skryje jeho ovládání. Bez tohoto
+volitelného přístupu zůstává systémové oznámení. Kliknutí na ikonu rozšíření při
+zobrazené výzvě uloží vaše potvrzení upozornění účastníkům; samo o sobě nezískává
+souhlas ostatních účastníků.
+
+Stránka schůzky může prostřednictvím posluchačů klávesnice ve fázi zachytávání sledovat stisky kláves při hledání složek v liště Klepny.
 
 ## Kam se data odesílají
 

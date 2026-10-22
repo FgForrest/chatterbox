@@ -22,6 +22,7 @@ import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence"
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { rosterProposalSourceForName } from "@/lib/learn/speaker-proposal-context";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 
@@ -46,6 +47,8 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
     answer: SpeakerAnswer;
     /** The human answering, recorded on what they confirm. */
     actorUserId: string;
+    /** Roster provenance of the unchanged guess a human explicitly accepted. */
+    proposalSource?: "calendar" | "meet";
     /**
      * The organization account sharing is decided against
      * (`sharingOrgUserId`), or null when this instance shows none. Unless
@@ -69,7 +72,7 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
  * created, so a refused change leaves nothing behind. Returns the person
  * named, if any.
  *
- * An answer is `confirmed` with source `user` and the person who gave it:
+ * An answer is `confirmed` with its original roster source, or `user`, and its confirmer:
  * it came from a human looking at the transcript, the only evidence strong
  * enough to reach a summary or an export.
  */
@@ -135,6 +138,7 @@ export async function answerSpeakerInTx(
         actorUserId,
         orgUserId,
         actsForOrganization,
+        proposalSource,
         ...version
     }: SpeakerChangeArgs,
     scopes: Set<string>,
@@ -160,10 +164,12 @@ export async function answerSpeakerInTx(
             personId: transcriptSpeakers.personId,
             status: transcriptSpeakers.status,
             markedUnknown: transcriptSpeakers.markedUnknown,
+            source: transcriptSpeakers.source,
         })
         .from(transcriptSpeakers)
         .where(
             and(
+                eq(transcriptSpeakers.userId, version.userId),
                 eq(transcriptSpeakers.transcriptionId, version.transcriptionId),
                 eq(transcriptSpeakers.label, version.label),
             ),
@@ -187,6 +193,7 @@ export async function answerSpeakerInTx(
     switch (answer.kind) {
         case "name": {
             let personId: string;
+            let acceptedSource = proposalSource;
             if ("personId" in answer) {
                 personId = await currentPersonInTx(
                     tx,
@@ -194,6 +201,14 @@ export async function answerSpeakerInTx(
                     answer.personId,
                 );
             } else {
+                acceptedSource ??= await rosterProposalSourceForName(tx, {
+                    ownerUserId: version.userId,
+                    scopeUserId,
+                    transcriptionId: version.transcriptionId,
+                    revision: version.revision,
+                    label: version.label,
+                    displayName: answer.displayName,
+                });
                 personId = (
                     await createPersonInTx(tx, {
                         userId: scopeUserId,
@@ -207,7 +222,11 @@ export async function answerSpeakerInTx(
             await writeSpeakerInTx(tx, {
                 ...where,
                 personId,
-                source: "user",
+                source:
+                    before?.personId === personId &&
+                    (before.source === "calendar" || before.source === "meet")
+                        ? before.source
+                        : (acceptedSource ?? "user"),
                 status: "confirmed",
                 confirmedByUserId: actorUserId,
             });

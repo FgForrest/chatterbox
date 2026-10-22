@@ -28,7 +28,7 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 **Timings matter.** Topics, Learn, playing a sentence and following along all need to know when each line was said. A transcript without timings is shown as plain text.
 
-**Names from the Almanac.** ElevenLabs Scribe v2 and Speechmatics are sent up to 500 names from your [Almanac](almanac.md) with each recording: your own first, then people and things mentioned recently. They spell those names right much more often. The names are sent for every recording, including people who are not in it.
+**Names from the Almanac.** ElevenLabs Scribe v2 and Speechmatics are sent up to 500 names from your [Almanac](almanac.md) with each recording: your own first, then meeting attendees from Calendar and Meet when connected, then people and things mentioned recently. They spell those names right much more often. The names are sent for every recording, including people who are not in it.
 
 **Recorder transcripts.** If your recorder's service made its own transcript and summary, Chatterbox can import them (Settings → Transcription → **Import Plaud transcripts and summaries**). A recording with both shows a switch between **Plaud** and **Custom**.
 
@@ -37,6 +37,14 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 ![A transcript with speakers, topics and Learn's proposals](images/transcript-speakers.png)
 
 A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. **Collapse transcript** at the right end of the header folds it away; **Expand transcript** appears in the same place. The footer shows which provider and model made it, its language and its length.
+
+### Recording language
+
+The footer labels the provider’s estimate **Detected language** until you confirm a language, then shows **Confirmed language**. Anyone allowed to edit the transcript can change it there: the owner, or a curator in the Organization view. The choice belongs to the recording and survives re-transcription. Choose **Automatic** to clear the confirmation and use automatic language handling again.
+
+An explicit output language in the profile or account settings takes precedence. Otherwise, the confirmed language guides summaries, titles and topics, and supplies language context for Learn, corrections and spelling. Without a confirmation, automatic output follows the transcript’s predominant language.
+
+Changing the language does not rerun anything. If existing output differs, the control offers **Re-summarize** using the existing summary action. When provider detection differs from your confirmation, **Re-transcribe in …** asks for the usual replacement confirmation and pins that language for this one run. Ordinary transcription keeps its existing profile or account language choice. Exports and backups preserve the confirmed language separately from provider detection.
 
 ### Naming speakers
 
@@ -48,6 +56,8 @@ The chips above the transcript are the speakers.
 - Every chip has a coloured **▶**, including an unanswered one. Click it to hear that speaker’s next turn. Right-click remains a shortcut. Click a confirmed name to choose another person or **Open in Almanac**, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
+
+Speaker suggestions show their source and, for a guess, the model's reason in the tooltip. Calendar and Meet are used on automatic and manual runs. Confirm a **?** suggestion with one click; leaving it unticked never names the speaker. Identity uses invitations, attendance and transcript clues, never voice data.
 
 ### Topics
 

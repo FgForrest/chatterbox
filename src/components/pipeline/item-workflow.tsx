@@ -316,7 +316,16 @@ export function ItemWorkflow({
     });
     const [panelData, setPanelData] =
         useState<CategorizationPanelPresentation | null>(null);
-    const panelRequest = useRef<{ itemId: string } | null>(null);
+    const foldersSignature = JSON.stringify(
+        folders
+            .map(({ id, parentId, name }) => ({ id, parentId, name }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+    );
+    const loadedFoldersSignature = useRef<string | null>(null);
+    const panelRequest = useRef<{
+        itemId: string;
+        foldersSignature: string;
+    } | null>(null);
     const filingRef = useRef<HTMLDivElement>(null);
     const pendingFilingFocus = useRef(false);
     const invalidate = useCallback(
@@ -333,32 +342,51 @@ export function ItemWorkflow({
             current?.itemId === itemId ? current : null,
         );
         panelRequest.current = null;
+        loadedFoldersSignature.current = null;
         pendingFilingFocus.current = false;
+        return () => {
+            panelRequest.current = null;
+        };
     }, [itemId]);
 
     const loadPanel = useCallback(() => {
-        if (!canEdit || panelData || panelRequest.current?.itemId === itemId) {
+        if (
+            !canEdit ||
+            (panelData?.itemId === itemId &&
+                loadedFoldersSignature.current === foldersSignature) ||
+            (panelRequest.current?.itemId === itemId &&
+                panelRequest.current.foldersSignature === foldersSignature)
+        ) {
             return;
         }
-        panelRequest.current = { itemId };
+        const request = { itemId, foldersSignature };
+        panelRequest.current = request;
         void fetch(`/api/recordings/${encodeURIComponent(itemId)}/categorize`)
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
                 const body =
                     (await response.json()) as CategorizationPanelPresentation;
-                if (panelRequest.current?.itemId === itemId) {
+                if (
+                    panelRequest.current === request &&
+                    body.itemId === itemId
+                ) {
+                    loadedFoldersSignature.current = foldersSignature;
                     setPanelData(body);
                 }
             })
             .catch(() => {
-                toast.error(i18n("The filing options could not be loaded."));
+                if (panelRequest.current === request) {
+                    toast.error(
+                        i18n("The filing options could not be loaded."),
+                    );
+                }
             })
             .finally(() => {
-                if (panelRequest.current?.itemId === itemId) {
+                if (panelRequest.current === request) {
                     panelRequest.current = null;
                 }
             });
-    }, [canEdit, i18n, itemId, panelData]);
+    }, [canEdit, foldersSignature, i18n, itemId, panelData]);
 
     const categorizeReason = data?.phases.categorize?.reason;
     const profileReason =
@@ -732,7 +760,7 @@ export function ItemWorkflow({
             )}
             {canEdit && filingMode ? (
                 <div ref={filingRef}>
-                    {panelData ? (
+                    {panelData?.itemId === itemId ? (
                         <CategorizePanel
                             data={panelData}
                             kind={kind}

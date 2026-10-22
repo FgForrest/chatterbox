@@ -565,3 +565,26 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         });
     }
 });
+
+it("keeps the existing no-transcript guidance and disables Summarize", () => {
+    state.summaryData = null;
+    render(
+        <SummaryWidget
+            itemId="mira-empty"
+            kind="audio"
+            canChange
+            workflowVisible={false}
+            widgetId="mira-summary"
+            taskWidgetId="mira-tasks"
+        />,
+    );
+    expect(
+        screen.getByText(
+            "A custom transcript is required before generating a custom summary.",
+        ),
+    ).toBeTruthy();
+    expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Summarize" })
+            .disabled,
+    ).toBe(true);
+});

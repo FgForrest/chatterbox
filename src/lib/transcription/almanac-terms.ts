@@ -56,6 +56,25 @@ function baseLanguage(language: string | null | undefined): string | null {
     return language ? (language.toLowerCase().split(/[-_]/)[0] ?? null) : null;
 }
 
+export interface AlmanacTermRankingInput {
+    items: readonly ViewItem[];
+    usage: readonly AlmanacUsageRow[];
+    scopeUsage?: readonly AlmanacUsageRow[];
+    recorderId: string | null;
+    language: string | null;
+    limit?: number;
+}
+
+export interface RankedAlmanacTerm extends AlmanacTerm {
+    reason: {
+        recorder: boolean;
+        folderUses: number;
+        ownerRecent: number;
+        ownerUses: number;
+        mishearings: number;
+    };
+}
+
 /**
  * The names a recording's transcription should expect, best first, at
  * most `limit`: the recorder, then names used in the item's folder scope,
@@ -65,14 +84,18 @@ function baseLanguage(language: string | null | undefined): string | null {
  * name, with the forms it was misheard as in `language` (any language when
  * unknown), and its nicknames.
  */
-export function rankAlmanacTerms(input: {
-    items: readonly ViewItem[];
-    usage: readonly AlmanacUsageRow[];
-    scopeUsage?: readonly AlmanacUsageRow[];
-    recorderId: string | null;
-    language: string | null;
-    limit?: number;
-}): AlmanacTerm[] {
+export function rankAlmanacTermsWithReasons(
+    input: AlmanacTermRankingInput,
+): RankedAlmanacTerm[] {
+    return rankTerms(input, false).terms;
+}
+
+/** Rank once, retaining the provider's capped list and a few terms below it. */
+export function rankAlmanacTermsWithOverflow(input: AlmanacTermRankingInput) {
+    return rankTerms(input, true);
+}
+
+function rankTerms(input: AlmanacTermRankingInput, includeOverflow: boolean) {
     const limit = input.limit ?? MAX_ALMANAC_TERMS;
     const usage = almanacUsageById(input.usage);
     const scopeUsage = almanacUsageById(input.scopeUsage ?? []);
@@ -102,9 +125,10 @@ export function rankAlmanacTerms(input: {
         );
     });
 
-    const terms: AlmanacTerm[] = [];
-    const byKey = new Map<string, AlmanacTerm>();
-    const add = (text: string, soundsLike: string[]) => {
+    const terms: RankedAlmanacTerm[] = [];
+    const byKey = new Map<string, RankedAlmanacTerm>();
+    let selected: RankedAlmanacTerm[] | undefined = limit <= 0 ? [] : undefined;
+    const add = (text: string, soundsLike: string[], item: ViewItem) => {
         const term = cleanTerm(text);
         if (!term) return;
         const key = term.toLocaleLowerCase();
@@ -126,71 +150,110 @@ export function rankAlmanacTerms(input: {
             }
             return;
         }
-        if (terms.length >= limit) return;
+        if (!includeOverflow && terms.length >= limit) return;
         const fresh = {
             text: term,
+            reason: {
+                recorder: item.id === input.recorderId,
+                folderUses: scopeUsage.get(item.id)?.total ?? 0,
+                ownerRecent: usage.get(item.id)?.recent ?? 0,
+                ownerUses: usage.get(item.id)?.total ?? 0,
+                mishearings: misheard(item).length,
+            },
             soundsLike: [...new Set(heard)].slice(0, MAX_SOUNDS_LIKE),
         };
         byKey.set(key, fresh);
         terms.push(fresh);
     };
     for (const item of ranked) {
-        if (terms.length >= limit) break;
+        if (!includeOverflow && terms.length >= limit) break;
         add(
             item.name,
             misheard(item).map((name) => name.text),
+            item,
         );
         for (const name of item.names) {
-            if (name.kind === "alias") add(name.text, []);
+            if (name.kind === "alias") add(name.text, [], item);
+        }
+        if (
+            includeOverflow &&
+            selected === undefined &&
+            terms.length >= limit
+        ) {
+            selected = terms.slice(0, limit).map((term) => ({
+                ...term,
+                soundsLike: [...term.soundsLike],
+            }));
         }
     }
-    return terms;
+    return {
+        terms: selected ?? terms,
+        total: terms.length,
+        belowCut: includeOverflow ? terms.slice(limit, limit + 3) : [],
+    };
 }
 
-/**
- * The names a transcription of `ownerUserId`'s recording should expect,
- * from the Almanac its Learn reads: the owner's and the Organization's
- * records, or on the Organization view the Organization's alone.
- */
-export async function almanacTermsFor(input: {
+/** Ranked names in the provider's wire format. */
+export function rankAlmanacTerms(
+    input: AlmanacTermRankingInput,
+): AlmanacTerm[] {
+    return rankAlmanacTermsWithReasons(input).map(({ text, soundsLike }) => ({
+        text,
+        soundsLike,
+    }));
+}
+
+/** Shared ranking inputs for transcription and a prospective folder preview. */
+export async function almanacTermRankingInput(input: {
     ownerUserId: string;
     shared: boolean;
     language: string | null;
     itemId?: string;
     scopeFolderIds?: readonly string[];
     limit?: number;
-}): Promise<AlmanacTerm[]> {
+}): Promise<AlmanacTermRankingInput> {
     const view = await knowledgeView({
         kind: "recording",
         ownerUserId: input.ownerUserId,
         shared: input.shared,
     });
-    if (view.items.length === 0) return [];
-    const [usage, scopeUsage, recorderId] = await Promise.all([
-        almanacUsage(
-            input.ownerUserId,
-            new Date(Date.now() - RECENT_DAYS * DAY_MS),
-        ),
-        input.itemId && input.scopeFolderIds?.length
-            ? almanacScopeUsage({
-                  ownerUserId: input.ownerUserId,
-                  orgUserId: await getOrgUserId(),
-                  itemId: input.itemId,
-                  view: input.shared ? "org" : "private",
-                  scopeFolderIds: input.scopeFolderIds,
-                  recentSince: new Date(Date.now() - RECENT_DAYS * DAY_MS),
-              })
-            : [],
-        input.shared ? null : recorderIdOf(input.ownerUserId),
-    ]);
-    return rankAlmanacTerms({
+    const since = new Date(Date.now() - RECENT_DAYS * DAY_MS);
+    const [usage, scopeUsage, recorderId] = view.items.length
+        ? await Promise.all([
+              almanacUsage(input.ownerUserId, since),
+              input.scopeFolderIds?.length
+                  ? almanacScopeUsage({
+                        ownerUserId: input.ownerUserId,
+                        orgUserId: await getOrgUserId(),
+                        itemId: input.itemId,
+                        view: input.shared ? "org" : "private",
+                        scopeFolderIds: input.scopeFolderIds,
+                        recentSince: since,
+                    })
+                  : [],
+              input.shared ? null : recorderIdOf(input.ownerUserId),
+          ])
+        : [[], [], null];
+    return {
         items: view.items,
         usage,
         scopeUsage,
         recorderId,
         language: input.language,
         limit: input.limit,
-    });
+    };
+}
+
+/** The names a recording's transcription should expect from its readable Almanac. */
+export async function almanacTermsFor(
+    input: Parameters<typeof almanacTermRankingInput>[0],
+): Promise<AlmanacTerm[]> {
+    return rankAlmanacTerms(
+        await almanacTermRankingInput({
+            ...input,
+            scopeFolderIds: input.itemId ? input.scopeFolderIds : undefined,
+        }),
+    );
 }
 
 async function recorderIdOf(ownerUserId: string): Promise<string | null> {

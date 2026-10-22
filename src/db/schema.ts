@@ -769,6 +769,7 @@ export const recordings = pgTable(
         downloadedAt: timestamp("downloaded_at"),
         // Version from Plaud API (for detecting updates)
         plaudVersion: varchar("plaud_version", { length: 50 }).notNull(),
+        confirmedLanguage: varchar("confirmed_language", { length: 2 }),
         // Metadata
         timezone: integer("timezone"),
         zonemins: integer("zonemins"),
@@ -2511,6 +2512,7 @@ export const learnReviewItems = pgTable(
                 | "fact"
                 | "relation_phrase"
                 | "new_record"
+                | "language"
             >()
             .notNull(),
         fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
@@ -2540,7 +2542,7 @@ export const learnReviewItems = pgTable(
         userIdx: index("learn_review_items_user_id_idx").on(table.userId),
         kindCheck: check(
             "learn_review_items_kind_check",
-            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record')`,
+            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record', 'language')`,
         ),
     }),
 );
@@ -4603,5 +4605,72 @@ export const personEmails = pgTable(
     (table) => ({
         pk: primaryKey({ columns: [table.userId, table.emailHash] }),
         personIdIdx: index("person_emails_person_id_idx").on(table.personId),
+    }),
+);
+
+export const almanacDuplicateDismissals = pgTable(
+    "almanac_duplicate_dismissals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 8 })
+            .$type<"person" | "entity">()
+            .notNull(),
+        leftPersonId: text("left_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        rightPersonId: text("right_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        leftEntityId: text("left_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        rightEntityId: text("right_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        dismissedByUserId: text("dismissed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pairUnique: unique("almanac_duplicate_dismissals_pair_unique")
+            .on(
+                table.userId,
+                table.kind,
+                table.leftPersonId,
+                table.rightPersonId,
+                table.leftEntityId,
+                table.rightEntityId,
+            )
+            .nullsNotDistinct(),
+        leftPersonIdx: index("almanac_duplicate_dismissals_left_person_idx").on(
+            table.leftPersonId,
+        ),
+        rightPersonIdx: index(
+            "almanac_duplicate_dismissals_right_person_idx",
+        ).on(table.rightPersonId),
+        leftEntityIdx: index("almanac_duplicate_dismissals_left_entity_idx").on(
+            table.leftEntityId,
+        ),
+        rightEntityIdx: index(
+            "almanac_duplicate_dismissals_right_entity_idx",
+        ).on(table.rightEntityId),
+        pairCheck: check(
+            "almanac_duplicate_dismissals_pair_check",
+            sql`
+            (${table.kind} = 'person' and ${table.leftPersonId} is not null and ${table.rightPersonId} is not null
+                and ${table.leftPersonId} collate "C" < ${table.rightPersonId} collate "C" and ${table.leftEntityId} is null and ${table.rightEntityId} is null)
+            or (${table.kind} = 'entity' and ${table.leftEntityId} is not null and ${table.rightEntityId} is not null
+                and ${table.leftEntityId} collate "C" < ${table.rightEntityId} collate "C" and ${table.leftPersonId} is null and ${table.rightPersonId} is null)
+        `,
+        ),
     }),
 );

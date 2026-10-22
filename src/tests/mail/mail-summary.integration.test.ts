@@ -549,7 +549,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 contentId: expect.any(String),
                 contentRevision: expect.any(Number),
             },
-            outputLanguage: "en",
+            outputLanguage: null,
             outputFormatLocale: "en",
         });
         expect(decryptText(stored?.summary ?? "")).toBe(
@@ -591,7 +591,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         ).toBe("deliver the samples to your warehouse next week");
     });
 
-    it("uses the account language for a profile mail summary when detection returned none", async () => {
+    it("uses a generic directive when detection returned none despite the account transcription language", async () => {
         await db()
             .insert(userSettings)
             .values({
@@ -631,7 +631,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             (message) => message.role === "system",
         );
         expect(system?.content).toContain(
-            "Write all natural-language output in Czech",
+            "Write all natural-language output in the language the transcription is predominantly spoken in",
         );
     });
 

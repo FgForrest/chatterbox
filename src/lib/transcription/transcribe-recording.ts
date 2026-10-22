@@ -8,6 +8,7 @@ import {
     recordings,
     transcriptions,
     userSettings,
+    users,
 } from "@/db/schema";
 import {
     getDefaultTranscriptionModel,
@@ -27,8 +28,10 @@ import {
     isMynahConfigured,
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
+import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { nudge } from "@/lib/jobs/nudge";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
+import { findPersonByEmail } from "@/lib/knowledge/people";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import {
@@ -76,6 +79,7 @@ import {
     parseTranscriptionResponse,
 } from "@/lib/transcription/format";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
+import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import {
     speechmaticsTakesVocabulary,
@@ -369,6 +373,8 @@ export interface TranscribeOptions {
     providerId?: string;
     /** Override the provider's default model for this single call. */
     model?: string;
+    /** Override the language for one explicitly requested re-transcription. */
+    language?: string;
     /** Transcript source whose confirmed speaker assignments may be carried forward. */
     attributionSource?: "riffado" | "plaud" | "mixed";
     /**
@@ -619,9 +625,10 @@ async function transcribeRecordingInner(
                   .limit(1);
 
         const defaultLanguage =
-            (opts.trigger ?? "manual") === "manual" && !orgView
+            opts.language ??
+            ((opts.trigger ?? "manual") === "manual" && !orgView
                 ? settings?.defaultTranscriptionLanguage || undefined
-                : transcribeStep.language || undefined;
+                : transcribeStep.language || undefined);
         const quality = transcribeStep.quality;
         void quality;
 
@@ -664,11 +671,26 @@ async function transcribeRecordingInner(
         // The Almanac's names, for the providers that can be told what to
         // expect. A failure to read them costs accuracy, not the run.
         const almanacTerms = async (): Promise<AlmanacTerm[]> => {
+            const roster = await resolveMeetingRoster({
+                ownerUserId: ctx.ownerUserId,
+                itemId: recordingId,
+            });
+            const unavailable = (error: unknown) =>
+                console.error(
+                    "[transcription] Almanac terms unavailable:",
+                    error,
+                );
+            let terms: AlmanacTerm[] = [];
+            let recorderName: string | null = null;
             try {
-                return await almanacTermsFor({
+                terms = await almanacTermsFor({
                     ownerUserId: ctx.ownerUserId,
                     shared: orgView,
-                    language: defaultLanguage ?? null,
+                    language:
+                        opts.language ??
+                        recording.confirmedLanguage ??
+                        defaultLanguage ??
+                        null,
                     itemId: recordingId,
                     scopeFolderIds: await itemScopeFolderIds(
                         recordingId,
@@ -676,12 +698,31 @@ async function transcribeRecordingInner(
                         ctx.ownerUserId,
                     ),
                 });
+                if (!roster?.attendees.length) return terms;
+                if (!orgView) {
+                    const [owner] = await db
+                        .select({ email: users.email })
+                        .from(users)
+                        .where(eq(users.id, ctx.ownerUserId))
+                        .limit(1);
+                    recorderName = owner?.email
+                        ? ((
+                              await findPersonByEmail(
+                                  ctx.ownerUserId,
+                                  owner.email,
+                              )
+                          )?.displayName ?? null)
+                        : null;
+                }
             } catch (error) {
-                console.error(
-                    "[transcription] Almanac terms unavailable:",
-                    error,
-                );
-                return [];
+                unavailable(error);
+            }
+            if (!roster?.attendees.length) return terms;
+            try {
+                return mergeMeetingTerms(terms, roster.attendees, recorderName);
+            } catch (error) {
+                unavailable(error);
+                return terms;
             }
         };
 
@@ -985,6 +1026,7 @@ async function transcribeRecordingInner(
             inputs: {
                 contentId: recording.id,
                 contentRevision: recording.fileMd5,
+                ...(opts.language ? { language: opts.language } : {}),
             },
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,

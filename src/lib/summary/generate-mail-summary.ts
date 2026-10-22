@@ -11,9 +11,9 @@ import {
 } from "@/lib/ai/mail-summary-prompts";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
+    explicitAiOutputLanguage,
     getAiOutputLanguageDirective,
     normalizeSummaryPromptConfig,
-    resolveAiOutputLanguage,
     SUMMARY_MARKDOWN_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
@@ -258,15 +258,11 @@ export async function generateMailSummary(
 
     const contentLanguage =
         content.language ?? userSettingsRow?.defaultTranscriptionLanguage;
-    const outputLanguage = profileSettings
-        ? resolveAiOutputLanguage(
-              profileSettings.steps.summary.outputLanguage,
-              contentLanguage,
-          )
-        : resolveAiOutputLanguage(
-              userSettingsRow?.aiOutputLanguage,
-              contentLanguage,
-          );
+    const outputLanguage = explicitAiOutputLanguage(
+        profileSettings
+            ? profileSettings.steps.summary.outputLanguage
+            : userSettingsRow?.aiOutputLanguage,
+    );
     const profilePrompt = profileSettings
         ? resolveSummaryPrompt({
               settings: profileSettings.steps.summary,

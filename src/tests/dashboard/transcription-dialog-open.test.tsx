@@ -208,8 +208,9 @@ describe("transcription dialog", () => {
         );
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         cleanup();
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
         vi.unstubAllGlobals();
     });
 
@@ -418,7 +419,7 @@ describe("transcription dialog", () => {
         expect(footer?.textContent).toContain("Custom");
         expect(footer?.textContent).toContain("openai");
         expect(footer?.textContent).toContain("whisper-1");
-        expect(footer?.textContent).toContain("Language: en");
+        expect(footer?.textContent).toContain("Detected language: English");
         expect(footer?.textContent).toContain("2 words");
         expect(footer?.textContent).toContain("12 characters");
 

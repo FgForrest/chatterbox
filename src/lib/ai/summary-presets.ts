@@ -325,7 +325,7 @@ export const AI_OUTPUT_LANGUAGES: readonly AiOutputLanguageOption[] = [
 
 const LANGUAGE_CODES = new Set(AI_OUTPUT_LANGUAGES.map((l) => l.code));
 
-const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+export const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
     eng: "en",
     spa: "es",
     fra: "fr",
@@ -364,6 +364,13 @@ const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
     vie: "vi",
     tha: "th",
 };
+
+/** Return a chosen output language, or null when the model should follow the text. */
+export function explicitAiOutputLanguage(
+    preference: string | null | undefined,
+): string | null {
+    return preference === "auto" ? null : normalizeAiOutputLanguage(preference);
+}
 
 /** Resolve an explicit output preference or a recognized transcription language. */
 export function resolveAiOutputLanguage(

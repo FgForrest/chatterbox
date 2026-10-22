@@ -205,6 +205,7 @@ curl -H "Authorization: Bearer op_..." \
 ```json
 {
   "language": "en",
+  "confirmed_language": null,
   "text": "Full plaintext transcript...",
   "provider": "groq",
   "model": "whisper-large-v3",
@@ -231,6 +232,8 @@ curl -H "Authorization: Bearer op_..." \
   ]
 }
 ```
+
+`language` zůstává jazykem rozpoznaným poskytovatelem přepisu. `confirmed_language` je uživatelem potvrzený jazyk nahrávky jako kód ISO 639-1, nebo `null` při volbě Automaticky. Metadata ve výpisu a detailu nahrávky i obsah nahrávky ve webhooku obsahují také `confirmed_language`; potvrzení nikdy nenahrazuje odhad poskytovatele.
 
 `text` je přepis, jak byl slyšen; opravy jej zpětně nepřepisují.
 `corrections` obsahuje potvrzené opravy jako překryv: index do

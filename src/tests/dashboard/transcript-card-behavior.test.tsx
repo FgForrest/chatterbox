@@ -7,13 +7,41 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { createTestPlayback } from "@/tests/helpers/playback";
 
+const summary = vi.hoisted(() => ({ disabled: false, run: vi.fn() }));
 vi.mock("@/components/summary/summary-widget", () => ({
-    SummaryWidget: () => null,
+    SummaryWidget: ({
+        source,
+        onSourceChange,
+        onResummarizeReady,
+    }: {
+        source: string;
+        onSourceChange: (source: "plaud" | "riffado") => void;
+        onResummarizeReady: (
+            action: { run: () => void; disabled: boolean } | null,
+        ) => void;
+    }) => {
+        const disabled = summary.disabled || source !== "riffado";
+        useEffect(() => {
+            onResummarizeReady({ run: summary.run, disabled });
+            return () => onResummarizeReady(null);
+        }, [onResummarizeReady, disabled]);
+        return (
+            <button
+                type="button"
+                onClick={() =>
+                    onSourceChange(source === "riffado" ? "plaud" : "riffado")
+                }
+            >
+                Switch summary source
+            </button>
+        );
+    },
 }));
 vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
 vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
@@ -108,6 +136,8 @@ function openTopics() {
 
 describe("transcript card behavior", () => {
     beforeEach(() => {
+        summary.run.mockReset();
+        summary.disabled = false;
         seek.mockReset();
         play.mockReset();
         fetchMock
@@ -156,6 +186,45 @@ describe("transcript card behavior", () => {
         cleanup();
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
+    });
+
+    it("drops a disabled re-summarize click instead of running later", async () => {
+        fetchMock.mockImplementation(async (url: string) =>
+            Response.json(
+                url.endsWith("/language")
+                    ? {
+                          confirmedLanguage: "hu",
+                          needsResummary: true,
+                          canChange: true,
+                      }
+                    : { speakers: [], corrections: [] },
+            ),
+        );
+        const view = panel();
+        const button = await screen.findByRole("button", {
+            name: "Re-summarize",
+        });
+        await waitFor(() => expect(button).toHaveProperty("disabled", false));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Switch summary source" }),
+        );
+        expect(button).toHaveProperty("disabled", true);
+        fireEvent.click(button);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Switch summary source" }),
+        );
+        await waitFor(() => expect(button).toHaveProperty("disabled", false));
+        expect(summary.run).not.toHaveBeenCalled();
+        summary.disabled = true;
+        view.rerender(panelElement());
+        await waitFor(() => expect(button).toHaveProperty("disabled", true));
+        fireEvent.click(button);
+        summary.disabled = false;
+        view.rerender(panelElement());
+        await waitFor(() => expect(button).toHaveProperty("disabled", false));
+        expect(summary.run).not.toHaveBeenCalled();
+        fireEvent.click(button);
+        expect(summary.run).toHaveBeenCalledOnce();
     });
 
     it("hides the collapsed body and footer, then navigates topics after expanding", () => {
@@ -284,8 +353,9 @@ describe("transcript card behavior", () => {
         ).toBeNull();
         expect(screen.getByText("Test model")).toBeTruthy();
         expect(
-            screen.getByText("Language:", { exact: false }).textContent,
-        ).toContain("cs");
+            screen.getByText("Detected language:", { exact: false })
+                .textContent,
+        ).toContain("Czech");
         expect(screen.getByText("words", { exact: false })).toBeTruthy();
         expect(screen.getByText("characters", { exact: false })).toBeTruthy();
         fireEvent.click(

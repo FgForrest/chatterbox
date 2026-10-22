@@ -1,20 +1,13 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { audioItemColumns, recordingItemJoin } from "@/db/items";
-import {
-    chatterItems,
-    recordings,
-    transcriptions,
-    userSettings,
-    users,
-} from "@/db/schema";
+import { chatterItems, recordings, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
     localizedSummaryPrompt,
     normalizeSummaryPromptConfig,
-    resolveAiOutputLanguage,
     SUMMARY_MARKDOWN_DIRECTIVE,
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
@@ -37,6 +30,10 @@ import {
 } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import {
+    normalizeDetectedLanguage,
+    recordingOutputLanguage,
+} from "@/lib/recordings/language";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -56,6 +53,7 @@ import {
     resolveTaskProposals,
 } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
 import { resolveMultiPass } from "./multi-pass-resolution";
@@ -129,33 +127,6 @@ export interface GenerateSummaryResult {
          */
         detail: string;
     };
-}
-
-/** Which transcript an Organization summary is made from, most preferred first. */
-const ORG_SUMMARY_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
-
-/**
- * The transcript an Organization summary is made from, of those its owner
- * holds: a provider's output over an edit, and both over an import.
- */
-async function findOrgSummarySource(
-    recordingId: string,
-    ownerUserId: string,
-): Promise<typeof transcriptions.$inferSelect | undefined> {
-    const rows = await db
-        .select()
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, ownerUserId),
-            ),
-        );
-    for (const source of ORG_SUMMARY_SOURCE_ORDER) {
-        const row = rows.find((item) => item.source === source);
-        if (row) return row;
-    }
-    return undefined;
 }
 
 /** Coarse length bucket -- never send raw transcript length or content. */
@@ -251,23 +222,7 @@ export async function generateSummaryForRecording(
         );
     }
 
-    // A recording shared before sharing needed a named transcript may hold
-    // only an import; the Organization summarizes what it has.
-    const transcription = orgView
-        ? await findOrgSummarySource(recordingId, userId)
-        : (
-              await db
-                  .select()
-                  .from(transcriptions)
-                  .where(
-                      and(
-                          eq(transcriptions.recordingId, recordingId),
-                          eq(transcriptions.userId, userId),
-                          eq(transcriptions.source, "riffado"),
-                      ),
-                  )
-                  .limit(1)
-          )[0];
+    const transcription = await readPreferredTranscript(recordingId, userId);
 
     if (!transcription) {
         throw new AppError(
@@ -317,7 +272,8 @@ export async function generateSummaryForRecording(
         ? await loadTasksPromptContext({
               recording,
               transcriptionId: transcription.id,
-              language: transcription.detectedLanguage,
+              language:
+                  recording.confirmedLanguage ?? transcription.detectedLanguage,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,
@@ -377,22 +333,22 @@ export async function generateSummaryForRecording(
     if (!usedPromptId) throw new Error("Summary prompt resolution failed");
 
     const contentLanguage =
+        recording.confirmedLanguage ??
         transcription.detectedLanguage ??
         userSettingsRow?.defaultTranscriptionLanguage;
     const outputLanguage = profileSettings
-        ? resolveAiOutputLanguage(
+        ? recordingOutputLanguage(
               profileSettings.steps.summary.outputLanguage,
-              contentLanguage,
+              recording.confirmedLanguage,
           )
-        : resolveAiOutputLanguage(
+        : recordingOutputLanguage(
               userSettingsRow?.aiOutputLanguage,
-              transcription.detectedLanguage ??
-                  userSettingsRow?.defaultTranscriptionLanguage,
+              recording.confirmedLanguage,
           );
     const profilePrompt = profileSettings
         ? resolveSummaryPrompt({
               settings: profileSettings.steps.summary,
-              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              outputLanguage: outputLanguage ?? "auto",
               contentLanguage,
               uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
           })
@@ -442,7 +398,7 @@ export async function generateSummaryForRecording(
         : localizedSummaryPrompt(
               usedPromptId,
               promptTemplate,
-              outputLanguage,
+              outputLanguage ?? normalizeDetectedLanguage(contentLanguage),
               selectedTemplate?.prompt === null,
           );
     const plaudActionItems = tasksEnabled
@@ -524,7 +480,8 @@ export async function generateSummaryForRecording(
               ownerUserId: ctx.ownerUserId,
               transcriptionId: transcription.id,
               turns: input.turns,
-              language: transcription.detectedLanguage,
+              language:
+                  recording.confirmedLanguage ?? transcription.detectedLanguage,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,

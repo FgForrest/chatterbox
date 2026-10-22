@@ -5,7 +5,12 @@ const mocks = vi.hoisted(() => ({
     openAi: vi.fn(),
     select: vi.fn(),
     resolveItemProfile: vi.fn(),
+    confirmedLanguage: vi.fn(),
     resolveStepProvider: vi.fn(),
+}));
+
+vi.mock("@/lib/recordings/read-language", () => ({
+    readConfirmedLanguage: mocks.confirmedLanguage,
 }));
 
 vi.mock("openai", () => ({
@@ -42,6 +47,7 @@ function selectRows(rows: unknown[]) {
 describe("profile-backed title generation", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.confirmedLanguage.mockResolvedValue(null);
         const settings = defaultProfileSettings("audio");
         settings.steps.title.automatic = false;
         mocks.resolveItemProfile.mockResolvedValue({
@@ -65,8 +71,12 @@ describe("profile-backed title generation", () => {
         });
     });
 
-    it("uses a resolved Czech directive and Czech capitalization for ces", async () => {
-        selectRows([{ detectedLanguage: "ces" }]);
+    it.each([
+        "riffado",
+        "mixed",
+        "plaud",
+    ])("uses a generic language directive and Czech prompt wording for ces from %s", async (source) => {
+        selectRows([{ source, detectedLanguage: "ces" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
 
         await generateTitleFromTranscription(
@@ -79,7 +89,7 @@ describe("profile-backed title generation", () => {
 
         const request = mocks.create.mock.calls[0]?.[0];
         expect(request.messages[0].content).toContain(
-            "Write all natural-language output in Czech",
+            "Write all natural-language output in the language the transcription is predominantly spoken in",
         );
         expect(request.messages[0].content).toContain(
             "Use English Title Case only for English; Czech and most other European languages use sentence case.",
@@ -87,8 +97,52 @@ describe("profile-backed title generation", () => {
         expect(request.messages[1].content).toContain("Jste generátor názvů");
     });
 
+    it.each([
+        "private",
+        "org",
+    ] as const)("uses the owner’s confirmed language in %s", async (view) => {
+        selectRows([{ uiLocale: "en" }]);
+        mocks.confirmedLanguage.mockResolvedValue("cs");
+        await generateTitleFromTranscription(
+            "actor-1",
+            "recording-1",
+            "Text",
+            "transcript",
+            "owner-1",
+            view,
+            "hun",
+        );
+        expect(mocks.confirmedLanguage).toHaveBeenCalledWith(
+            "owner-1",
+            "recording-1",
+        );
+        expect(mocks.create.mock.calls[0]?.[0].messages[0].content).toContain(
+            "Write all natural-language output in Czech",
+        );
+    });
+
+    it("explicit title output wins over the recording language", async () => {
+        selectRows([{ uiLocale: "en" }]);
+        mocks.confirmedLanguage.mockResolvedValue("cs");
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.outputLanguage = "en";
+        mocks.resolveItemProfile.mockResolvedValue({ settings });
+        await generateTitleFromTranscription(
+            "actor-1",
+            "recording-1",
+            "Text",
+            "transcript",
+            "owner-1",
+            "private",
+            "hun",
+        );
+        expect(mocks.create.mock.calls[0]?.[0].messages[0].content).toContain(
+            "Write all natural-language output in English",
+        );
+    });
+
     it("fails loudly when an explicit account title provider is disabled", async () => {
-        selectRows([{ detectedLanguage: "cs" }]);
+        selectRows([{ source: "riffado", detectedLanguage: "cs" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
         const error = new Error(
             "The provider OpenAI is disabled. Enable it or choose another provider.",
@@ -107,7 +161,7 @@ describe("profile-backed title generation", () => {
     });
 
     it("logs the provider id when automatic title generation has no model", async () => {
-        selectRows([{ detectedLanguage: "en" }]);
+        selectRows([{ source: "riffado", detectedLanguage: "en" }]);
         selectRows([{ uiLocale: "en" }]);
         mocks.resolveStepProvider.mockResolvedValueOnce({
             kind: "credential",

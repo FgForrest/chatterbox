@@ -16,6 +16,7 @@ import { audioItemColumns, recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
     aiUsageEvents,
+    almanacDuplicateDismissals,
     apiCredentials,
     chatterItems,
     folderDefaultProfiles,
@@ -75,6 +76,7 @@ export interface ArchiveResult {
 
 interface ManifestRecording {
     id: string;
+    confirmedLanguage: string | null;
     /** Whose recording it is: in the Organization's archive only. */
     owner?: { id: string; name: string | null; email: string };
     filename: string;
@@ -370,6 +372,7 @@ export async function buildAndUploadExportArchive(input: {
         entities?: { entities: number; aliases: number; notes: number };
         facts?: { facts: number; evidence: number };
         learn?: { runs: number; items: number };
+        duplicateDismissals?: { count: number; path: string };
         profiles?: {
             profiles: number;
             revisions: number;
@@ -423,6 +426,7 @@ export async function buildAndUploadExportArchive(input: {
         const folder = folderName(recording);
         const entry: ManifestRecording = {
             id: recording.id,
+            confirmedLanguage: recording.confirmedLanguage ?? null,
             ...(scope.kind === "organization"
                 ? {
                       owner: {
@@ -961,6 +965,20 @@ export async function buildAndUploadExportArchive(input: {
             runs: learn.runs.length,
             items: learn.items.length,
         };
+    }
+
+    if (scope.kind === "organization") {
+        const dismissals = await db
+            .select()
+            .from(almanacDuplicateDismissals)
+            .where(eq(almanacDuplicateDismissals.userId, scope.orgUserId));
+        if (dismissals.length > 0) {
+            const path = "knowledge/duplicate-dismissals.json";
+            archive.append(Buffer.from(JSON.stringify(dismissals, null, 2)), {
+                name: path,
+            });
+            manifest.duplicateDismissals = { count: dismissals.length, path };
+        }
     }
 
     const profiles = await collectProfiles(scope, {

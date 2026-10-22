@@ -5,6 +5,7 @@ import type { RecordingView } from "@/lib/sharing/view";
  * until the caller decrypts it) and start (`startTime`), and its audio.
  */
 export interface RecordingQueryResult {
+    confirmedLanguage?: string | null;
     id: string;
     filename: string;
     duration: number;

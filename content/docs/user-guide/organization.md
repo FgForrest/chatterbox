@@ -22,6 +22,8 @@ Task review does not delay sharing. Colleagues see a proposed task only after th
 
 The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. Sharing cancels any open private [Learn](learn.md) run. Its findings stay private. When the Organization profile enables automatic Learn, a new run starts in the Organization scope and the summary waits for that review.
 
+If you finished the private Learn review for the item's current content, sharing publishes what you confirmed as Organization knowledge without another confirmation. Learn shows **Learned from the owner's review** with its applied and skipped counts, and the workflow counts Learn as done. This also applies to mail. Curators can start **Re-learn** and merge or delete Organization people and things.
+
 An item categorized with **Nothing automatic** is not shared by itself. Its intended folder offers **Share now** and a cancel button in the folder row. The strip says **Your turn.** and waits until you share or cancel it.
 
 Mail sent directly to an Organization folder address also starts as a private intended placement, runs the same gates, and shares automatically. See [Mail](mail.md).
@@ -69,6 +71,7 @@ With identity-provider authorization, people granted `org.curate` are curators a
 - edit shared recordings and mail,
 - review shared Learn results and tasks,
 - manage Organization profiles, people, things, and suggested relations,
+- review **Almanac → Care → Possible duplicates**, compare and join Organization records, or mark a pair **Not the same** so it stays dismissed for all curators (see [Care](almanac.md#care-possible-duplicates)),
 - set up folder exports of Organization folders,
 - back up the Organization, with each item's owner recorded.
 

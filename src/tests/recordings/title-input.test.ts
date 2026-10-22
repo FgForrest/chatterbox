@@ -48,7 +48,7 @@ describe("title input", () => {
     it("uses the corrected transcript when no summary exists", async () => {
         mocks.readStoredSummary.mockResolvedValue(null);
         mocks.limit.mockResolvedValue([
-            { id: "transcript-1", detectedLanguage: "ces" },
+            { id: "transcript-1", source: "riffado", detectedLanguage: "ces" },
         ]);
         mocks.modelInput.mockResolvedValue({ text: "Corrected launch plan" });
 
@@ -59,6 +59,7 @@ describe("title input", () => {
         });
         expect(mocks.modelInput).toHaveBeenCalledWith({
             id: "transcript-1",
+            source: "riffado",
             detectedLanguage: "ces",
         });
     });

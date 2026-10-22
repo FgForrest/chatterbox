@@ -5,6 +5,7 @@ description: Let Chatterbox propose speaker names, corrections and facts, and re
 
 Learn reads a transcript against your [Almanac](almanac.md) and proposes what it found:
 
+- **transcript language** when Learn confidently reads a different language from the transcription provider,
 - **speaker names** for speakers nobody named yet,
 - **corrections** of names the transcription misheard ("Path finder" for Pathfinder),
 - **new people and things** worth adding to the Almanac,
@@ -22,12 +23,21 @@ When the item's processing profile has **Run automatically** on for Learn, Learn
 
 If Learn finds nothing to review and **Correct the transcript after Learn** is on, the Learn step stays **Running** while it reads the transcript again and corrects misheard words. The summary says that it is waiting for this correction and starts by itself when the pass finishes. You can still click **Summarize** to start it immediately.
 
+## Calendar, Meet and speaker guesses
+
+With Calendar access connected, every audio Learn run, manual or automatic, uses the recording owner's meeting invitees. Meet participants are included when Meet access is granted. This also works after sharing with the Organization. Chatterbox selects the meeting with the strongest time overlap; close matches are left unresolved. On a manual run you can choose an event when several are offered.
+
+Learn combines those names with the transcript and known Almanac roles and facts to suggest likely speakers. Suggestions show **?** and their source: **Named in the transcript**, **Invited in Calendar**, **Joined in Google Meet**, or **Guess**, with a short reason. Guesses start unticked. Tick a correct guess once to accept it; finishing without ticking leaves the speaker unconfirmed. A new attendee can be added to the Almanac at the same time.
+
+Attendee names also help supported transcription providers and the correction pass spell names correctly. This does not name a speaker. Unconfirmed speaker guesses never appear as names in transcript text, summaries, exports or the API. No voice data, voiceprints or biometrics are used for identity; attendee emails are not requested.
+
 ## Reviewing
 
 The review has the same contents inline or in a window. **Review** on the widget and **Review Learn** in the workflow strip open that window explicitly:
 
 ![The Learn review](images/learn-review.png)
 
+- **Transcript language**: Learn’s reading is preselected. Keep it, keep the provider’s detected language, or pick another from the language list. **Finish review** confirms the choice for this recording in both private and Organization views. Agreement or uncertainty creates no language item and stores nothing. This check applies to audio recordings; mail keeps its existing language handling.
 - **Speakers**: who Learn thinks each unnamed speaker is, and why. **▷** plays the evidence. **Someone else…** picks another person, **Unknown** marks the speaker unknown.
 - **New in the Almanac**: people and things Learn heard that the Almanac does not know. These start unticked. Correct the name or type before ticking, choose **It is something known…** if it is a record you already have under another name, or **Never propose it** to stop it being proposed on any recording.
 - **Corrections**: misheard names, how often, and where. These start ticked.
@@ -47,6 +57,8 @@ Accepted corrections are kept beside the original text, never in place of it, so
 
 When the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
+When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. Learn shows **Learned from the owner's review** in the Organization view, with the review's applied and skipped counts. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
+
 ## Where reviews wait
 
 - The **Needs review** filter above the recording list.
@@ -56,7 +68,7 @@ When the processing profile has **Correct the transcript after Learn** on, Learn
 ## Good to know
 
 - Names are recognized in their inflected forms in the transcript's language, with or without accents: "Šimákem" finds Šimák.
-- A speaker named only by a first name is marked as such. A first name two people in your Almanac share names neither of them.
+- A speaker named only by a first name is marked as such. A shared first name needs distinguishing evidence or an explicitly marked guess.
 - Saying a new record is one you already have teaches Chatterbox the misheard form as a nickname, so the next run recognizes it.
 - A processing profile can give Learn its own provider and model, for example a stronger one than the summary uses. See [Processing and profiles](processing-and-profiles.md).
 

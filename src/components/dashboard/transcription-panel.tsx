@@ -4,7 +4,6 @@ import {
     ChevronDown,
     ChevronUp,
     FileText,
-    Languages,
     Loader2,
     RefreshCw,
     Sparkles,
@@ -13,6 +12,7 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
+import { RecordingLanguage } from "@/components/dashboard/recording-language";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptChapterBar } from "@/components/dashboard/transcript-chapter-bar";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
@@ -73,6 +73,7 @@ import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
@@ -115,7 +116,11 @@ interface TranscriptionPanelProps {
      * more than one is present a source switcher is shown. */
     transcripts?: TranscriptOption[];
     isTranscribing: boolean;
-    onTranscribe: (attributionSource?: string, retranscribe?: boolean) => void;
+    onTranscribe: (
+        attributionSource?: string,
+        retranscribe?: boolean,
+        language?: string,
+    ) => void;
     /** Refresh handler called after a browser-side transcription completes. */
     onTranscribeComplete?: () => void;
     /**
@@ -569,9 +574,10 @@ export function TranscriptionPanel({
         summarySelection.recordingId === recording.id
             ? summarySelection.source
             : defaultSummarySource;
-    const summaryTranscript = transcriptList.find(
-        (candidate) => candidate.source === summarySource,
-    );
+    const summaryTranscript =
+        summarySource === "riffado"
+            ? preferredTranscript(transcriptList)
+            : transcriptList.find((candidate) => candidate.source === "plaud");
     const summarySpeakerTags = useMemo(
         () => transcriptSpeakerTags(summaryTranscript),
         [summaryTranscript],
@@ -659,6 +665,10 @@ export function TranscriptionPanel({
             ? transcriptWidgetId
             : undefined,
     );
+    const [resummarizeAction, setResummarizeAction] = useState<{
+        run: () => void;
+        disabled: boolean;
+    } | null>(null);
     const transcriptFooter = activeTranscript
         ? {
               status: (
@@ -680,15 +690,37 @@ export function TranscriptionPanel({
                               {activeTranscript.model}
                           </span>
                       )}
-                      {activeTranscript.language && (
-                          <span className="flex items-center gap-1">
-                              <Languages className="size-3" />
-                              <span>
-                                  {i18n("Language:")}{" "}
-                                  {activeTranscript.language}
-                              </span>
-                          </span>
-                      )}
+                      <RecordingLanguage
+                          key={`${recording.id}:${view ?? "private"}`}
+                          recordingId={recording.id}
+                          detectedLanguage={activeTranscript.language}
+                          readOnly={readOnly}
+                          view={view}
+                          source={activeTranscript.source}
+                          refreshKey={reviewsFinished + followUpRevision}
+                          onReload={() => {
+                              setFollowUpRevision((count) => count + 1);
+                              onTranscriptStale?.();
+                          }}
+                          onTranscribe={onTranscribe}
+                          onResummarize={() => {
+                              if (
+                                  summarySource === "riffado" &&
+                                  resummarizeAction &&
+                                  !resummarizeAction.disabled
+                              ) {
+                                  resummarizeAction.run();
+                              }
+                          }}
+                          resummarizeDisabled={
+                              summarySource !== "riffado" ||
+                              (resummarizeAction?.disabled ?? true)
+                          }
+                          transcriptionDisabled={
+                              transcriptionRunning ||
+                              Boolean(recording.audioReaped)
+                          }
+                      />
                       <span>
                           {activeTranscript.text.trim()
                               ? activeTranscript.text.trim().split(/\s+/).length
@@ -1137,6 +1169,7 @@ export function TranscriptionPanel({
                 (!widgets || widgets.summary.visible) && (
                     <SummaryWidget
                         itemId={recording.id}
+                        onResummarizeReady={setResummarizeAction}
                         kind="audio"
                         canChange={!readOnly}
                         contentText={summaryTranscript?.text}

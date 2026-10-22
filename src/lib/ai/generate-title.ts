@@ -1,19 +1,19 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { transcriptions, users } from "@/db/schema";
+import { users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { ProfileSettings } from "@/lib/profiles/settings";
+import { recordingOutputLanguage } from "@/lib/recordings/language";
+import { readConfirmedLanguage } from "@/lib/recordings/read-language";
 import type { RecordingView } from "@/lib/sharing/view";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { buildChatCompletionParams } from "./chat-completion-params";
-import {
-    getAiOutputLanguageDirective,
-    resolveAiOutputLanguage,
-} from "./summary-presets";
+import { getAiOutputLanguageDirective } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
 function isAbsentProviderSelection(error: unknown): boolean {
@@ -51,17 +51,10 @@ export async function generateTitleFromTranscription(
     const settings = profile.settings as ProfileSettings;
     let contentLanguage = detectedLanguage;
     if (contentLanguage === undefined) {
-        const [transcript] = await db
-            .select({ detectedLanguage: transcriptions.detectedLanguage })
-            .from(transcriptions)
-            .where(
-                and(
-                    eq(transcriptions.recordingId, recordingId),
-                    eq(transcriptions.userId, ownerUserId),
-                    eq(transcriptions.source, "riffado"),
-                ),
-            )
-            .limit(1);
+        const transcript = await readPreferredTranscript(
+            recordingId,
+            ownerUserId,
+        );
         contentLanguage = transcript?.detectedLanguage ?? null;
     }
     const [owner] = await db
@@ -69,9 +62,14 @@ export async function generateTitleFromTranscription(
         .from(users)
         .where(eq(users.id, ownerUserId))
         .limit(1);
-    const outputLanguage = resolveAiOutputLanguage(
+    const confirmedLanguage = await readConfirmedLanguage(
+        ownerUserId,
+        recordingId,
+    );
+    contentLanguage = confirmedLanguage ?? contentLanguage;
+    const outputLanguage = recordingOutputLanguage(
         settings.steps.summary.outputLanguage,
-        contentLanguage,
+        confirmedLanguage,
     );
     const promptTemplate = resolveTitlePrompt({
         settings: settings.steps.title,

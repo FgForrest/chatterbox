@@ -120,6 +120,8 @@ interface TranscriptOut {
     recording: { id: string; title: string; recorded_at: string; url: string };
     has_transcript: boolean;
     language: string | null;
+    confirmed_language: string | null;
+    detected_language: string | null;
     timed: boolean;
     turns: TurnOut[];
     next_cursor: string | null;
@@ -473,6 +475,8 @@ describeWithDatabase("MCP transcript tools (PostgreSQL)", () => {
                 },
                 has_transcript: true,
                 language: "cs",
+                confirmed_language: null,
+                detected_language: "cs",
                 timed: true,
                 turns: [
                     {
