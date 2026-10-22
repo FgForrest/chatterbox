@@ -140,10 +140,29 @@ export function CategorizePanel({
     const locale = useLocale();
     const profileTrigger = useRef<HTMLButtonElement>(null);
     const [folders, setFolders] = useState(data.folders);
+    const previousServerFolders = useRef(data.folders);
+    useEffect(() => {
+        const previousIds = new Set(
+            previousServerFolders.current.map(({ id }) => id),
+        );
+        const serverIds = new Set(data.folders.map(({ id }) => id));
+        previousServerFolders.current = data.folders;
+        setFolders((current) => [
+            ...data.folders,
+            ...current.filter(
+                ({ id }) => !previousIds.has(id) && !serverIds.has(id),
+            ),
+        ]);
+    }, [data.folders]);
     const fileableFolders = folders.filter(
         (folder) => folder.parentId !== null,
     );
     const [folderId, setFolderId] = useState(data.selectedFolderIds[0] ?? "");
+    useEffect(() => {
+        setFolderId((current) =>
+            folders.some((folder) => folder.id === current) ? current : "",
+        );
+    }, [folders]);
     const [profileChoice, setProfileChoice] = useState(
         initialProfileChoice(data),
     );

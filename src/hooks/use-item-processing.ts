@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onTasksChanged } from "@/components/tasks/task-api";
 import {
+    ITEM_PROCESSING_REVALIDATION_MS,
     onItemProcessingInvalidated,
     recentItemProcessingInvalidation,
 } from "@/lib/pipeline/item-processing-events";
@@ -173,12 +174,28 @@ export function useItemProcessing({
 
     useEffect(() => {
         if (!enabled || !pageVisible || unavailableVersion === version) return;
-        const delay = Math.max(3_000, schedule.delay);
+        const invalidatedAt = recentItemProcessingInvalidation(itemId);
+        const waitingForArrival =
+            !data?.phases.categorize &&
+            invalidatedAt !== null &&
+            Date.now() - invalidatedAt < ITEM_PROCESSING_REVALIDATION_MS;
+        const delay = waitingForArrival
+            ? 3_000
+            : Math.max(3_000, schedule.delay);
         const timer = window.setTimeout(() => {
             void refresh();
         }, delay);
         return () => window.clearTimeout(timer);
-    }, [enabled, schedule, pageVisible, refresh, unavailableVersion, version]);
+    }, [
+        data?.phases.categorize,
+        enabled,
+        itemId,
+        schedule,
+        pageVisible,
+        refresh,
+        unavailableVersion,
+        version,
+    ]);
 
     const invalidationWaiting = useRef<Promise<void> | null>(null);
     const refreshAfterChange = useCallback(() => {
