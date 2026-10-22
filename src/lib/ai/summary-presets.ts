@@ -365,6 +365,13 @@ const DETECTED_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
     tha: "th",
 };
 
+/** Return a chosen output language, or null when the model should follow the text. */
+export function explicitAiOutputLanguage(
+    preference: string | null | undefined,
+): string | null {
+    return preference === "auto" ? null : normalizeAiOutputLanguage(preference);
+}
+
 /** Resolve an explicit output preference or a recognized transcription language. */
 export function resolveAiOutputLanguage(
     preference: string | null | undefined,
