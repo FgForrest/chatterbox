@@ -666,7 +666,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
     });
 
-    it("accepts Plaud tasks and reaches sharing without Task review", async () => {
+    it("waits for the owner to review Plaud proposals while still reaching the share gate", async () => {
         await seedPlaudTaskPipeline(["Draft the final report"]);
 
         await expect(
@@ -675,7 +675,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await drainActions();
         expect((await processing())?.phases).toMatchObject({
-            taskReview: { state: "done", reason: "reviewed" },
+            taskReview: { state: "waiting", reason: "needs_review" },
             share: {
                 state: "waiting",
                 reason: "org_unavailable",

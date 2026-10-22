@@ -26,7 +26,7 @@ Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox
 
 ## Organization folders
 
-Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn and task reviews pass. With **Nothing automatic**, the folder row offers **Share now** instead and the workflow strip waits for you.
+Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn review passes. Task review does not delay sharing. With **Nothing automatic**, the folder row offers **Share now** instead and the workflow strip waits for you.
 
 You can also share any of your mail by filing it into an Organization folder. Colleagues read a shared mail, its attachments and its formatted version; only you delete it or download the original message.
 

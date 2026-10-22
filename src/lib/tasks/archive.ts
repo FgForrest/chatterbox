@@ -43,7 +43,7 @@ export interface ArchivedTask {
     createdAt: string;
     acceptedAt: string | null;
     statusChangedAt: string | null;
-    /** A legacy proposal's draft, or an accepted task's unresolved assignee. */
+    /** A proposal's draft, or an accepted task's unresolved assignee. */
     review?: { ticked: boolean; assigneeCheck: boolean };
 }
 

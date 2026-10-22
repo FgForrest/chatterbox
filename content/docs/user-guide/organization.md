@@ -16,8 +16,9 @@ Choose an Organization folder in the inline **Categorize recording** or **Catego
 This first creates an intended Organization placement. The item remains private while its profile runs. Chatterbox shares it automatically when it is ready for others to read:
 
 - it has a transcript when it is a recording,
-- every speaker is named or marked unknown,
-- the [proposed tasks](summaries-and-tasks.md#tasks-across-items) are reviewed.
+- every speaker is named or marked unknown.
+
+Task review does not delay sharing. Colleagues see a proposed task only after the owner or a curator accepts it.
 
 The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. Sharing cancels any open private [Learn](learn.md) run. Its findings stay private. When the Organization profile enables automatic Learn, a new run starts in the Organization scope and the summary waits for that review.
 

@@ -1,12 +1,4 @@
-import {
-    and,
-    eq,
-    inArray,
-    isNotNull,
-    isNull,
-    notExists,
-    sql,
-} from "drizzle-orm";
+import { and, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { ANY_TASK_ITEM, taskVisible } from "@/db/queries/task-visibility";
 import {
@@ -50,7 +42,7 @@ export interface ProposedTask {
     /**
      * The quote is in a quoted part of a mail, by a sender nothing
      * verified, or not found in a mail with quoted parts: the proposal then
-     * is excluded from automatic task creation.
+     * starts unticked.
      */
     evidenceProvenance?: EvidenceProvenance | null;
     /** A quoted mail header's claimed time, bounded when it is stored. */
@@ -118,7 +110,7 @@ type ProposedEvidence = Pick<
     | "quotedAt"
 >;
 
-type ProposedMatchEvidence = ProposedEvidence & { accepted: boolean };
+type ProposedMatchEvidence = ProposedEvidence & { ticked: false };
 
 function statementAt(itemOccurredAt: Date, evidence: ProposedEvidence): Date {
     return evidence.evidenceProvenance === "quoted"
@@ -127,9 +119,8 @@ function statementAt(itemOccurredAt: Date, evidence: ProposedEvidence): Date {
 }
 
 /**
- * Accept a summary's tasks and identity matches in its transaction. Untrusted
- * evidence and ambiguous matches create no tasks. Existing tasks and review
- * decisions survive; untouched follow-up proposals are replaced for review.
+ * Store a summary's proposals in its transaction. Untouched proposals are
+ * replaced; reviewed tasks and remembered rejections survive.
  */
 export async function writeTaskProposalsInTx(
     tx: Tx,
@@ -163,30 +154,20 @@ export async function writeTaskProposalsInTx(
         .limit(1)
         .for("no key update");
     if (!item) return;
-    const uniqueMatches = proposals.tasks.flatMap(
-        (task): ProposedTaskMatch[] => {
-            const candidateTaskIds = [...new Set(task.candidateTaskIds ?? [])];
-            const [taskId] = candidateTaskIds;
-            if (
-                !taskId ||
-                candidateTaskIds.length > 1 ||
-                task.evidenceProvenance
-            ) {
-                return [];
-            }
-            return [
-                {
-                    taskId,
-                    quote: task.quote,
-                    evidenceStartMs: task.evidenceStartMs,
-                    evidenceText: task.evidenceText,
-                    evidenceProvenance: task.evidenceProvenance,
-                    quotedAt: task.quotedAt,
-                },
-            ];
-        },
-    );
-    const proposedMatches = [...(proposals.matches ?? []), ...uniqueMatches];
+    const ambiguousMatches = proposals.tasks.flatMap((task) => {
+        const candidateTaskIds = [...new Set(task.candidateTaskIds ?? [])];
+        return candidateTaskIds.map(
+            (taskId): ProposedTaskMatch => ({
+                taskId,
+                quote: task.quote,
+                evidenceStartMs: task.evidenceStartMs,
+                evidenceText: task.evidenceText,
+                evidenceProvenance: task.evidenceProvenance,
+                quotedAt: task.quotedAt,
+            }),
+        );
+    });
+    const proposedMatches = [...(proposals.matches ?? []), ...ambiguousMatches];
     const targets = [
         ...new Set([
             ...proposedMatches.map((match) => match.taskId),
@@ -227,8 +208,6 @@ export async function writeTaskProposalsInTx(
                 eq(recordingTasks.version, 0),
             ),
         );
-    // Untouched source-review follow-ups are heard again. Decisions already
-    // routed or made are durable history.
     if (proposals.source === "riffado") {
         await tx
             .delete(taskUpdateProposals)
@@ -285,8 +264,6 @@ export async function writeTaskProposalsInTx(
         kept.map((row) => proposals.fingerprintOf(decryptText(row.text))),
     );
 
-    // What the summary named may have gone while it ran (minutes, with
-    // several passes): a person deleted, a task closed or deleted.
     const assignees = [
         ...new Set([
             ...proposals.tasks.flatMap((task) =>
@@ -362,43 +339,18 @@ export async function writeTaskProposalsInTx(
             );
         }
     }
-    const existingMentionRows =
-        targets.length > 0
-            ? await tx
-                  .select({
-                      taskId: taskMentions.taskId,
-                      decision: taskMentions.matchDecision,
-                  })
-                  .from(taskMentions)
-                  .where(
-                      and(
-                          inArray(taskMentions.taskId, targets),
-                          eq(taskMentions.itemId, recordingId),
-                          eq(taskMentions.userId, ownerUserId),
-                          eq(taskMentions.view, view),
-                      ),
-                  )
-            : [];
     const existingMentions = new Set(
-        existingMentionRows.map((row) => row.taskId),
-    );
-    const acceptedMatches = new Set(
-        existingMentionRows
-            .filter((row) => row.decision === "accepted")
-            .map((row) => row.taskId),
-    );
-    const reviewedUpdates = new Set(
         targets.length > 0
             ? (
                   await tx
-                      .select({ taskId: taskUpdateProposals.taskId })
-                      .from(taskUpdateProposals)
+                      .select({ taskId: taskMentions.taskId })
+                      .from(taskMentions)
                       .where(
                           and(
-                              eq(taskUpdateProposals.itemId, recordingId),
-                              eq(taskUpdateProposals.userId, ownerUserId),
-                              inArray(taskUpdateProposals.taskId, targets),
-                              isNotNull(taskUpdateProposals.decidedByUserId),
+                              inArray(taskMentions.taskId, targets),
+                              eq(taskMentions.itemId, recordingId),
+                              eq(taskMentions.userId, ownerUserId),
+                              eq(taskMentions.view, view),
                           ),
                       )
               ).map((row) => row.taskId)
@@ -407,32 +359,21 @@ export async function writeTaskProposalsInTx(
 
     const rows: (typeof recordingTasks.$inferInsert)[] = [];
     const rowStatements: Date[] = [];
-    const now = new Date();
     for (const task of proposals.tasks) {
         const { fingerprint } = task;
-        if (
-            task.evidenceProvenance ||
-            (task.candidateTaskIds?.length ?? 0) > 0 ||
-            rejected.has(fingerprint) ||
-            known.has(fingerprint)
-        )
-            continue;
+        if (rejected.has(fingerprint) || known.has(fingerprint)) continue;
         known.add(fingerprint);
         position += 1;
-        const effectiveAt = statementAt(item.occurredAt, task);
-        const assigneePersonId =
-            !task.assigneeCheck &&
-            task.assigneePersonId &&
-            livePeople.has(task.assigneePersonId)
-                ? task.assigneePersonId
-                : null;
-        rowStatements.push(effectiveAt);
+        rowStatements.push(statementAt(item.occurredAt, task));
         rows.push({
             itemId: recordingId,
             userId: ownerUserId,
-            status: "open",
+            status: "proposed" as const,
             text: encryptText(task.text),
-            assigneePersonId,
+            assigneePersonId:
+                task.assigneePersonId && livePeople.has(task.assigneePersonId)
+                    ? task.assigneePersonId
+                    : null,
             assigneeHint: encryptText(task.assigneeHint),
             assigneeCheck: task.assigneeCheck,
             dueDate: task.dueDate,
@@ -444,18 +385,12 @@ export async function writeTaskProposalsInTx(
             evidenceCharEnd: task.evidenceText?.charEnd ?? null,
             evidenceProvenance: task.evidenceProvenance ?? null,
             source: proposals.source,
-            ticked: true,
+            ticked:
+                !task.assigneeCheck &&
+                !task.evidenceProvenance &&
+                (task.candidateTaskIds?.length ?? 0) === 0,
             position,
             createdByUserId: actorUserId,
-            acceptedAt: now,
-            assignedAt: assigneePersonId ? now : null,
-            acceptedByUserId: actorUserId,
-            statusEffectiveAt: effectiveAt,
-            dueEffectiveAt: effectiveAt,
-            assigneeEffectiveAt: effectiveAt,
-            updatedAt: now,
-            updatedByUserId: actorUserId,
-            version: 1,
             originItemId: recordingId,
         });
     }
@@ -493,7 +428,6 @@ export async function writeTaskProposalsInTx(
     const mentionByTask = new Map<string, ProposedMatchEvidence>();
     for (const match of proposedMatches) {
         if (
-            match.evidenceProvenance ||
             openTasks.get(match.taskId)?.status !== "open" ||
             existingMentions.has(match.taskId) ||
             mentionByTask.has(match.taskId)
@@ -502,7 +436,7 @@ export async function writeTaskProposalsInTx(
         }
         mentionByTask.set(match.taskId, {
             ...match,
-            accepted: true,
+            ticked: false,
         });
     }
     for (const update of proposals.updates) {
@@ -520,7 +454,7 @@ export async function writeTaskProposalsInTx(
         ) {
             continue;
         }
-        mentionByTask.set(update.taskId, { ...update, accepted: false });
+        mentionByTask.set(update.taskId, { ...update, ticked: false });
     }
     if (mentionByTask.size > 0) {
         await tx.insert(taskMentions).values(
@@ -539,12 +473,8 @@ export async function writeTaskProposalsInTx(
                 contentSourceId,
                 contentRevision,
                 statementAt: statementAt(item.occurredAt, evidence),
-                matchDecision: evidence.accepted
-                    ? ("accepted" as const)
-                    : ("suggested" as const),
-                ticked: evidence.accepted,
-                decidedByUserId: evidence.accepted ? actorUserId : null,
-                decidedAt: evidence.accepted ? now : null,
+                matchDecision: "suggested" as const,
+                ticked: evidence.ticked,
             })),
         );
     }
@@ -560,12 +490,11 @@ export async function writeTaskProposalsInTx(
                         statement,
                         target.statusEffectiveAt,
                     ))) &&
-            !reviewedUpdates.has(update.taskId) &&
-            (!existingMentions.has(update.taskId) ||
-                acceptedMatches.has(update.taskId))
+            !existingMentions.has(update.taskId)
         );
     });
     if (updates.length > 0) {
+        const now = new Date();
         await tx
             .insert(taskUpdateProposals)
             .values(

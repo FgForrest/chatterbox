@@ -16,8 +16,9 @@ Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Za�
 Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Klepna ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
 
 - u nahrávky existuje přepis,
-- každý mluvčí je pojmenovaný nebo označený jako neznámý,
-- [navržené úkoly](summaries-and-tasks.md#tasks-across-items) jsou zkontrolovány.
+- každý mluvčí je pojmenovaný nebo označený jako neznámý.
+
+Kontrola úkolů sdílení nezdržuje. Kolegové uvidí navržený úkol až po jeho přijetí vlastníkem nebo kurátorem.
 
 Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Sdílení zruší otevřený soukromý běh [Učení](learn.md). Jeho zjištění zůstanou soukromá. Pokud profil Organizace zapíná automatické Učení, spustí se nový běh v rozsahu Organizace a shrnutí počká na jeho kontrolu.
 

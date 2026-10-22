@@ -3,7 +3,7 @@
  * provider stubbed: what the model is shown (references and domains in the
  * user message, nothing of the mail in the system message), what is stored
  * (a summary without a transcript), and how task evidence is placed and
- * trusted (quoted or unverified evidence creates no new task).
+ * trusted (a quoted part or an unverified sender starts unticked).
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -443,7 +443,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(eva?.personId).toBe(person.id);
     });
 
-    it("summarizes a mail and accepts trusted tasks, skipping quoted evidence", async () => {
+    it("summarizes a mail and proposes its tasks, quoted ones unticked", async () => {
         const itemId = await deliver(
             await signMessage(
                 rawMessage(headers("Contract and samples"), BODY),
@@ -565,7 +565,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         );
         const contract = byText.get("Send the signed contract");
         expect(contract).toMatchObject({
-            status: "open",
+            status: "proposed",
             ticked: true,
             evidenceStartMs: null,
             evidenceSegmentIndex: 0,
@@ -575,8 +575,20 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         // Eva's address is a person of Jan's Almanac since the test above.
         expect(contract?.assigneePersonId).toEqual(expect.any(String));
         expect(contract?.assigneeCheck).toBe(false);
-        expect(tasks).toHaveLength(1);
-        expect(byText.has("Deliver the samples to the warehouse")).toBe(false);
+        const samples = byText.get("Deliver the samples to the warehouse");
+        expect(samples).toMatchObject({
+            ticked: false,
+            evidenceSegmentIndex: 2,
+            evidenceProvenance: "quoted",
+        });
+        const content = await readItemContent("u-jan", itemId);
+        const quoted = content?.segments[2]?.text ?? "";
+        expect(
+            quoted.slice(
+                samples?.evidenceCharStart ?? 0,
+                samples?.evidenceCharEnd ?? 0,
+            ),
+        ).toBe("deliver the samples to your warehouse next week");
     });
 
     it("uses the account language for a profile mail summary when detection returned none", async () => {
@@ -623,23 +635,25 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         );
     });
 
-    it("lists accepted mail tasks immediately and backs them up with the summary", async () => {
+    it("reviews a mail's tasks like a recording's, and backs them up with its summary", async () => {
         const viewer = await taskViewerById("u-jan");
-        expect(await recordingsAwaitingTaskReview(viewer)).toEqual([]);
-        const [summary] = (await db().select().from(aiEnhancements)).filter(
-            (row) =>
-                decryptText(row.summary) ===
-                "Jan asks Eva for the signed contract by Friday.",
+        const waiting = await recordingsAwaitingTaskReview(viewer);
+        const [entry] = waiting.filter(
+            (row) => row.title === "Contract and samples",
         );
-        const itemId = summary?.itemId ?? "";
+        expect(entry?.proposals).toBe(2);
+        const itemId = entry?.recordingId ?? "";
+
         const listed = await listRecordingTasks(viewer, itemId);
         expect(listed?.canEdit).toBe(true);
-        expect(listed?.proposals).toEqual([]);
-        expect(listed?.tasks).toHaveLength(1);
-        expect(await acceptReview(viewer, itemId)).toMatchObject({
-            accepted: 0,
-            rejected: 0,
-        });
+        expect(listed?.proposals).toHaveLength(2);
+        const quoted = listed?.proposals.find(
+            (task) => task.evidenceProvenance === "quoted",
+        );
+        expect(quoted?.evidenceText).toMatchObject({ segmentIndex: 2 });
+
+        const result = await acceptReview(viewer, itemId);
+        expect(result).toMatchObject({ accepted: 1, rejected: 1 });
         const tasks = await listTasks(viewer, {
             tab: "tracked",
             state: "open",
@@ -679,7 +693,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         });
     });
 
-    it("creates no task whose words are not found in a mail that quotes", async () => {
+    it("leaves unticked a task whose words are not found in a mail that quotes", async () => {
         const itemId = await deliver(
             await signMessage(rawMessage(headers("Unplaced"), BODY), company),
             ["jan@klepna.example"],
@@ -713,7 +727,14 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             .select()
             .from(recordingTasks)
             .where(eq(recordingTasks.itemId, itemId));
-        expect(tasks).toEqual([]);
+        expect(tasks).toHaveLength(2);
+        for (const task of tasks) {
+            expect(task).toMatchObject({
+                ticked: false,
+                evidenceSegmentIndex: null,
+                evidenceProvenance: "unlocated",
+            });
+        }
     });
 
     it("keeps an earlier quoted follow-up as a mention without a field proposal", async () => {

@@ -328,10 +328,7 @@ export function deriveWorkflowStatus(
         ...(kind === "audio" ? ["transcribe" as const] : []),
         "learn",
         "summary",
-        ...(data.taskReviewWaiting > 0 ||
-        data.phases.taskReview?.state === "failed"
-            ? ["taskReview" as const]
-            : []),
+        "taskReview",
         ...(data.intents.length > 0 || data.phases.share
             ? ["share" as const]
             : []),
@@ -387,6 +384,9 @@ export function deriveWorkflowStatus(
             visiblePhases.some(
                 (phase) =>
                     data.steps[phase].state === "pending" &&
+                    (phase !== "taskReview" ||
+                        data.taskReviewWaiting > 0 ||
+                        data.phases.taskReview !== undefined) &&
                     data.profile !== null &&
                     !data.manualOnly,
             ));

@@ -479,6 +479,29 @@ describe("Share planning", () => {
         });
     }
 
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("shares %s while the owner's Task review waits", (kind) => {
+        const result = planAdvance(
+            shareReady({
+                item: { ...facts().item, kind },
+                taskReview: { proposals: 2, followUps: 1 },
+            }),
+        );
+        expect(result.actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "waiting",
+                    reason: "needs_review",
+                }),
+            }),
+        );
+        expect(result.actions).toContainEqual({ type: "executeShares" });
+    });
+
     it("waits with gate problems, then executes and records a completed share", () => {
         const blocked = shareReady({
             share: {

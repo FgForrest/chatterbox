@@ -9,6 +9,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
@@ -56,20 +57,22 @@ const task: TaskView = {
     canUndoMatch: false,
 };
 
-it("shows no Review tasks entry for a freshly accepted summary", () => {
+it("offers Review tasks and applies the owner-selected proposals", async () => {
     const state: RecordingTasksState = {
         itemId: "item-1",
         data: {
             canEdit: true,
-            reviewed: true,
-            tasks: [task],
-            proposals: [],
+            reviewed: false,
+            tasks: [],
+            proposals: [
+                { ...task, status: "proposed", acceptedAt: null, version: 0 },
+            ],
             updates: [],
             matches: [],
         },
         failed: false,
-        reviewing: false,
-        waiting: 0,
+        reviewing: true,
+        waiting: 1,
         accepting: false,
         update: vi.fn(),
         add: vi.fn(async () => null),
@@ -80,11 +83,14 @@ it("shows no Review tasks entry for a freshly accepted summary", () => {
         tickMatch: vi.fn(),
         accept: vi.fn(async () => false),
     };
-    const { container } = render(
+    render(
         <TaskReviewLink state={state} speakers={[]} organizationOnly={false} />,
     );
-    expect(screen.queryByRole("button", { name: /Review tasks/ })).toBeNull();
-    expect(container.textContent).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: /Review tasks/ }));
+    fireEvent.click(
+        screen.getByRole("button", { name: /Apply selected changes/ }),
+    );
+    await waitFor(() => expect(state.accept).toHaveBeenCalledOnce());
 });
 
 it("shows who is this beside the heard name and lets the owner choose a person", async () => {
@@ -113,4 +119,38 @@ it("shows who is this beside the heard name and lets the owner choose a person",
             assigneeCheck: false,
         },
     );
+});
+
+it("suppresses the summary fallback when proposals are hidden from a colleague", () => {
+    render(
+        <RecordingTasks
+            state={{
+                data: {
+                    canEdit: false,
+                    reviewed: true,
+                    tasks: [],
+                    proposals: [],
+                    updates: [],
+                    matches: [],
+                },
+                itemId: "item-1",
+                reviewing: false,
+                failed: false,
+                waiting: 0,
+                accepting: false,
+                update: vi.fn(),
+                add: vi.fn(async () => null),
+                merge: vi.fn(async () => false),
+                mergeInto: vi.fn(async () => false),
+                undoMatch: vi.fn(async () => {}),
+                tickUpdate: vi.fn(),
+                tickMatch: vi.fn(),
+                accept: vi.fn(async () => false),
+            }}
+            speakers={[]}
+            organizationOnly={true}
+            fallback={<p>Unreviewed summary task</p>}
+        />,
+    );
+    expect(screen.queryByText("Unreviewed summary task")).toBeNull();
 });
