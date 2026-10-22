@@ -434,19 +434,19 @@ export function SpeakerTags({
                                 attribution ? (
                                     <Link
                                         href={`/almanac/${attribution.personId}`}
-                                        className={`${segmentClass} min-w-0 break-words text-left`}
+                                        className={`${segmentClass} min-w-0 break-words pr-3 text-left`}
                                     >
                                         {label}
                                     </Link>
                                 ) : (
-                                    <span className="min-w-0 px-2 break-words">
+                                    <span className="min-w-0 pl-2 pr-3 break-words">
                                         {label}
                                     </span>
                                 )
                             ) : (
                                 <button
                                     type="button"
-                                    className={`${segmentClass} min-w-0 break-words text-left`}
+                                    className={`${segmentClass} min-w-0 break-words text-left ${suggestion || attribution || unknown ? "" : "pr-3"}`}
                                     disabled={saving}
                                     aria-haspopup="dialog"
                                     onClick={() => {
