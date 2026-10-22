@@ -1,15 +1,15 @@
 ---
 title: Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
 date: 2026-10-12
-updated: 2026-10-22 16:00
-status: accepted
+updated: 2026-10-22 21:10
+status: superseded
 kind: feature
 issues: []
 prs: [105, 106, 107, 117]
 areas: [src/lib/integrations/google, src/app/api/recordings/[id]/calendar-events/route.ts, src/lib/learn/run-fallback.ts, src/lib/learn/learn-job-handler.ts, src/components/learn/learn-widget.tsx]
 supersedes: []
-superseded-by: []
-relates: [2026-09-14-speaker-identity-without-biometrics, 2026-09-30-learn, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-09-28-google-drive-export]
+superseded-by: [2026-10-22-calendar-speaker-guesses-in-automatic-runs]
+relates: [2026-09-14-speaker-identity-without-biometrics, 2026-09-30-learn, 2026-09-28-google-drive-export]
 ---
 
 # Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
@@ -23,6 +23,10 @@ dropped; nothing is stored, no e-mail address is requested, and no schema change
 use the names as hints, but a speaker is named only from direct evidence in the transcript.
 Attendance alone never assigns a speaker. Shipped as PRs #105 (all unnamed speakers assessed),
 #106 and #107 (Calendar and Meet), recreated as PR #117.
+
+**Superseded on 2026-10-22** by [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250): every Learn run,
+automatic ones included, now gets the roster, and the model guesses speakers from it for the user to
+confirm.
 
 ## Why
 
@@ -81,7 +85,7 @@ turns when their language is English, and Calendar and Meet treated as facts rat
 identity from topic, attendance, or elimination." The same change (PR #105) made Learn assess every
 unnamed label separately and look up people by the names used to address a speaker who then answers.
 What would make Option A win: a review flow where a roster-based name is clearly marked as a guess
-the user confirms. That is the proposal in [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md).
+the user confirms. That is what [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) built.
 
 ## Key technical details
 
@@ -101,7 +105,7 @@ the user confirms. That is the proposal in [2026-10-22-calendar-speaker-guesses-
   discarded.
 - **Rule:** `SPEAKER_RULE` and `LearnSpeakerCandidate` in `src/lib/learn/run-fallback.ts`.
 - **Automatic Learn passes no event** (`src/lib/learn/auto-learn.ts`), so automatic runs get no
-  candidates. This is the behaviour the 2026-10-22 proposal reverses.
+  candidates. PR #250 reversed this.
 - **Looks like a bug in the history:** #106 and #107 show as merged, but they merged into their stacked
   parent branches after #105 had reached `main`, so neither reached `main`; PR #117 carried both
   commits. Stacked PRs must be retargeted before the parent merges.
@@ -127,15 +131,15 @@ Checked on 2026-10-22, the integration helped little in practice:
   exist, nothing writes them);
 - only the owner's primary calendar, only the private view, Meet data only for 30 days.
 
-The proposal [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) addresses all but the e-mail
-link; it is not merged, so this record stays in force until it ships.
+[2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250) addressed all but the e-mail link, which
+it dropped on purpose.
 
 ## Related work
 
 - [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md): why identity comes from Calendar and Meet at all.
 - [2026-09-30-learn](2026-09-30-learn/README.md): the Learn passes and evaluation these candidates feed.
-- [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): the proposed successor rule (roster on every
-  run, guesses for the user to confirm).
+- [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): the successor rule that supersedes this one
+  (roster on every run, guesses for the user to confirm).
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): the per-user Google connection Calendar and Meet reuse.
 
 ## Timeline
@@ -146,3 +150,4 @@ link; it is not merged, so this record stays in force until it ships.
 - **2026-10-12**: the gap found; PR #117 merged with both stranded commits.
 - **2026-10-22**: gaps reviewed; a successor rule proposed.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: superseded by PR #250.
