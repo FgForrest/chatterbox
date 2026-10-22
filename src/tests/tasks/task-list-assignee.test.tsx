@@ -81,6 +81,7 @@ const secondPerson: TaskAssignee = {
     name: "Hela Thistlemere",
 };
 const item = {
+    audioAvailable: true,
     id: "item-1",
     title: "Planning",
     startTime: "2026-10-20T00:00:00Z",
@@ -92,6 +93,7 @@ const task: TaskListItem = {
     recordingId: item.id,
     evidenceItemId: item.id,
     evidenceItemKind: "audio",
+    evidenceAudioAvailable: true,
     status: "open",
     text: "Send the draft",
     assignee: firstPerson,

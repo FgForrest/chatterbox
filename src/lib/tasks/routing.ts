@@ -14,6 +14,7 @@ import { db } from "@/db";
 import {
     chatterItems,
     people,
+    recordings,
     recordingTasks,
     taskMentions,
     taskUpdateProposals,
@@ -27,6 +28,7 @@ import {
     refreshExistingRecordingSidecars,
 } from "@/lib/export/document-sidecars";
 import { recordingSharedCondition } from "@/lib/knowledge/org-people";
+import { hasAudio } from "@/lib/recordings/audio-availability";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
@@ -78,6 +80,7 @@ export interface RoutedTaskProposalView {
         id: string;
         kind: "audio" | "mail";
         title: string;
+        audioAvailable: boolean;
     } | null;
     proposedBy: { id: string; name: string } | null;
 }
@@ -766,6 +769,9 @@ export async function listRoutedTaskProposals(
             version: taskUpdateProposals.version,
             sourceItemKind: routedSourceItem.kind,
             sourceItemTitle: routedSourceItem.title,
+            sourceAudioId: recordings.id,
+            sourceAudioReapedAt: recordings.audioReapedAt,
+            sourceAudioDeletedAt: recordings.deletedAt,
             hasEvidence: exists(
                 db
                     .select({ id: taskMentions.id })
@@ -813,6 +819,13 @@ export async function listRoutedTaskProposals(
             ),
         )
         .leftJoin(
+            recordings,
+            and(
+                eq(recordings.id, routedSourceItem.id),
+                eq(recordings.userId, routedSourceItem.userId),
+            ),
+        )
+        .leftJoin(
             routedActor,
             eq(routedActor.id, taskUpdateProposals.decidedByUserId),
         )
@@ -834,7 +847,15 @@ export async function listRoutedTaskProposals(
             asc(taskUpdateProposals.id),
         );
     return rows.map((row) => ({
-        ...row,
+        id: row.id,
+        kind: row.kind,
+        sourceItemId: row.sourceItemId,
+        taskId: row.taskId,
+        currentDueDate: row.currentDueDate,
+        dueDate: row.dueDate,
+        evidenceStartMs: row.evidenceStartMs,
+        version: row.version,
+        proposedAssigneeCheck: row.proposedAssigneeCheck,
         taskText: decryptText(row.taskText),
         currentDuePhrase: row.currentDuePhrase
             ? decryptText(row.currentDuePhrase)
@@ -871,6 +892,12 @@ export async function listRoutedTaskProposals(
                       id: row.sourceItemId,
                       kind: row.sourceItemKind,
                       title: decryptText(row.sourceItemTitle),
+                      audioAvailable: hasAudio({
+                          kind: row.sourceItemKind,
+                          audioId: row.sourceAudioId,
+                          audioReapedAt: row.sourceAudioReapedAt,
+                          audioDeletedAt: row.sourceAudioDeletedAt,
+                      }),
                   },
         proposedBy: row.proposedById
             ? {

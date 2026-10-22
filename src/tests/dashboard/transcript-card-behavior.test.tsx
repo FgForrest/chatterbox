@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 vi.mock("@/components/summary/summary-widget", () => ({
     SummaryWidget: () => null,
@@ -38,34 +40,36 @@ function panelElement(
     isTranscribing = false,
 ) {
     return (
-        <TranscriptionPanel
-            recording={{
-                id: "rec-card",
-                filename: "Meeting",
-                duration: 60000,
-                filesize: 100,
-                startTime: new Date(0).toISOString(),
-                deviceSn: "local",
-            }}
-            transcripts={[
-                {
-                    source: "riffado",
-                    text: turns
-                        .map((turn) => `${turn.speaker}: ${turn.text}`)
-                        .join("\n"),
-                    language: "cs",
-                    provider: "Test provider",
-                    model: "Test model",
-                    turns,
-                    topics: hasTopics ? topics : null,
-                },
-            ]}
-            readOnly={readOnly}
-            isTranscribing={isTranscribing}
-            onTranscribe={vi.fn()}
-            onSeekToTurn={seek}
-            onPlayFromTurn={play}
-        />
+        <PlaybackProvider
+            playback={createTestPlayback({ seek, play }).playback}
+        >
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-card",
+                    filename: "Meeting",
+                    duration: 60000,
+                    filesize: 100,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: turns
+                            .map((turn) => `${turn.speaker}: ${turn.text}`)
+                            .join("\n"),
+                        language: "cs",
+                        provider: "Test provider",
+                        model: "Test model",
+                        turns,
+                        topics: hasTopics ? topics : null,
+                    },
+                ]}
+                readOnly={readOnly}
+                isTranscribing={isTranscribing}
+                onTranscribe={vi.fn()}
+            />
+        </PlaybackProvider>
     );
 }
 
@@ -289,7 +293,7 @@ describe("transcript card behavior", () => {
                 name: "Play the next turn of Speaker 1",
             }),
         );
-        expect(play).toHaveBeenCalledWith(10000);
+        expect(play).toHaveBeenCalledWith(10000, expect.any(String), undefined);
         expect(HTMLElement.prototype.scrollTo).toHaveBeenLastCalledWith({
             top: 504,
             behavior: "smooth",
@@ -405,6 +409,6 @@ describe("transcript card behavior", () => {
         });
         expect(button).toHaveProperty("disabled", false);
         fireEvent.click(button);
-        expect(play).toHaveBeenCalledWith(10000);
+        expect(play).toHaveBeenCalledWith(10000, expect.any(String), undefined);
     });
 });

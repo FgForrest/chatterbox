@@ -33,6 +33,7 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         recordingId: "recording-1",
         evidenceItemId: "recording-1",
         evidenceItemKind: "audio",
+        evidenceAudioAvailable: true,
         status: "open",
         text: "Send the draft",
         assignee: { personId: "person-1", name: "Karel Vondra" },

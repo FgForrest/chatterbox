@@ -25,7 +25,6 @@ it("keeps an edited new-record name when it is ticked before the blur save retur
             disabled: false,
             names: {},
             entityTypes: [{ key: "organization", label: "Organization" }],
-            seek: () => null,
             onDecide,
             onLinked: vi.fn(),
         }),

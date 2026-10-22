@@ -1,8 +1,8 @@
 "use client";
 
-import { Pause, Play } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useState } from "react";
 import { speakerAccent } from "@/components/people/speaker-accents";
+import { PlayAtIcon } from "@/components/playback/play-at-button";
 import { sentenceElement } from "@/hooks/use-transcript-follow";
 
 /** The marker's size, `size-5`. */
@@ -90,11 +90,7 @@ export function TranscriptPlayMarker({
             className={`absolute m-0 grid size-5 cursor-pointer place-items-center rounded-full transition-[top] duration-150 ease-out motion-reduce:transition-none ${pausing ? `${accent.dot} text-white` : `${accent.text} ${accent.soft}`}`}
             style={{ top: place.top, left: place.left }}
         >
-            {pausing ? (
-                <Pause className="size-3 fill-current" />
-            ) : (
-                <Play className="size-3 fill-current" />
-            )}
+            <PlayAtIcon playing={pausing} />
         </span>
     );
 }

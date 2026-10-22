@@ -1,15 +1,16 @@
 "use client";
 
-import { Mail, Pause, Play } from "lucide-react";
+import { ArrowUpRight, Mail } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
-import { type ReactNode, useEffect, useId, useState } from "react";
-import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
+import type { ReactNode } from "react";
+import { PlayAtButton } from "@/components/playback/play-at-button";
 import { formatClock } from "@/lib/topics/timeline";
 
 export interface TaskEvidence {
     itemId: string;
     itemKind: "audio" | "mail";
+    audioAvailable: boolean;
     startMs: number | null;
     text: {
         segmentIndex: number;
@@ -22,30 +23,17 @@ export interface TaskEvidence {
 export function TaskEvidenceLink({
     evidence,
     quote,
-    onPlay,
     onNavigate,
     currentItemId,
-    playback,
     showQuote = false,
 }: {
     evidence: TaskEvidence;
     quote?: string | null;
-    onPlay?: (startMs: number) => void;
     onNavigate?: () => void;
     currentItemId?: string;
-    playback?: TranscriptPlayback;
     showQuote?: boolean;
 }) {
     const i18n = useExtracted();
-    const evidenceId = useId();
-    const [playing, setPlaying] = useState(false);
-    useEffect(() => {
-        if (!playback) return;
-        return playback.subscribe((state) => {
-            setPlaying(state.owner === evidenceId);
-        });
-    }, [evidenceId, playback]);
-
     const className =
         "inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline";
     const hasLocation = evidence.startMs !== null || evidence.text !== null;
@@ -66,51 +54,38 @@ export function TaskEvidenceLink({
     }
 
     const currentAudio =
-        evidence.itemKind === "audio" &&
-        evidence.startMs !== null &&
-        evidence.itemId === currentItemId &&
-        (onPlay !== undefined || playback !== undefined);
+        evidence.itemKind === "audio" && evidence.itemId === currentItemId;
     const time =
         evidence.startMs === null ? null : formatClock(evidence.startMs);
-    const audioLabel = playing
-        ? i18n("Pause evidence at {time}", { time: time ?? "" })
-        : i18n("Play evidence at {time}", { time: time ?? "" });
     let action: ReactNode;
 
     if (currentAudio) {
-        action = (
-            <button
-                type="button"
-                className={`${className} ${playing ? "text-primary" : ""}`}
-                title={quote ?? undefined}
-                aria-label={audioLabel}
-                aria-pressed={playback ? playing : undefined}
-                onClick={() => {
-                    const startMs = evidence.startMs as number;
-                    if (playback) {
-                        if (playing) {
-                            setPlaying(false);
-                            playback.pause();
-                        } else {
-                            setPlaying(true);
-                            playback.play(startMs, evidenceId);
-                        }
-                    } else {
-                        onPlay?.(startMs);
-                    }
-                }}
-            >
-                {playing ? (
-                    <Pause className="size-3" aria-hidden="true" />
-                ) : (
-                    <Play className="size-3" aria-hidden="true" />
-                )}
-                {time}
-            </button>
-        );
+        if (evidence.startMs === null) {
+            action = null;
+        } else if (evidence.audioAvailable) {
+            action = (
+                <PlayAtButton
+                    ms={evidence.startMs}
+                    title={quote ?? undefined}
+                />
+            );
+        } else {
+            action = (
+                <span
+                    className="text-xs tabular-nums text-muted-foreground"
+                    title={quote ?? undefined}
+                >
+                    {time}
+                </span>
+            );
+        }
     } else {
         const query = new URLSearchParams({ recording: evidence.itemId });
-        if (evidence.itemKind === "audio" && evidence.startMs !== null) {
+        if (
+            evidence.itemKind === "audio" &&
+            evidence.audioAvailable &&
+            evidence.startMs !== null
+        ) {
             query.set("playFrom", String(evidence.startMs));
         }
         if (evidence.itemKind === "mail" && evidence.text) {
@@ -118,10 +93,16 @@ export function TaskEvidenceLink({
             query.set("evidenceStart", String(evidence.text.charStart));
             query.set("evidenceEnd", String(evidence.text.charEnd));
         }
-        const label =
-            evidence.itemKind === "mail"
-                ? i18n("Show evidence in mail")
-                : audioLabel;
+        let label = i18n("Show in recording");
+        let text = label;
+        let icon = <ArrowUpRight className="size-3" aria-hidden="true" />;
+        if (evidence.itemKind === "mail") {
+            label = i18n("Show evidence in mail");
+            text = i18n("Show in mail");
+            icon = <Mail className="size-3" aria-hidden="true" />;
+        } else if (evidence.audioAvailable && time !== null) {
+            text = time;
+        }
         action = (
             <Link
                 href={`/dashboard?${query.toString()}`}
@@ -130,12 +111,8 @@ export function TaskEvidenceLink({
                 aria-label={label}
                 onClick={onNavigate}
             >
-                {evidence.itemKind === "mail" ? (
-                    <Mail className="size-3" aria-hidden="true" />
-                ) : (
-                    <Play className="size-3" aria-hidden="true" />
-                )}
-                {evidence.itemKind === "mail" ? i18n("Show in mail") : time}
+                {icon}
+                {text}
             </Link>
         );
     }

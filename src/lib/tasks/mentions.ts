@@ -26,6 +26,7 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
+import { hasAudio } from "@/lib/recordings/audio-availability";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import type { TaskViewer } from "@/lib/tasks/access";
 
@@ -124,6 +125,7 @@ export interface TaskMentionEvidence {
     itemId: string;
     kind: "audio" | "mail";
     title: string;
+    audioAvailable: boolean;
     occurredAt: Date;
     ownerUserId: string;
     quote: string | null;
@@ -170,6 +172,9 @@ async function loadTaskMentions(
                 itemId: taskMentions.itemId,
                 kind: chatterItems.kind,
                 title: chatterItems.title,
+                audioId: recordings.id,
+                audioReapedAt: recordings.audioReapedAt,
+                audioDeletedAt: recordings.deletedAt,
                 occurredAt: chatterItems.occurredAt,
                 ownerUserId: chatterItems.userId,
                 quote: taskMentions.quote,
@@ -182,6 +187,13 @@ async function loadTaskMentions(
             })
             .from(taskMentions)
             .innerJoin(chatterItems, eq(chatterItems.id, taskMentions.itemId))
+            .leftJoin(
+                recordings,
+                and(
+                    eq(recordings.id, chatterItems.id),
+                    eq(recordings.userId, chatterItems.userId),
+                ),
+            )
             .innerJoin(
                 recordingTasks,
                 eq(recordingTasks.id, taskMentions.taskId),
@@ -202,8 +214,15 @@ async function loadTaskMentions(
     ]);
     for (const row of all) taskIdsWithMentions.add(row.taskId);
     for (const row of rows) {
+        const { audioId, audioReapedAt, audioDeletedAt, ...mention } = row;
         const evidence = {
-            ...row,
+            ...mention,
+            audioAvailable: hasAudio({
+                kind: row.kind,
+                audioId,
+                audioReapedAt,
+                audioDeletedAt,
+            }),
             title: decryptText(row.title),
             quote: row.quote ? decryptText(row.quote) : null,
         };

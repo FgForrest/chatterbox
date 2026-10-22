@@ -1,12 +1,14 @@
 "use client";
 
-import { Check, Loader2, Play, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { SpeakerTurnChip } from "@/components/playback/play-turn-button";
 import { useProductName } from "@/components/product-name-provider";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
 import { speakerGroups } from "@/lib/knowledge/speaker-groups";
@@ -33,10 +35,10 @@ interface SpeakerTagsProps {
      * knowledge base, for everyone who can see the recording.
      */
     view?: RecordingView;
-    /** Play the recording from a moment, to hear a suggestion's evidence. */
-    onSeek?: (ms: number) => void;
-    /** Play a speaker's next timed turn; false leaves the browser menu alone. */
-    onPlaySpeaker?: (speaker: string | readonly string[]) => boolean;
+    /** Select a speaker's next timed turn, or null when none exists. */
+    nextSpeakerTurn?: (
+        speaker: string | readonly string[],
+    ) => PlayAtTarget | null;
     /**
      * The version of the transcript on screen, from the page's data. Every
      * change names it; without it, the version the speakers were read at.
@@ -147,8 +149,7 @@ export function SpeakerTags({
     attributions,
     onAttributionsChange,
     view,
-    onSeek,
-    onPlaySpeaker,
+    nextSpeakerTurn,
     shownVersion,
     onStale,
     onUnknownLabelsChange,
@@ -330,20 +331,7 @@ export function SpeakerTags({
         speakers.map(({ speaker }) => speaker),
         attributions,
     );
-    const playGroup = (labels: readonly string[]) =>
-        onPlaySpeaker?.(labels.length === 1 ? labels[0] : labels);
     if (speakers.length === 0) return null;
-
-    const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        const speaker =
-            target.closest<HTMLElement>("[data-speaker]")?.dataset.speaker;
-        const group = groups.find(({ labels }) =>
-            labels.includes(speaker ?? ""),
-        );
-        if (group && playGroup(group.labels)) event.preventDefault();
-    };
 
     const openSpeaker = speakers.find(
         (speaker) => speaker.speaker === openLabel,
@@ -356,7 +344,6 @@ export function SpeakerTags({
             <fieldset
                 className="flex min-w-0 flex-wrap items-center gap-2"
                 aria-label={i18n("Transcript speakers")}
-                onContextMenu={handleContextMenu}
             >
                 {groups.map(({ labels, position }) => {
                     const speaker = speakers.find(
@@ -389,9 +376,8 @@ export function SpeakerTags({
                         .join(", ");
                     const evidenceMs = suggestion?.evidenceStartMs;
                     const canPlayEvidence = Boolean(
-                        suggestion && onSeek && evidenceMs != null,
+                        suggestion && evidenceMs != null,
                     );
-                    const canListen = canPlayEvidence || Boolean(onPlaySpeaker);
                     const label =
                         attribution?.name ??
                         (suggestion
@@ -403,39 +389,47 @@ export function SpeakerTags({
                               : speaker.label);
 
                     return (
-                        <span
+                        <SpeakerTurnChip
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
-                            data-speaker={speaker.speaker}
-                            className={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
+                            speaker={speaker.speaker}
+                            chipClassName={`inline-flex h-8 max-w-full items-center overflow-hidden rounded-full border text-xs font-medium ${attribution ? "border-primary/30 bg-primary/10" : "border-dashed bg-muted/30 text-muted-foreground"}`}
+                            className={`${segmentClass} shrink-0 ${accent}`}
+                            label={
+                                canPlayEvidence
+                                    ? i18n("Play where {speaker} speaks", {
+                                          speaker: speaker.label,
+                                      })
+                                    : i18n("Play the next turn of {name}", {
+                                          name,
+                                      })
+                            }
+                            contextTurn={
+                                nextSpeakerTurn
+                                    ? () =>
+                                          nextSpeakerTurn(
+                                              labels.length === 1
+                                                  ? labels[0]
+                                                  : labels,
+                                          )
+                                    : null
+                            }
+                            nextTurn={
+                                canPlayEvidence && evidenceMs != null
+                                    ? () => ({ ms: evidenceMs })
+                                    : nextSpeakerTurn
+                                      ? () =>
+                                            nextSpeakerTurn(
+                                                labels.length === 1
+                                                    ? labels[0]
+                                                    : labels,
+                                            )
+                                      : undefined
+                            }
                         >
                             {labels.slice(1).map((label) => (
                                 <span key={label} id={speakerAnchorId(label)} />
                             ))}
-                            <button
-                                type="button"
-                                className={`${segmentClass} shrink-0 ${accent}`}
-                                disabled={!canListen}
-                                aria-label={
-                                    canPlayEvidence
-                                        ? i18n("Play where {speaker} speaks", {
-                                              speaker: speaker.label,
-                                          })
-                                        : i18n("Play the next turn of {name}", {
-                                              name,
-                                          })
-                                }
-                                title={
-                                    canPlayEvidence ? i18n("Listen") : undefined
-                                }
-                                onClick={() => {
-                                    if (canPlayEvidence && evidenceMs != null) {
-                                        onSeek?.(evidenceMs);
-                                    } else playGroup(labels);
-                                }}
-                            >
-                                <Play className="size-3 fill-current" />
-                            </button>
                             {readOnly ? (
                                 attribution ? (
                                     <Link
@@ -555,7 +549,7 @@ export function SpeakerTags({
                                     )}
                                 </button>
                             )}
-                        </span>
+                        </SpeakerTurnChip>
                     );
                 })}
             </fieldset>
@@ -596,9 +590,9 @@ export function SpeakerTags({
                     }
                     activeVoice={openSpeaker.speaker}
                     onVoiceChange={setOpenLabel}
-                    onPlayVoice={
-                        onPlaySpeaker
-                            ? (label) => onPlaySpeaker(label)
+                    nextVoiceTurn={
+                        nextSpeakerTurn
+                            ? (label) => nextSpeakerTurn(label)
                             : undefined
                     }
                     onUnlinkVoice={(label) => attribute(label, null)}

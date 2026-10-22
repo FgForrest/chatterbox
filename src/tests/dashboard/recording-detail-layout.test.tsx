@@ -19,7 +19,6 @@ vi.mock("@/components/dashboard/recording-player", () => ({
         useImperativeHandle(ref, () => ({
             playFrom,
             seekTo: vi.fn(),
-            getCurrentTime: () => 0,
             pause: vi.fn(),
             subscribe: () => () => {},
         }));
@@ -33,7 +32,9 @@ vi.mock("@/components/dashboard/recording-player", () => ({
             </button>
         );
     },
-    transcriptPlayback: () => undefined,
+    transcriptPlayback: (ref: { current: RecordingPlayerHandle | null }) => ({
+        play: (ms: number) => ref.current?.playFrom(ms / 1000),
+    }),
 }));
 
 vi.mock("@/components/dashboard/recording-player-header", () => ({
@@ -176,6 +177,23 @@ describe("recording detail layout", () => {
         );
         fireEvent.click(screen.getByTestId("recording-player"));
         expect(onSelectRecording).toHaveBeenCalledExactlyOnceWith(next);
+    });
+
+    it("keeps the player mounted when switching recordings", () => {
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+        const player = screen.getByTestId("recording-player");
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{ ...recording, id: "next-recording" }}
+            />,
+        );
+        expect(screen.getByTestId("recording-player")).toBe(player);
     });
 
     it("orders the title, workflow, folder row, player, and detail panels", () => {

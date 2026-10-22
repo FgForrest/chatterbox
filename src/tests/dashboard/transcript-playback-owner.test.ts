@@ -24,7 +24,6 @@ function fakePlayer() {
             emit(false);
             emit(true);
         },
-        getCurrentTime: () => ms / 1000,
         pause: () => emit(false),
         subscribe: (listener) => {
             listeners.add(listener);
@@ -36,6 +35,22 @@ function fakePlayer() {
 }
 
 describe("transcript playback owner", () => {
+    it("passes a bounded span to the player in seconds with the same owner", () => {
+        const { ref } = fakePlayer();
+        const playFrom = vi.spyOn(ref.current, "playFrom");
+        const states: PlaybackState[] = [];
+        const playback = transcriptPlayback(ref);
+        playback.subscribe((state) => states.push(state));
+        playback.play(1250, "turn-control", 2750);
+        expect(playFrom).toHaveBeenCalledExactlyOnceWith(1.25, 2.75);
+        expect(states.at(-1)).toMatchObject({
+            ms: 1250,
+            playing: true,
+            owner: "turn-control",
+        });
+        playback.pause();
+        expect(states.at(-1)).toMatchObject({ playing: false, owner: null });
+    });
     it("keeps the owner when the view is rebuilt for the same player", () => {
         const { ref } = fakePlayer();
         transcriptPlayback(ref).play(12_000, "evidence-a");
