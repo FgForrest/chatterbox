@@ -103,6 +103,53 @@ describe("speaker proposal provenance", () => {
             ),
         ).toBeTruthy();
     });
+    it.each([
+        ["calendar", "Invited in Calendar"],
+        ["meet", "Joined in Google Meet"],
+    ] as const)("keeps an evidence-backed %s proposal's reason on the transcript chip", (source, origin) => {
+        const marks = learnMarksFrom(
+            {
+                run: { status: "ready" },
+                names: { p1: "Nera Veln" },
+                items: [
+                    {
+                        id: "speaker-item",
+                        kind: "speaker",
+                        preTicked: true,
+                        decision: null,
+                        payload: {
+                            label: "speaker_0",
+                            personId: "p1",
+                            source,
+                            reason: "Introduces herself at the start.",
+                            evidenceMs: [2_000],
+                        },
+                    },
+                ],
+            },
+            vi.fn(),
+        );
+        if (!marks) throw new Error("Marks missing");
+        expect(marks.speakers.speaker_0).toMatchObject({
+            source,
+            reason: "Introduces herself at the start.",
+            ticked: true,
+        });
+        expect(marks.speakers.speaker_0?.guess).toBeUndefined();
+        render(
+            <SpeakerGuesses
+                recordingId="recording"
+                source="riffado"
+                marks={marks}
+                answeredLabels={new Set()}
+                onAccepted={vi.fn()}
+            />,
+        );
+        expect(screen.getByText("Nera Veln")).toBeTruthy();
+        expect(
+            screen.getByTitle(`${origin} · Introduces herself at the start.`),
+        ).toBeTruthy();
+    });
     it("shows the stored suggestion's source and reason on the transcript speaker chip", async () => {
         vi.stubGlobal(
             "fetch",

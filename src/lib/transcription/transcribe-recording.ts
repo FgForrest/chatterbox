@@ -672,6 +672,11 @@ async function transcribeRecordingInner(
                 ownerUserId: ctx.ownerUserId,
                 itemId: recordingId,
             });
+            const unavailable = (error: unknown) =>
+                console.error(
+                    "[transcription] Almanac terms unavailable:",
+                    error,
+                );
             let terms: AlmanacTerm[] = [];
             let recorderName: string | null = null;
             try {
@@ -703,14 +708,15 @@ async function transcribeRecordingInner(
                         : null;
                 }
             } catch (error) {
-                console.error(
-                    "[transcription] Almanac terms unavailable:",
-                    error,
-                );
+                unavailable(error);
             }
-            return roster?.attendees.length
-                ? mergeMeetingTerms(terms, roster.attendees, recorderName)
-                : terms;
+            if (!roster?.attendees.length) return terms;
+            try {
+                return mergeMeetingTerms(terms, roster.attendees, recorderName);
+            } catch (error) {
+                unavailable(error);
+                return terms;
+            }
         };
 
         let transcriptionText: string;
