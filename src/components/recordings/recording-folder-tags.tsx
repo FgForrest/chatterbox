@@ -18,6 +18,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import { cn } from "@/lib/utils";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -122,15 +123,25 @@ export function RecordingFolderTags({
             {assigned.map((folder) => (
                 <span
                     key={folder.id}
-                    className="inline-flex h-7 items-center overflow-hidden rounded-full border border-primary/20 bg-primary/5 text-xs"
+                    className={cn(
+                        "inline-flex h-7 items-center overflow-hidden rounded-full border text-xs",
+                        folder.scope === "org"
+                            ? "border-organization/20 bg-organization/5"
+                            : "border-primary/20 bg-primary/5",
+                    )}
                 >
                     <button
                         type="button"
                         onClick={() => onSelectFolder(folder)}
-                        className="inline-flex h-full items-center gap-1.5 px-2.5 text-foreground hover:bg-primary/10"
+                        className={cn(
+                            "inline-flex h-full items-center gap-1.5 px-2.5 text-foreground",
+                            folder.scope === "org"
+                                ? "hover:bg-organization/10"
+                                : "hover:bg-primary/10",
+                        )}
                     >
                         {folder.scope === "org" ? (
-                            <Users className="size-3.5 text-primary" />
+                            <Users className="size-3.5 text-organization" />
                         ) : (
                             <Folder className="size-3.5 text-primary" />
                         )}
@@ -164,7 +175,12 @@ export function RecordingFolderTags({
                                     },
                                 );
                             }}
-                            className="inline-flex h-full items-center border-l border-primary/15 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            className={cn(
+                                "inline-flex h-full items-center border-l px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+                                folder.scope === "org"
+                                    ? "border-organization/15"
+                                    : "border-primary/15",
+                            )}
                             aria-label={i18n("Remove from {folder}", {
                                 folder: label(folder),
                             })}

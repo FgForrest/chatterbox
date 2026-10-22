@@ -130,7 +130,7 @@ export function FolderPicker({
             className="flex cursor-default items-center gap-2 rounded px-3 py-2 text-sm data-[selected=true]:bg-accent data-[disabled=true]:opacity-50"
         >
             {entry.folder.scope === "org" ? (
-                <Users className="size-4 shrink-0 text-blue-600" />
+                <Users className="size-4 shrink-0 text-organization" />
             ) : (
                 <Folder className="size-4 shrink-0 text-primary" />
             )}
