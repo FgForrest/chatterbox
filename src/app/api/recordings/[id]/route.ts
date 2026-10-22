@@ -69,12 +69,59 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
 
+    if (requestedRecordingView(request) === "received") {
+        const access = await requireRecordingView(
+            session.user.id,
+            id,
+            "received",
+        );
+        if (new URL(request.url).searchParams.get("processing") === "1")
+            return NextResponse.json({ processing: null });
+        const [item] = await db
+            .select({
+                id: recordings.id,
+                title: chatterItems.title,
+                duration: recordings.duration,
+                occurredAt: chatterItems.occurredAt,
+                filesize: recordings.filesize,
+            })
+            .from(recordings)
+            .innerJoin(chatterItems, recordingItemJoin)
+            .where(
+                and(
+                    eq(recordings.id, id),
+                    eq(recordings.userId, access.ownerUserId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .limit(1);
+        if (!item)
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording not found",
+                404,
+            );
+        return NextResponse.json({
+            recording: {
+                id: item.id,
+                filename: decryptText(item.title),
+                duration: item.duration,
+                startTime: item.occurredAt,
+                filesize: item.filesize,
+                view: "received",
+                isOwn: false,
+            },
+        });
+    }
+
     if (new URL(request.url).searchParams.get("processing") === "1") {
         const access = await requireRecordingView(
             session.user.id,
             id,
             requestedRecordingView(request),
         );
+        if (access.view === "received")
+            return NextResponse.json({ processing: null });
         return NextResponse.json({
             processing: await loadPrivateItemProcessing(
                 access.ownerUserId,

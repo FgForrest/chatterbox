@@ -1,4 +1,5 @@
 import { type AnyColumn, eq, or, type SQL, sql } from "drizzle-orm";
+import { receivedItemCondition } from "@/db/queries/item-shares";
 import {
     chatterItems,
     recordingFolderAssignments,
@@ -6,19 +7,7 @@ import {
     recordings,
 } from "@/db/schema";
 
-/**
- * Who may do what with a task (Johnny, 2026-10-07):
- *
- * | action                   | private recording | shared recording                          |
- * |--------------------------|-------------------|-------------------------------------------|
- * | edit, add, drop, review  | owner             | home owner, curator                        |
- * | done, reopen             | owner             | home owner, assignee, curator              |
- * | see                      | owner             | everyone; list: owner, assignee, curator   |
- *
- * A task on a private recording reaches nobody but its owner, even when it
- * names someone else: tasks travel only through the Organization. The
- * assignee is a user when their person's email is that user's login email.
- */
+/** A caller's identity and visibility for task queries. */
 export interface TaskViewer {
     userId: string;
     /** `lookupHash` of the viewer's login email. */
@@ -28,6 +17,7 @@ export interface TaskViewer {
     isCurator: boolean;
     /** The organization account this instance shows, or null. */
     orgUserId: string | null;
+    includeReceived?: boolean;
 }
 
 /** The id and owner columns of the table a task's item is joined as. */
@@ -71,5 +61,19 @@ export function taskVisible(
 ): SQL {
     const shared = taskRecordingShared(viewer, item);
     if (viewer.isOrg) return shared;
-    return or(eq(item.userId, viewer.userId), shared) as SQL;
+    return or(
+        eq(item.userId, viewer.userId),
+        shared,
+        taskReceived(viewer, item),
+    ) as SQL;
+}
+
+/** SQL: an accepted person share grants read access to this task's item. */
+export function taskReceived(
+    viewer: TaskViewer,
+    item: TaskItemColumns = RECORDING_TASK_ITEM,
+): SQL {
+    return viewer.isOrg || viewer.includeReceived !== true
+        ? sql`false`
+        : receivedItemCondition(viewer.userId, item.id);
 }

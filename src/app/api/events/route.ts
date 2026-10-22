@@ -34,8 +34,8 @@ export const GET = apiHandler(async (request: Request) => {
                 : () => {};
             const unsubscribePersonal = subscribePersonalEvents(
                 session.user.id,
-                () => {
-                    write('data: {"type":"mail"}\n\n');
+                (event) => {
+                    write(`data: ${JSON.stringify({ type: event.type })}\n\n`);
                 },
             );
             const keepalive = setInterval(

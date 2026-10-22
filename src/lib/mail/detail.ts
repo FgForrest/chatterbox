@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
+    itemShares,
     mailContents,
     mailMessages,
     mailParticipants,
@@ -125,23 +126,37 @@ export async function loadMailDetail(
                 ),
             )
             .limit(1),
-        db
-            .select({ folderId: recordingFolderAssignments.folderId })
-            .from(recordingFolderAssignments)
-            .innerJoin(
-                recordingFolders,
-                eq(recordingFolders.id, recordingFolderAssignments.folderId),
-            )
-            .where(
-                and(
-                    eq(recordingFolderAssignments.itemId, itemId),
-                    eq(recordingFolderAssignments.userId, ownerUserId),
-                    // The owner's private folders are theirs alone.
-                    orgUserId
-                        ? eq(recordingFolders.userId, orgUserId)
-                        : undefined,
-                ),
-            ),
+        access.role === "receiver"
+            ? db
+                  .select({ folderId: itemShares.filingFolderId })
+                  .from(itemShares)
+                  .where(
+                      and(
+                          eq(itemShares.itemId, itemId),
+                          eq(itemShares.receiverUserId, viewerUserId),
+                          eq(itemShares.state, "accepted"),
+                      ),
+                  )
+            : db
+                  .select({ folderId: recordingFolderAssignments.folderId })
+                  .from(recordingFolderAssignments)
+                  .innerJoin(
+                      recordingFolders,
+                      eq(
+                          recordingFolders.id,
+                          recordingFolderAssignments.folderId,
+                      ),
+                  )
+                  .where(
+                      and(
+                          eq(recordingFolderAssignments.itemId, itemId),
+                          eq(recordingFolderAssignments.userId, ownerUserId),
+                          // The owner's private folders are theirs alone.
+                          orgUserId
+                              ? eq(recordingFolders.userId, orgUserId)
+                              : undefined,
+                      ),
+                  ),
     ]);
     const segments =
         decryptJsonField<
@@ -194,13 +209,16 @@ export async function loadMailDetail(
             ...segment,
             text: mask(segment.text),
             at: segment.at ? new Date(segment.at).toISOString() : null,
+            ...(access.role === "receiver" ? { knownItemId: null } : {}),
         })),
         attachments: attachments.map((attachment) => ({
             ...attachment,
             filename: attachment.filename ? mask(attachment.filename) : null,
         })),
         auth: decryptJsonField<MailAuth>(row.auth),
-        folderIds: assignments.map((assignment) => assignment.folderId),
+        folderIds: assignments.flatMap((assignment) =>
+            assignment.folderId ? [assignment.folderId] : [],
+        ),
     };
 }
 

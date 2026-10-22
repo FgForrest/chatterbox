@@ -1,10 +1,11 @@
 "use client";
 
-import { Mail, Mic, X } from "lucide-react";
+import { Mail, Mic, UserPlus, X } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format-date";
 import { formatDurationMs } from "@/lib/format-duration";
+import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type { Recording } from "@/types/recording";
 
@@ -15,28 +16,52 @@ export function ArrivalNotice({
     dateTimeFormat,
     onOpen,
     onClose,
+    invitation = false,
 }: {
     recording: Recording;
     more: number;
     dateTimeFormat: DateTimeFormat;
     onOpen: () => void;
     onClose: () => void;
+    invitation?: boolean;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
     const mail = recording.kind === "mail";
-    const Icon = mail ? Mail : Mic;
+    const Icon = invitation ? UserPlus : mail ? Mail : Mic;
     const title = recording.filename || (mail ? i18n("(no subject)") : "");
     return (
         <div className="grid w-full grid-cols-[34px_minmax(0,1fr)] items-start gap-3 rounded-lg border bg-popover p-3 pl-3.5 text-popover-foreground shadow-lg">
-            <span className="grid size-[34px] place-items-center rounded-lg bg-primary/10 text-primary">
+            <span
+                className={cn(
+                    "grid size-[34px] place-items-center rounded-lg",
+                    invitation
+                        ? "bg-person-share/10 text-person-share"
+                        : "bg-primary/10 text-primary",
+                )}
+            >
                 <Icon className="size-[18px]" aria-hidden="true" />
             </span>
             <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-baseline gap-2 text-xs">
-                        <strong className="font-semibold text-primary">
-                            {mail ? i18n("New email") : i18n("New recording")}
+                        <strong
+                            className={cn(
+                                "font-semibold",
+                                invitation
+                                    ? "text-person-share"
+                                    : "text-primary",
+                            )}
+                        >
+                            {invitation
+                                ? i18n("{owner} shared an item with you", {
+                                      owner:
+                                          recording.ownerName ??
+                                          i18n("A colleague"),
+                                  })
+                                : mail
+                                  ? i18n("New email")
+                                  : i18n("New recording")}
                         </strong>
                         {more > 0 && (
                             <span className="text-muted-foreground">

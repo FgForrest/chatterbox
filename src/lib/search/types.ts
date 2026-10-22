@@ -18,7 +18,11 @@ export interface TaskSearchHit {
     text: string;
     status: "open" | "done";
     dueDate: string | null;
-    recording: { id: string; title: string; view: "private" | "org" };
+    recording: {
+        id: string;
+        title: string;
+        view: "private" | "org" | "received";
+    };
     href: string;
 }
 

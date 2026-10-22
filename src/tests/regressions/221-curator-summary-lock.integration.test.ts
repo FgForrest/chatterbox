@@ -46,6 +46,7 @@ vi.mock("@/lib/authz/curator", () => ({
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "org-telvo",
     assertOrgScopeWritable: () => {},
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveSelectedProfile: async () => ({

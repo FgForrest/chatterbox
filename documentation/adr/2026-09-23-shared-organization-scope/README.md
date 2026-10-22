@@ -1,7 +1,7 @@
 ---
 title: Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
 date: 2026-09-23
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:00
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [53]
 areas: [src/lib/sharing, src/lib/org, src/lib/folders/folders.ts, src/lib/knowledge/people.ts, src/db/queries/retention.ts, src/db/queries/events.ts, src/app/api/events/route.ts, src/lib/folder-exports, content/docs/self-hosting/organization.mdx]
 supersedes: []
 superseded-by: []
-relates: [2026-09-30-shared-recording-edited-by-organization, 2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-21-curators-manage-organization-almanac, 2026-10-19-processing-profiles-and-workflow, 2026-10-14-identity-provider-authorization, 2026-10-19-provider-defaults-and-no-fallback]
+relates: [2026-10-22-person-to-person-sharing, 2026-09-30-shared-recording-edited-by-organization, 2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-21-curators-manage-organization-almanac, 2026-10-19-processing-profiles-and-workflow, 2026-10-14-identity-provider-authorization, 2026-10-19-provider-defaults-and-no-fallback]
 ---
 
 # Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
@@ -148,6 +148,8 @@ the client localizes the folder conflict (409) only.
   ([2026-10-22-owner-edits-shared-recording](../2026-10-22-owner-edits-shared-recording.md)).
 
 ## Related work
+
+- [Person-to-person sharing](../2026-10-22-person-to-person-sharing.md): adds accepted receivers without publishing items or knowledge to the Organization; receiver archives still exclude those items.
 
 - [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md): replaced the two-view model with one set of
   rows and changed the retention rule.

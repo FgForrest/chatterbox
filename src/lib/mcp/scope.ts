@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { receivedItemCondition } from "@/db/queries/item-shares";
 import { type ChatterItemKind, chatterItems, recordings } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
 import { type ActorContext, LOCAL_MODE_CAPABILITIES } from "@/lib/authz/model";
@@ -32,7 +33,12 @@ export function mcpRecordingCondition(caller: McpCaller): SQL {
             : shared
               ? or(eq(recordings.userId, caller.userId), shared)
               : eq(recordings.userId, caller.userId);
-    return and(isNull(recordings.deletedAt), visible) as SQL;
+    return and(
+        isNull(recordings.deletedAt),
+        caller.kind === "user"
+            ? or(visible, receivedItemCondition(caller.userId, recordings.id))
+            : visible,
+    ) as SQL;
 }
 
 /** Whether the caller may read mail, its content and what quotes it (D8). */
@@ -66,7 +72,9 @@ export function mcpItemCondition(
         allowed.length > 0
             ? inArray(chatterItems.kind, [...allowed])
             : eq(chatterItems.id, ""),
-        visible ?? eq(chatterItems.id, ""),
+        caller.kind === "user"
+            ? or(visible, receivedItemCondition(caller.userId))
+            : (visible ?? eq(chatterItems.id, "")),
     ) as SQL;
 }
 
@@ -77,7 +85,15 @@ export function mcpItemCondition(
 export function recordingViewFor(
     caller: McpCaller,
     ownerUserId: string,
+    itemId?: string,
 ): RecordingView {
+    if (
+        caller.kind === "user" &&
+        caller.userId !== ownerUserId &&
+        itemId &&
+        caller.receivedItemIds?.has(itemId)
+    )
+        return "received";
     return caller.kind === "user" && caller.userId === ownerUserId
         ? "private"
         : "org";

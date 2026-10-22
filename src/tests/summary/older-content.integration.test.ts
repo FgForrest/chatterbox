@@ -60,6 +60,7 @@ vi.mock("@/lib/env", () => ({
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "summary-org",
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: async (request: Request) => ({

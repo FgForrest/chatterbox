@@ -243,7 +243,7 @@ function transcriptMatcher(
         return held;
     };
     return async (row) => {
-        const view = recordingViewFor(caller, row.userId);
+        const view = recordingViewFor(caller, row.userId, row.id);
         let transcript: ReadableTranscript | null;
         try {
             transcript = await loadReadableTranscript(

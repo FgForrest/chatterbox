@@ -1,14 +1,14 @@
 ---
 title: Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
 date: 2026-10-07
-updated: 2026-10-22 16:00
-status: accepted
+updated: 2026-10-22 22:00
+status: superseded
 kind: feature
 issues: []
 prs: [91, 92, 93]
 areas: [src/lib/tasks, src/components/tasks, src/app/(app)/tasks, src/lib/export, src/db/schema.ts]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-10-22-person-to-person-sharing]
 relates: [2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-07-backup-scope, 2026-10-19-processing-profiles-and-workflow]
 ---
 
@@ -22,6 +22,8 @@ and on a Tasks page beside the Almanac, with "Mine" and "Tracked" tabs and a bad
 private recording is the owner's alone; it reaches anyone else only when its recording is shared
 into the Organization. A task has one assignee and is open, done or dropped. In backups a task
 follows its recording, never its assignee.
+
+**Superseded in part by [person-to-person sharing](2026-10-22-person-to-person-sharing.md):** an accepted receiver can read tasks on a private item and close or reopen tasks assigned to their login email, without sharing the item into the Organization. The remaining task model and archive rules still hold.
 
 ## Why
 

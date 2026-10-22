@@ -1,6 +1,6 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
-import type { RecordingViewContext } from "@/lib/sharing/access";
+import type { ReadableRecordingViewContext } from "@/lib/sharing/access";
 import {
     contentWriterRefusal,
     type WriterRefusal,
@@ -66,14 +66,23 @@ export function writerRefusalError(refusal: WriterRefusal): AppError {
 }
 
 /** Authorize a content change before checking again under the recording lock. */
-export function assertMayChange(
-    access: Pick<
-        RecordingViewContext,
+export function assertMayChange<
+    T extends Pick<
+        ReadableRecordingViewContext,
         "view" | "shared" | "orgUserId" | "ownerUserId"
     >,
+>(
+    access: T & { role?: string },
     actorUserId: string,
     actsForOrganization = actorUserId === access.orgUserId,
-): void {
+): asserts access is T & { view: "private" | "org" } {
+    if (access.view === "received" || access.role === "receiver") {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Received items are read-only",
+            403,
+        );
+    }
     if (access.view === "org" || access.shared) {
         assertOrgScopeWritable();
         if (actorUserId !== access.ownerUserId && !actsForOrganization) {

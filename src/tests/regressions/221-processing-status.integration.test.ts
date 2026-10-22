@@ -63,6 +63,7 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "org-zurna",
     isOrgScopeEnabled: () => mocks.orgWritable,
+    isOrgScopeVisible: () => true,
     assertOrgScopeWritable: vi.fn(),
 }));
 vi.mock("@/lib/authz/curator", () => ({

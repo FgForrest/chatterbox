@@ -68,6 +68,7 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "shared-skip-org",
     isOrgScopeEnabled: () => true,
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/learn/hold", () => ({

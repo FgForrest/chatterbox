@@ -1,12 +1,15 @@
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "@/app/(app)/dashboard/page";
 import {
     aiEnhancements,
+    itemShares,
     plaudConnections,
     recordings,
     transcriptions,
 } from "@/db/schema";
 import { appChromeConfig } from "@/lib/settings/app-chrome";
+import type { Recording } from "@/types/recording";
 
 const {
     state,
@@ -22,6 +25,7 @@ const {
         completed: true,
         connection: { invalidatedAt: null as Date | null },
         organization: false,
+        personSharing: false,
     },
     readiness: vi.fn(),
     capabilities: vi.fn(),
@@ -70,14 +74,22 @@ vi.mock("@/lib/settings/user-settings", () => ({ getUserSettings: settings }));
 vi.mock("@/lib/settings/plaud-connection", () => ({
     getPlaudConnection: connection,
 }));
-vi.mock("@/lib/mail/list", () => ({ loadMailListRows: async () => [] }));
+vi.mock("@/lib/mail/list", () => ({
+    loadMailListRows: async () => [],
+    loadSharedMailRows: async () => [],
+    loadReceivedMailRows: async () => [],
+}));
+vi.mock("@/lib/sharing/person-shares", () => ({
+    listMyInvitations: async () => [],
+}));
 vi.mock("@/lib/onboarding/readiness", () => ({
     loadOnboardingReadiness: readiness,
     loadOnboardingCapabilities: capabilities,
 }));
 vi.mock("@/lib/org/config", () => ({
-    getOrgUserId: async () => null,
+    getOrgUserId: async () => (state.personSharing ? "organization" : null),
     isOrgAccount: orgAccount,
+    isOrgScopeVisible: () => state.personSharing,
 }));
 vi.mock("@/lib/sharing/access", () => ({ sharedRecordingCondition: vi.fn() }));
 
@@ -86,6 +98,7 @@ describe("layout onboarding seed", () => {
         vi.clearAllMocks();
         state.completed = true;
         state.organization = false;
+        state.personSharing = false;
         settings.mockImplementation(async () => ({
             onboardingCompleted: state.completed,
         }));
@@ -98,25 +111,63 @@ describe("layout onboarding seed", () => {
         });
         readiness.mockResolvedValue({ plaud: "connected" });
         review.mockResolvedValue(new Set());
-        select.mockImplementation(() => ({
-            from(table: unknown) {
-                const rows =
-                    table === plaudConnections ? [state.connection] : [];
-                expect([
-                    recordings,
-                    transcriptions,
-                    aiEnhancements,
-                    plaudConnections,
-                ]).toContain(table);
-                const query = Object.assign(Promise.resolve(rows), {
-                    innerJoin: () => query,
-                    where: () => query,
-                    orderBy: async () => rows,
-                    limit: async () => rows,
-                });
-                return query;
-            },
-        }));
+        select.mockImplementation(
+            (projection: Record<string, unknown> | undefined) => ({
+                from(table: unknown) {
+                    const rows =
+                        table === plaudConnections
+                            ? [state.connection]
+                            : !state.personSharing
+                              ? []
+                              : table === itemShares
+                                ? [
+                                      {
+                                          id: "share",
+                                          itemId: "received-audio",
+                                          version: 1,
+                                          filingFolderId: "personal",
+                                      },
+                                  ]
+                                : table === recordings &&
+                                    projection &&
+                                    "ownerName" in projection
+                                  ? [
+                                        {
+                                            id: "received-audio",
+                                            userId: "owner",
+                                            filename: "Interview",
+                                            duration: 1000,
+                                            filesize: 10,
+                                            startTime: new Date(
+                                                "2026-10-22T10:00:00Z",
+                                            ),
+                                            deviceSn: "demo",
+                                            ownerName: "Alex Morgan",
+                                            ownerEmail: "alex@example.com",
+                                            waveformPeaks: null,
+                                            audioReapedAt: null,
+                                            transcriptReapedAt: null,
+                                            summaryReapedAt: null,
+                                        },
+                                    ]
+                                  : [];
+                    expect([
+                        recordings,
+                        transcriptions,
+                        aiEnhancements,
+                        plaudConnections,
+                        itemShares,
+                    ]).toContain(table);
+                    const query = Object.assign(Promise.resolve(rows), {
+                        innerJoin: () => query,
+                        where: () => query,
+                        orderBy: async () => rows,
+                        limit: async () => rows,
+                    });
+                    return query;
+                },
+            }),
+        );
     });
 
     it("does not load readiness after onboarding is completed", async () => {
@@ -198,5 +249,25 @@ describe("layout onboarding seed", () => {
         finishReadiness({ plaud: "connected" });
         finishReview(new Set());
         await Promise.all([layoutConfig, render]);
+    });
+    it("keeps an accepted receiver read-only in both the personal and Organization libraries", async () => {
+        state.personSharing = true;
+        const page = (await DashboardPage()) as ReactElement<{
+            children: ReactElement<{
+                recordings: Recording[];
+                organizationLibrary: { recordings: Recording[] };
+            }>;
+        }>;
+        const { recordings: personal, organizationLibrary } =
+            page.props.children.props;
+        for (const items of [personal, organizationLibrary.recordings]) {
+            expect(
+                items.find((item) => item.id === "received-audio"),
+            ).toMatchObject({
+                view: "received",
+                isOwn: false,
+                receivedShare: { id: "share", filingFolderId: "personal" },
+            });
+        }
     });
 });

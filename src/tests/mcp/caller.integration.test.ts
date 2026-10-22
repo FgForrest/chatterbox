@@ -16,7 +16,8 @@ import {
     it,
     vi,
 } from "vitest";
-import { accounts, users } from "@/db/schema";
+import { accounts, chatterItems, itemShares, users } from "@/db/schema";
+import { encryptText } from "@/lib/encryption/fields";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -153,6 +154,7 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
                 subject: "alice-sub",
                 clientId: "claude",
                 roles: new Set(["knowledge:read"]),
+                receivedItemIds: new Set(),
                 orgUserId,
             },
         });
@@ -163,6 +165,42 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
         await expect(
             resolveCaller(claims("alice-sub", ["admin"])),
         ).resolves.toEqual({ ok: false, reason: "no-roles" });
+    });
+
+    it("loads only accepted invitations for a linked user's received view", async () => {
+        await db()
+            .insert(chatterItems)
+            .values(
+                ["accepted", "pending"].map((state) => ({
+                    id: `received-${state}`,
+                    userId: BOB,
+                    kind: "mail" as const,
+                    title: encryptText("Project mail"),
+                    occurredAt: new Date(),
+                })),
+            );
+        await db()
+            .insert(itemShares)
+            .values([
+                {
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    itemId: "received-accepted",
+                    state: "accepted",
+                },
+                {
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    itemId: "received-pending",
+                    state: "pending",
+                },
+            ]);
+        expect(
+            await resolveCaller(claims("alice-sub", ["mail:read"])),
+        ).toMatchObject({
+            ok: true,
+            caller: { receivedItemIds: new Set(["received-accepted"]) },
+        });
     });
 
     it("links only through the SSO provider", async () => {

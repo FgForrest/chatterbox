@@ -291,7 +291,7 @@ konektorem i kontrolami.
 
 | Token                                                   | Volající                                                 |
 | ------------------------------------------------------- | -------------------------------------------------------- |
-| `sub` uživatele, který se přihlásil do Klepna přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
+| `sub` uživatele, který se přihlásil do Klepna přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho, ty sdílené Organizací a přijaté osobní pozvánky, jak je vidí v seznamu nahrávek. |
 | Chybí takový `sub`, klient je v `MCP_SERVICE_CLIENTS` a token nese označení služby | Servisní účet jednající v datovém kontextu Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. Bez `MCP_SERVICE_CLIENTS` v režimu `local` jakýkoli token s `client_id` (zastaralé). |
 | Cokoli jiného                                           | Odmítnuto s 403 "Sign in to Klepna once first".       |
 
@@ -303,6 +303,10 @@ servisní účet bez zapnuté Organizace, klient, kterého veřejný vstup
 neobsluhuje, a klient bez svého klíče konektoru dostanou 403
 "Forbidden". Důvod uvádí log aplikace (viz
 [Když se Claude nepřipojí](./claude#when-claude-cannot-connect)).
+
+**Přijaté položky** jsou dostupné po přijetí pozvánky na vlastní instanci se zobrazenou Organizací. Nástroje pro výpis, čtení a hledání nahrávek, přepisů, shrnutí a pošty je zahrnují při stejných oprávněních nástroje. Odkazy používají `view=received`. Mluvčí mají prostá jména potvrzená vlastníkem; jeho soukromé osoby, fakta, aliasy a složky zůstávají skryté. Přijaté položky lze filtrovat jen podle vlastního zařazení příjemce. Servisní účty ani ostatní kurátoři přístup k osobním sdílením nezískávají.
+
+Přiřazené úkoly z přijatých položek se zobrazují ve výpisu a hledání úkolů. S `tasks:write` je může `update_task` dokončit nebo znovu otevřít; nemůže je upravit, zrušit ani přeřadit. Citace, slovní termíny a odkazy na zdroj v poště stále vyžadují `mail:read`. Osobní sdílení nic nepřidává do Almanachu ani Učení příjemce.
 
 **Úkoly** kopírují logiku stránky Úkoly:
 

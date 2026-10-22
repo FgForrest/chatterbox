@@ -119,7 +119,16 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
-    const { ownerUserId } = await requireRecordingAccess(session.user.id, id);
+    const { ownerUserId, role } = await requireRecordingAccess(
+        session.user.id,
+        id,
+    );
+    if (role === "receiver")
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Received items are read-only",
+            403,
+        );
 
     const [recording] = await db
         .select({

@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
+import { isItemReceived } from "@/db/queries/item-shares";
 import { type ChatterItemKind, chatterItems, recordings } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId } from "@/lib/org/config";
@@ -19,7 +20,7 @@ export { recordingJobSubject } from "@/lib/sharing/view";
  * - `member`: any other regular user, on a shared recording.
  * - `curator`: the organization account, on a shared recording.
  */
-export type RecordingAccessRole = "owner" | "member" | "curator";
+export type RecordingAccessRole = "owner" | "member" | "curator" | "receiver";
 
 export interface RecordingAccess {
     recordingId: string;
@@ -31,7 +32,7 @@ export interface RecordingAccess {
     orgUserId: string | null;
 }
 
-export interface RecordingViewContext extends RecordingAccess {
+export interface ReadableRecordingViewContext extends RecordingAccess {
     view: RecordingView;
     /**
      * Owner of the transcript and summary rows this view reads and writes:
@@ -40,6 +41,11 @@ export interface RecordingViewContext extends RecordingAccess {
      */
     contentUserId: string;
 }
+
+/** A view that can be passed to processing and Learn after writer authorization. */
+export type RecordingViewContext = ReadableRecordingViewContext & {
+    view: "private" | "org";
+};
 
 export interface AccessOptions {
     /**
@@ -104,6 +110,16 @@ export async function resolveRecordingAccess(
             orgUserId,
         };
     }
+    if (await isItemReceived(userId, recordingId)) {
+        return {
+            recordingId,
+            kind: recording.kind,
+            ownerUserId: recording.userId,
+            role: "receiver",
+            shared,
+            orgUserId,
+        };
+    }
     if (!shared) return null;
     return {
         recordingId,
@@ -117,9 +133,8 @@ export async function resolveRecordingAccess(
 
 /** Read `?view=org` from a request URL; anything else is the private view. */
 export function requestedRecordingView(request: Request): RecordingView {
-    return new URL(request.url).searchParams.get("view") === "org"
-        ? "org"
-        : "private";
+    const view = new URL(request.url).searchParams.get("view");
+    return view === "org" || view === "received" ? view : "private";
 }
 
 /**
@@ -128,18 +143,20 @@ export function requestedRecordingView(request: Request): RecordingView {
  * The private view is the owner's alone. The Organization view exists only
  * while the recording is shared, for the owner and every other account.
  */
-export async function requireRecordingView(
+export async function requireRecordingView<V extends RecordingView>(
     userId: string,
     recordingId: string,
-    view: RecordingView,
+    view: V,
     options: AccessOptions = {},
-): Promise<RecordingViewContext> {
+): Promise<ReadableRecordingViewContext & { view: V }> {
     const access = await resolveRecordingAccess(userId, recordingId, options);
     const allowed =
         access !== null &&
         (view === "private"
             ? access.role === "owner"
-            : access.shared && access.orgUserId !== null);
+            : view === "received"
+              ? access.role === "receiver"
+              : access.shared && access.orgUserId !== null);
     if (!access || !allowed) {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,

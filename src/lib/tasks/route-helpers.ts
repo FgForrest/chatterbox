@@ -2,6 +2,7 @@ import { requireApiSessionActor } from "@/lib/auth-server";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
+import { requireRecordingAccess } from "@/lib/sharing/access";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 
 /** A task change is a few short fields; nothing near this. */
@@ -10,6 +11,22 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** The signed-in caller, as tasks see them. */
 export async function requireTaskViewer(request: Request): Promise<TaskViewer> {
     const { session, actor } = await requireApiSessionActor(request);
+    const item = new URL(request.url).pathname.match(
+        /^\/api\/recordings\/([^/]+)\/tasks(?:\/|$)/,
+    );
+    if (request.method !== "GET" && item) {
+        const access = await requireRecordingAccess(
+            session.user.id,
+            decodeURIComponent(item[1]),
+            { kinds: ["audio", "mail"] },
+        );
+        if (access.role === "receiver")
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Received items are read-only",
+                403,
+            );
+    }
     return taskViewer(
         { id: session.user.id, email: session.user.email },
         actor,

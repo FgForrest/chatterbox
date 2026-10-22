@@ -1,10 +1,11 @@
-import { and, eq, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, not, or, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     ANY_TASK_ITEM,
     RECORDING_TASK_ITEM,
     type TaskItemColumns,
     type TaskViewer,
+    taskReceived,
     taskRecordingShared,
     taskVisible,
 } from "@/db/queries/task-visibility";
@@ -17,7 +18,13 @@ import type { ActorContext } from "@/lib/authz/model";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { getOrgUserId } from "@/lib/org/config";
 
-export { ANY_TASK_ITEM, RECORDING_TASK_ITEM, taskRecordingShared, taskVisible };
+export {
+    ANY_TASK_ITEM,
+    RECORDING_TASK_ITEM,
+    taskRecordingShared,
+    taskReceived,
+    taskVisible,
+};
 export type { TaskItemColumns, TaskViewer };
 
 /** The viewer for a signed-in user. */
@@ -38,6 +45,7 @@ export async function taskViewer(
         isOrg: orgUserId !== null && orgUserId === user.id,
         isCurator,
         orgUserId,
+        includeReceived: true,
     };
 }
 
@@ -48,7 +56,10 @@ export async function taskViewerById(userId: string): Promise<TaskViewer> {
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
-    return taskViewer(user ?? { id: userId, email: "" });
+    return {
+        ...(await taskViewer(user ?? { id: userId, email: "" })),
+        includeReceived: false,
+    };
 }
 
 /** SQL: the task is assigned to the viewer (needs nothing joined). */
@@ -70,9 +81,13 @@ export function taskListed(
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
     const own = eq(item.userId, viewer.userId);
-    const shared = taskRecordingShared(viewer, item);
-    if (viewer.isCurator) return or(own, shared) as SQL;
-    return or(own, and(shared, assignedToViewer(viewer))) as SQL;
+    const shared = and(
+        taskRecordingShared(viewer, item),
+        not(taskReceived(viewer, item)),
+    );
+    const received = and(taskReceived(viewer, item), assignedToViewer(viewer));
+    if (viewer.isCurator) return or(own, shared, received) as SQL;
+    return or(own, and(shared, assignedToViewer(viewer)), received) as SQL;
 }
 
 /** SQL: the viewer may mark the task done or open again (`recordings` joined, or `item`). */
@@ -81,9 +96,13 @@ export function taskClosable(
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
     const own = eq(item.userId, viewer.userId);
-    const shared = taskRecordingShared(viewer, item);
-    if (viewer.isCurator) return or(own, shared) as SQL;
-    return or(own, and(shared, assignedToViewer(viewer))) as SQL;
+    const shared = and(
+        taskRecordingShared(viewer, item),
+        not(taskReceived(viewer, item)),
+    );
+    const received = and(taskReceived(viewer, item), assignedToViewer(viewer));
+    if (viewer.isCurator) return or(own, shared, received) as SQL;
+    return or(own, and(shared, assignedToViewer(viewer)), received) as SQL;
 }
 
 /** SQL: the viewer may change the task (`recordings` joined, or `item`). */
@@ -94,6 +113,17 @@ export function taskEditable(
     const own = eq(item.userId, viewer.userId);
     const shared = taskRecordingShared(viewer, item);
     return viewer.isCurator ? (or(own, shared) as SQL) : own;
+}
+
+/** Content writes retain the existing editor rule while explicitly refusing accepted receivers. */
+export function taskContentEditable(
+    viewer: TaskViewer,
+    item: TaskItemColumns = RECORDING_TASK_ITEM,
+): SQL {
+    return and(
+        taskEditable(viewer, item),
+        not(taskReceived(viewer, item)),
+    ) as SQL;
 }
 
 /** Whether the viewer may remove `sourceOwnerUserId`'s task into the target. */

@@ -22,7 +22,10 @@ vi.mock("@/lib/knowledge/knowledge-loader", () => ({
 vi.mock("@/lib/knowledge/vocabulary", () => ({
     vocabularyVisibleTo: async () => ({ entityTypes: [] }),
 }));
-vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => null }));
+vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: async () => null,
+    isOrgScopeVisible: () => false,
+}));
 vi.mock("@/lib/mail/redact", () => ({ secretAddressMasker: vi.fn() }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: (text: string) => text,

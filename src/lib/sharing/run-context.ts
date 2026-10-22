@@ -18,7 +18,7 @@ import { isRecordingShared } from "@/lib/sharing/shared";
  * for the run.
  */
 export interface ContentRunContext {
-    view: RecordingView;
+    view: Exclude<RecordingView, "received">;
     actorUserId: string;
     ownerUserId: string;
     /** Owner of the transcript/summary rows read and written: the recording's owner. */
@@ -57,6 +57,7 @@ export async function resolveRunContext(
     view: RecordingView,
     options: AccessOptions = {},
 ): Promise<ContentRunContext | null> {
+    if (view === "received") return null;
     if (view === "private") {
         const context = privateRunContext(actorUserId);
         const orgUserId = await getOrgUserId();

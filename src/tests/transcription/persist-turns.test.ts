@@ -14,6 +14,7 @@ vi.mock("@/lib/encryption/fields", () => ({
     encryptJsonField: <T>(value: T) => ({ c: value }),
 }));
 
+vi.mock("@/lib/org/config", () => ({ isOrgScopeVisible: () => false }));
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),

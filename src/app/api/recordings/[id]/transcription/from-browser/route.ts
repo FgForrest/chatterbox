@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { requireRecordingView } from "@/lib/sharing/access";
 import { recordingShared } from "@/lib/sharing/writer";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
@@ -32,6 +33,7 @@ const bodySchema = z.object({
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
+    await requireRecordingView(session.user.id, id, "private");
 
     const raw = await request.json().catch(() => null);
     const parsed = bodySchema.safeParse(raw);
