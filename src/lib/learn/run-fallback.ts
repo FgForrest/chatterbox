@@ -67,7 +67,7 @@ export interface LearnLookup {
 
 /**
  * Whether the model's other form of a mention is a reading of it, not a
- * name from nowhere: sharing letters with it ("Forestu" -> "Forest"), or
+ * name from nowhere: sharing letters with it ("Orionu" -> "Orion"), or
  * one name for one name (the nickname "Honza" -> "Jan"). Anything else
  * would look up, and show the model, what the transcript never named.
  */
@@ -214,7 +214,7 @@ const MENTIONS_SYSTEM = [
     "Copy each exactly as it is written in the transcript, even where it looks misheard or misspelled, and give the index of the turn (T<n>) it is in.",
     "Include every distinct acronym, abbreviation, specialist term, and organization, project, product, system or tool name, including the one the meeting is about. Include client, supplier, partner and authority acronyms even when also used for a folder or channel. List the name, not a generic folder label or task description. When the limit is reached, prefer likely mishearings, then the most frequently mentioned names.",
     "Prioritize names and nicknames spoken to a person who answers in the next turn, for every speaker label. Include these before organizations or terms when the limit is reached.",
-    `Where it differs, add forms: at most ${MAX_FORMS} other ways the knowledge base may write it: its base form (the nominative, spelled right where it sounds misheard: "Forestu" -> "Forest", "Honzou Šimákem" -> "Honza Šimák"), and for a nickname or short form the full name it stands for ("Honza" -> "Jan").`,
+    `Where it differs, add forms: at most ${MAX_FORMS} other ways the knowledge base may write it: its base form (the nominative, spelled right where it sounds misheard: "Orionu" -> "Orion", "Honzou Dvořákem" -> "Honza Dvořák"), and for a nickname or short form the full name it stands for ("Honza" -> "Jan").`,
     NAME_SPELLING_RULE,
     DATA_RULE,
     `Answer with one raw JSON object and nothing else: {"mentions":[{"text":string,"turn":number,"forms":[string]}]}. At most ${MAX_MENTIONS} mentions; each distinct spelling once.`,
@@ -261,7 +261,7 @@ const ANSWER_SYSTEM = [
     LEARN_LANGUAGE_RULE,
     RECORDER_RULE,
     NEW_RECORDS_RULE,
-    "corrections: only for a listed record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs, never put the record's base name into an inflected place). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
+    "corrections: only for a listed record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs, never put the record's base name into an inflected place). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Kráťa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
     'facts: lasting work facts the transcript states about known or new people and things: who works on, leads or works for what, which client uses which product, what a term means. Not a current task, a to-do of this meeting, a version or release number, or a detail only this meeting needs. Use only the listed relation keys and shapes; start and end are times copied from the transcript lines where it is said; speakerLabel is the label whose speaker the fact is about or depends on, else null. What a speaker says about themselves takes the subject {"speakerLabel":label}, never a person you guess for that label. sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
     "relationPhrases: a relation between known or new people or things that none of the listed keys expresses, as a short phrase in the transcript's language, with the same sensitivity category as a fact.",
     `Answer with one raw JSON object and nothing else, valid against this JSON Schema, with exactly its field names: ${ANSWER_SHAPE}`,

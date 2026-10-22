@@ -1,6 +1,6 @@
 /**
  * Whether words in a transcript are a person's or a thing's name, as
- * Czech says it: inflected ("Bednářovi", "Hrubcovou"), with the "e" some
+ * Czech says it: inflected ("Kovářovi", "Hrubcovou"), with the "e" some
  * surnames drop ("Hájek" → "Hájka", "Němec" → "Němcovi"), and without
  * titles or initials ("Ing.", "F."). Pure; conservative on purpose: a
  * common word that merely starts like a name ("nová" for "Novák", "dost"
@@ -33,7 +33,7 @@ const TITLES = new Set([
 
 /**
  * The endings Czech declension puts after a name's stem (diacritics gone):
- * "Bednářovi", "Hrubcovou", "Zeleného", "Hájka", "Michale". Anything
+ * "Kovářovi", "Hrubcovou", "Zeleného", "Hájka", "Michale". Anything
  * else after the stem is another word ("Janoušek" is not "Jan").
  */
 const ENDINGS = new Set([

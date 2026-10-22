@@ -7,7 +7,7 @@ import {
 } from "@/db/schema";
 
 /**
- * Who may do what with a task (Johnny, 2026-10-07):
+ * Who may do what with a task (maintainer, 2026-10-07):
  *
  * | action                   | private recording | shared recording                          |
  * |--------------------------|-------------------|-------------------------------------------|

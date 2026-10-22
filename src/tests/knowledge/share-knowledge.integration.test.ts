@@ -353,7 +353,7 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(await owners(people, jan)).toBe(orgUserId);
         expect(await owners(knowledgeEntities, orion)).toBe(orgUserId);
         // Her private "Supplier" and "mentors" became the Organization's
-        // (Johnny, 2026-09-29), so Acme and the fact went with the share.
+        // (maintainer, 2026-09-29), so Acme and the fact went with the share.
         expect(await owners(knowledgeEntities, acme)).toBe(orgUserId);
         expect(await owners(people, pavel)).toBe(orgUserId);
         expect(await scopeOf(toJan)).toBe(orgUserId);
