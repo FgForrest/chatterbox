@@ -40,12 +40,16 @@ export async function duplicateEvidence(
     kind: DuplicateKind,
     ids: string[],
 ) {
+    const subject =
+        kind === "person" ? sql`subject_person_id` : sql`subject_entity_id`;
+    const object =
+        kind === "person" ? sql`object_person_id` : sql`object_entity_id`;
     return db.execute<{ id: string; count: number }>(sql`
         with named as (
-            select unnest(array[
-                case when ${kind} = 'person' then subject_person_id else subject_entity_id end,
-                case when ${kind} = 'person' then object_person_id else object_entity_id end
-            ]) as id, f.id as fact_id from knowledge_facts f where f.user_id = ${scope}
+            select unnest(array[${subject}, ${object}]) as id, f.id as fact_id
+            from knowledge_facts f where f.user_id = ${scope}
+                and (${subject} = any(${sql.param(ids)}::text[])
+                    or ${object} = any(${sql.param(ids)}::text[]))
         ), evidence as (
             select named.id from named join knowledge_fact_evidence e on e.fact_id = named.fact_id
             where named.id = any(${sql.param(ids)}::text[]) and e.user_id = ${scope} and e.status = 'supported'
