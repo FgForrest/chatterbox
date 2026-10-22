@@ -12,8 +12,8 @@ Using AI to write code is fine. Submitting AI-generated code you don't understan
 
 - **Search first.** Check [open issues](https://github.com/FgForrest/chatterbox/issues) and PRs — don't duplicate work in flight.
 - **Open an issue for anything non-trivial.** Discuss the approach before you write 500 lines.
-- **Read [AGENTS.md](AGENTS.md).** It documents the product principles (self-host is first-class, export parity, no vendor lock-in) and code conventions. PRs that violate them will likely be rejected.
-- **Read [BRANCHING.md](BRANCHING.md).** `main` is a rolling integration branch; your PR targets it.
+- **Read [AGENTS.md](AGENTS.md).** It documents the product principles (self-host is first-class, export parity, no vendor lock-in) and code conventions, and points to the rules for each area in `.claude/rules/`. PRs that violate them will likely be rejected.
+- **Read [BRANCHING.md](BRANCHING.md).** `dev` is the integration branch; your PR targets it. Every merge into `main` is a release.
 
 ## Development setup
 
@@ -42,7 +42,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ## Submitting a PR
 
-1. Branch off `main`: `feature/xxx`, `fix/xxx`, or `docs/xxx`.
+1. Branch off `dev`: `feature/xxx`, `fix/xxx`, or `docs/xxx`.
 2. Write clean, tested code. Follow existing patterns.
 3. Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`, `chore:`, `perf:`, `docs:`). Same prefixes as our issue titles.
 4. Run everything before pushing:
@@ -59,15 +59,17 @@ Do **not** edit `CHANGELOG.md`: release notes are generated from PR titles. See 
 
 ## Database migrations
 
-Edit `src/db/schema.ts` first, then run `pnpm db:generate`. **Never hand-write migration SQL** — drizzle tracks snapshots in `src/db/migrations/meta/` and hand-written files cause silent history corruption. See [AGENTS.md](AGENTS.md) for context.
+Edit `src/db/schema.ts` first, then run `pnpm db:generate`. **Never hand-write migration SQL** — drizzle tracks snapshots in `src/db/migrations/meta/` and hand-written files cause silent history corruption. See [.claude/rules/database.md](.claude/rules/database.md) for the full rules.
 
 ## Integration tests
+
+Database integration tests (`*.integration.test.ts`) run with `pnpm test` when `TEST_DATABASE_URL` points at a local Postgres; CI runs them on every push.
 
 Live Plaud API tests are opt-in (skipped in CI to avoid leaking credentials):
 
 ```bash
 export PLAUD_BEARER_TOKEN="Bearer your-token-here"
-bun test src/tests/plaud.integration.test.ts
+pnpm vitest run src/tests/plaud.integration.test.ts
 ```
 
 ## Security
