@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewSpeaker } from "@/components/learn/review-speaker";
 import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import { speakerAccent } from "@/components/people/speaker-accents";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import type { AppLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 let reviewLocale: AppLocale = "en";
 
@@ -27,27 +29,29 @@ describe.each(["cs-CZ", "en"] as const)("ReviewSpeaker in %s", (locale) => {
         ["Luma Veln", null],
         ["Speaker Veln", null],
     ])("localizes only provider defaults: %s", (label, number) => {
-        const onPlay = vi.fn();
+        const onPlay = vi.fn(() => ({ ms: 1000, untilMs: 2000 }));
         const onTick = vi.fn();
         reviewLocale = locale;
         render(
-            <ReviewSpeaker
-                label={label}
-                person={{ name: "Neri Vosk" }}
-                accent={speakerAccent(0)}
-                ticked={false}
-                blocked={false}
-                disabled={false}
-                recorder={false}
-                onlyFirstName={false}
-                reason="Stored reason remains unchanged."
-                evidence={null}
-                waits={null}
-                onTick={onTick}
-                onPick={vi.fn()}
-                onUnknown={vi.fn()}
-                onPlay={onPlay}
-            />,
+            <PlaybackProvider playback={createTestPlayback().playback}>
+                <ReviewSpeaker
+                    label={label}
+                    person={{ name: "Neri Vosk" }}
+                    accent={speakerAccent(0)}
+                    ticked={false}
+                    blocked={false}
+                    disabled={false}
+                    recorder={false}
+                    onlyFirstName={false}
+                    reason="Stored reason remains unchanged."
+                    evidence={null}
+                    waits={null}
+                    onTick={onTick}
+                    onPick={vi.fn()}
+                    onUnknown={vi.fn()}
+                    nextTurn={onPlay}
+                />
+            </PlaybackProvider>,
         );
         const shown =
             number === null

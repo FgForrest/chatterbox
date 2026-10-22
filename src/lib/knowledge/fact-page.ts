@@ -15,6 +15,7 @@ import {
     knowledgeFactEvidence,
     knowledgeFacts,
     people,
+    recordings,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
@@ -25,6 +26,7 @@ import {
 } from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { hasAudio } from "@/lib/recordings/audio-availability";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 
 export interface FactSide {
@@ -38,6 +40,7 @@ export interface PageEvidence {
     /** The recording or mail. */
     recordingId: string;
     kind: ChatterItemKind;
+    audioAvailable: boolean;
     title: string;
     /** When the recording began or the mail was sent, ISO 8601. */
     recordedAt: string;
@@ -121,6 +124,9 @@ export async function factsForPage(
             itemOwner: chatterItems.userId,
             kind: chatterItems.kind,
             title: chatterItems.title,
+            audioId: recordings.id,
+            audioReapedAt: recordings.audioReapedAt,
+            audioDeletedAt: recordings.deletedAt,
             startTime: chatterItems.occurredAt,
             startMs: knowledgeFactEvidence.startMs,
             provenance: knowledgeFactEvidence.provenance,
@@ -129,6 +135,13 @@ export async function factsForPage(
         .innerJoin(
             chatterItems,
             eq(chatterItems.id, knowledgeFactEvidence.itemId),
+        )
+        .leftJoin(
+            recordings,
+            and(
+                eq(recordings.id, chatterItems.id),
+                eq(recordings.userId, chatterItems.userId),
+            ),
         )
         .where(
             and(
@@ -159,6 +172,7 @@ export async function factsForPage(
             list.push({
                 recordingId: row.itemId,
                 kind: row.kind,
+                audioAvailable: hasAudio(row),
                 title: decryptText(row.title),
                 recordedAt: row.startTime.toISOString(),
                 startMs: row.startMs,

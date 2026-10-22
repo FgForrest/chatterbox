@@ -34,8 +34,6 @@ export interface RecordingPlayerHandle {
     seekTo: (seconds: number) => void;
     /** Play from a moment; with `untilSeconds`, pause once it is reached. */
     playFrom: (seconds: number, untilSeconds?: number) => void;
-    /** Playback position in seconds, read from the audio element. */
-    getCurrentTime: () => number;
     pause: () => void;
     /** Called with the position now and whenever it moves or playback starts or stops. */
     subscribe: (listener: (state: PlaybackState) => void) => () => void;
@@ -68,10 +66,13 @@ export function transcriptPlayback(
 ): TranscriptPlayback {
     const owner = playbackOwner(ref);
     return {
-        play: (ms, nextOwner) => {
+        play: (ms, nextOwner, untilMs) => {
             owner.id = nextOwner ?? null;
             owner.pending = owner.id !== null;
-            ref.current?.playFrom(ms / 1000);
+            ref.current?.playFrom(
+                ms / 1000,
+                untilMs === undefined ? undefined : untilMs / 1000,
+            );
             owner.pending = false;
         },
         pause: () => {
@@ -139,11 +140,10 @@ export function RecordingPlayer({
         () => ({
             seekTo: seekToTime,
             playFrom,
-            getCurrentTime: () => audioRef.current?.currentTime ?? 0,
             pause,
             subscribe,
         }),
-        [seekToTime, playFrom, pause, audioRef, subscribe],
+        [seekToTime, playFrom, pause, subscribe],
     );
 
     usePlaybackKeyboard({

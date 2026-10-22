@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Play } from "lucide-react";
+import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
 import {
     Fragment,
@@ -22,10 +22,9 @@ import {
     type SpeakerAccent,
     speakerAccent,
 } from "@/components/people/speaker-accents";
-import {
-    type TranscriptPlayback,
-    useTranscriptFollow,
-} from "@/hooks/use-transcript-follow";
+import { PlayAtIcon } from "@/components/playback/play-at-button";
+import { usePlayback } from "@/components/playback/playback-context";
+import { useTranscriptFollow } from "@/hooks/use-transcript-follow";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { speakerPositions } from "@/lib/knowledge/speaker-groups";
 import {
@@ -63,13 +62,6 @@ export interface TranscriptViewProps {
     storedTurns?: TranscriptTurn[] | null;
     /** Confirmed names projected over raw labels without changing the text. */
     speakerAttributions?: SpeakerAttributions;
-    /** Seek audio to a timed turn. Omitted when audio is unavailable. */
-    onSeekToTurn?: (startMs: number) => void;
-    /**
-     * The player, for timed sentences to play from and to follow. Omitted
-     * when audio is unavailable.
-     */
-    playback?: TranscriptPlayback;
     /** The scroll box the transcript sits in: it follows playback, and scrolling it seeks. */
     scrollRef?: RefObject<HTMLElement | null>;
     /**
@@ -118,6 +110,48 @@ interface TextChunk {
  * from a little earlier keeps their first word.
  */
 const SENTENCE_PREROLL_MS = 300;
+
+function ParagraphPlayButton({
+    ms,
+    active,
+    playing,
+    named,
+    style,
+    label,
+    time,
+}: {
+    ms: number;
+    active: boolean;
+    playing: boolean;
+    named: boolean;
+    style: SpeakerAccent;
+    label: string;
+    time: string;
+}) {
+    const i18n = useExtracted();
+    const playback = usePlayback();
+    const pausing = active && playing;
+    if (!playback) return null;
+    return (
+        <button
+            type="button"
+            className={`group/play absolute top-0 left-0 grid size-5 place-items-center rounded-full ${style.text} ${style.hover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+            onClick={() => (pausing ? playback.pause() : playback.play(ms))}
+            aria-pressed={pausing}
+            aria-label={pausing ? i18n("Pause at {time}", { time }) : label}
+        >
+            {named && !pausing && (
+                <span
+                    className={`size-1.5 rounded-full transition-opacity group-hover/para:opacity-0 group-focus-visible/play:opacity-0 ${style.dot}`}
+                />
+            )}
+            <PlayAtIcon
+                playing={pausing}
+                className={`absolute ${pausing ? "" : "opacity-0 transition-opacity group-hover/para:opacity-100 group-focus-visible/play:opacity-100"}`}
+            />
+        </button>
+    );
+}
 
 /** A chunk's text without its trailing space, which stays outside the sentence's wash. */
 function withoutTrailingSpace(pieces: readonly TurnPiece[]): {
@@ -225,8 +259,6 @@ export function TranscriptView({
     model,
     storedTurns,
     speakerAttributions = {},
-    onSeekToTurn,
-    playback,
     scrollRef,
     topics,
     highlightedTopic = null,
@@ -234,6 +266,7 @@ export function TranscriptView({
     learnMarks = null,
     corrections = null,
 }: TranscriptViewProps) {
+    const playback = usePlayback();
     const i18n = useExtracted();
     // Marks are anchored to stored turns; a transcript without them has none.
     const marksByTurn = useMemo(() => {
@@ -282,7 +315,7 @@ export function TranscriptView({
     // Sentences play once their times can be told: from stored turns with
     // times, and audio to play.
     const timed = Boolean(storedTurns?.length) && !isUntimed(storedTurns ?? []);
-    const bySentence = playback !== undefined && timed;
+    const bySentence = playback !== null && timed;
     // Each paragraph's text: corrections applied and review marks in place,
     // both anchored to the stored turn it is cut from, and cut into the
     // sentences that play.
@@ -347,7 +380,7 @@ export function TranscriptView({
     const follow = useTranscriptFollow({
         rootRef,
         scrollRef,
-        playback: bySentence ? playback : undefined,
+        playback: bySentence ? playback : null,
         startsMs,
         holdScroll: highlightedTopic !== null || highlightedTurnIndex !== null,
     });
@@ -400,9 +433,9 @@ export function TranscriptView({
         const sentence = target.closest<HTMLElement>("[data-sentence]");
         if (!sentence || window.getSelection()?.toString()) return;
         const index = Number(sentence.dataset.sentence);
-        if (index === follow.active && follow.playing) playback.pause();
-        else if (Number.isFinite(startsMs[index])) {
-            playback.play(startsMs[index]);
+        if (Number.isFinite(startsMs[index])) {
+            if (index === follow.active && follow.playing) playback.pause();
+            else playback.play(startsMs[index]);
         }
     };
     const renderPieces = (pieces: readonly TurnPiece[]) =>
@@ -467,21 +500,26 @@ export function TranscriptView({
                     (proposed ? `${proposed.name}?` : turn.label);
                 const nameStyle = proposed ? "italic" : "";
                 const canSeek =
-                    onSeekToTurn !== undefined &&
-                    Number.isFinite(paragraph.startMs);
+                    playback !== null && Number.isFinite(paragraph.startMs);
                 const chunksHere = chunks[index] ?? [];
                 const firstSentence = chunksHere[0]?.sentence ?? null;
                 const gutter = named || bySentence;
                 const time = formatTimestamp(paragraph.startMs);
+                const activeParagraph = chunksHere.some(
+                    (chunk) =>
+                        chunk.sentence !== null &&
+                        chunk.sentence === follow.active,
+                );
                 const playButton =
                     playback && firstSentence !== null ? (
-                        <button
-                            type="button"
-                            className={`group/play absolute top-0 left-0 grid size-5 place-items-center rounded-full ${style.text} ${style.hover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
-                            onClick={() =>
-                                playback.play(startsMs[firstSentence])
-                            }
-                            aria-label={
+                        <ParagraphPlayButton
+                            ms={startsMs[firstSentence]}
+                            time={time}
+                            active={activeParagraph}
+                            playing={follow.playing}
+                            named={named}
+                            style={style}
+                            label={
                                 named
                                     ? i18n("Play from {time}, {speaker}", {
                                           time,
@@ -489,14 +527,7 @@ export function TranscriptView({
                                       })
                                     : i18n("Play from {time}", { time })
                             }
-                        >
-                            {named && (
-                                <span
-                                    className={`size-1.5 rounded-full transition-opacity group-hover/para:opacity-0 group-focus-visible/play:opacity-0 ${style.dot}`}
-                                />
-                            )}
-                            <Play className="absolute size-3 fill-current opacity-0 transition-opacity group-hover/para:opacity-100 group-focus-visible/play:opacity-100" />
-                        </button>
+                        />
                     ) : null;
                 const speakerMark = playButton ?? (
                     <span
@@ -525,12 +556,12 @@ export function TranscriptView({
                                     <h4 className="min-w-0 flex-1 text-base font-semibold leading-snug">
                                         {topic.title}
                                     </h4>
-                                    {onSeekToTurn ? (
+                                    {playback ? (
                                         <button
                                             type="button"
                                             className="shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                             onClick={() =>
-                                                onSeekToTurn(topic.fromMs)
+                                                playback.seek(topic.fromMs)
                                             }
                                             aria-label={i18n(
                                                 "Jump to topic {title} at {time}",
@@ -556,9 +587,9 @@ export function TranscriptView({
                             {!named && canSeek && (
                                 <button
                                     type="button"
-                                    className="inline-flex min-h-5 items-center rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="inline-flex min-h-5 items-center rounded-sm text-xs text-muted-foreground tabular-nums underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                     onClick={() =>
-                                        onSeekToTurn(paragraph.startMs)
+                                        playback?.seek(paragraph.startMs)
                                     }
                                     aria-label={i18n("Seek audio to {time}", {
                                         time: formatTimestamp(
@@ -566,7 +597,7 @@ export function TranscriptView({
                                         ),
                                     })}
                                 >
-                                    {formatTimestamp(paragraph.startMs)}
+                                    {time}
                                 </button>
                             )}
                             {named && opensTurn && (
@@ -577,7 +608,9 @@ export function TranscriptView({
                                             type="button"
                                             className={`rounded-sm text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${style.text} ${nameStyle}`}
                                             onClick={() =>
-                                                onSeekToTurn(turn.startMs ?? 0)
+                                                playback?.seek(
+                                                    turn.startMs ?? 0,
+                                                )
                                             }
                                             aria-label={i18n(
                                                 "Seek audio to {time}, {speaker}",

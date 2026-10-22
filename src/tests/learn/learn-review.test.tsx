@@ -11,6 +11,8 @@ import {
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 vi.mock("sonner", () => ({
     toast: {
@@ -856,14 +858,16 @@ describe("LearnReview", () => {
                 items: [speaker("speaker_1"), speaker("speaker_7")],
             },
         });
-        const onPlaySpeaker = vi.fn(() => true);
+        const nextSpeakerTurn = vi.fn(() => ({ ms: 5000, untilMs: 9000 }));
         render(
-            <LearnReview
-                recordingId="rec-1"
-                source="riffado"
-                turns={TURNS}
-                onPlaySpeaker={onPlaySpeaker}
-            />,
+            <PlaybackProvider playback={createTestPlayback().playback}>
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                    nextSpeakerTurn={nextSpeakerTurn}
+                />
+            </PlaybackProvider>,
         );
         fireEvent.click(
             await screen.findByRole("button", { name: "Review (2)" }),
@@ -871,7 +875,7 @@ describe("LearnReview", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Play a turn of Speaker 1" }),
         );
-        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_1");
+        expect(nextSpeakerTurn).toHaveBeenCalledWith("speaker_1");
         // Nobody to hear: no turn of that speaker in the transcript.
         expect(
             screen.queryByRole("button", { name: "Play a turn of Speaker 7" }),

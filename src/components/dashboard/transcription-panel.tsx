@@ -32,6 +32,8 @@ import {
     WorkflowWidget,
     WorkflowWidgetLine,
 } from "@/components/pipeline/workflow-widget";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
 import { SourceSwitcher } from "@/components/source-switcher";
 import { SummaryWidget } from "@/components/summary/summary-widget";
@@ -55,7 +57,6 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
-import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import type { SummarySource } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -122,14 +123,6 @@ interface TranscriptionPanelProps {
      * re-transcribed in another tab.
      */
     onTranscriptStale?: () => void;
-    /** Seek the recording audio to a provider-reported transcript turn. */
-    onSeekToTurn?: (startMs: number) => void;
-    /** Seek and start playback for speaker navigation, up to `endMs` if given. */
-    onPlayFromTurn?: (startMs: number, endMs?: number) => void;
-    /** Playback position in milliseconds, to mark the topic being played. */
-    getPlaybackMs?: () => number;
-    /** The player, for the transcript's sentences to play from and follow. */
-    playback?: TranscriptPlayback;
     /**
      * The recording is not the viewer's to change: while it is shared only
      * the organization account changes it, on the Organization view.
@@ -208,13 +201,10 @@ export function TranscriptionPanel({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
-    onSeekToTurn,
-    onPlayFromTurn,
-    getPlaybackMs,
-    playback,
     readOnly = false,
     processing = null,
 }: TranscriptionPanelProps) {
+    const playback = usePlayback();
     const i18n = useExtracted();
     const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
@@ -435,7 +425,7 @@ export function TranscriptionPanel({
     const handleSelectTopic = (index: number) => {
         const topic = topics?.[index];
         if (!topic) return;
-        onSeekToTurn?.(topic.fromMs);
+        playback?.seek(topic.fromMs);
         setTranscriptExpanded(true);
         setTopicJump({ index });
     };
@@ -500,13 +490,13 @@ export function TranscriptionPanel({
             ]),
         [speakerAttributions, unknownByKey, attributionKey],
     );
-    /** Play a speaker's next turn; `once`: only that turn. */
-    const handlePlaySpeaker = (
+
+    const nextSpeakerTurn = (
         voices: string | readonly string[],
         once = false,
-    ): boolean => {
+    ): PlayAtTarget | null => {
         const turns = activeTranscript?.turns;
-        if (!turns?.length || !onPlayFromTurn) return false;
+        if (!turns?.length || !playback) return null;
         const labels = new Set(
             (typeof voices === "string" ? [voices] : voices).map(speakerKey),
         );
@@ -519,7 +509,7 @@ export function TranscriptionPanel({
                 : [],
         );
         matching.sort((a, b) => turns[a].startMs - turns[b].startMs || a - b);
-        if (matching.length === 0) return false;
+        if (matching.length === 0) return null;
         const transcript = `${attributionKey}:${activeTranscriptKey}`;
         const cursor = speakerCursorRef.current;
         const nextPosition =
@@ -529,14 +519,17 @@ export function TranscriptionPanel({
         const index = matching[nextPosition];
         speakerCursorRef.current = { transcript, speaker, index };
         const { startMs, endMs } = turns[index];
-        if (once && Number.isFinite(endMs) && endMs > startMs) {
-            onPlayFromTurn(startMs, endMs);
-        } else {
-            onPlayFromTurn(startMs);
-        }
         setTranscriptExpanded(true);
         setSpeakerJump({ index });
-        return true;
+        return {
+            ms: startMs,
+            endMs:
+                Number.isFinite(endMs) && endMs > startMs ? endMs : undefined,
+            untilMs:
+                once && Number.isFinite(endMs) && endMs > startMs
+                    ? endMs
+                    : undefined,
+        };
     };
     const accentPositions = useMemo(
         () =>
@@ -735,7 +728,6 @@ export function TranscriptionPanel({
                         onAccepted={() =>
                             setGuessesAccepted((count) => count + 1)
                         }
-                        onSeek={onSeekToTurn}
                     />
                 )}
             {(!widgets || widgets.transcript.visible) && (
@@ -1021,10 +1013,9 @@ export function TranscriptionPanel({
                             attributions={speakerAttributions}
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
-                            onSeek={onSeekToTurn}
-                            onPlaySpeaker={
-                                onPlayFromTurn && activeTranscript.turns?.length
-                                    ? handlePlaySpeaker
+                            nextSpeakerTurn={
+                                playback && activeTranscript.turns?.length
+                                    ? nextSpeakerTurn
                                     : undefined
                             }
                             shownVersion={activeTranscript.version}
@@ -1051,8 +1042,6 @@ export function TranscriptionPanel({
                                     key={`${attributionKey}:${activeTranscriptKey}`}
                                     widgetId={`recording-topics-${recording.id}`}
                                     topics={topics}
-                                    playback={playback}
-                                    getPlaybackMs={getPlaybackMs}
                                     expanded={transcriptOpen}
                                     scrollRef={transcriptSectionRef}
                                     canDetect={canDetectTopics}
@@ -1075,8 +1064,6 @@ export function TranscriptionPanel({
                                         speakerAttributions={
                                             speakerAttributions
                                         }
-                                        onSeekToTurn={onSeekToTurn}
-                                        playback={playback}
                                         scrollRef={transcriptSectionRef}
                                         topics={topics}
                                         highlightedTopic={
@@ -1129,10 +1116,9 @@ export function TranscriptionPanel({
                                     : "riffado"
                             }
                             turns={activeTranscript.turns ?? []}
-                            onSeek={onSeekToTurn}
-                            onPlaySpeaker={
-                                onPlayFromTurn
-                                    ? (label) => handlePlaySpeaker(label, true)
+                            nextSpeakerTurn={
+                                playback
+                                    ? (label) => nextSpeakerTurn(label, true)
                                     : undefined
                             }
                             onFinished={handleReviewFinished}
@@ -1171,12 +1157,6 @@ export function TranscriptionPanel({
                         speakerLabels={summarySpeakerTags.map(
                             (speaker) => speaker.speaker,
                         )}
-                        onPlay={
-                            onPlayFromTurn
-                                ? (startMs) => onPlayFromTurn(startMs)
-                                : undefined
-                        }
-                        playback={playback}
                         widget={widgets?.summary}
                         taskWidget={widgets?.taskReview}
                         workflowVisible={widgets?.workflowVisible ?? false}

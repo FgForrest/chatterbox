@@ -1,14 +1,16 @@
 "use client";
 
-import { Play, RotateCcw, Trash2, Unlink } from "lucide-react";
+import { ArrowUpRight, RotateCcw, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
 import { toast } from "sonner";
+import { PlayAtButton } from "@/components/playback/play-at-button";
 import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
+import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import {
@@ -18,6 +20,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
+import { formatClock } from "@/lib/topics/timeline";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,10 +32,10 @@ export function TaskRow({
     task,
     recording,
     evidence,
+    currentItemId,
     showAssignee = true,
     speakers = [],
     organizationOnly,
-    onPlay,
     onChange,
     onMerge,
     onUndoMatch,
@@ -42,11 +45,10 @@ export function TaskRow({
     recording?: TaskListItem["recording"];
     /** The latest visible item that evidences the task. */
     evidence?: TaskListItem["evidence"];
+    currentItemId?: string;
     showAssignee?: boolean;
     speakers?: readonly SpeakerChoice[];
     organizationOnly: boolean;
-    /** Play the recording where the task was said. */
-    onPlay?: (startMs: number) => void;
     onChange: TaskRowChange;
     onMerge?: (
         targetTaskId: string,
@@ -171,9 +173,13 @@ export function TaskRow({
                     {evidence && (
                         <>
                             <Link
-                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                 className="truncate hover:text-primary hover:underline"
                             >
+                                <ArrowUpRight
+                                    className="mr-1 inline size-3"
+                                    aria-hidden="true"
+                                />
                                 {evidence.title}
                             </Link>
                             <span>
@@ -185,19 +191,40 @@ export function TaskRow({
                             </span>
                         </>
                     )}
-                    {task.evidenceStartMs !== null && onPlay && (
-                        <button
-                            type="button"
-                            className="inline-flex items-center gap-1 hover:text-primary"
-                            title={task.quote ?? undefined}
-                            onClick={() =>
-                                onPlay(task.evidenceStartMs as number)
-                            }
-                        >
-                            <Play className="size-3" />
-                            {i18n("Where it was said")}
-                        </button>
-                    )}
+                    {!evidence &&
+                        task.evidenceItemId === currentItemId &&
+                        task.evidenceItemKind === "audio" &&
+                        task.evidenceStartMs !== null &&
+                        (task.evidenceAudioAvailable ? (
+                            <PlayAtButton
+                                ms={task.evidenceStartMs}
+                                label={i18n("Where it was said")}
+                                playLabel={i18n("Play where it was said")}
+                                title={task.quote ?? undefined}
+                            />
+                        ) : (
+                            <span
+                                className="tabular-nums"
+                                title={task.quote ?? undefined}
+                            >
+                                {formatClock(task.evidenceStartMs)}
+                            </span>
+                        ))}
+                    {!evidence &&
+                        (task.evidenceItemId !== currentItemId ||
+                            task.evidenceItemKind === "mail") && (
+                            <TaskEvidenceLink
+                                evidence={{
+                                    itemId: task.evidenceItemId,
+                                    itemKind: task.evidenceItemKind,
+                                    audioAvailable: task.evidenceAudioAvailable,
+                                    startMs: task.evidenceStartMs,
+                                    text: task.evidenceText,
+                                }}
+                                quote={task.quote}
+                                currentItemId={currentItemId}
+                            />
+                        )}
                     {dropped && (
                         <span className="rounded bg-muted px-1.5">
                             {i18n("Dropped")}

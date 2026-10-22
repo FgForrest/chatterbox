@@ -1,11 +1,15 @@
 "use client";
 
-import { Play } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
 import { useSpeakerAccent } from "@/components/people/speaker-accent-context";
 import type { SpeakerAccent } from "@/components/people/speaker-accents";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
+import {
+    PlayAtIcon,
+    type PlayAtTarget,
+    usePlayAt,
+} from "@/components/playback/play-at-button";
 import { Button } from "@/components/ui/button";
 
 /** Whom a speaker of the review is: someone, explicitly nobody, or not yet. */
@@ -31,7 +35,7 @@ export function ReviewSpeaker({
     onTick,
     onPick,
     onUnknown,
-    onPlay,
+    nextTurn,
 }: {
     label: string;
     person: ReviewSpeakerPerson;
@@ -50,8 +54,9 @@ export function ReviewSpeaker({
     onTick: (ticked: boolean) => void;
     onPick: () => void;
     onUnknown: () => void;
-    onPlay?: () => void;
+    nextTurn?: () => PlayAtTarget | null;
 }) {
+    const play = usePlayAt();
     const i18n = useExtracted();
     const accent = useSpeakerAccent(label, fallbackAccent);
     const speakerLabel = useSpeakerLabel();
@@ -88,17 +93,28 @@ export function ReviewSpeaker({
                     <span
                         className={`inline-flex h-8 items-center overflow-hidden rounded-full border text-xs font-medium ${chip}`}
                     >
-                        {onPlay && (
+                        {nextTurn && play.available && (
                             <button
                                 type="button"
-                                onClick={onPlay}
-                                aria-label={i18n("Play a turn of {speaker}", {
-                                    speaker,
-                                })}
+                                onClick={() => {
+                                    if (play.playing) play.toggle();
+                                    else {
+                                        const target = nextTurn();
+                                        if (target) play.toggle(target);
+                                    }
+                                }}
+                                aria-pressed={play.playing}
+                                aria-label={
+                                    play.playing
+                                        ? i18n("Pause")
+                                        : i18n("Play a turn of {speaker}", {
+                                              speaker,
+                                          })
+                                }
                                 title={i18n("Listen")}
-                                className={`flex h-full items-center border-r px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground ${divider}`}
+                                className={`flex h-full items-center border-r px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary ${play.playing ? "text-primary" : ""} ${divider}`}
                             >
-                                <Play className="size-3" />
+                                <PlayAtIcon playing={play.playing} />
                             </button>
                         )}
                         <span className="inline-flex h-full items-center gap-2 px-3">

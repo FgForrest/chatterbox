@@ -19,7 +19,10 @@ import {
     type SpeakerResponseRow,
     SpeakerTags,
 } from "@/components/people/speaker-tags";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
+import { PlaybackProvider } from "@/components/playback/playback-context";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
+import { createTestPlayback } from "@/tests/helpers/playback";
 
 interface FetchScenario {
     initialSpeakers?: unknown[];
@@ -71,7 +74,7 @@ function stubFetch(scenario: FetchScenario) {
 function SpeakerTagsHarness({
     onAttributionsChange,
     onSeek,
-    onPlaySpeaker,
+    nextSpeakerTurn,
     shownVersion,
     onStale,
     onUnknownLabelsChange,
@@ -81,7 +84,9 @@ function SpeakerTagsHarness({
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
     onSeek?: (ms: number) => void;
-    onPlaySpeaker?: (speaker: string | readonly string[]) => boolean;
+    nextSpeakerTurn?: (
+        speaker: string | readonly string[],
+    ) => PlayAtTarget | null;
     shownVersion?: { transcriptionId: string; revision: number };
     onStale?: () => void;
     onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
@@ -99,20 +104,27 @@ function SpeakerTagsHarness({
     );
 
     return (
-        <SpeakerTags
-            recordingId="rec-1"
-            source="riffado"
-            speakers={speakers}
-            attributions={attributions}
-            onAttributionsChange={handleAttributionsChange}
-            onSeek={onSeek}
-            onPlaySpeaker={onPlaySpeaker}
-            shownVersion={shownVersion}
-            onStale={onStale}
-            onUnknownLabelsChange={onUnknownLabelsChange}
-            readOnly={readOnly}
-            view={view}
-        />
+        <PlaybackProvider
+            playback={
+                onSeek || nextSpeakerTurn
+                    ? createTestPlayback({ play: onSeek ?? vi.fn() }).playback
+                    : null
+            }
+        >
+            <SpeakerTags
+                recordingId="rec-1"
+                source="riffado"
+                speakers={speakers}
+                attributions={attributions}
+                onAttributionsChange={handleAttributionsChange}
+                nextSpeakerTurn={nextSpeakerTurn}
+                shownVersion={shownVersion}
+                onStale={onStale}
+                onUnknownLabelsChange={onUnknownLabelsChange}
+                readOnly={readOnly}
+                view={view}
+            />
+        </PlaybackProvider>
     );
 }
 
@@ -237,9 +249,7 @@ describe("SpeakerTags", () => {
         );
         expect(screen.getByText("Speaker 2")).toBeDefined();
         expect(screen.getByText("Managed by the Organization")).toBeDefined();
-        expect(screen.queryAllByRole("button")).toHaveLength(3);
-        for (const button of screen.getAllByRole("button"))
-            expect(button).toHaveProperty("disabled", true);
+        expect(screen.queryAllByRole("button")).toHaveLength(0);
         expect(
             fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
         ).toBe(false);
@@ -511,7 +521,11 @@ describe("SpeakerTags", () => {
                 }),
             );
 
-            expect(onSeek).toHaveBeenCalledWith(42_000);
+            expect(onSeek).toHaveBeenCalledWith(
+                42_000,
+                expect.any(String),
+                undefined,
+            );
         });
     });
 
@@ -532,12 +546,14 @@ describe("SpeakerTags", () => {
                 },
             ],
         });
-        const onPlaySpeaker = vi.fn(() => true);
+        const nextSpeakerTurn = vi.fn<() => PlayAtTarget | null>(() => ({
+            ms: 1000,
+        }));
         const onSeek = vi.fn();
         render(
             <SpeakerTagsHarness
                 onAttributionsChange={vi.fn()}
-                onPlaySpeaker={onPlaySpeaker}
+                nextSpeakerTurn={nextSpeakerTurn}
                 onSeek={onSeek}
             />,
         );
@@ -560,14 +576,19 @@ describe("SpeakerTags", () => {
         expect(play.className).toContain("focus-visible:ring-2");
         fireEvent.click(play);
         if (status === "suggested") {
-            expect(onSeek).toHaveBeenCalledWith(42000);
-            expect(onPlaySpeaker).not.toHaveBeenCalled();
-        } else expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_0");
+            expect(onSeek).toHaveBeenCalledWith(
+                42000,
+                expect.any(String),
+                undefined,
+            );
+            expect(nextSpeakerTurn).not.toHaveBeenCalled();
+        } else expect(nextSpeakerTurn).toHaveBeenCalledWith("speaker_0");
         expect(screen.queryByRole("combobox")).toBeNull();
-        onPlaySpeaker.mockClear();
+        nextSpeakerTurn.mockClear();
         expect(fireEvent.contextMenu(nameButton)).toBe(false);
-        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_0");
-        onPlaySpeaker.mockReturnValue(false);
+        if (status !== "suggested")
+            expect(nextSpeakerTurn).toHaveBeenCalledWith("speaker_0");
+        nextSpeakerTurn.mockReturnValue(null);
         expect(fireEvent.contextMenu(play)).toBe(true);
         fireEvent.click(nameButton);
         expect(await screen.findByRole("combobox")).toBeDefined();
@@ -779,11 +800,13 @@ describe("confirmed person speaker groups", () => {
             { ...linked("speaker_3"), status: "suggested" },
             { ...linked("speaker_4"), status: "suggested" },
         ]);
-        const onPlaySpeaker = vi.fn(() => true);
+        const nextSpeakerTurn = vi.fn<() => PlayAtTarget | null>(() => ({
+            ms: 1000,
+        }));
         render(
             <SpeakerTagsHarness
                 onAttributionsChange={vi.fn()}
-                onPlaySpeaker={onPlaySpeaker}
+                nextSpeakerTurn={nextSpeakerTurn}
                 speakers={[
                     ...voices,
                     ...[3, 4, 5].map((index) => ({
@@ -808,12 +831,12 @@ describe("confirmed person speaker groups", () => {
         expect(play[0].className).toContain("text-primary");
         expect(play[1].className).toContain("text-emerald-600");
         fireEvent.click(play[0]);
-        expect(onPlaySpeaker).toHaveBeenLastCalledWith([
+        expect(nextSpeakerTurn).toHaveBeenLastCalledWith([
             "speaker_0",
             "speaker_2",
         ]);
         fireEvent.contextMenu(play[0]);
-        expect(onPlaySpeaker).toHaveBeenLastCalledWith([
+        expect(nextSpeakerTurn).toHaveBeenLastCalledWith([
             "speaker_0",
             "speaker_2",
         ]);
@@ -881,12 +904,14 @@ describe("confirmed person speaker groups", () => {
         "relink",
     ])("lets the picker %s one voice and split the chip", async (action) => {
         const fetchMock = server();
-        const onPlaySpeaker = vi.fn(() => true);
+        const nextSpeakerTurn = vi.fn<() => PlayAtTarget | null>(() => ({
+            ms: 1000,
+        }));
         render(
             <SpeakerTagsHarness
                 onAttributionsChange={vi.fn()}
                 speakers={voices}
-                onPlaySpeaker={onPlaySpeaker}
+                nextSpeakerTurn={nextSpeakerTurn}
                 view="org"
             />,
         );
@@ -897,7 +922,7 @@ describe("confirmed person speaker groups", () => {
                 name: "Play the next turn of Speaker 2",
             }),
         );
-        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_2");
+        expect(nextSpeakerTurn).toHaveBeenCalledWith("speaker_2");
         if (action === "unlink")
             fireEvent.click(
                 dialog.getByRole("button", {

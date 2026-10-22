@@ -2,6 +2,7 @@
 
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnWidget } from "@/components/learn/learn-widget";
+import type { PlayAtTarget } from "@/components/playback/play-at-button";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type { RecordingView } from "@/lib/sharing/view";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -12,8 +13,7 @@ export function LearnReview({
     view,
     source,
     turns,
-    onSeek,
-    onPlaySpeaker,
+    nextSpeakerTurn,
     onFinished,
     onMarks,
     pollMs,
@@ -27,8 +27,7 @@ export function LearnReview({
     view?: RecordingView;
     source: "plaud" | "riffado";
     turns: readonly TranscriptTurn[];
-    onSeek?: (ms: number) => void;
-    onPlaySpeaker?: (label: string) => boolean;
+    nextSpeakerTurn?: (label: string) => PlayAtTarget | null;
     onFinished?: () => void;
     onMarks?: (marks: LearnMarks | null) => void;
     pollMs?: number;
@@ -45,8 +44,7 @@ export function LearnReview({
             view={view}
             source={source}
             turns={turns}
-            onSeek={onSeek}
-            onPlaySpeaker={onPlaySpeaker}
+            nextSpeakerTurn={nextSpeakerTurn}
             onFinished={onFinished}
             onMarks={onMarks}
             pollMs={pollMs}

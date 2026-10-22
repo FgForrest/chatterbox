@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { PlaybackProvider } from "@/components/playback/playback-context";
+import { createTestPlayback } from "@/tests/helpers/playback";
 import type { Recording } from "@/types/recording";
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
@@ -85,22 +87,25 @@ describe("speaker playback navigation", () => {
     it("plays and scrolls through one speaker, then starts another at their first turn", async () => {
         const onPlayFromTurn = vi.fn();
         render(
-            <TranscriptionPanel
-                recording={recording}
-                transcripts={[
-                    {
-                        source: "riffado",
-                        text: turns
-                            .map((turn) => `${turn.speaker}: ${turn.text}`)
-                            .join("\n"),
-                        turns,
-                        version: { transcriptionId: "tx-1", revision: 1 },
-                    },
-                ]}
-                isTranscribing={false}
-                onTranscribe={vi.fn()}
-                onPlayFromTurn={onPlayFromTurn}
-            />,
+            <PlaybackProvider
+                playback={createTestPlayback({ play: onPlayFromTurn }).playback}
+            >
+                <TranscriptionPanel
+                    recording={recording}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: turns
+                                .map((turn) => `${turn.speaker}: ${turn.text}`)
+                                .join("\n"),
+                            turns,
+                            version: { transcriptionId: "tx-1", revision: 1 },
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                />
+            </PlaybackProvider>,
         );
 
         const firstSpeaker = screen.getByRole("button", { name: "Speaker 0" });
@@ -116,19 +121,31 @@ describe("speaker playback navigation", () => {
                 name: "Play the next turn of Speaker 0",
             }),
         );
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(1000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            1000,
+            expect.any(String),
+            undefined,
+        );
         expect(
             document.querySelector('[data-turn-index="0"]')?.className,
         ).toContain("bg-primary/10");
 
         fireEvent.contextMenu(firstSpeaker);
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(5000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            5000,
+            expect.any(String),
+            undefined,
+        );
         expect(
             document.querySelector('[data-turn-index="2"]')?.className,
         ).toContain("bg-primary/10");
 
         fireEvent.contextMenu(secondSpeaker);
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(3000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            3000,
+            expect.any(String),
+            undefined,
+        );
         expect(
             document.querySelector('[data-turn-index="1"]')?.className,
         ).toContain("bg-primary/10");
@@ -137,7 +154,11 @@ describe("speaker playback navigation", () => {
             screen.getByRole("button", { name: "Collapse transcript" }),
         );
         fireEvent.contextMenu(firstSpeaker);
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(1000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            1000,
+            expect.any(String),
+            undefined,
+        );
         await waitFor(() =>
             expect(
                 screen.getByRole("button", { name: "Collapse transcript" }),
@@ -188,22 +209,25 @@ describe("speaker playback navigation", () => {
         );
         const onPlayFromTurn = vi.fn();
         render(
-            <TranscriptionPanel
-                recording={recording}
-                transcripts={[
-                    {
-                        source: "riffado",
-                        text: turns
-                            .map((turn) => `${turn.speaker}: ${turn.text}`)
-                            .join("\n"),
-                        turns,
-                        version: { transcriptionId: "tx-1", revision: 1 },
-                    },
-                ]}
-                isTranscribing={false}
-                onTranscribe={vi.fn()}
-                onPlayFromTurn={onPlayFromTurn}
-            />,
+            <PlaybackProvider
+                playback={createTestPlayback({ play: onPlayFromTurn }).playback}
+            >
+                <TranscriptionPanel
+                    recording={recording}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: turns
+                                .map((turn) => `${turn.speaker}: ${turn.text}`)
+                                .join("\n"),
+                            turns,
+                            version: { transcriptionId: "tx-1", revision: 1 },
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                />
+            </PlaybackProvider>,
         );
         fireEvent.click(await screen.findByRole("button", { name: "Review" }));
         fireEvent.click(
@@ -211,7 +235,11 @@ describe("speaker playback navigation", () => {
                 name: "Play a turn of Speaker 1",
             }),
         );
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(3000, 4000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            3000,
+            expect.any(String),
+            4000,
+        );
     });
 });
 
@@ -287,20 +315,23 @@ it("cycles all confirmed voices chronologically with matching transcript colours
     ];
     try {
         render(
-            <TranscriptionPanel
-                recording={recording}
-                transcripts={[
-                    {
-                        source: "riffado",
-                        text: "speaker_0: First.\nspeaker_1: Reply.\nspeaker_0: Again.",
-                        turns: mixedTurns,
-                        version: { transcriptionId: "tx-1", revision: 1 },
-                    },
-                ]}
-                isTranscribing={false}
-                onTranscribe={vi.fn()}
-                onPlayFromTurn={onPlayFromTurn}
-            />,
+            <PlaybackProvider
+                playback={createTestPlayback({ play: onPlayFromTurn }).playback}
+            >
+                <TranscriptionPanel
+                    recording={recording}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: "speaker_0: First.\nspeaker_1: Reply.\nspeaker_0: Again.",
+                            turns: mixedTurns,
+                            version: { transcriptionId: "tx-1", revision: 1 },
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                />
+            </PlaybackProvider>,
         );
         const play = await screen.findByRole("button", {
             name: "Play the next turn of Jan",
@@ -315,7 +346,11 @@ it("cycles all confirmed voices chronologically with matching transcript colours
         }
         for (const time of [1000, 3000, 5000, 1000]) {
             fireEvent.click(play);
-            expect(onPlayFromTurn).toHaveBeenLastCalledWith(time);
+            expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+                time,
+                expect.any(String),
+                undefined,
+            );
         }
         fireEvent.click(screen.getByRole("button", { name: "Jan" }));
         fireEvent.click(
@@ -323,7 +358,11 @@ it("cycles all confirmed voices chronologically with matching transcript colours
                 name: "Play the next turn of Speaker 1",
             }),
         );
-        expect(onPlayFromTurn).toHaveBeenLastCalledWith(5000);
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(
+            5000,
+            expect.any(String),
+            undefined,
+        );
     } finally {
         cleanup();
         vi.unstubAllGlobals();

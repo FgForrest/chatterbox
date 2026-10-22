@@ -15,8 +15,6 @@ interface RecordingTasksProps {
     speakers: readonly SpeakerChoice[];
     /** The Organization view: assignees come from the Organization only. */
     organizationOnly: boolean;
-    /** Play the recording from a moment, up to the turn's end. */
-    onPlay?: (startMs: number) => void;
     /** Shown when the recording has no tasks: the summary's own list. */
     fallback: ReactNode;
     /** Offer adding tasks by hand; not without a summary they would die with. */
@@ -32,7 +30,6 @@ export function RecordingTasks({
     state,
     speakers,
     organizationOnly,
-    onPlay,
     fallback,
     allowAdd = true,
 }: RecordingTasksProps) {
@@ -104,9 +101,9 @@ export function RecordingTasks({
                         <TaskRow
                             key={task.id}
                             task={task}
+                            currentItemId={state.itemId}
                             speakers={speakers}
                             organizationOnly={organizationOnly}
-                            onPlay={onPlay}
                             onChange={(change, optimistic) =>
                                 state.update(task, change, optimistic)
                             }
