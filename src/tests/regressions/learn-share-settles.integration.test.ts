@@ -1242,6 +1242,116 @@ describeWithDatabase("finished private Learn at share (PostgreSQL)", () => {
         });
     });
 
+    it("keeps ambiguous same-named people private for older runs and still writes a receipt", async () => {
+        const personIds = [
+            "settles-ambiguous-first",
+            "settles-ambiguous-second",
+        ];
+        const source = await run({
+            stats: { kept_new_record: 1 },
+            createdAt: new Date("2026-10-01T10:00:00.000Z"),
+            finishedAt: new Date("2026-10-01T10:01:00.000Z"),
+        });
+        expect(source.inputs?.confirmedRecords).toBeUndefined();
+        await db()
+            .insert(people)
+            .values(
+                personIds.map((id) => ({
+                    id,
+                    userId: OWNER,
+                    displayName: encryptText("Luma Kestrel"),
+                    createdAt: new Date("2026-10-01T10:00:30.000Z"),
+                })),
+            );
+        await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: source.id,
+                userId: OWNER,
+                kind: "new_record",
+                fingerprintHmac: "ambiguous-older-person",
+                outcome: "applied",
+                decision: "accepted",
+                choice: encryptJsonField({ name: "Luma Kestrel" }),
+                payload: encryptJsonField({
+                    kind: "person",
+                    name: "Luma",
+                    typeKey: null,
+                }),
+            });
+        await share();
+        expect(
+            await db()
+                .select({ id: people.id })
+                .from(people)
+                .where(
+                    and(
+                        eq(people.userId, OWNER),
+                        inArray(people.id, personIds),
+                    ),
+                ),
+        ).toHaveLength(2);
+        expect(await orgRuns()).toEqual([
+            expect.objectContaining({
+                status: "finished",
+                scopeUserId: orgUserId,
+                inputs: expect.objectContaining({
+                    promotedFromRunId: source.id,
+                }),
+                stats: { applied: 1, skipped: 0, dismissed: 0 },
+            }),
+        ]);
+    });
+
+    it("does not promote an older run's entity when its new-record type key is absent", async () => {
+        const entity = await createEntity(OWNER, {
+            typeKey: "project",
+            name: "Kestrel Atrium",
+        });
+        const source = await run({
+            stats: { kept_new_record: 1 },
+            createdAt: new Date(entity.createdAt.getTime() - 1_000),
+            finishedAt: new Date(entity.createdAt.getTime() + 1_000),
+        });
+        expect(source.inputs?.confirmedRecords).toBeUndefined();
+        await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: source.id,
+                userId: OWNER,
+                kind: "new_record",
+                fingerprintHmac: "older-entity-without-type",
+                outcome: "applied",
+                decision: "accepted",
+                payload: encryptJsonField({
+                    kind: "entity",
+                    name: "Kestrel Atrium",
+                }),
+            });
+        await share();
+        expect(
+            await db()
+                .select({ id: knowledgeEntities.id })
+                .from(knowledgeEntities)
+                .where(
+                    and(
+                        eq(knowledgeEntities.userId, OWNER),
+                        eq(knowledgeEntities.id, entity.id),
+                    ),
+                ),
+        ).toEqual([{ id: entity.id }]);
+        expect(await orgRuns()).toEqual([
+            expect.objectContaining({
+                status: "finished",
+                scopeUserId: orgUserId,
+                inputs: expect.objectContaining({
+                    promotedFromRunId: source.id,
+                }),
+                stats: { applied: 1, skipped: 0, dismissed: 0 },
+            }),
+        ]);
+    });
+
     it("keeps unknown historical outcome counts unknown and does not promote unproven records", async () => {
         const [person] = await db()
             .insert(people)
