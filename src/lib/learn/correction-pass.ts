@@ -196,14 +196,10 @@ export interface CorrectionPassResult {
     failedWindows: number;
 }
 
-function contextOf(
-    input: CorrectionPassInput,
-    first: number,
-    turns: readonly TranscriptTurn[],
-): string {
-    const last = first + turns.length;
-    const almanac = {
-        people: input.almanac
+/** The exact ALMANAC JSON value included in correction-pass prompts. */
+export function correctionAlmanacJson(records: readonly AlmanacRecord[]) {
+    return {
+        people: records
             .filter((record) => record.kind === "person")
             .map(({ id: personId, name, aliases, heardAs }) => ({
                 id: personId,
@@ -211,7 +207,7 @@ function contextOf(
                 ...(aliases.length ? { aliases } : {}),
                 ...(heardAs.length ? { heardAs } : {}),
             })),
-        things: input.almanac
+        things: records
             .filter((record) => record.kind === "entity")
             .map(({ id: entityId, typeKey, name, aliases, heardAs }) => ({
                 id: entityId,
@@ -221,6 +217,14 @@ function contextOf(
                 ...(heardAs.length ? { heardAs } : {}),
             })),
     };
+}
+
+function contextOf(
+    input: CorrectionPassInput,
+    first: number,
+    turns: readonly TranscriptTurn[],
+): string {
+    const last = first + turns.length;
     const corrected = input.corrected
         .filter((entry) => entry.turnIndex >= first && entry.turnIndex < last)
         .map((entry) => ({
@@ -230,7 +234,7 @@ function contextOf(
         }));
     return [
         `LANGUAGE: ${input.language ?? "unknown"}`,
-        `ALMANAC (JSON):\n${JSON.stringify(almanac)}`,
+        `ALMANAC (JSON):\n${JSON.stringify(correctionAlmanacJson(input.almanac))}`,
         `ALREADY CORRECTED (JSON):\n${JSON.stringify(corrected)}`,
         `TRANSCRIPT:\n${renderLearnTranscript(turns, first)}`,
     ].join("\n\n");

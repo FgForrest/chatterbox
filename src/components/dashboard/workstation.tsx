@@ -10,6 +10,7 @@ import { AppHeader } from "@/components/app-header";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
+import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
@@ -207,6 +208,9 @@ export function Workstation({
     );
     const [folderOrganization, setFolderOrganization] =
         useState<FolderOrganization>(initialFolderOrganization);
+    const [knowledgeFolderId, setKnowledgeFolderId] = useState<string | null>(
+        null,
+    );
     const [settingsFolderId, setSettingsFolderId] = useState<string | null>(
         null,
     );
@@ -279,6 +283,7 @@ export function Workstation({
             folderId: string | null,
             method: "push" | "replace" = "replace",
             intendedMobileView = mobileViewRef.current,
+            knowledge = false,
         ) => {
             const params = new URLSearchParams(window.location.search);
             clearItemLinkContext(params);
@@ -286,6 +291,8 @@ export function Workstation({
             params.delete("folder");
             params.delete("view");
             params.delete("googleExport");
+            params.delete("knowledge");
+            if (knowledge) params.set("knowledge", "1");
             if (folderId) {
                 params.set("folder", folderId);
             }
@@ -315,6 +322,7 @@ export function Workstation({
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             setItemLinkQuery("");
+            setKnowledgeFolderId(null);
             setCurrentRecording(recording);
             setMobileView("detail");
             let folderId = selectedFolderIdRef.current;
@@ -367,6 +375,7 @@ export function Workstation({
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             setItemLinkQuery("");
+            setKnowledgeFolderId(null);
             setSelectedFolderId(folder.id);
             rememberFolder(folder.id);
             const pool =
@@ -480,6 +489,12 @@ export function Workstation({
             const locationFolder = folder ?? firstFolder;
             setSelectedFolderId(locationFolder?.id ?? null);
             if (locationFolder) rememberFolder(locationFolder.id);
+            const previewingKnowledge = Boolean(
+                locationFolder && params.get("knowledge") === "1",
+            );
+            setKnowledgeFolderId(
+                previewingKnowledge ? (locationFolder?.id ?? null) : null,
+            );
             if (recordingId) {
                 const preferred =
                     params.get("view") === "org" ||
@@ -498,12 +513,13 @@ export function Workstation({
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
                 const restoredView = window.history.state?.mobileView;
-                const nextMobileView =
-                    restoredView === "list" || restoredView === "detail"
-                        ? restoredView
-                        : traversing && locationFolder
-                          ? "list"
-                          : "detail";
+                const nextMobileView = previewingKnowledge
+                    ? "detail"
+                    : restoredView === "list" || restoredView === "detail"
+                      ? restoredView
+                      : traversing && locationFolder
+                        ? "list"
+                        : "detail";
                 setMobileView(nextMobileView);
                 if (!linked)
                     toast.error(
@@ -516,6 +532,7 @@ export function Workstation({
                     locationFolder?.id ?? null,
                     "replace",
                     nextMobileView,
+                    previewingKnowledge,
                 );
                 return;
             }
@@ -547,12 +564,13 @@ export function Workstation({
                           )[0] ?? null)
                     : null;
             setCurrentRecording(initial);
-            setMobileView("list");
+            setMobileView(previewingKnowledge ? "detail" : "list");
             writeSelection(
                 initial,
                 locationFolder?.id ?? null,
                 "replace",
-                "list",
+                previewingKnowledge ? "detail" : "list",
+                previewingKnowledge,
             );
         },
         [
@@ -708,7 +726,17 @@ export function Workstation({
             ).find((recording) => recording.id === currentRecording.id);
             if (updated !== currentRecording) {
                 setCurrentRecording(updated ?? null);
-                if (!updated) writeSelection(null, selectedFolderId);
+                if (!updated)
+                    writeSelection(
+                        null,
+                        selectedFolderId,
+                        "replace",
+                        mobileViewRef.current,
+                        Boolean(
+                            knowledgeFolderId &&
+                                knowledgeFolderId === selectedFolderId,
+                        ),
+                    );
             }
         }
         // When server data comes back, clear any optimistic hides whose
@@ -733,6 +761,7 @@ export function Workstation({
         recordings,
         orgRecordings,
         currentRecording,
+        knowledgeFolderId,
         selectedFolderId,
         writeSelection,
     ]);
@@ -1611,6 +1640,7 @@ export function Workstation({
     });
 
     const navigateRecent = () => {
+        setKnowledgeFolderId(null);
         selectionRevisionRef.current += 1;
         setPendingUploadSelection(null);
         setItemLinkQuery("");
@@ -1635,6 +1665,16 @@ export function Workstation({
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
         onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
+        knowledgeOpen: knowledgeFolderId === selectedFolderId,
+        onKnowledge: (folder: RecordingFolder) => {
+            if (knowledgeFolderId === folder.id) return;
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
+            setItemLinkQuery("");
+            setKnowledgeFolderId(folder.id);
+            setMobileView("detail");
+            writeSelection(currentRecording, folder.id, "push", "detail", true);
+        },
         onNewFolder: () =>
             selectedFolder &&
             canCreateSubfolder(selectedFolder, canCurate, isOrgAccount)
@@ -1894,9 +1934,26 @@ export function Workstation({
                                 }
                             />
                         </div>
-                        {visibleRecordings.length === 0 &&
-                        visibleOrgRecordings.length === 0 &&
-                        pendingUploads.length === 0 ? (
+                        {knowledgeFolderId &&
+                        selectedFolder?.id === knowledgeFolderId ? (
+                            <FolderKnowledgePanel
+                                key={knowledgeFolderId}
+                                folder={selectedFolder}
+                                contentRevision={orgContentRevision}
+                                onBack={() => {
+                                    setKnowledgeFolderId(null);
+                                    setMobileView("list");
+                                    writeSelection(
+                                        selectedRecording,
+                                        selectedFolderId,
+                                        "replace",
+                                        "list",
+                                    );
+                                }}
+                            />
+                        ) : visibleRecordings.length === 0 &&
+                          visibleOrgRecordings.length === 0 &&
+                          pendingUploads.length === 0 ? (
                             <div className="hidden min-w-0 lg:block lg:self-start">
                                 <WorkstationEmptyState
                                     isSyncing={isAutoSyncing}
