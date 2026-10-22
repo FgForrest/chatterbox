@@ -44,6 +44,7 @@ import {
     matchFolderEntries,
     visibleFolderLevel,
 } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import { cn } from "@/lib/utils";
 import type {
     RecordingFolder,
@@ -79,7 +80,8 @@ interface FolderTreeProps {
     ) => Promise<void>;
     onNewFolder?: () => void;
     canCurate?: boolean;
-    onSettings: (folder: RecordingFolder) => void;
+    isOrgAccount?: boolean;
+    onSettings: (folder: RecordingFolder, action?: "create") => void;
     navigation?: FolderNavigation;
     recentCount?: number;
     onCollapse?: () => void;
@@ -97,6 +99,7 @@ export function FolderTree({
     onMoveRecording,
     onNewFolder,
     canCurate = false,
+    isOrgAccount = false,
     onSettings,
     navigation,
     recentCount,
@@ -129,6 +132,7 @@ export function FolderTree({
         [folders, selectedFolderId, byId],
     );
     const [query, setQuery] = useState("");
+    const [menuFolderId, setMenuFolderId] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(
         () =>
             new Set(
@@ -259,7 +263,10 @@ export function FolderTree({
         const canManage = folder.scope !== "org" || canCurate;
         return (
             <div key={folder.id}>
+                {/* biome-ignore lint/a11y/useSemanticElements: Folder row controls are not form inputs. */}
                 <div
+                    role="group"
+                    aria-label={folderLabel(folder)}
                     className={cn(
                         "group/folder flex items-center rounded-md border border-transparent pr-1 transition-colors",
                         selectedFolderId === folder.id &&
@@ -277,6 +284,10 @@ export function FolderTree({
                             "border-primary bg-primary/10 ring-1 ring-primary/30",
                     )}
                     style={{ paddingLeft: `${depth * 12 + 2}px` }}
+                    onContextMenu={(event) => {
+                        event.preventDefault();
+                        setMenuFolderId(folder.id);
+                    }}
                 >
                     {canExpand ? (
                         <button
@@ -447,6 +458,15 @@ export function FolderTree({
                             }
                         }}
                         onClick={() => onSelectFolder(folder)}
+                        onKeyDown={(event) => {
+                            if (
+                                event.key === "ContextMenu" ||
+                                (event.shiftKey && event.key === "F10")
+                            ) {
+                                event.preventDefault();
+                                setMenuFolderId(folder.id);
+                            }
+                        }}
                         aria-label={i18n(
                             "{folder}, {count, plural, one {# recording} other {# recordings}}",
                             {
@@ -480,7 +500,12 @@ export function FolderTree({
                             {countByFolder.get(folder.id) ?? 0}
                         </span>
                     </button>
-                    <DropdownMenu>
+                    <DropdownMenu
+                        open={menuFolderId === folder.id}
+                        onOpenChange={(open) =>
+                            setMenuFolderId(open ? folder.id : null)
+                        }
+                    >
                         <DropdownMenuTrigger asChild>
                             <Button
                                 type="button"
@@ -496,6 +521,19 @@ export function FolderTree({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                            {canCreateSubfolder(
+                                folder,
+                                canCurate,
+                                isOrgAccount,
+                            ) && (
+                                <DropdownMenuItem
+                                    onSelect={() =>
+                                        onSettings(folder, "create")
+                                    }
+                                >
+                                    <FolderPlus /> {i18n("New subfolder")}
+                                </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                                 onSelect={() => onSettings(folder)}
                             >

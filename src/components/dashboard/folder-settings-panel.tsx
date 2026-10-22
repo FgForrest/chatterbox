@@ -2,7 +2,7 @@
 
 import { FolderInput, FolderPlus, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import {
@@ -31,6 +31,7 @@ import {
     descendantFolderIds,
 } from "@/lib/folders/hierarchy";
 import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { RecordingFolder } from "@/types/folder";
 
 export function FolderSettingsPanel({
@@ -83,6 +84,7 @@ export function FolderSettingsPanel({
     });
     const exports = exportStatus.configured;
     const [subfolder, setSubfolder] = useState("");
+    const subfolderInput = useRef<HTMLInputElement>(null);
     const [parentId, setParentId] = useState(folder.parentId ?? "");
     const [saving, setSaving] = useState(false);
     const [exportOpen, setExportOpen] = useState(false);
@@ -104,8 +106,7 @@ export function FolderSettingsPanel({
     const inheritedExportFolder = folders.find(
         (item) => item.id === exportStatus.inheritedFolderId,
     );
-    const canCreate =
-        folder.scope !== "org" || folder.parentId !== null || canCurate;
+    const canCreate = canCreateSubfolder(folder, canCurate, isOrgAccount);
     const subtree = descendantFolderIds(folders, folder.id);
     const entries = matchFolders(folders, "", label);
     const path = joinFolderPath(
@@ -129,7 +130,11 @@ export function FolderSettingsPanel({
             >
                 <DialogContent
                     className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
-                    onOpenAutoFocus={(event) => event.preventDefault()}
+                    onOpenAutoFocus={(event) => {
+                        event.preventDefault();
+                        if (initialAction === "create")
+                            subfolderInput.current?.focus();
+                    }}
                 >
                     <DialogHeader>
                         <DialogTitle>{label(folder)}</DialogTitle>
@@ -267,6 +272,7 @@ export function FolderSettingsPanel({
                     {canCreate && creating && (
                         <div className="flex items-center gap-2 border-t pt-3">
                             <Input
+                                ref={subfolderInput}
                                 aria-label={i18n("New subfolder name")}
                                 placeholder={i18n("Folder name")}
                                 maxLength={100}

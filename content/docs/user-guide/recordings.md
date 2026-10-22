@@ -91,7 +91,7 @@ The picker focuses its search field. Before typing, it shows recently used folde
 
 A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder. An intended Organization folder also appears here; a **Nothing automatic** item offers **Share now** beside it until you share or cancel the placement.
 
-To manage folders, use **⋯ → Folder settings** next to a folder. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
+To manage folders, use **⋯ → Folder settings** next to a folder. Choose **New subfolder** from the folder’s **⋯** menu to create a child folder, or right-click the folder row to open the same menu. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
 
 Click a folder to show its items in the list. Use the current folder name in the breadcrumb or the **⋯** beside the list count to rename it, manage its mail addresses, change defaults, create a subfolder, move it, or delete it:
 

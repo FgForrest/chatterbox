@@ -26,6 +26,7 @@ import {
     libraryNavigation,
     visibleFolderLevel,
 } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
@@ -43,6 +44,7 @@ export function LibraryLocationHeader({
     navigation,
     part = "all",
     canCurate = false,
+    isOrgAccount = false,
 }: {
     variant: "rail" | "walk";
     organization: FolderOrganization;
@@ -57,6 +59,7 @@ export function LibraryLocationHeader({
     navigation?: FolderNavigation;
     part?: "all" | "header" | "tiles";
     canCurate?: boolean;
+    isOrgAccount?: boolean;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -332,7 +335,8 @@ export function LibraryLocationHeader({
                             onClick={onNewFolder}
                         >
                             <FolderPlus className="size-3" />
-                            {folder && (folder.scope !== "org" || canCurate)
+                            {folder &&
+                            canCreateSubfolder(folder, canCurate, isOrgAccount)
                                 ? i18n("New subfolder")
                                 : i18n("New folder")}
                         </Button>
