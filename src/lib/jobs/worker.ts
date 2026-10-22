@@ -65,6 +65,7 @@ import type { JobHandler, JobProgress } from "./types";
 const TICK_MS = 5_000;
 
 const HOUSEKEEPING_EVERY_MS = 60 * 60 * 1000;
+const COMPLETION_RETRY_DELAYS_MS = [500, 2_000, 5_000];
 
 /** Default wait between attempts when a handler does not set its own. */
 const DEFAULT_JOB_BACKOFF = { baseMs: 20_000, maxMs: 10 * 60_000, jitter: 0.3 };
@@ -190,7 +191,11 @@ async function runJob(
         )
             throw new StepFailedError(stepOutcome.code, stepOutcome.retryable);
         stop();
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (
+            let attempt = 0;
+            attempt <= COMPLETION_RETRY_DELAYS_MS.length;
+            attempt++
+        ) {
             try {
                 const settled = await retryOnDeadlock(() =>
                     completeJob({
@@ -205,7 +210,11 @@ async function runJob(
                     });
                 break;
             } catch (error) {
-                if (attempt < 2) continue;
+                const delay = COMPLETION_RETRY_DELAYS_MS[attempt];
+                if (delay !== undefined) {
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                    continue;
+                }
                 console.error(
                     `[job-worker] could not settle completed job ${job.id}:`,
                     error,

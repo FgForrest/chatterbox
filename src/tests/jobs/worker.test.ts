@@ -178,14 +178,55 @@ describe("job worker", () => {
             new Error("database unavailable"),
         );
         claimOnce(claimed());
-        await runTick();
+        vi.useFakeTimers();
+        try {
+            const ticked = runTick();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(queries.completeJob).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(499);
+            expect(queries.completeJob).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(queries.completeJob).toHaveBeenCalledTimes(2);
+            await vi.advanceTimersByTimeAsync(1_999);
+            expect(queries.completeJob).toHaveBeenCalledTimes(2);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(queries.completeJob).toHaveBeenCalledTimes(3);
+            await vi.advanceTimersByTimeAsync(4_999);
+            expect(queries.completeJob).toHaveBeenCalledTimes(3);
+            await vi.advanceTimersByTimeAsync(1);
+            await ticked;
+        } finally {
+            vi.useRealTimers();
+        }
         expect(run).toHaveBeenCalledOnce();
-        expect(queries.completeJob).toHaveBeenCalledTimes(3);
+        expect(queries.completeJob).toHaveBeenCalledTimes(4);
         expect(queries.failJobAttempt).not.toHaveBeenCalled();
         expect(captureServerException).toHaveBeenCalledWith(expect.any(Error), {
             source: "worker:settle:test",
             distinctId: "user-1",
         });
+    });
+
+    it("settles after a connection reset clears without repeating the handler", async () => {
+        const run = vi.fn().mockResolvedValue({ outcome: { kind: "done" } });
+        registerJobHandler(testHandler({ run }));
+        queries.completeJob
+            .mockRejectedValueOnce(new Error("connection reset"))
+            .mockResolvedValue(true);
+        claimOnce(claimed());
+        vi.useFakeTimers();
+        try {
+            const ticked = runTick();
+            await vi.advanceTimersByTimeAsync(499);
+            expect(queries.completeJob).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(1);
+            await ticked;
+        } finally {
+            vi.useRealTimers();
+        }
+        expect(run).toHaveBeenCalledOnce();
+        expect(queries.completeJob).toHaveBeenCalledTimes(2);
+        expect(queries.failJobAttempt).not.toHaveBeenCalled();
     });
 
     it("hands the handler the payload its own parser produced", async () => {

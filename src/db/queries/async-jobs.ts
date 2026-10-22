@@ -12,11 +12,12 @@ import { db } from "@/db";
 import {
     bindAvailableCorrectionInTx,
     bindPipelineJobInTx,
+    currentPipelineJobBindingsInTx,
     jobBindings,
     lockPipelineTargetsInTx,
     type PipelineJobTarget,
-    pipelineJobBindingsCurrentInTx,
     pipelineJobTarget,
+    sameBinding,
     settlePipelineBindingInTx,
     terminalStepOutcome,
     wakePipelineInTx,
@@ -250,24 +251,38 @@ export async function enqueueJob(
                 .limit(1);
             if (!locked) continue;
             active = locked as AsyncJobRow;
-            if (!(await pipelineJobBindingsCurrentInTx(executor, locked))) {
+            const bindings = jobBindings(locked.payload);
+            const current = await currentPipelineJobBindingsInTx(
+                executor,
+                locked,
+            );
+            if (bindings.length > 0 && current.length === 0) {
+                await settleSupersededJobInTx(
+                    executor,
+                    locked.id,
+                    input.userId,
+                );
+                continue;
+            }
+            if (current.length < bindings.length) {
+                const payload = { ...locked.payload, pipelineSteps: current };
                 await executor
                     .update(asyncJobs)
-                    .set({
-                        status: "failed",
-                        claimToken: null,
-                        completedAt: new Date(),
-                        updatedAt: new Date(),
-                        errorCode: "superseded",
-                        lastError: "The pipeline step was superseded",
-                    })
+                    .set({ payload })
                     .where(
                         and(
                             eq(asyncJobs.id, locked.id),
                             eq(asyncJobs.userId, input.userId),
                         ),
                     );
-                continue;
+                active = { ...active, payload };
+                for (const binding of bindings)
+                    if (!current.some((entry) => sameBinding(entry, binding)))
+                        await wakePipelineInTx(
+                            executor,
+                            binding.itemId,
+                            binding.userId,
+                        );
             }
         }
         if (input.takeOverDelayed) {
@@ -583,11 +598,18 @@ export async function prepareClaimedPipelineJob(
             )
             .limit(1);
         if (!job) return false;
-        if (jobBindings(job.payload).length > 0)
-            return (
-                (await lockClaimedPipelineJobInTx(tx, jobId, claimToken)) !==
-                null
+        if (jobBindings(job.payload).length > 0) {
+            const locked = await lockClaimedPipelineJobInTx(
+                tx,
+                jobId,
+                claimToken,
             );
+            if (!locked) return false;
+            if ((await currentPipelineJobBindingsInTx(tx, locked)).length > 0)
+                return true;
+            await settleSupersededJobInTx(tx, jobId, locked.userId);
+            return false;
+        }
         let pipeline: PipelineJobTarget | undefined;
         if (job.kind === "learn.run" && typeof job.payload.runId === "string") {
             const [run] = await tx
@@ -931,15 +953,16 @@ export async function settleTerminalJobInTx(
         );
         if (!settled)
             await wakePipelineInTx(tx, binding.itemId, binding.userId);
-    }
-    if (input.status === "completed") {
-        for (const binding of bindings)
-            if (binding.phase === "learn")
-                await bindAvailableCorrectionInTx(
-                    tx,
-                    binding.itemId,
-                    binding.userId,
-                );
+        if (
+            settled &&
+            input.status === "completed" &&
+            binding.phase === "learn"
+        )
+            await bindAvailableCorrectionInTx(
+                tx,
+                binding.itemId,
+                binding.userId,
+            );
     }
     if (
         job.kind === "pipeline.advance" &&
@@ -964,6 +987,21 @@ export async function settleTerminalJobInTx(
             await wakePipelineInTx(tx, job.payload.itemId, job.userId);
     }
     return true;
+}
+
+function settleSupersededJobInTx(
+    tx: EnqueueExecutor,
+    jobId: string,
+    userId: string,
+): Promise<boolean> {
+    return settleTerminalJobInTx(tx, {
+        jobId,
+        cancelForUserId: userId,
+        status: "failed",
+        code: "superseded",
+        message: "The pipeline step was superseded",
+        retryable: false,
+    });
 }
 
 /** Terminate matching active jobs in another transaction and revoke their claims. */

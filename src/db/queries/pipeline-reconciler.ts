@@ -253,16 +253,6 @@ export async function reconcilePipelineSteps(
                                 retryable: true,
                             })
                         ) {
-                            await settlePipelineBindingInTx(
-                                tx,
-                                binding,
-                                job.id,
-                                {
-                                    kind: "failed",
-                                    code: "lost",
-                                    retryable: true,
-                                },
-                            );
                             ended.push({
                                 ...job,
                                 status: "failed",

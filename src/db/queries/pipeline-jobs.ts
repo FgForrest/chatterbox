@@ -39,6 +39,20 @@ export interface PipelineJobBinding extends PipelineJobTarget {
     generation: number;
 }
 
+/** Whether two bindings name the same item step at the same generation. */
+export function sameBinding(
+    a: PipelineJobBinding,
+    b: PipelineJobBinding,
+): boolean {
+    return (
+        a.itemId === b.itemId &&
+        a.userId === b.userId &&
+        a.phase === b.phase &&
+        a.step === b.step &&
+        a.generation === b.generation
+    );
+}
+
 /** Read only validated, owner-scoped binding metadata from the job payload. */
 export function jobBindings(
     payload: Record<string, unknown>,
@@ -94,6 +108,11 @@ export function pipelineJobTarget(
     };
 }
 
+function compareCodeUnits(a: string, b: string): number {
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+}
+
 /** Lock order: item (when needed) → processing rows sorted by item/user id → profile locks sorted by owner id → job. */
 export async function lockPipelineTargetsInTx(
     tx: Tx,
@@ -110,8 +129,8 @@ export async function lockPipelineTargetsInTx(
         ).values(),
     ].sort(
         (a, b) =>
-            a.itemId.localeCompare(b.itemId) ||
-            a.userId.localeCompare(b.userId),
+            compareCodeUnits(a.itemId, b.itemId) ||
+            compareCodeUnits(a.userId, b.userId),
     );
     for (const target of ordered) {
         if (create) {
@@ -161,11 +180,12 @@ export async function lockPipelineTargetsInTx(
     return true;
 }
 
-/** Check deduplication against the generations protected by the processing locks. */
-export async function pipelineJobBindingsCurrentInTx(
+/** Select bindings whose job and generation still match under the processing locks. */
+export async function currentPipelineJobBindingsInTx(
     tx: Tx,
     job: Job,
-): Promise<boolean> {
+): Promise<PipelineJobBinding[]> {
+    const current: PipelineJobBinding[] = [];
     for (const binding of jobBindings(job.payload)) {
         const [processing] = await tx
             .select({ phases: itemProcessing.phases })
@@ -180,10 +200,10 @@ export async function pipelineJobBindingsCurrentInTx(
             .limit(1);
         const phase = processing?.phases[binding.phase];
         const step = binding.step ? phase?.steps?.[binding.step] : phase;
-        if (step?.jobId !== job.id || step.generation !== binding.generation)
-            return false;
+        if (step?.jobId === job.id && step.generation === binding.generation)
+            current.push(binding);
     }
-    return true;
+    return current;
 }
 
 function contentOf(
@@ -292,7 +312,16 @@ export async function bindPipelineJobInTx(
         ? previous?.steps?.[selected.step]
         : previous;
     if (!automatic && !previousStep) return;
-    if (previousStep?.jobId === job.id) return;
+    if (
+        previousStep?.jobId === job.id &&
+        jobBindings(job.payload).some((binding) =>
+            sameBinding(binding, {
+                ...selected,
+                generation: previousStep.generation,
+            }),
+        )
+    )
+        return;
     let content = selected.record?.inputs ?? previous?.inputs;
     if (selected.phase === "learn" && typeof job.payload.runId === "string") {
         const [run] = await tx

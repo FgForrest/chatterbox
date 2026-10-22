@@ -85,12 +85,22 @@ import {
     pruneFinishedJobs,
     reclaimStaleJobs,
 } from "@/db/queries/async-jobs";
-import { settlePipelineBindingInTx } from "@/db/queries/pipeline-jobs";
+import {
+    jobBindings,
+    lockPipelineTargetsInTx,
+    settlePipelineBindingInTx,
+} from "@/db/queries/pipeline-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
+import { clearJobHandlers, registerJobHandler } from "@/lib/jobs/registry";
+import { __resetJobWorkerForTests, tick, waitForIdle } from "@/lib/jobs/worker";
 import { supersedeCorrectionPassesInTx } from "@/lib/learn/correction-pass-queue";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+
+vi.mock("@/lib/jobs/housekeeping", () => ({
+    runHousekeeping: async () => ({}),
+}));
 
 const url = getTestDatabaseUrl();
 const owner = "owner-veln";
@@ -343,7 +353,10 @@ const input = {
             );
         });
 
-        it("defers an early correction claim until its Learn predecessor settles without consuming an attempt", async () => {
+        it.each([
+            false,
+            true,
+        ])("hands off an early correction only when its Learn predecessor is current, superseded: %s", async (superseded) => {
             await seed();
             await db()
                 .update(chatterItems)
@@ -405,6 +418,22 @@ const input = {
                 { status: "pending", attempts: 0, claimToken: null },
             );
             expect((await stored()).phases.learn?.jobId).toBe(predecessor.id);
+            if (superseded)
+                await db().transaction((tx) =>
+                    updatePhaseInTx(
+                        tx,
+                        "item-veln",
+                        "private",
+                        owner,
+                        "learn",
+                        {
+                            state: "skipped",
+                            reason: "cancelled",
+                            generation: 9,
+                            at,
+                        },
+                    ),
+                );
             expect(
                 await completeJob({
                     jobId: predecessor.id,
@@ -412,6 +441,19 @@ const input = {
                     result: { outcome: { kind: "done" } },
                 }),
             ).toBe(true);
+            if (superseded) {
+                expect((await stored()).phases.learn).toMatchObject({
+                    state: "skipped",
+                    reason: "cancelled",
+                    generation: 9,
+                });
+                expect((await stored()).phases.learn?.jobId).toBeUndefined();
+                expect(
+                    (await getJobForUser(correction.job.id, owner))?.payload
+                        .pipelineSteps,
+                ).toBeUndefined();
+                return;
+            }
             expect((await stored()).phases.learn?.jobId).toBe(
                 correction.job.id,
             );
@@ -871,6 +913,86 @@ const input = {
             });
         });
 
+        it("does not run a reclaimed handler after its step was cancelled (probe G)", async () => {
+            await seed();
+            const queued = await queue();
+            const first = await claim();
+            await age(first.id);
+            expect(await reclaimStaleJobs(120_000)).toBe(1);
+            await db().transaction((tx) =>
+                updatePhaseInTx(tx, "item-veln", "private", owner, "learn", {
+                    state: "skipped",
+                    reason: "cancelled",
+                    generation: 9,
+                    at,
+                }),
+            );
+            const cancelled = (await stored()).phases.learn;
+            const generation = (await stored()).requestedGeneration;
+            const run = vi
+                .fn()
+                .mockResolvedValue({ outcome: { kind: "done" } });
+            __resetJobWorkerForTests();
+            clearJobHandlers();
+            registerJobHandler({
+                kind: "test.pipeline",
+                concurrency: 1,
+                maxAttempts: 3,
+                timeoutMs: 5_000,
+                parsePayload: (raw) => raw,
+                run,
+            });
+            try {
+                await tick();
+                await waitForIdle();
+                expect(run).not.toHaveBeenCalled();
+                expect(await getJobForUser(queued.job.id, owner)).toMatchObject(
+                    {
+                        status: "failed",
+                        errorCode: "superseded",
+                        claimToken: null,
+                        attempts: 2,
+                    },
+                );
+                expect((await stored()).phases.learn).toEqual(cancelled);
+                expect((await stored()).requestedGeneration).toBeGreaterThan(
+                    generation,
+                );
+                expect(await claimDueJobs("pipeline.advance", 1)).toHaveLength(
+                    1,
+                );
+            } finally {
+                __resetJobWorkerForTests();
+                clearJobHandlers();
+            }
+        });
+
+        it.each([
+            "test.pipeline",
+            "pipeline.advance",
+            "pipeline.action",
+        ])("seeds fresh claim timestamps for %s despite old queued metadata", async (kind) => {
+            const [queued] = await db()
+                .insert(asyncJobs)
+                .values({
+                    userId: owner,
+                    kind,
+                    subjectId: "item-veln",
+                    updatedAt: new Date(at),
+                })
+                .returning();
+            const before = Date.now();
+            const [claimed] = await claimDueJobs(kind, 1);
+            expect(claimed.id).toBe(queued.id);
+            const stored = await getJobForUser(queued.id, owner);
+            expect(stored?.startedAt?.getTime()).toBeGreaterThanOrEqual(before);
+            expect(stored?.heartbeatAt?.getTime()).toBeGreaterThanOrEqual(
+                before,
+            );
+            expect(await reconcilePipelineSteps()).toBe(0);
+            expect(await reclaimStaleJobs(120_000)).toBe(0);
+        });
+
         it("settles an exhausted stale job and a terminal attempt failure", async () => {
             await seed();
             await queue();
@@ -1093,6 +1215,91 @@ const input = {
             expect((await stored()).phases.summary?.steps?.summary).toEqual(
                 leaf,
             );
+        });
+
+        it.each([
+            "title",
+            "summary",
+        ] as const)("deduplicates a partly current summary job after only its %s binding is superseded (probe B3)", async (staleStep) => {
+            await seed("item-veln", owner, {
+                summary: { state: "pending", generation: 1, at, inputs: input },
+            });
+            const enqueue = () =>
+                enqueueJob({
+                    userId: owner,
+                    kind: "summary",
+                    subjectId: "item-veln",
+                    payload: { recordingId: "item-veln", trigger: "auto" },
+                });
+            const first = await enqueue();
+            const [claimed] = await claimDueJobs("summary", 1);
+            const phase = (await stored()).phases.summary;
+            const stale = phase?.steps?.[staleStep];
+            if (!phase || !stale) throw new Error("missing binding");
+            await db().transaction((tx) =>
+                updatePhaseInTx(tx, "item-veln", "private", owner, "summary", {
+                    ...phase,
+                    state: "outdated",
+                    generation: 8,
+                    steps: {
+                        ...phase.steps,
+                        [staleStep]: {
+                            ...stale,
+                            state: "outdated",
+                            generation: 8,
+                        },
+                    },
+                }),
+            );
+            const before = (await stored()).requestedGeneration;
+            const joined = await enqueue();
+            expect(joined.created).toBe(false);
+            expect(joined.job.id).toBe(first.job.id);
+            const storedJob = await getJobForUser(first.job.id, owner);
+            expect(storedJob).toMatchObject({
+                status: "processing",
+                claimToken: claimed.claimToken,
+                errorCode: null,
+            });
+            const bindings = jobBindings(storedJob?.payload ?? {});
+            expect(
+                bindings.some(
+                    (binding) =>
+                        binding.step === staleStep &&
+                        binding.generation === stale.generation,
+                ),
+            ).toBe(false);
+            const currentStep = staleStep === "title" ? "summary" : "title";
+            expect(
+                bindings.some((binding) => binding.step === currentStep),
+            ).toBe(true);
+            expect((await stored()).requestedGeneration).toBeGreaterThan(
+                before,
+            );
+            expect(
+                await prepareClaimedPipelineJob(claimed.id, claimed.claimToken),
+            ).toBe(true);
+            expect(
+                await completeJob({
+                    jobId: claimed.id,
+                    claimToken: claimed.claimToken,
+                    result: {
+                        outcome: { kind: "done" },
+                        titleOutcome: { kind: "done" },
+                    },
+                }),
+            ).toBe(true);
+            expect(
+                (await stored()).phases.summary?.steps?.[currentStep],
+            ).toMatchObject({ state: "done" });
+            if (staleStep === "title")
+                expect(
+                    (await stored()).phases.summary?.steps?.title,
+                ).toMatchObject({ state: "outdated", generation: 8 });
+            else
+                expect(
+                    (await stored()).phases.summary?.steps?.summary,
+                ).toMatchObject({ state: "done" });
         });
 
         it("shares while a Learn worker settles without a processing/job deadlock (probe D)", async () => {
@@ -1329,26 +1536,19 @@ const input = {
             if (!phase || !title) throw new Error("missing title binding");
             const superseded = {
                 ...title,
-                state: "outdated" as const,
+                state: "pending" as const,
+                jobId: undefined,
                 generation: 8,
             };
-            await db()
-                .update(itemProcessing)
-                .set({
-                    phases: {
-                        ...current.phases,
-                        summary: {
-                            ...phase,
-                            steps: { ...phase.steps, title: superseded },
-                        },
-                    },
-                })
-                .where(
-                    and(
-                        eq(itemProcessing.itemId, "item-veln"),
-                        eq(itemProcessing.userId, owner),
-                    ),
-                );
+            await db().transaction((tx) =>
+                updatePhaseInTx(tx, "item-veln", "private", owner, "summary", {
+                    ...phase,
+                    state: "outdated",
+                    generation: 8,
+                    steps: { ...phase.steps, title: superseded },
+                }),
+            );
+            const generation = (await stored()).requestedGeneration;
             expect(
                 await completeJob({
                     jobId: claimed.id,
@@ -1367,6 +1567,22 @@ const input = {
             );
             expect((await stored()).phases.summary?.steps?.title).toEqual(
                 superseded,
+            );
+            expect((await stored()).requestedGeneration).toBe(generation + 2);
+            expect(await claimDueJobs("pipeline.advance", 1)).toHaveLength(1);
+            expect(
+                await reconcilePipelineSteps(
+                    undefined,
+                    undefined,
+                    new Date(Date.now() + 121_000),
+                ),
+            ).toBe(1);
+            expect((await stored()).phases.summary?.steps?.title).toMatchObject(
+                {
+                    state: "pending",
+                    generation: 8,
+                    replanAttempts: 1,
+                },
             );
         });
 
@@ -1464,6 +1680,53 @@ const input = {
                     reason: "lost",
                     retryable: true,
                 });
+        });
+
+        it("locks uppercase item ids before lowercase ids using code-unit order", async () => {
+            await seed("item-Zivra");
+            await seed("item-avro");
+            let release = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            let signal = () => {};
+            const acquired = new Promise<void>((resolve) => {
+                signal = resolve;
+            });
+            const holder = db().transaction(async (tx) => {
+                await lockPipelineTargetsInTx(tx, [
+                    { itemId: "item-Zivra", userId: owner },
+                ]);
+                signal();
+                await gate;
+            });
+            await acquired;
+            const locking = db().transaction((tx) =>
+                lockPipelineTargetsInTx(tx, [
+                    { itemId: "item-avro", userId: owner },
+                    { itemId: "item-Zivra", userId: owner },
+                ]),
+            );
+            try {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                const lower = await db().transaction((tx) =>
+                    tx
+                        .select()
+                        .from(itemProcessing)
+                        .where(
+                            and(
+                                eq(itemProcessing.itemId, "item-avro"),
+                                eq(itemProcessing.userId, owner),
+                                eq(itemProcessing.view, "private"),
+                            ),
+                        )
+                        .for("update", { skipLocked: true }),
+                );
+                expect(lower).toHaveLength(1);
+            } finally {
+                release();
+                await Promise.all([holder, locking]);
+            }
         });
 
         it("skips a processing row held by another transaction during stale burial", async () => {

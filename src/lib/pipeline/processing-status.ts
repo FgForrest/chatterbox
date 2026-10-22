@@ -135,7 +135,11 @@ function projectRecord(
         return result;
     }
     if (job) {
-        const outcome = job.result?.outcome as StepOutcome | undefined;
+        const recorded = job.result?.outcome as StepOutcome | undefined;
+        const outcome =
+            recorded?.kind === "failed" && job.status !== "failed"
+                ? undefined
+                : recorded;
         const terminal =
             outcome ??
             (job.status === "failed"

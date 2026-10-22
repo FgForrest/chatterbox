@@ -125,6 +125,7 @@ export function parseSummaryJobPayload(
 export interface EnqueueSummaryInput {
     /** The actor. On the private view, the recording's owner. */
     userId: string;
+    ownerUserId?: string;
     recordingId: string;
     presetId?: string;
     profileRevisionId?: string;
@@ -152,6 +153,17 @@ export async function enqueueSummaryJob(
             // A click starts what a rate limit put off, not wait for it.
             ...(input.trigger === "manual" ? { takeOverDelayed: {} } : {}),
             userId: input.userId,
+            ...(input.ownerUserId
+                ? {
+                      pipeline: {
+                          itemId: input.recordingId,
+                          userId: input.ownerUserId,
+                          phase: "summary" as const,
+                          step: "summary" as const,
+                          existingOnly: input.trigger === "manual",
+                      },
+                  }
+                : {}),
             kind: SUMMARY_JOB_KIND,
             subjectId: recordingJobSubject(
                 input.recordingId,
@@ -184,7 +196,7 @@ export async function enqueueSummaryJob(
                   organizationUserId: await getOrgUserId(),
                   pipelineTarget: {
                       itemId: input.recordingId,
-                      userId: input.userId,
+                      userId: input.ownerUserId ?? input.userId,
                   },
               },
               queue,

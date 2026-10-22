@@ -95,6 +95,35 @@ describe("#221 explicit processing response", () => {
         ).toBe("stalled");
     });
     it.each([
+        ["completed", "done"],
+        ["failed", "failed"],
+        ["pending", "queued"],
+        ["processing", "running"],
+    ] as const)("projects a %s job carrying an old retryable outcome as %s", (status, state) => {
+        const result = projectProcessing(
+            bound(),
+            [
+                {
+                    ...job("processing"),
+                    status,
+                    result: {
+                        outcome: {
+                            kind: "failed",
+                            code: "PROVIDER_FAILED",
+                            retryable: true,
+                        },
+                    },
+                },
+            ],
+            owner,
+            now,
+        );
+        expect(result.steps.learn.state).toBe(state);
+        expect(result.steps.learn.actions).toEqual(
+            status === "failed" ? ["retry"] : [],
+        );
+    });
+    it.each([
         ["learn", "review_pending", "learnReview", "reviewLearn"],
         ["categorize", "needs_folder", "folder", "file"],
         ["categorize", "needs_profile", "profile", "chooseProfile"],
