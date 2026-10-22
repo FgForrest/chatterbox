@@ -108,7 +108,7 @@ Výběr složky otevře rovnou vyhledávací pole. Před psaním ukazuje naposle
 
 Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky. Zobrazuje se tu také zamýšlená složka Organizace; položka s volbou **Bez automatického zpracování** u ní nabízí **Sdílet nyní**, dokud ji nenasdílíte nebo umístění nezrušíte.
 
-Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
+Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Volbou **Nová podsložka** v nabídce **⋯** vytvoříte podsložku; stejnou nabídku otevřete kliknutím pravým tlačítkem na řádek složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
 
 Kliknutím na složku zobrazíte její položky v seznamu. Název aktuální složky v drobečkové navigaci nebo **⋯** vedle počtu položek otevře přejmenování, poštovní adresy, výchozí profily, novou podsložku, přesun a smazání:
 

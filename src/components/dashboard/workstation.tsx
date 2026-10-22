@@ -55,6 +55,7 @@ import {
     folderRowLocations,
     libraryNavigation,
 } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -1629,12 +1630,14 @@ export function Workstation({
         recordings: treeRecordings,
         navigation,
         canCurate,
+        isOrgAccount,
         folder: selectedFolder,
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
         onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
         onNewFolder: () =>
-            selectedFolder && (selectedFolder.scope !== "org" || canCurate)
+            selectedFolder &&
+            canCreateSubfolder(selectedFolder, canCurate, isOrgAccount)
                 ? openFolderSettings(selectedFolder, "create")
                 : setFirstLevelFolderOpen(true),
         onAssign: assignRecording,
@@ -1689,11 +1692,10 @@ export function Workstation({
                                 onAssignRecording={assignRecording}
                                 onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
+                                isOrgAccount={isOrgAccount}
                                 navigation={navigation}
                                 recentCount={visibleRecordings.length}
-                                onSettings={(folder) =>
-                                    openFolderSettings(folder)
-                                }
+                                onSettings={openFolderSettings}
                                 onCollapse={() =>
                                     libraryPreferences.setPreferences(
                                         (value) => ({
