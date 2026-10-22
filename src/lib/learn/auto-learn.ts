@@ -1,3 +1,4 @@
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 /**
  * Automatic Learn and what waits for it (Task 5.5).
  *
@@ -46,11 +47,7 @@ import {
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
-import {
-    InvalidJobPayloadError,
-    type JobHandler,
-    type JobResult,
-} from "@/lib/jobs/types";
+import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
@@ -357,13 +354,25 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
         }
         return { recordingId: raw.recordingId };
     },
-    async run({ userId, payload }): Promise<JobResult> {
+    async run({ userId, payload }): Promise<PipelineJobResult> {
         const requested = await db.transaction((tx) =>
-            requestLearnReleaseInTx(tx, payload.recordingId, userId),
+            requestAdvanceInTx(tx, {
+                itemId: payload.recordingId,
+                userId,
+                view: "private",
+                reason: "learn-released",
+            }),
         );
-        if (!requested) return { skipped: "gone" };
+        if (!requested)
+            return {
+                skipped: "gone",
+                outcome: { kind: "skipped", reason: "gone" },
+            };
         nudge();
-        return { queued: ["pipeline.advance"] };
+        return {
+            queued: ["pipeline.advance"],
+            outcome: { kind: "done", reason: "released" },
+        };
     },
 };
 

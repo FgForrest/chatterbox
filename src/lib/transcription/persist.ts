@@ -621,7 +621,7 @@ export async function upsertEnhancement(
                                   view: args.view ?? "private",
                                   reason: "summary",
                               });
-                    if (advance && current) {
+                    if (advance && current && !args.jobId) {
                         const profileChanged =
                             "itemProfileRevisionId" in args.inputs &&
                             !itemProfileFenceMatches(
@@ -770,6 +770,7 @@ export async function upsertEnhancement(
                       });
             if (
                 advance &&
+                !args.jobId &&
                 args.inputs &&
                 typeof args.inputs.contentSourceId === "string" &&
                 typeof args.inputs.contentRevision === "number"

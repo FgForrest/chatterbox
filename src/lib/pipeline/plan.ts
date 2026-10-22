@@ -87,6 +87,7 @@ function stepRequested(
     input: ContentRevisionInput,
     minimumGeneration?: number,
     retryNoProvider = false,
+    retryHeld = false,
 ): boolean {
     const requested = record?.steps?.[step];
     return (
@@ -95,6 +96,11 @@ function stepRequested(
             input.contentSourceId &&
         requested.contentRevision === input.contentRevision &&
         requested.state !== "outdated" &&
+        !(
+            retryHeld &&
+            requested.state === "skipped" &&
+            requested.reason === "held"
+        ) &&
         !(
             retryNoProvider &&
             ["skipped", "failed"].includes(requested.state ?? "") &&
@@ -396,6 +402,8 @@ function planMail(
             input,
             minimumGeneration,
             true,
+            facts.phases.learn?.state === "done" &&
+                facts.phases.learn.reason === "released",
         )
     ) {
         actions.push({ type: "queueSummary", presetId: null, strict: true });
@@ -461,6 +469,8 @@ function sameProblems(
 
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
+    if (facts.phases.share?.jobId || facts.phases.share?.state === "failed")
+        return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
     if (facts.manualOnly && facts.share?.confirmationRequired) {
         if (
@@ -483,7 +493,6 @@ function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
         if (
             current?.state === "waiting" &&
             current.reason === "gate_blocked" &&
-            current.generation >= facts.generation &&
             sameProblems(current.problems, problems)
         ) {
             return;
@@ -522,6 +531,7 @@ function planReleasedAudio(
                 ? releaseGeneration
                 : Math.max(releaseGeneration, minimumGeneration),
             retryNoProvider,
+            true,
         );
     for (const step of ["topics", "summary"] as const) {
         if (
@@ -1226,6 +1236,8 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         return { actions };
     }
     const learn = facts.phases.learn;
+    if (learn?.jobId && !facts.learnRunOpen && !facts.learnCorrectionInFlight)
+        return { actions };
     const timedOut =
         learn?.state === "waiting" &&
         learn.reason === "review_pending_timeout" &&
@@ -1270,6 +1282,11 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         actions.push(...taskReviewActions(facts, summarySettled));
         planShare(facts, actions);
     };
+
+    if (learn?.state === "failed") {
+        planSummary();
+        return { actions };
+    }
 
     if (timedOut) {
         if (!facts.learnRunOpen) {

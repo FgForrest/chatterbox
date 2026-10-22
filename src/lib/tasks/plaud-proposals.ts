@@ -27,6 +27,7 @@ export async function applyPlaudActionItemProposals(input: {
     view: PipelineView;
     expectedFingerprint: string;
     record: PhaseRecord;
+    settle?: boolean;
 }): Promise<boolean> {
     const source = await readPlaudTaskSource(input.userId, input.itemId);
     if (
@@ -107,14 +108,15 @@ export async function applyPlaudActionItemProposals(input: {
             contentSourceId: "plaud",
             proposals,
         });
-        await updatePhaseInTx(
-            tx,
-            input.itemId,
-            input.view,
-            input.userId,
-            "summary",
-            input.record,
-        );
+        if (input.settle !== false)
+            await updatePhaseInTx(
+                tx,
+                input.itemId,
+                input.view,
+                input.userId,
+                "summary",
+                input.record,
+            );
         await requestAdvanceInTx(tx, {
             itemId: input.itemId,
             userId: input.userId,

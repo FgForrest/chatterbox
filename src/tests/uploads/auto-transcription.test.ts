@@ -137,7 +137,10 @@ describe("automatic upload transcription", () => {
 
         await expect(
             transcriptionJobHandler.run(handlerContext()),
-        ).resolves.toEqual({ transcribed: true });
+        ).resolves.toEqual({
+            transcribed: true,
+            outcome: { kind: "done", reason: "content-available" },
+        });
         expect(mocks.transcribeRecording).toHaveBeenCalledWith(
             "user-1",
             "recording-1",
@@ -187,24 +190,8 @@ describe("automatic upload transcription", () => {
         });
     });
 
-    it("requests the private pipeline after a pipeline transcription fails", async () => {
-        await transcriptionJobHandler.onTerminalFailure?.({
-            jobId: "job-1",
-            userId: "user-1",
-            payload: {
-                recordingId: "recording-1",
-                trigger: "pipeline",
-                force: false,
-            },
-            errorCode: ErrorCode.TRANSCRIPTION_FAILED,
-        });
-
-        expect(mocks.requestAdvance).toHaveBeenCalledWith({
-            itemId: "recording-1",
-            userId: "user-1",
-            view: "private",
-            reason: "transcription-failed",
-        });
+    it("leaves terminal phase settlement and wake-up to the worker transaction", () => {
+        expect(transcriptionJobHandler.onTerminalFailure).toBeUndefined();
     });
 
     it("does not recreate an erased transcript from an upload job", async () => {

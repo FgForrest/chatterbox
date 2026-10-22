@@ -449,6 +449,8 @@ export function WorkflowStrip({
                 return i18n(
                     "The source recording or stored content is no longer available. Restore it before trying again.",
                 );
+            case "failureInterrupted":
+                return i18n("Processing was interrupted");
             case "failureAccess":
                 return i18n(
                     "This item can no longer be processed here. Check its access and sharing, then try again.",

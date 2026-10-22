@@ -607,6 +607,8 @@ export function ItemWorkflow({
                 if (failedStep === "transcribe") onTranscribe?.(true);
                 else if (failedStep === "learn") onLearn?.();
                 else if (failedStep === "summary") onSummary?.();
+                else if (workflow?.status?.message === "failureInterrupted")
+                    void processAgain();
                 break;
             }
         }

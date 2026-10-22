@@ -1,3 +1,10 @@
+import {
+    claimDueJobs,
+    completeJob,
+    prepareClaimedPipelineJob,
+} from "@/db/queries/async-jobs";
+import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
+import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 /**
  * Automatic Learn holding the title, summary and topics back (Task 5.5),
  * against a real PostgreSQL: when it holds, what releases it, and that it
@@ -297,20 +304,58 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     /** Drain a release job queued before the processing pipeline deployed. */
     const runLegacyRelease = async () => {
-        await learnReleaseJobHandler.run({
-            jobId: "job-release",
+        const [job] = await claimDueJobs("learn.release", 1);
+        if (!job) throw new Error("release job missing");
+        await prepareClaimedPipelineJob(job.id, job.claimToken);
+        const result = await learnReleaseJobHandler.run({
+            jobId: job.id,
             userId: OWNER,
             payload: { recordingId: REC },
-            attempt: 1,
-            maxAttempts: 5,
+            attempt: job.attempts,
+            maxAttempts: job.maxAttempts,
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
-        } as unknown as Parameters<typeof learnReleaseJobHandler.run>[0]);
+        });
+        await completeJob({
+            jobId: job.id,
+            claimToken: job.claimToken,
+            result: result ?? null,
+        });
         await db().delete(asyncJobs).where(eq(asyncJobs.kind, "learn.release"));
     };
 
     /** Run the queued pipeline driver, as the worker would. */
     const runAdvance = async () => {
+        const runs = await db()
+            .select()
+            .from(learnRuns)
+            .where(and(eq(learnRuns.itemId, REC), eq(learnRuns.userId, OWNER)));
+        for (const run of runs)
+            if (run.jobId && ["ready", "finished"].includes(run.status)) {
+                await db()
+                    .update(asyncJobs)
+                    .set({
+                        status: "completed",
+                        completedAt: new Date(),
+                        result: {
+                            outcome:
+                                run.status === "ready"
+                                    ? {
+                                          kind: "waiting",
+                                          reason: "review_pending",
+                                          waitingFor: { kind: "learnReview" },
+                                      }
+                                    : { kind: "done", reason: "released" },
+                        },
+                    })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, run.jobId),
+                            eq(asyncJobs.userId, OWNER),
+                        ),
+                    );
+            }
+        await reconcilePipelineSteps();
         const profile = await resolveDefaultProfile(OWNER, "audio");
         await db()
             .insert(itemProcessing)
@@ -359,10 +404,31 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
         } as unknown as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+        await drainActions();
         await db()
             .delete(asyncJobs)
             .where(eq(asyncJobs.kind, "pipeline.advance"));
     };
+
+    async function drainActions() {
+        const jobs = await claimDueJobs("pipeline.action", 10);
+        for (const job of jobs) {
+            const result = await pipelineActionJobHandler.run({
+                jobId: job.id,
+                userId: job.userId,
+                attempt: job.attempts,
+                maxAttempts: job.maxAttempts,
+                payload: pipelineActionJobHandler.parsePayload(job.payload),
+                signal: new AbortController().signal,
+                reportProgress: vi.fn(),
+            });
+            await completeJob({
+                jobId: job.id,
+                claimToken: job.claimToken,
+                result: result ?? null,
+            });
+        }
+    }
 
     const setStatus = (id: string, status: "finished" | "failed") =>
         db().update(learnRuns).set({ status }).where(eq(learnRuns.id, id));
@@ -889,7 +955,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             state: "waiting",
             reason: "review_pending_timeout",
         });
-        expect(processing?.phases.summary).toMatchObject({ state: "pending" });
+        expect(processing?.phases.summary).toMatchObject({ state: "running" });
         expect(await kinds()).toContain("summary");
         expect(
             (
@@ -1027,6 +1093,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
         } as unknown as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+        await drainActions();
         expect((await processing())?.phases.share).toMatchObject({
             state: "done",
             reason: "shared",

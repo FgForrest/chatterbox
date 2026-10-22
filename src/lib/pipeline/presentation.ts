@@ -169,7 +169,8 @@ export function processingFailures(
             failures.push({
                 phase,
                 reasonCode: record.reason ?? "UNKNOWN_FAILURE",
-                retryAvailable: retryable.has(phase),
+                retryAvailable:
+                    record.reason === "lost" || retryable.has(phase),
             });
         }
         if (phase !== "summary") continue;

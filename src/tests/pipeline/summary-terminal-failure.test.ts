@@ -1,99 +1,33 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-    markSummaryStepFailed: vi.fn().mockResolvedValue(true),
+    emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
-
 vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/env", () => ({ env: {} }));
-vi.mock("@/lib/pipeline/state", () => ({
-    markSummaryStepFailed: mocks.markSummaryStepFailed,
-}));
+vi.mock("@/lib/webhooks/emit", () => ({ emitEvent: mocks.emitEvent }));
 
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
+import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
 
-describe("Summary-phase terminal failures", () => {
-    beforeEach(() => {
-        mocks.markSummaryStepFailed.mockClear();
-    });
-
-    it.each([
-        {
-            invoke: () =>
-                summaryJobHandler.onTerminalFailure?.({
-                    jobId: "job-1",
-                    userId: "user-1",
-                    payload: {
-                        recordingId: "recording-1",
-                        trigger: "auto",
-                        view: "org",
-                    },
-                    errorCode: "PROVIDER_FAILED",
-                }),
-            step: "summary",
-            view: "org",
-        },
-        {
-            invoke: () =>
-                topicsJobHandler.onTerminalFailure?.({
-                    jobId: "job-1",
-                    userId: "user-1",
-                    payload: {
-                        recordingId: "recording-1",
-                        source: "riffado",
-                        trigger: "auto",
-                    },
-                    errorCode: "PROVIDER_FAILED",
-                }),
-            step: "topics",
-            view: "private",
-        },
-    ])("marks $step failed and advances the pipeline", async ({
-        invoke,
-        step,
-        view,
-    }) => {
-        await invoke();
-
-        expect(mocks.markSummaryStepFailed).toHaveBeenCalledWith({
-            itemId: "recording-1",
-            userId: "user-1",
-            view,
-            step,
+describe("pipeline terminal failure hooks", () => {
+    it("retains the summary notification after settlement, including manual jobs", async () => {
+        await summaryJobHandler.onTerminalFailure?.({
+            jobId: "job-veln",
+            userId: "owner-veln",
+            payload: { recordingId: "item-veln", trigger: "manual" },
             errorCode: "PROVIDER_FAILED",
         });
+        expect(mocks.emitEvent).toHaveBeenCalledWith(
+            "summary.failed",
+            "owner-veln",
+            "item-veln",
+            { error: "PROVIDER_FAILED" },
+        );
     });
-
-    it.each([
-        {
-            invoke: () =>
-                summaryJobHandler.onTerminalFailure?.({
-                    jobId: "job-1",
-                    userId: "user-1",
-                    payload: {
-                        recordingId: "recording-1",
-                        trigger: "manual",
-                    },
-                    errorCode: "PROVIDER_FAILED",
-                }),
-        },
-        {
-            invoke: () =>
-                topicsJobHandler.onTerminalFailure?.({
-                    jobId: "job-1",
-                    userId: "user-1",
-                    payload: {
-                        recordingId: "recording-1",
-                        source: "riffado",
-                        trigger: "manual",
-                    },
-                    errorCode: "PROVIDER_FAILED",
-                }),
-        },
-    ])("does not settle manual jobs", async ({ invoke }) => {
-        await invoke();
-
-        expect(mocks.markSummaryStepFailed).not.toHaveBeenCalled();
+    it("removes hooks whose only purpose was pipeline state", () => {
+        expect(topicsJobHandler.onTerminalFailure).toBeUndefined();
+        expect(transcriptionJobHandler.onTerminalFailure).toBeUndefined();
     });
 });

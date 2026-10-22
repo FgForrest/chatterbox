@@ -154,7 +154,7 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
-import { addRecordingToFolder } from "@/lib/folders/folders";
+import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -319,6 +319,7 @@ describeWithDatabase(
 
             expect(await runJob(OWNER, "private")).toEqual({
                 transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
 
             expect(provider.calls).toBe(1);
@@ -330,6 +331,7 @@ describeWithDatabase(
 
             expect(await runJob(OWNER, "private")).toEqual({
                 transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
             expect(provider.calls).toBe(1);
         });
@@ -338,6 +340,7 @@ describeWithDatabase(
             await share();
             expect(await runJob(OWNER, "private", "manual")).toEqual({
                 transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
             expect(provider.calls).toBe(1);
         });
@@ -436,6 +439,7 @@ describeWithDatabase(
 
             expect(await runJob(orgUserId, "org", "manual")).toEqual({
                 transcribed: true,
+                outcome: { kind: "done", reason: "content-available" },
             });
 
             // One recording: the owner's row, rewritten, and no other.
@@ -484,7 +488,6 @@ describeWithDatabase(
 
         it("lets an organization account's run that outlives the withdrawal write nothing", async () => {
             await share();
-            const { unshareRecording } = await import("@/lib/folders/folders");
             provider.during = () =>
                 unshareRecording(OWNER, REC, { withdraw: true });
 
@@ -513,7 +516,6 @@ describeWithDatabase(
                     payload: { recordingId: REC, view: "org" },
                 })
                 .returning({ id: asyncJobs.id });
-            const { unshareRecording } = await import("@/lib/folders/folders");
             // Withdrawn and shared again while the provider ran.
             provider.during = async () => {
                 await unshareRecording(OWNER, REC, { withdraw: true });
@@ -584,7 +586,6 @@ describeWithDatabase(
             expect(await plaudImport()).toEqual({ committed: true });
             expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
 
-            const { unshareRecording } = await import("@/lib/folders/folders");
             await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await plaudImport()).toEqual({ committed: true });
             expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
@@ -663,7 +664,6 @@ describeWithDatabase(
             expect(offered).toEqual([]);
 
             // Withdrawn, the recording is the owner's to change again.
-            const { unshareRecording } = await import("@/lib/folders/folders");
             await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await offer()).toBe(1);
         });

@@ -1,4 +1,5 @@
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
+import type { PipelineWait, StepOutcome } from "./outcome";
 
 export type PipelineView = "private" | "org";
 
@@ -29,6 +30,10 @@ export interface ContentRevisionInput {
 export type SummaryStepName = "summary" | "topics" | "title";
 
 export interface PhaseStepRecord {
+    jobId?: string;
+    outcome?: StepOutcome;
+    retryable?: boolean;
+    waitingFor?: PipelineWait;
     contentId: string;
     contentSourceId?: string;
     contentRevision: number;
@@ -49,6 +54,10 @@ export interface PlacementProfileBinding {
 }
 
 export interface PhaseRecord {
+    jobId?: string;
+    outcome?: StepOutcome;
+    retryable?: boolean;
+    waitingFor?: PipelineWait;
     state: PhaseState;
     reason?: string;
     /** Identifies Transcribe failures owned by automatic pipeline processing. */

@@ -60,6 +60,7 @@ export type WorkflowMessageCode =
     | "failureContextTooLong"
     | "failureTranscription"
     | "failureSourceUnavailable"
+    | "failureInterrupted"
     | "failureAccess"
     | "stepFailed"
     | "profileChanged";
@@ -375,6 +376,7 @@ function inferUpcomingStates(
 
 function failureMessage(reasonCode: string): WorkflowMessageCode {
     const code = reasonCode.toUpperCase();
+    if (code === "LOST") return "failureInterrupted";
     if (
         code === "NO_PROVIDER" ||
         code === "NO_TRANSCRIPTION_PROVIDER" ||

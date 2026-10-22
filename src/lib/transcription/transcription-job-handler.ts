@@ -1,8 +1,7 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { isRetryableError } from "@/lib/jobs/retryable";
-import type { JobHandler, JobResult } from "@/lib/jobs/types";
-import { markAutomaticStepShared } from "@/lib/pipeline/state";
-import { requestAdvance } from "@/lib/pipeline/trigger";
+import type { JobHandler } from "@/lib/jobs/types";
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import {
     type TranscribeErrorCode,
@@ -83,17 +82,7 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             ? false
             : isRetryableError(error),
 
-    async onTerminalFailure({ payload, userId }): Promise<void> {
-        if (payload.trigger === "manual") return;
-        await requestAdvance({
-            itemId: payload.recordingId,
-            userId,
-            view: payload.view ?? "private",
-            reason: "transcription-failed",
-        });
-    },
-
-    async run({ payload, userId, jobId }): Promise<JobResult> {
+    async run({ payload, userId, jobId }): Promise<PipelineJobResult> {
         const allowed =
             payload.view === "org" ||
             (await allowManualArtifactGeneration(
@@ -126,13 +115,10 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             result.errorCode === "RECORDING_SHARED" &&
             payload.trigger !== "manual"
         ) {
-            await markAutomaticStepShared({
-                itemId: payload.recordingId,
-                userId,
-                view: payload.view ?? "private",
-                step: "transcribe",
-            });
-            return { skipped: "shared" };
+            return {
+                skipped: "shared",
+                outcome: { kind: "skipped", reason: "shared" },
+            };
         }
         if (!result.success) {
             throw failedResultError(
@@ -141,6 +127,9 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
                 result.organizationProviderMissing,
             );
         }
-        return { transcribed: true };
+        return {
+            transcribed: true,
+            outcome: { kind: "done", reason: "content-available" },
+        };
     },
 };

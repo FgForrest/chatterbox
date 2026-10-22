@@ -16,6 +16,7 @@ import { knowledgeEmbedJobHandler } from "@/lib/knowledge/knowledge-embed";
 import { learnReleaseJobHandler } from "@/lib/learn/auto-learn";
 import { correctionPassJobHandler } from "@/lib/learn/correction-pass-job";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
+import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { recordingSessionFinalizeJobHandler } from "@/lib/recording-sessions/finalize-job-handler";
 import {
@@ -45,6 +46,7 @@ export function registerJobHandlers(): void {
     registerJobHandler(titleJobHandler);
     registerJobHandler(learnReleaseJobHandler);
     registerJobHandler(pipelineAdvanceJobHandler);
+    registerJobHandler(pipelineActionJobHandler);
     registerJobHandler(correctionPassJobHandler);
     registerJobHandler(recordingSessionFinalizeJobHandler);
 }

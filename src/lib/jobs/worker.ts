@@ -32,9 +32,11 @@ import {
     deferJob,
     failJobAttempt,
     heartbeatJob,
+    prepareClaimedPipelineJob,
     reclaimStaleJobs,
     releaseClaimedJobs,
 } from "@/db/queries/async-jobs";
+import { StepFailedError } from "@/lib/pipeline/outcome";
 import { captureServerException } from "@/lib/posthog-server";
 import { backoffDelayMs } from "./backoff";
 import { runHousekeeping } from "./housekeeping";
@@ -47,6 +49,7 @@ import {
     JobDeferredError,
     JobTimeoutError,
 } from "./retryable";
+import { afterTerminalJobFailure } from "./terminal-failure";
 import type { JobHandler, JobProgress } from "./types";
 
 /**
@@ -109,6 +112,12 @@ async function runJob(
     };
 
     try {
+        if (!(await prepareClaimedPipelineJob(job.id, job.claimToken))) {
+            console.debug("[job-worker] superseded claim before handler", {
+                jobId: job.id,
+            });
+            return;
+        }
         const payload = handler.parsePayload(job.payload ?? {});
         parsedPayload = payload;
 
@@ -177,6 +186,18 @@ async function runJob(
             timedOut,
         ]);
 
+        const stepOutcome = result?.outcome;
+        if (
+            stepOutcome &&
+            typeof stepOutcome === "object" &&
+            "kind" in stepOutcome &&
+            stepOutcome.kind === "failed" &&
+            "code" in stepOutcome &&
+            typeof stepOutcome.code === "string" &&
+            "retryable" in stepOutcome &&
+            typeof stepOutcome.retryable === "boolean"
+        )
+            throw new StepFailedError(stepOutcome.code, stepOutcome.retryable);
         stop();
         await completeJob({
             jobId: job.id,
@@ -199,8 +220,14 @@ async function runJob(
             });
             return;
         }
-        const retryable = (handler.isRetryable ?? isRetryableError)(error);
-        const { message, code } = describeJobError(error);
+        const retryable =
+            error instanceof StepFailedError
+                ? error.retryable
+                : (handler.isRetryable ?? isRetryableError)(error);
+        const { message, code } =
+            error instanceof StepFailedError
+                ? { message: error.code, code: error.code }
+                : describeJobError(error);
         const delayMs = backoffDelayMs(job.attempts, {
             ...DEFAULT_JOB_BACKOFF,
             ...handler.backoff,
@@ -224,9 +251,9 @@ async function runJob(
         });
 
         if (outcome === null) {
-            console.warn(
-                `[job-worker] job ${job.id} (${job.kind}) failed but its claim was superseded; not recording`,
-            );
+            console.debug(`[job-worker] superseded failure settlement`, {
+                jobId: job.id,
+            });
         } else if (outcome.status === "failed") {
             if (handler.onTerminalFailure && parsedPayload !== undefined) {
                 await handler
@@ -235,6 +262,7 @@ async function runJob(
                         userId: job.userId,
                         payload: parsedPayload,
                         errorCode: code ?? "INTERNAL_ERROR",
+                        errorMessage: message,
                     })
                     .catch((notificationError) => {
                         console.error(
@@ -323,7 +351,10 @@ export async function tick(): Promise<void> {
                 `[job-worker] reclaimed ${reclaimed} job(s) from workers that stopped responding`,
             );
         }
-        const buried = await buryExhaustedStaleJobs(STALE_MS);
+        const buried = await buryExhaustedStaleJobs(
+            STALE_MS,
+            afterTerminalJobFailure,
+        );
         if (buried > 0) {
             console.warn(
                 `[job-worker] buried ${buried} job(s) that exhausted their attempts without reporting`,

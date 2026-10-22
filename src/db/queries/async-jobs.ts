@@ -9,15 +9,23 @@
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { asyncJobStatusEnum, asyncJobs } from "@/db/schema";
-
-/**
- * `async_job_status`, named from the schema so a rename cannot leave a stale
- * literal behind in the raw SQL below.
- */
-function statusType() {
-    return sql.identifier(asyncJobStatusEnum.enumName);
-}
+import {
+    bindAvailableCorrectionInTx,
+    bindPipelineJobInTx,
+    jobBindings,
+    type PipelineJobTarget,
+    settlePipelineBindingInTx,
+    terminalStepOutcome,
+    wakePipelineInTx,
+} from "@/db/queries/pipeline-jobs";
+import {
+    asyncJobs,
+    chatterItems,
+    itemProcessing,
+    learnRuns,
+    transcriptCorrectionPasses,
+} from "@/db/schema";
+import type { StepOutcome } from "@/lib/pipeline/outcome";
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -80,11 +88,12 @@ function rowsOf<T>(result: unknown): T[] {
     return ((result as { rows?: T[] })?.rows ?? []) as T[];
 }
 
-type EnqueueExecutor = Pick<typeof db, "select" | "insert" | "update">;
+type EnqueueExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export interface EnqueueJobInput {
     userId: string;
     kind: string;
+    pipeline?: PipelineJobTarget;
     /** Domain object this job acts on. Enforces one live job per subject. */
     subjectId?: string | null;
     /** Higher runs first. */
@@ -158,8 +167,20 @@ export async function enqueueJobInTx(
 
 export async function enqueueJob(
     input: EnqueueJobInput,
-    executor: EnqueueExecutor = db,
+    executor?: EnqueueExecutor,
 ): Promise<EnqueueJobResult> {
+    if (!executor) return db.transaction((tx) => enqueueJob(input, tx));
+    const bind = async (
+        result: EnqueueJobResult,
+    ): Promise<EnqueueJobResult> => {
+        await bindPipelineJobInTx(
+            executor as Parameters<Parameters<typeof db.transaction>[0]>[0],
+            result.job,
+            input.pipeline,
+            input.payload?.trigger !== "manual",
+        );
+        return result;
+    };
     const values = {
         userId: input.userId,
         kind: input.kind,
@@ -179,15 +200,20 @@ export async function enqueueJob(
                 where: isActive(),
             })
             .returning();
-        if (row) return { job: row as AsyncJobRow, created: true };
+        if (row) return bind({ job: row as AsyncJobRow, created: true });
         // Only a subject can conflict: NULLs are distinct in the index.
         if (!input.subjectId) break;
         if (input.takeOverDelayed) {
             const [taken] = await executor
                 .update(asyncJobs)
-                .set({ ...values, nextAttemptAt: new Date() })
+                .set({
+                    ...values,
+                    payload: sql`case when ${asyncJobs.payload} -> 'pipelineSteps' is null then ${JSON.stringify(values.payload)}::jsonb else ${JSON.stringify(values.payload)}::jsonb || jsonb_build_object('pipelineSteps', ${asyncJobs.payload} -> 'pipelineSteps') end`,
+                    nextAttemptAt: new Date(),
+                })
                 .where(
                     and(
+                        eq(asyncJobs.userId, input.userId),
                         eq(asyncJobs.kind, input.kind),
                         eq(asyncJobs.subjectId, input.subjectId),
                         eq(asyncJobs.status, "pending"),
@@ -202,14 +228,30 @@ export async function enqueueJob(
                     ),
                 )
                 .returning();
-            if (taken) return { job: taken as AsyncJobRow, created: true };
+            if (taken)
+                return bind({ job: taken as AsyncJobRow, created: true });
         }
         const active = await getActiveJob(
             input.kind,
             input.subjectId,
             executor,
         );
-        if (active) return { job: active, created: false };
+        if (active && active.userId === input.userId) {
+            const [locked] = await executor
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.id, active.id),
+                        eq(asyncJobs.userId, input.userId),
+                        isActive(),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (locked)
+                return bind({ job: locked as AsyncJobRow, created: false });
+        }
     }
     throw new Error(
         `Could not queue a ${input.kind} job for ${input.subjectId ?? "no subject"}`,
@@ -347,7 +389,7 @@ export async function claimDueJobs(
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
     const result =
-        kind === "pipeline.advance"
+        kind === "pipeline.advance" || kind === "pipeline.action"
             ? await db.execute(sql`
         with eligible_users as (
             select
@@ -370,7 +412,7 @@ export async function claimDueJobs(
             select user_id, oldest_waiting
             from eligible_users
             where pg_try_advisory_xact_lock(
-                hashtext('riffado:pipeline.advance'),
+                hashtext(${`riffado:${kind}`}),
                 hashtext(user_id)
             )
             order by oldest_waiting asc
@@ -475,6 +517,122 @@ export async function heartbeatJob(
     return result.length > 0;
 }
 
+/** Adopt pre-deployment jobs under the current claim before their handler runs. */
+export async function prepareClaimedPipelineJob(
+    jobId: string,
+    claimToken: string,
+): Promise<boolean> {
+    return db.transaction(async (tx) => {
+        const [job] = await tx
+            .select()
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.id, jobId),
+                    eq(asyncJobs.claimToken, claimToken),
+                    eq(asyncJobs.status, "processing"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!job) return false;
+        if (jobBindings(job.payload).length > 0) return true;
+        let pipeline: PipelineJobTarget | undefined;
+        if (job.kind === "learn.run" && typeof job.payload.runId === "string") {
+            const [run] = await tx
+                .select()
+                .from(learnRuns)
+                .where(
+                    and(
+                        eq(learnRuns.id, job.payload.runId),
+                        eq(learnRuns.actorUserId, job.userId),
+                    ),
+                )
+                .limit(1);
+            if (run)
+                pipeline = {
+                    itemId: run.itemId,
+                    userId: run.userId,
+                    phase: "learn",
+                    existingOnly: run.trigger === "manual",
+                };
+        } else if (
+            job.kind === "learn.correct" &&
+            typeof job.payload.passId === "string"
+        ) {
+            const [pass] = await tx
+                .select()
+                .from(transcriptCorrectionPasses)
+                .where(
+                    and(
+                        eq(transcriptCorrectionPasses.id, job.payload.passId),
+                        eq(transcriptCorrectionPasses.actorUserId, job.userId),
+                    ),
+                )
+                .limit(1);
+            if (pass)
+                pipeline = {
+                    itemId: pass.recordingId,
+                    userId: pass.userId,
+                    phase: "learn",
+                    existingOnly: true,
+                };
+        } else if (
+            job.kind === "learn.release" &&
+            typeof job.payload.recordingId === "string"
+        )
+            pipeline = {
+                itemId: job.payload.recordingId,
+                userId: job.userId,
+                phase: "learn",
+            };
+        if (job.kind === "learn.correct" && pipeline) {
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, pipeline.itemId),
+                        eq(itemProcessing.userId, pipeline.userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            const learn = processing?.phases.learn;
+            if (
+                learn?.jobId &&
+                learn.jobId !== job.id &&
+                ["pending", "running", "waiting"].includes(learn.state)
+            ) {
+                const now = new Date();
+                await tx
+                    .update(asyncJobs)
+                    .set({
+                        status: "pending",
+                        claimToken: null,
+                        heartbeatAt: null,
+                        startedAt: null,
+                        attempts: sql`greatest(0, ${asyncJobs.attempts} - 1)`,
+                        nextAttemptAt: new Date(now.getTime() + 1000),
+                        updatedAt: now,
+                    })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, job.id),
+                            eq(asyncJobs.userId, job.userId),
+                            eq(asyncJobs.claimToken, claimToken),
+                            eq(asyncJobs.status, "processing"),
+                        ),
+                    );
+                return false;
+            }
+        }
+        await bindPipelineJobInTx(tx, job, pipeline);
+        return true;
+    });
+}
+
 /**
  * Mark a job done. Scoped to the claim, so a superseded worker finishing late
  * cannot overwrite whatever the current owner has since done with the job.
@@ -484,26 +642,187 @@ export async function completeJob(input: {
     claimToken: string;
     result?: Record<string, unknown> | null;
 }): Promise<boolean> {
+    const outcome = terminalStepOutcome({
+        status: "completed",
+        result: input.result ?? null,
+        errorCode: null,
+    });
+    return db.transaction((tx) =>
+        settleTerminalJobInTx(tx, {
+            ...input,
+            status: outcome.kind === "failed" ? "failed" : "completed",
+            ...(outcome.kind === "failed"
+                ? {
+                      code: outcome.code,
+                      retryable: outcome.retryable,
+                      message: outcome.code,
+                  }
+                : {}),
+        }),
+    );
+}
+
+/** Settle the claimed job and all of its still-current step bindings atomically. */
+export async function settleTerminalJobInTx(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: {
+        jobId: string;
+        claimToken: string;
+        status: "completed" | "failed";
+        result?: Record<string, unknown> | null;
+        message?: string;
+        code?: string | null;
+        retryable?: boolean;
+    },
+): Promise<boolean> {
+    const [job] = await tx
+        .select()
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.id, input.jobId),
+                eq(asyncJobs.claimToken, input.claimToken),
+                eq(asyncJobs.status, "processing"),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    if (!job) {
+        console.debug("[pipeline] superseded job claim", {
+            jobId: input.jobId,
+        });
+        return false;
+    }
+    const bindings = jobBindings(job.payload);
+    for (const binding of bindings) {
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, binding.itemId),
+                    eq(itemProcessing.userId, binding.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        const phase = processing?.phases[binding.phase];
+        const step = binding.step ? phase?.steps?.[binding.step] : phase;
+        if (step?.jobId !== job.id || step.generation !== binding.generation) {
+            console.debug("[pipeline] superseded step generation", {
+                jobId: job.id,
+                generation: binding.generation,
+            });
+            return false;
+        }
+    }
     const now = new Date();
-    const rows = await db
+    let outcome: StepOutcome =
+        input.status === "failed"
+            ? {
+                  kind: "failed",
+                  code: input.code ?? "INTERNAL_ERROR",
+                  retryable: input.retryable ?? true,
+              }
+            : terminalStepOutcome({
+                  status: input.status,
+                  result: input.result ?? null,
+                  errorCode: null,
+              });
+    if (
+        outcome.kind === "waiting" &&
+        outcome.waitingFor.kind === "learnReview" &&
+        bindings[0]
+    ) {
+        const binding = bindings[0];
+        const [item] = await tx
+            .select({ until: chatterItems.summaryDueAt })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, binding.itemId),
+                    eq(chatterItems.userId, binding.userId),
+                ),
+            )
+            .limit(1);
+        if (item?.until)
+            outcome = {
+                ...outcome,
+                waitingFor: {
+                    ...outcome.waitingFor,
+                    until: item.until.toISOString(),
+                },
+            };
+    }
+    const result =
+        bindings.length > 0 || input.result?.outcome
+            ? { ...input.result, outcome }
+            : (input.result ?? null);
+    await tx
         .update(asyncJobs)
         .set({
-            status: "completed",
-            result: input.result ?? null,
-            lastError: null,
-            errorCode: null,
+            status: input.status,
+            result,
+            lastError: input.message ?? null,
+            errorCode: input.code ?? null,
             completedAt: now,
             heartbeatAt: now,
             updatedAt: now,
         })
         .where(
             and(
-                eq(asyncJobs.id, input.jobId),
+                eq(asyncJobs.id, job.id),
+                eq(asyncJobs.userId, job.userId),
                 eq(asyncJobs.claimToken, input.claimToken),
+                eq(asyncJobs.status, "processing"),
             ),
-        )
-        .returning({ id: asyncJobs.id });
-    return rows.length > 0;
+        );
+    for (const binding of bindings) {
+        const titleOutcome = input.result?.titleOutcome;
+        await settlePipelineBindingInTx(
+            tx,
+            binding,
+            job.id,
+            binding.step === "title" &&
+                titleOutcome &&
+                typeof titleOutcome === "object"
+                ? (titleOutcome as StepOutcome)
+                : outcome,
+        );
+    }
+    if (input.status === "completed") {
+        for (const binding of bindings)
+            if (binding.phase === "learn")
+                await bindAvailableCorrectionInTx(
+                    tx,
+                    binding.itemId,
+                    binding.userId,
+                );
+    }
+    if (
+        job.kind === "pipeline.advance" &&
+        typeof job.payload.itemId === "string"
+    ) {
+        const [processing] = await tx
+            .select({
+                requested: itemProcessing.requestedGeneration,
+                processed: itemProcessing.processedGeneration,
+            })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, job.payload.itemId),
+                    eq(itemProcessing.userId, job.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (processing && processing.requested > processing.processed)
+            await wakePipelineInTx(tx, job.payload.itemId, job.userId);
+    }
+    return true;
 }
 
 /** Terminate matching active jobs in another transaction and revoke their claims. */
@@ -573,28 +892,50 @@ export async function failJobAttempt(input: {
     retryable: boolean;
     delayMs: number;
 }): Promise<FailJobOutcome | null> {
-    // One expression, evaluated once per column, rather than five copies of
-    // the same condition drifting apart later.
-    const buried = sql`(${!input.retryable}::boolean or attempts >= max_attempts)`;
-    // The cast on `status` is load-bearing: a `case` over bare literals
-    // resolves to `text`, which Postgres will not assign to an enum column.
-    const result = await db.execute(sql`
-        update ${asyncJobs}
-        set last_error = ${input.message},
-            error_code = ${input.code ?? null},
-            updated_at = now(),
-            status = (case when ${buried} then 'failed' else 'pending' end)::${statusType()},
-            claim_token = case when ${buried} then claim_token else null end,
-            started_at = case when ${buried} then started_at else null end,
-            completed_at = case when ${buried} then now() else null end,
-            next_attempt_at = case
-                when ${buried} then next_attempt_at
-                else now() + make_interval(secs => ${input.delayMs / 1000}::double precision)
-            end
-        where id = ${input.jobId} and claim_token = ${input.claimToken}
-        returning status, attempts
-    `);
-    return rowsOf<FailJobOutcome>(result)[0] ?? null;
+    return db.transaction(async (tx) => {
+        const [job] = await tx
+            .select()
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.id, input.jobId),
+                    eq(asyncJobs.claimToken, input.claimToken),
+                    eq(asyncJobs.status, "processing"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!job) return null;
+        if (!input.retryable || job.attempts >= job.maxAttempts) {
+            const settled = await settleTerminalJobInTx(tx, {
+                ...input,
+                status: "failed",
+            });
+            return settled
+                ? { status: "failed", attempts: job.attempts }
+                : null;
+        }
+        await tx
+            .update(asyncJobs)
+            .set({
+                status: "pending",
+                claimToken: null,
+                startedAt: null,
+                lastError: input.message,
+                errorCode: input.code ?? null,
+                updatedAt: new Date(),
+                nextAttemptAt: new Date(Date.now() + input.delayMs),
+            })
+            .where(
+                and(
+                    eq(asyncJobs.id, job.id),
+                    eq(asyncJobs.userId, job.userId),
+                    eq(asyncJobs.claimToken, input.claimToken),
+                    eq(asyncJobs.status, "processing"),
+                ),
+            );
+        return { status: "pending", attempts: job.attempts };
+    });
 }
 
 /**
@@ -623,6 +964,7 @@ export async function reclaimStaleJobs(staleMs: number): Promise<number> {
             updated_at = now()
         where status = 'processing'
           and attempts < max_attempts
+          and coalesce(payload -> 'pipelineSteps', '[]'::jsonb) = '[]'::jsonb
           and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => ${staleMs / 1000}::double precision)
         returning id
     `);
@@ -630,26 +972,65 @@ export async function reclaimStaleJobs(staleMs: number): Promise<number> {
 }
 
 /**
- * Bury jobs that were reclaimed once too often.
+ * Bury expired pipeline claims and unbound jobs that exhausted their attempts.
  *
  * Separate from `reclaimStaleJobs` because the two say different things: one
  * is "try again", this is "this job has now killed as many workers as it is
  * allowed to". Without it, a job whose handler reliably crashes the process
  * would be reclaimed forever, taking the container with it each time.
  */
-export async function buryExhaustedStaleJobs(staleMs: number): Promise<number> {
-    const result = await db.execute(sql`
-        update ${asyncJobs}
-        set status = 'failed',
-            completed_at = now(),
-            updated_at = now(),
-            last_error = coalesce(last_error, 'Worker stopped responding and no attempts remain')
-        where status = 'processing'
-          and attempts >= max_attempts
-          and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => ${staleMs / 1000}::double precision)
-        returning id
-    `);
-    return rowsOf<{ id: string }>(result).length;
+export async function buryExhaustedStaleJobs(
+    staleMs: number,
+    afterFailure?: (job: AsyncJobRow) => Promise<void>,
+): Promise<number> {
+    const ended: AsyncJobRow[] = [];
+    const count = await db.transaction(async (tx) => {
+        const jobs = await tx
+            .select()
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.status, "processing"),
+                    sql`(${asyncJobs.attempts} >= ${asyncJobs.maxAttempts} or coalesce(${asyncJobs.payload} -> 'pipelineSteps', '[]'::jsonb) <> '[]'::jsonb)`,
+                    sql`${asyncJobs.id} in (
+                        select id from (
+                            select id, row_number() over (partition by user_id order by coalesce(heartbeat_at, started_at), id) as owner_rank
+                            from async_jobs where status = 'processing'
+                              and (attempts >= max_attempts or coalesce(payload -> 'pipelineSteps', '[]'::jsonb) <> '[]'::jsonb)
+                              and coalesce(heartbeat_at, started_at) < now() - make_interval(secs => ${staleMs / 1000}::double precision)
+                        ) candidates where owner_rank <= 5
+                    )`,
+                    sql`coalesce(${asyncJobs.heartbeatAt}, ${asyncJobs.startedAt}) < now() - make_interval(secs => ${staleMs / 1000}::double precision)`,
+                ),
+            )
+            .limit(100)
+            .for("update", { skipLocked: true });
+        let settled = 0;
+        for (const job of jobs) {
+            if (
+                job.claimToken &&
+                (await settleTerminalJobInTx(tx, {
+                    jobId: job.id,
+                    claimToken: job.claimToken,
+                    status: "failed",
+                    message: "Worker stopped responding and no attempts remain",
+                    code: "lost",
+                    retryable: true,
+                }))
+            ) {
+                settled++;
+                ended.push({
+                    ...job,
+                    status: "failed",
+                    errorCode: "lost",
+                    lastError: "Processing was interrupted",
+                });
+            }
+        }
+        return settled;
+    });
+    if (afterFailure) for (const job of ended) await afterFailure(job);
+    return count;
 }
 
 /**

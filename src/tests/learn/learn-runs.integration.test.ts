@@ -1051,7 +1051,11 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 release();
                 await executing;
             }
-            expect(await executing).toEqual({ status: "cancelled", items: 0 });
+            expect(await executing).toEqual({
+                status: "cancelled",
+                items: 0,
+                outcome: { kind: "skipped", reason: "cancelled" },
+            });
             expect(await statusOf(payload.runId)).toBe("cancelled");
             expect(await db().select().from(learnReviewItems)).toEqual([]);
             expect(await db().select().from(transcriptCorrections)).toEqual([]);

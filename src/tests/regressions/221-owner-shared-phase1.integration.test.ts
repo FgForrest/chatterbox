@@ -10,7 +10,9 @@ import {
     vi,
 } from "vitest";
 import { POST as categorize } from "@/app/api/recordings/[id]/categorize/route";
+import { completeJob } from "@/db/queries/async-jobs";
 import { listProviderRecoveryRowsInTx } from "@/db/queries/pipeline";
+import { bindPipelineJobInTx } from "@/db/queries/pipeline-jobs";
 import { profileHistoryReferences } from "@/db/queries/profile-history";
 import * as revisionGuard from "@/db/queries/profile-revision-guard";
 import {
@@ -382,6 +384,28 @@ const content = {
                 });
         });
 
+        async function bindSeededJob(jobId: string) {
+            await db().transaction(async (tx) => {
+                const [job] = await tx
+                    .update(asyncJobs)
+                    .set({ claimToken: "test-claim" })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, jobId),
+                            eq(asyncJobs.userId, OWNER),
+                        ),
+                    )
+                    .returning();
+                if (!job) throw new Error("seeded job missing");
+                await bindPipelineJobInTx(tx, job, {
+                    itemId: ITEM,
+                    userId: OWNER,
+                    phase: "summary",
+                    step: "summary",
+                });
+            });
+        }
+
         const share = (folderId = "org-child") =>
             addRecordingToFolder({
                 userId: OWNER,
@@ -458,6 +482,7 @@ const content = {
                     payload: { recordingId: ITEM, trigger: "auto" },
                     status: "processing",
                 });
+            await bindSeededJob("running-summary");
             await share();
             expect((await resolved("summary")).revisionId).toBe(
                 `${PERSONAL}-rev`,
@@ -509,6 +534,13 @@ const content = {
                     },
                 }),
             ).resolves.toEqual({ committed: true });
+            expect(
+                await completeJob({
+                    jobId: "running-summary",
+                    claimToken: "test-claim",
+                    result: { outcome: { kind: "done" } },
+                }),
+            ).toBe(true);
             expect(
                 (await readProcessing(ITEM, "private", OWNER))?.phases.summary
                     ?.steps?.summary?.state,
@@ -1395,6 +1427,7 @@ const content = {
                     status: "processing",
                     payload: { trigger: "auto" },
                 });
+            await bindSeededJob("held-summary");
             await share();
             await upsertEnhancement({
                 userId: OWNER,
@@ -1413,6 +1446,13 @@ const content = {
                     itemProfileRevisionId: `${PERSONAL}-rev`,
                 },
             });
+            expect(
+                await completeJob({
+                    jobId: "held-summary",
+                    claimToken: "test-claim",
+                    result: { outcome: { kind: "done" } },
+                }),
+            ).toBe(true);
             expect(
                 (await readProcessing(ITEM, "private", OWNER))?.phases
                     .categorize?.heldProfiles?.summary,

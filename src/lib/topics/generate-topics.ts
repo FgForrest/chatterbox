@@ -108,6 +108,7 @@ function matchingStoredTopics(
 
 export interface GenerateTopicsOptions {
     trigger: "manual" | "auto";
+    jobId?: string;
     onProgress?: (progress: JobProgress) => void;
     view?: RecordingView;
 }
@@ -118,6 +119,7 @@ export interface GenerateTopicsResult {
     model: string;
     templateId: string;
     windows: number;
+    inputFingerprint?: string | null;
 }
 
 export async function generateTopicsForTranscript(
@@ -309,14 +311,16 @@ export async function generateTopicsForTranscript(
                 ? matchingStoredTopics(current, input.fingerprint, recipe)
                 : null;
             if (!stored) return { stored: null, advance: false };
-            const advance = await markSummaryStepDoneInTx(tx, {
-                itemId: recordingId,
-                userId,
-                view: ctx.view,
-                step: "topics",
-                content: stepContent,
-                inputFingerprint: input.fingerprint,
-            });
+            const advance = opts.jobId
+                ? false
+                : await markSummaryStepDoneInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: ctx.view,
+                      step: "topics",
+                      content: stepContent,
+                      inputFingerprint: input.fingerprint,
+                  });
             return { stored, advance };
         });
         if (outcome.stored) {
@@ -327,6 +331,7 @@ export async function generateTopicsForTranscript(
                 model: outcome.stored.model,
                 templateId: outcome.stored.templateId,
                 windows: windows.length,
+                inputFingerprint: input.fingerprint,
             };
         }
     }
@@ -467,7 +472,7 @@ export async function generateTopicsForTranscript(
             )
             .returning({ id: transcriptions.id });
         const advance =
-            written.length > 0 && opts.trigger === "auto"
+            written.length > 0 && opts.trigger === "auto" && !opts.jobId
                 ? await markSummaryStepDoneInTx(tx, {
                       itemId: recordingId,
                       userId,
@@ -505,5 +510,6 @@ export async function generateTopicsForTranscript(
         model,
         templateId,
         windows: windows.length,
+        inputFingerprint: input.fingerprint,
     };
 }

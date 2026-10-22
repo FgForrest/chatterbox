@@ -18,14 +18,10 @@
  */
 
 import { AppError, ErrorCode } from "@/lib/errors";
-import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
-import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import type { JobHandler } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
-import {
-    markAutomaticStepShared,
-    markSummaryStepFailed,
-} from "@/lib/pipeline/state";
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
@@ -54,25 +50,24 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseSummaryJobPayload,
 
-    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
-        if (payload.trigger === "manual") return;
-        await markSummaryStepFailed({
-            itemId: payload.recordingId,
-            userId,
-            view: payload.view ?? "private",
-            step: "summary",
-            errorCode,
-        });
+    async onTerminalFailure({
+        payload,
+        userId,
+        errorCode,
+        errorMessage,
+    }): Promise<void> {
+        if (payload.view !== "org")
+            await emitEvent("summary.failed", userId, payload.recordingId, {
+                error: errorMessage ?? errorCode,
+            }).catch(() => {});
     },
 
     async run({
         payload,
         userId,
         jobId,
-        attempt,
-        maxAttempts,
         reportProgress,
-    }): Promise<JobResult> {
+    }): Promise<PipelineJobResult> {
         const orgView = payload.view === "org";
         // An automatic summary queued before automatic Learn held the
         // recording again: the hold's release makes it, from the reviewed
@@ -82,7 +77,10 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             !orgView &&
             (await isHeldForLearn(payload.recordingId))
         ) {
-            return { skipped: "held" };
+            return {
+                skipped: "held",
+                outcome: { kind: "skipped", reason: "held" },
+            };
         }
         if (payload.rateLimited) await admitRateLimitedAutoSummary(userId);
         try {
@@ -113,7 +111,11 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     jobId,
                 });
             let result = await generate(payload.presetId);
-            if (result.committed === false) return { skipped: "outdated" };
+            if (result.committed === false)
+                return {
+                    skipped: "outdated",
+                    outcome: { kind: "skipped", reason: "outdated" },
+                };
             // Corrections that changed while it ran (a review finished
             // meanwhile) found no summary to refresh, and the hold's release
             // found this job running: made again, once, from the reading as
@@ -130,21 +132,31 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                             ? undefined
                             : (payload.presetId ?? due.presetId),
                     );
-                if (result.committed === false) return { skipped: "outdated" };
+                if (result.committed === false)
+                    return {
+                        skipped: "outdated",
+                        outcome: { kind: "skipped", reason: "outdated" },
+                    };
             }
 
+            let titleOutcome: PipelineJobResult["titleOutcome"];
             if (!orgView) {
-                await updateTitleAfterSummary({
+                titleOutcome = await updateTitleAfterSummary({
                     userId: result.ownerUserId,
                     recordingId: payload.recordingId,
                     summary: result.summary,
                     keyPoints: result.keyPoints,
                     fence: result.titleFence,
+                    jobId,
                 }).catch((error: unknown) => {
                     console.error(
                         "Failed to update title from summary:",
                         error,
                     );
+                    return {
+                        kind: "skipped" as const,
+                        reason: "first_summary_title_failed",
+                    };
                 });
             }
 
@@ -161,6 +173,8 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             ).catch(() => {});
 
             return {
+                outcome: { kind: "done" },
+                ...(titleOutcome ? { titleOutcome } : {}),
                 provider: result.provider,
                 model: result.model,
                 promptId: result.promptId,
@@ -175,24 +189,10 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                 error.code === ErrorCode.RECORDING_SHARED &&
                 payload.trigger !== "manual"
             ) {
-                await markAutomaticStepShared({
-                    itemId: payload.recordingId,
-                    userId,
-                    view: payload.view ?? "private",
-                    step: "summary",
-                });
-                return { skipped: "shared" };
-            }
-            // Emit only when this failure is final. A `summary.failed` per
-            // attempt would tell a subscriber the summary failed and then
-            // have it succeed a minute later, which is worse for them than
-            // hearing about it once, late.
-            const willRetry = attempt < maxAttempts && isRetryableError(error);
-            if (!willRetry && !orgView) {
-                const { message } = describeJobError(error);
-                await emitEvent("summary.failed", userId, payload.recordingId, {
-                    error: message,
-                }).catch(() => {});
+                return {
+                    skipped: "shared",
+                    outcome: { kind: "skipped", reason: "shared" },
+                };
             }
             throw error;
         }

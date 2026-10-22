@@ -1,3 +1,4 @@
+import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 /**
  * Running a correction pass (job kind `learn.correct`, queued when a Learn
  * run finishes, `correction-pass-queue.ts`): the Learn model reads the
@@ -465,14 +466,45 @@ export const correctionPassJobHandler: JobHandler<CorrectionPassPayload> = {
         return { passId: raw.passId };
     },
 
-    async run(context): Promise<JobResult> {
+    async onTerminalFailure({
+        payload,
+        userId,
+        jobId,
+        errorCode,
+    }): Promise<void> {
+        const [pass] = await db
+            .select()
+            .from(transcriptCorrectionPasses)
+            .where(
+                and(
+                    eq(transcriptCorrectionPasses.id, payload.passId),
+                    eq(transcriptCorrectionPasses.actorUserId, userId),
+                ),
+            )
+            .limit(1);
+        if (!pass) return;
+        await setStatus(pass.id, "failed", {
+            errorCode,
+            finishedAt: new Date(),
+        });
+        await afterPass(pass, 0, jobId);
+    },
+
+    async run(context): Promise<PipelineJobResult> {
         let ended: PassRow | null = null;
         let written = 0;
         try {
             const { pass, written: count, ...result } = await runPass(context);
             ended = pass;
             written = count;
-            return { ...result, written: count };
+            return {
+                ...result,
+                written: count,
+                outcome:
+                    typeof result.skipped === "string"
+                        ? { kind: "skipped", reason: result.skipped }
+                        : { kind: "done", reason: "released" },
+            };
         } catch (caught) {
             const retrying =
                 context.attempt < context.maxAttempts &&

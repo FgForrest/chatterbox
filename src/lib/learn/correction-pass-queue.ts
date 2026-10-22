@@ -8,6 +8,7 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
+import { bindAvailableCorrectionInTx } from "@/db/queries/pipeline-jobs";
 import {
     asyncJobs,
     type learnRuns,
@@ -154,5 +155,6 @@ export async function queueCorrectionPassInTx(
             .delete(transcriptCorrectionPasses)
             .where(eq(transcriptCorrectionPasses.id, pass.id));
     }
+    if (queued) await bindAvailableCorrectionInTx(tx, run.itemId, run.userId);
     return queued;
 }

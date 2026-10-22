@@ -8,6 +8,7 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
+import { bindPipelineJobInTx } from "@/db/queries/pipeline-jobs";
 import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
 import {
     asyncJobs,
@@ -167,7 +168,7 @@ export async function startLearnRun(input: {
     // take, with the transcript read and the writer rule checked there: a
     // share, withdrawal, rewrite or erase that landed since the route
     // authorized the actor is seen.
-    const inserted = await db.transaction(async (tx) => {
+    const insertRun = async (tx: Tx) => {
         if (access.kind === "mail") {
             return insertMailRunInTx(tx, {
                 access,
@@ -294,99 +295,136 @@ export async function startLearnRun(input: {
             runId: (run as { id: string }).id,
             transcriptionId: transcript.id,
         };
-    });
-    if ("open" in inserted) {
-        return {
-            runId: inserted.open.id,
-            jobId: inserted.open.jobId,
-            created: false,
-        };
-    }
-    const runId = inserted.runId;
-    const transcriptionId = inserted.transcriptionId;
-    const enqueue = () =>
-        enqueueJob({
-            userId: actorUserId,
-            kind: LEARN_JOB_KIND,
-            subjectId: recordingJobSubject(access.recordingId, view),
-            priority:
-                trigger === "manual"
-                    ? LEARN_PRIORITY_MANUAL
-                    : LEARN_PRIORITY_AUTO,
-            maxAttempts: LEARN_MAX_ATTEMPTS,
-            payload: {
-                runId,
-                ...(input.calendarEventId
-                    ? { calendarEventId: input.calendarEventId }
-                    : {}),
-            },
-        });
-    const abandon = () => db.delete(learnRuns).where(eq(learnRuns.id, runId));
-    let queued: Awaited<ReturnType<typeof enqueue>>;
-    try {
-        queued = await enqueue();
-        // One Learn job per recording and view. A job that holds the slot
-        // for a run nobody waits for any more (superseded, failed, gone)
-        // and has not started is let go, and this one queued instead.
-        if (!queued.created && queued.job.payload.runId !== runId) {
-            const holderId = String(queued.job.payload.runId);
-            const [holder] = await db
-                .select({
-                    transcriptionId: learnRuns.transcriptionId,
-                    status: learnRuns.status,
-                })
-                .from(learnRuns)
-                .where(eq(learnRuns.id, holderId))
-                .limit(1);
-            const holderOpen =
-                holder?.status === "queued" || holder?.status === "running";
-            if (holderOpen && holder?.transcriptionId === transcriptionId) {
-                await abandon();
-                return {
-                    runId: holderId,
-                    jobId: queued.job.id,
-                    created: false,
-                };
-            }
-            if (!holderOpen && queued.job.status === "pending") {
-                await db
-                    .update(asyncJobs)
-                    .set({
-                        status: "failed",
-                        completedAt: new Date(),
-                        updatedAt: new Date(),
-                        lastError: "Its Learn run is no longer waiting",
-                    })
+    };
+    const started = await db.transaction(async (tx) => {
+        const inserted = await insertRun(tx);
+        if ("open" in inserted) {
+            if (inserted.open.jobId) {
+                const [job] = await tx
+                    .select()
+                    .from(asyncJobs)
                     .where(
                         and(
-                            eq(asyncJobs.id, queued.job.id),
-                            eq(asyncJobs.status, "pending"),
+                            eq(asyncJobs.id, inserted.open.jobId),
+                            eq(asyncJobs.userId, actorUserId),
                         ),
-                    );
-                queued = await enqueue();
+                    )
+                    .for("update")
+                    .limit(1);
+                if (
+                    job &&
+                    (job.status === "pending" || job.status === "processing")
+                )
+                    await bindPipelineJobInTx(tx, job, {
+                        itemId: access.recordingId,
+                        userId: access.ownerUserId,
+                        phase: "learn",
+                        existingOnly: trigger === "manual",
+                    });
             }
-            if (!queued.created && queued.job.payload.runId !== runId) {
-                await abandon();
-                throw new AppError(
-                    ErrorCode.CONFLICT,
-                    holderOpen
-                        ? "Learn is already running on this recording's other transcript. Try again when it finishes."
-                        : "Learn is finishing on this recording. Try again in a moment.",
-                    409,
-                );
-            }
+            return {
+                runId: inserted.open.id,
+                jobId: inserted.open.jobId,
+                created: false,
+            };
         }
-    } catch (error) {
-        // Not queued: the run must not wait for a job that never comes.
-        await abandon().catch(() => {});
-        throw error;
-    }
-    await db
-        .update(learnRuns)
-        .set({ jobId: queued.job.id, updatedAt: new Date() })
-        .where(eq(learnRuns.id, runId));
-    if (queued.created) nudge();
-    return { runId, jobId: queued.job.id, created: true };
+        const runId = inserted.runId;
+        const transcriptionId = inserted.transcriptionId;
+        const enqueue = () =>
+            enqueueJob(
+                {
+                    userId: actorUserId,
+                    kind: LEARN_JOB_KIND,
+                    subjectId: recordingJobSubject(access.recordingId, view),
+                    priority:
+                        trigger === "manual"
+                            ? LEARN_PRIORITY_MANUAL
+                            : LEARN_PRIORITY_AUTO,
+                    maxAttempts: LEARN_MAX_ATTEMPTS,
+                    pipeline: {
+                        itemId: access.recordingId,
+                        userId: access.ownerUserId,
+                        phase: "learn",
+                        existingOnly: trigger === "manual",
+                    },
+                    payload: {
+                        runId,
+                        ...(input.calendarEventId
+                            ? { calendarEventId: input.calendarEventId }
+                            : {}),
+                    },
+                },
+                tx,
+            );
+        const abandon = () =>
+            tx.delete(learnRuns).where(eq(learnRuns.id, runId));
+        let queued: Awaited<ReturnType<typeof enqueue>>;
+        try {
+            queued = await enqueue();
+            // One Learn job per recording and view. A job that holds the slot
+            // for a run nobody waits for any more (superseded, failed, gone)
+            // and has not started is let go, and this one queued instead.
+            if (!queued.created && queued.job.payload.runId !== runId) {
+                const holderId = String(queued.job.payload.runId);
+                const [holder] = await tx
+                    .select({
+                        transcriptionId: learnRuns.transcriptionId,
+                        status: learnRuns.status,
+                    })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, holderId))
+                    .limit(1);
+                const holderOpen =
+                    holder?.status === "queued" || holder?.status === "running";
+                if (holderOpen && holder?.transcriptionId === transcriptionId) {
+                    await abandon();
+                    return {
+                        runId: holderId,
+                        jobId: queued.job.id,
+                        created: false,
+                    };
+                }
+                if (!holderOpen && queued.job.status === "pending") {
+                    await tx
+                        .update(asyncJobs)
+                        .set({
+                            status: "failed",
+                            completedAt: new Date(),
+                            updatedAt: new Date(),
+                            lastError: "Its Learn run is no longer waiting",
+                        })
+                        .where(
+                            and(
+                                eq(asyncJobs.id, queued.job.id),
+                                eq(asyncJobs.status, "pending"),
+                            ),
+                        );
+                    queued = await enqueue();
+                }
+                if (!queued.created && queued.job.payload.runId !== runId) {
+                    await abandon();
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        holderOpen
+                            ? "Learn is already running on this recording's other transcript. Try again when it finishes."
+                            : "Learn is finishing on this recording. Try again in a moment.",
+                        409,
+                    );
+                }
+            }
+        } catch (error) {
+            // Not queued: the run must not wait for a job that never comes.
+            await abandon().catch(() => {});
+            throw error;
+        }
+        await tx
+            .update(learnRuns)
+            .set({ jobId: queued.job.id, updatedAt: new Date() })
+            .where(eq(learnRuns.id, runId));
+        return { runId, jobId: queued.job.id, created: true };
+    });
+    if (started.created) nudge();
+    return started;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

@@ -102,6 +102,7 @@ describe("summaryJobHandler", () => {
         const result = await summaryJobHandler.run(context());
 
         expect(result).toEqual({
+            outcome: { kind: "done" },
             provider: "openai",
             model: "gpt-4o-mini",
             promptId: "general",
@@ -138,6 +139,8 @@ describe("summaryJobHandler", () => {
             .invocationCallOrder[0];
         expect(order).toBeGreaterThan(generation);
         expect(updateTitleAfterSummary).toHaveBeenCalledWith({
+            fence: undefined,
+            jobId: "job-1",
             userId: "user-1",
             recordingId: "rec-1",
             summary: generated.summary,
@@ -359,6 +362,14 @@ describe("summaryJobHandler", () => {
             summaryJobHandler.run(context({ attempt: 3, maxAttempts: 3 })),
         ).rejects.toThrow();
 
+        expect(emitEvent).not.toHaveBeenCalled();
+        await summaryJobHandler.onTerminalFailure?.({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: { recordingId: "rec-1", trigger: "manual" },
+            errorCode: ErrorCode.AI_RATE_LIMITED,
+            errorMessage: "slow down",
+        });
         expect(emitEvent).toHaveBeenCalledWith(
             "summary.failed",
             "user-1",
@@ -382,6 +393,14 @@ describe("summaryJobHandler", () => {
             summaryJobHandler.run(context({ attempt: 1, maxAttempts: 3 })),
         ).rejects.toThrow();
 
+        expect(emitEvent).not.toHaveBeenCalled();
+        await summaryJobHandler.onTerminalFailure?.({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: { recordingId: "rec-1", trigger: "manual" },
+            errorCode: ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+            errorMessage: "No AI provider configured",
+        });
         expect(emitEvent).toHaveBeenCalledWith(
             "summary.failed",
             "user-1",

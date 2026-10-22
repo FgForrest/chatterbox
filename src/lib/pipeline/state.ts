@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { pipelineDriver } from "@/lib/pipeline/driver";
+import { waitForReason } from "@/lib/pipeline/outcome";
 import { automaticTitleSettled } from "@/lib/pipeline/title-step";
 import {
     requestAdvanceForViewInTx,
@@ -71,26 +72,73 @@ export async function updatePhaseInTx(
     record: PhaseRecord,
 ): Promise<boolean> {
     view = pipelineDriver(userId).view;
-    if (phase === "categorize") {
-        const [current] = await tx
-            .select({ phases: itemProcessing.phases })
-            .from(itemProcessing)
-            .where(
-                and(
-                    eq(itemProcessing.itemId, itemId),
-                    eq(itemProcessing.userId, userId),
-                    eq(itemProcessing.view, view),
-                ),
-            )
-            .for("update")
-            .limit(1);
-        const previous = current?.phases.categorize;
+    const [current] = await tx
+        .select({ phases: itemProcessing.phases })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, itemId),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, view),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    const previous = current?.phases[phase];
+    if (phase === "categorize")
         record = {
             profileChoice: previous?.profileChoice,
             placementProfile: previous?.placementProfile,
             heldProfiles: previous?.heldProfiles,
             ...record,
         };
+    if (
+        record.state !== "outdated" &&
+        !["erased", "scope_changed", "cancelled"].includes(
+            record.reason ?? "",
+        ) &&
+        previous
+    ) {
+        if (previous.jobId) record = { ...record, ...previous };
+        if (previous.steps) {
+            const steps = { ...record.steps };
+            for (const name of ["summary", "topics", "title"] as const) {
+                const step = previous.steps[name];
+                if (step?.jobId) steps[name] = step;
+            }
+            record = {
+                ...record,
+                steps,
+                ...(Object.values(steps).some(
+                    (step) => step.jobId && step.state === "running",
+                )
+                    ? { state: "running" as const }
+                    : {}),
+            };
+        }
+    }
+    if (record.state === "waiting" && !record.jobId) {
+        const waitingFor = record.waitingFor ?? waitForReason(record.reason);
+        if (previous?.waitingFor?.kind === waitingFor.kind)
+            waitingFor.until ??= previous.waitingFor.until;
+        if (
+            phase === "learn" &&
+            waitingFor.kind === "learnReview" &&
+            record.reason !== "review_pending_timeout"
+        ) {
+            const [item] = await tx
+                .select({ dueAt: chatterItems.summaryDueAt })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                )
+                .limit(1);
+            if (item?.dueAt) waitingFor.until = item.dueAt.toISOString();
+        }
+        record = { ...record, waitingFor };
     }
     const updated = await updateProcessingPhaseInTx(
         tx,
@@ -213,6 +261,7 @@ async function settleSummaryStepInTx(
         at: new Date().toISOString(),
     };
     const step = summary?.steps?.[input.step];
+    if (step?.jobId) return false;
     const recoveringProfileChange =
         input.currentInputsVerified === true &&
         input.step === "summary" &&
@@ -607,7 +656,9 @@ export async function markLearnReleasedInTx(
                 eq(itemProcessing.view, "private"),
             ),
         )
+        .for("update")
         .limit(1);
+    if (processing?.phases.learn?.state === "failed") return false;
     let content = processing?.phases.learn?.inputs;
     if (!content) {
         const [item] = await tx

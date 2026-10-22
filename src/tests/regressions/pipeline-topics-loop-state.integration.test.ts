@@ -9,6 +9,11 @@ import {
     vi,
 } from "vitest";
 import {
+    claimDueJobs,
+    completeJob,
+    prepareClaimedPipelineJob,
+} from "@/db/queries/async-jobs";
+import {
     aiEnhancements,
     apiRateLimitBuckets,
     asyncJobs,
@@ -424,7 +429,9 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
             .where(
                 and(eq(asyncJobs.userId, USER), eq(asyncJobs.kind, "topics")),
             );
-        await topicsJobHandler.run({
+        const [claimed] = await claimDueJobs("topics", 1);
+        expect(claimed.id).toBe(job.id);
+        const result = await topicsJobHandler.run({
             jobId: job.id,
             userId: USER,
             attempt: 1,
@@ -433,10 +440,13 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
         });
-        await database.db
-            .update(asyncJobs)
-            .set({ status: "completed", completedAt: new Date() })
-            .where(and(eq(asyncJobs.id, job.id), eq(asyncJobs.userId, USER)));
+        expect(
+            await completeJob({
+                jobId: job.id,
+                claimToken: claimed.claimToken,
+                result: result ?? null,
+            }),
+        ).toBe(true);
         for (let index = 0; index < 65; index++) {
             const plan = await advance();
             for (const action of plan.actions) {
@@ -497,7 +507,7 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
             userId: USER,
             subjectId: ITEM,
             kind: "topics",
-            nextAttemptAt: new Date(Date.now() + 3_600_000),
+            nextAttemptAt: new Date(Date.now() - 1),
             payload: {
                 recordingId: ITEM,
                 source: "riffado",
@@ -505,7 +515,12 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
                 rateLimited: true,
             },
         });
-        await topicsJobHandler.run({
+        const [claimed] = await claimDueJobs("topics", 1);
+        expect(claimed.id).toBe("delayed-topics");
+        expect(
+            await prepareClaimedPipelineJob(claimed.id, claimed.claimToken),
+        ).toBe(true);
+        const result = await topicsJobHandler.run({
             jobId: "delayed-topics",
             userId: USER,
             attempt: 1,
@@ -519,6 +534,13 @@ describeWithDatabase("pipeline topics loop (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
         });
+        expect(
+            await completeJob({
+                jobId: claimed.id,
+                claimToken: claimed.claimToken,
+                result: result ?? null,
+            }),
+        ).toBe(true);
         expect(
             (await readProcessing(ITEM, "private", USER))?.phases.summary
                 ?.state,

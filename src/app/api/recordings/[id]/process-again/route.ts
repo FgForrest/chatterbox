@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
+import { retryLostPipelineStepsInTx } from "@/db/queries/pipeline-jobs";
 import { itemProcessing } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
@@ -22,13 +23,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const hasAutomaticStep = Object.values(steps).some(
         (step) => "automatic" in step && step.automatic,
     );
-    if (!hasAutomaticStep) {
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            "This profile has no automatic processing steps",
-            409,
-        );
-    }
 
     const advance = await db.transaction(async (tx) => {
         const [processing] = await tx
@@ -46,6 +40,23 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             )
             .for("update")
             .limit(1);
+        if (
+            processing &&
+            (await retryLostPipelineStepsInTx(tx, itemId, userId))
+        ) {
+            return requestAdvanceInTx(tx, {
+                itemId,
+                userId,
+                view: "private",
+                reason: "process-again",
+            });
+        }
+        if (!hasAutomaticStep)
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "This profile has no automatic processing steps",
+                409,
+            );
         if (
             !processing ||
             effectiveManualOnly(processing) ||
@@ -77,6 +88,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     nudge();
     return NextResponse.json({
         itemId,
-        requestedGeneration: advance.requestedGeneration,
+        requestedGeneration: advance?.requestedGeneration,
     });
 });

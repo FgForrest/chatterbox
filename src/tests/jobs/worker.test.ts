@@ -21,6 +21,7 @@ const { queries, housekeeping } = vi.hoisted(() => ({
         deferJob: vi.fn(),
         failJobAttempt: vi.fn(),
         heartbeatJob: vi.fn(),
+        prepareClaimedPipelineJob: vi.fn(),
         reclaimStaleJobs: vi.fn(),
         buryExhaustedStaleJobs: vi.fn(),
         releaseClaimedJobs: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
+import { AppError, ErrorCode } from "@/lib/errors";
 import { clearJobHandlers, registerJobHandler } from "@/lib/jobs/registry";
 import { JobAbortedError, JobDeferredError } from "@/lib/jobs/retryable";
 import type { JobHandler } from "@/lib/jobs/types";
@@ -119,6 +121,7 @@ describe("job worker", () => {
         queries.buryExhaustedStaleJobs.mockResolvedValue(0);
         housekeeping.runHousekeeping.mockResolvedValue({});
         queries.heartbeatJob.mockResolvedValue(true);
+        queries.prepareClaimedPipelineJob.mockResolvedValue(true);
         queries.completeJob.mockResolvedValue(true);
         queries.releaseClaimedJobs.mockResolvedValue(0);
         queries.countPendingJobs.mockResolvedValue(0);
@@ -195,6 +198,22 @@ describe("job worker", () => {
         );
     });
 
+    it("routes a typed failed outcome through the retry and terminal settlement path", async () => {
+        registerJobHandler(
+            testHandler({
+                run: async () => ({
+                    outcome: { kind: "failed", code: "lost", retryable: true },
+                }),
+            }),
+        );
+        claimOnce(claimed());
+        await runTick();
+        expect(queries.completeJob).not.toHaveBeenCalled();
+        expect(queries.failJobAttempt).toHaveBeenCalledWith(
+            expect.objectContaining({ code: "lost", retryable: true }),
+        );
+    });
+
     it("puts off a job that says it is not time yet, without a failure", async () => {
         queries.deferJob.mockResolvedValue(true);
         registerJobHandler(
@@ -218,7 +237,6 @@ describe("job worker", () => {
     });
 
     it("buries a failure that another attempt cannot fix", async () => {
-        const { AppError, ErrorCode } = await import("@/lib/errors");
         registerJobHandler(
             testHandler({
                 run: async () => {
@@ -415,6 +433,7 @@ describe("job worker", () => {
             userId: "user-1",
             payload: { value: "terminal" },
             errorCode: "INTERNAL_ERROR",
+            errorMessage: "An unexpected error occurred",
         });
     });
 
