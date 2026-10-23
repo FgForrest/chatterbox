@@ -37,7 +37,9 @@
         "db:generate": "drizzle-kit generate",
         "db:migrate": "bun src/db/migrate.ts",
         "db:studio": "drizzle-kit studio",
-        "authz:export": "bun scripts/export-authz.ts"
+        "authz:export": "bun scripts/export-authz.ts",
+        "adr:index": "node scripts/generate-adr-index.mts",
+        "adr:index:check": "node scripts/generate-adr-index.mts --check"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.1083.0",

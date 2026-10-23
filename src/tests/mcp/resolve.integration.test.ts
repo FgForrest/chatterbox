@@ -198,7 +198,7 @@ describeWithDatabase("MCP name resolution (PostgreSQL)", () => {
 
         ids.orgJan = await insertPerson(db(), orgUserId, "Jan Novotný");
         ids.orgEva = await insertPerson(db(), orgUserId, "Eva Dvořáková");
-        ids.orgTomas = await insertPerson(db(), orgUserId, "Tomáš Veselý");
+        ids.orgOndrej = await insertPerson(db(), orgUserId, "Ondřej Veselý");
         ids.orgOlga = await insertPerson(db(), orgUserId, "Olga Černá");
         ids.orgAliceSelf = await insertPerson(
             db(),
@@ -270,7 +270,7 @@ describeWithDatabase("MCP name resolution (PostgreSQL)", () => {
         await insertTask(db(), {
             recordingId: "r3",
             userId: BOB,
-            assigneePersonId: ids.orgTomas,
+            assigneePersonId: ids.orgOndrej,
         });
         await insertTask(db(), {
             recordingId: "r3",
@@ -383,7 +383,7 @@ describeWithDatabase("MCP name resolution (PostgreSQL)", () => {
                 "Eva Dvořáková",
                 ids.orgEva ?? "",
                 "Karel Bobek",
-                "Tomáš Veselý",
+                "Ondřej Veselý",
                 "Olga Černá",
             ]) {
                 expect(
@@ -410,7 +410,7 @@ describeWithDatabase("MCP name resolution (PostgreSQL)", () => {
                 ids.orgAliceSelf,
             );
             expect(await personId(tasks, "Petra Malá")).toBe(ids.alicePetra);
-            for (const input of ["Tomáš Veselý", "Eva Dvořáková"]) {
+            for (const input of ["Ondřej Veselý", "Eva Dvořáková"]) {
                 expect(
                     await failure(resolveTarget(tasks, input, ["person"])),
                 ).toMatchObject({ outcome: "not_found" });
@@ -419,7 +419,7 @@ describeWithDatabase("MCP name resolution (PostgreSQL)", () => {
 
         it("gives a service caller the Organization's speakers and tasks", async () => {
             const bot = service(["tasks:read"]);
-            expect(await personId(bot, "Tomáš Veselý")).toBe(ids.orgTomas);
+            expect(await personId(bot, "Ondřej Veselý")).toBe(ids.orgOndrej);
             expect(await personId(bot, "Jan Novotný")).toBe(ids.orgJan);
             for (const input of [
                 "Olga Černá",

@@ -7,8 +7,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    main,
     parseFrontMatter,
     repositoryUrl,
     run,
@@ -209,6 +211,33 @@ describe("generate-adr-index", () => {
         expect(fields.get("title")).toBe("Fix #12 parsing");
         expect(fields.get("date")).toBe("2026-07-24");
         expect(fields.get("areas")).toEqual(["src/lib/jobs"]);
+    });
+
+    it("links refs to this repository by default and renders them plain with --plain", () => {
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const repo = repositoryUrl(
+                fileURLToPath(new URL("../../package.json", import.meta.url)),
+            );
+            expect(repo).toMatch(/^https:\/\/github\.com\/[^/]+\/[^/]+$/);
+            writeRecord("2026-07-24-claim-jobs.md");
+            const readme = () => readFileSync(join(dir, "README.md"), "utf8");
+
+            expect(main(["--dir", dir])).toBe(0);
+            expect(readme()).toContain(
+                `| [#12](${repo}/issues/12), [PR #13](${repo}/pull/13) |`,
+            );
+            expect(main(["--dir", dir, "--check"])).toBe(0);
+
+            expect(main(["--dir", dir, "--plain", "--check"])).toBe(1);
+            expect(main(["--dir", dir, "--plain"])).toBe(0);
+            expect(readme()).toContain("| #12, PR #13 |");
+            expect(() => main(["--dir", dir, "--links"])).toThrow();
+        } finally {
+            log.mockRestore();
+            error.mockRestore();
+        }
     });
 
     it("derives the GitHub URL from package.json", () => {

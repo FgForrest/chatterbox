@@ -173,13 +173,13 @@ describe("validateLearnOutput", () => {
                     speaker: "speaker_0",
                     startMs: 20_000,
                     endMs: 30_000,
-                    text: "Bednářovi to pošlu.",
+                    text: "Kovářovi to pošlu.",
                 },
                 {
                     speaker: "speaker_2",
                     startMs: 30_000,
                     endMs: 40_000,
-                    text: "Jo, Vonďo, pošli.",
+                    text: "Jo, Kráťo, pošli.",
                 },
             ];
             const { items } = validateLearnOutput(
@@ -193,7 +193,7 @@ describe("validateLearnOutput", () => {
                         },
                         {
                             label: "speaker_2",
-                            personId: "p-vondra",
+                            personId: "p-kratochvil",
                             evidence: ["00:30"],
                             reason: "",
                         },
@@ -203,10 +203,10 @@ describe("validateLearnOutput", () => {
                     turns,
                     answeredLabels: new Map(),
                     people: new Map([
-                        ["p-michal", { name: "Michal Bednář" }],
+                        ["p-michal", { name: "Michal Kovář" }],
                         [
-                            "p-vondra",
-                            { name: "Michal Vondra", aliases: ["Vonďa"] },
+                            "p-kratochvil",
+                            { name: "Michal Kratochvíl", aliases: ["Kráťa"] },
                         ],
                     ]),
                 }),
@@ -235,7 +235,7 @@ describe("validateLearnOutput", () => {
                     speaker: "speaker_0",
                     startMs: 40_000,
                     endMs: 50_000,
-                    text: "Díky, Bednáři.",
+                    text: "Díky, Kováři.",
                 },
                 {
                     speaker: "speaker_2",
@@ -245,21 +245,21 @@ describe("validateLearnOutput", () => {
                 },
             ];
             const people = new Map([
-                ["p-vondra", { name: "Michal Vondra" }],
-                ["p-bednar", { name: "Michal Bednář" }],
+                ["p-kratochvil", { name: "Michal Kratochvíl" }],
+                ["p-kovar", { name: "Michal Kovář" }],
             ]);
             const { items, dropped } = validateLearnOutput(
                 output({
                     speakers: [
                         {
                             label: "speaker_1",
-                            personId: "p-vondra",
+                            personId: "p-kratochvil",
                             evidence: ["00:09"],
                             reason: "",
                         },
                         {
                             label: "speaker_2",
-                            personId: "p-bednar",
+                            personId: "p-kovar",
                             evidence: ["00:50"],
                             reason: "",
                         },
@@ -270,7 +270,7 @@ describe("validateLearnOutput", () => {
             expect(items.map((item) => item.payload)).toEqual([
                 expect.objectContaining({
                     label: "speaker_2",
-                    personId: "p-bednar",
+                    personId: "p-kovar",
                 }),
             ]);
             expect(dropped).toMatchObject({ ambiguousFirstName: 1 });

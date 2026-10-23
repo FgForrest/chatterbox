@@ -67,7 +67,7 @@ When you share a recording or mail whose Learn review you finished for its curre
 
 ## Good to know
 
-- Names are recognized in their inflected forms in the transcript's language, with or without accents: "Šimákem" finds Šimák.
+- Names are recognized in their inflected forms in the transcript's language, with or without accents: "Dvořákem" finds Dvořák.
 - A speaker named only by a first name is marked as such. A shared first name needs distinguishing evidence or an explicitly marked guess.
 - Saying a new record is one you already have teaches Chatterbox the misheard form as a nickname, so the next run recognizes it.
 - A processing profile can give Learn its own provider and model, for example a stronger one than the summary uses. See [Processing and profiles](processing-and-profiles.md).

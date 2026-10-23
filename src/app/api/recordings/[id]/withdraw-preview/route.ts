@@ -14,7 +14,7 @@ type IdContext = { params: Promise<{ id: string }> };
  * What the owner's retention would remove from a shared recording at its
  * next sweep, were it withdrawn now, for the withdraw confirmation to warn
  * about. Asked by whoever may withdraw it: the owner on the private view,
- * the organization account on the Organization view (Johnny, 2026-09-28:
+ * the organization account on the Organization view (maintainer, 2026-09-28:
  * the curator sees and confirms the owner's warning). Read-only.
  */
 export const GET = apiHandler<IdContext>(async (request, context) => {

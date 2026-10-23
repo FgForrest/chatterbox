@@ -394,7 +394,7 @@ describe.each([
         ).toBeTruthy();
     });
 
-    it("adds from the footer and focuses the new task", async () => {
+    it("adds directly below the task list and focuses the new task", async () => {
         const scrollIntoView = vi.fn();
         Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
             configurable: true,
@@ -408,22 +408,78 @@ describe.each([
         }
 
         const add = await screen.findByRole("button", { name: "Add task" });
-        const apply = screen.getByRole("button", {
-            name: "Apply selected changes",
-        });
-        const footer = apply.closest("footer");
+        const footer = screen
+            .getByRole("button", { name: "Apply selected changes" })
+            .closest("footer");
         expect(footer).toBeTruthy();
-        const footerButtons = within(footer as HTMLElement).getAllByRole(
-            "button",
-        );
-        expect(footerButtons.indexOf(add)).toBeLessThan(
-            footerButtons.indexOf(apply),
-        );
+        expect(
+            within(footer as HTMLElement).queryByRole("button", {
+                name: "Add task",
+            }),
+        ).toBeNull();
+        expect(add.closest("[data-widget-body]")).toBeTruthy();
+        expect(add.className).toContain("hover:bg-accent");
+        const list = add.previousElementSibling;
+        expect(list?.tagName).toBe("UL");
+        expect(
+            list?.lastElementChild?.getAttribute("data-task-review-card"),
+        ).toBe("proposal-1");
 
         fireEvent.click(add);
         const input = await screen.findByDisplayValue("New task");
         await waitFor(() => expect(document.activeElement).toBe(input));
         expect(scrollIntoView).toHaveBeenCalled();
+        expect(
+            add.previousElementSibling?.lastElementChild?.getAttribute(
+                "data-task-review-card",
+            ),
+        ).toBe("new-proposal");
+    });
+
+    it("keeps Add task in the Tasks section when the list is empty", async () => {
+        await openFrame(
+            state({
+                canEdit: true,
+                reviewed: false,
+                tasks: [],
+                proposals: [],
+                updates: [],
+                matches: [match()],
+            }),
+        );
+
+        const add = screen.getByRole("button", { name: "Add task" });
+        const section = add.closest("section");
+        expect(
+            within(section as HTMLElement).getByRole("heading", {
+                name: /^Tasks/,
+            }),
+        ).toBeTruthy();
+        expect(section?.querySelector("ul")).toBeNull();
+        expect(add.closest("footer")).toBeNull();
+    });
+
+    it("hides Add task while merging", async () => {
+        await openFrame(
+            state({
+                canEdit: true,
+                reviewed: false,
+                tasks: [],
+                proposals: [
+                    task(),
+                    task({ id: "proposal-2", text: "Book the room" }),
+                ],
+                updates: [],
+                matches: [],
+            }),
+        );
+        expect(screen.getByRole("button", { name: "Add task" })).toBeTruthy();
+
+        fireEvent.click(screen.getByRole("button", { name: "Merge…" }));
+        expect(screen.queryByRole("button", { name: "Add task" })).toBeNull();
+
+        fireEvent.click(screen.getByRole("button", { name: "Cancel merging" }));
+        expect(screen.getByRole("button", { name: "Add task" })).toBeTruthy();
     });
 });
 

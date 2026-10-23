@@ -11,7 +11,7 @@ import { TOPIC_PROMPTS_BY_LOCALE } from "@/lib/topics/topic-presets";
 import type { AudioProfileSettings, MailProfileSettings } from "./settings";
 
 /** Bump this value whenever any built-in prompt text changes. */
-export const BUILTIN_PROMPTS_VERSION = "2026-10-20.1";
+export const BUILTIN_PROMPTS_VERSION = "2026-10-22.1";
 
 type SummaryStepSettings =
     | AudioProfileSettings["steps"]["summary"]

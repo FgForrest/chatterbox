@@ -1,7 +1,7 @@
 ---
 title: Mail search reads forwarded and quoted parts but never more than the caller may already see
 date: 2026-10-20
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
@@ -128,7 +128,10 @@ with it, and nothing else should.
 - Stored mail is not re-parsed with the new signature rules from PR #191 (`MAIL_PARSER_VERSION` 2):
   a re-parse writes a new content revision, which supersedes Learn runs and may trigger AI work
   again, so a backfill was left as a separate decision. `mail-segmentation-diff.js` measures what it
-  would change.
+  would change. The text-evidence unique index (`knowledge_fact_evidence_text_unique`) leaves out the
+  content revision, so evidence from two parses of one mail at the same segment and character range
+  collides: a re-parse backfill must recheck or move the old revision's text evidence rather than
+  insert new evidence beside it.
 - `backfill-mail-language.js` fills the stored language of older mail once after upgrade (optional;
   search detects each part's language anyway).
 

@@ -13,7 +13,7 @@ const meets = (heard: string, written: string) => {
 const DECLENSIONS: Record<string, string[]> = {
     // pán
     Novák: ["Nováka", "Novákovi", "Nováku", "Novákem", "Nováci", "Nováků"],
-    Šimák: ["Šimáka", "Šimákovi", "Šimáku", "Šimákem"],
+    Dvořák: ["Dvořáka", "Dvořákovi", "Dvořáku", "Dvořákem"],
     Milan: ["Milana", "Milanovi", "Milane", "Milanem"],
     Jan: ["Jana", "Janovi", "Jane", "Janem"],
     // the e Czech drops, and k~c, h~z
@@ -34,7 +34,7 @@ const DECLENSIONS: Record<string, string[]> = {
     // město
     Brno: ["Brna", "Brnu", "Brnem"],
     // borrowed names, declined as Czech does
-    Forest: ["Forestu", "Forestem"],
+    Orion: ["Orionu", "Orionem"],
     // "Shoptetem" strips "-etem" as "kuřetem" does: the stems are one
     // letter apart, which the name index tolerates (name-match tests).
     Shoptet: ["Shoptetu"],
@@ -52,8 +52,8 @@ describe("Czech stem variants", () => {
     });
 
     it("meet whether either side kept its accents", () => {
-        expect(meets("Simakem", "Šimák")).toBe(true);
-        expect(meets("Šimákem", "Simak")).toBe(true);
+        expect(meets("Dvorakem", "Dvořák")).toBe(true);
+        expect(meets("Dvořákem", "Dvorak")).toBe(true);
         expect(meets("Petre", "Petra")).toBe(true);
     });
 
@@ -66,7 +66,7 @@ describe("Czech stem variants", () => {
     });
 
     it("include the word itself, and stay within their bound", () => {
-        for (const word of ["a", "ab", "abc", "simakem", "atech", "atum"]) {
+        for (const word of ["a", "ab", "abc", "dvorakem", "atech", "atum"]) {
             const variants = czechVariants(word);
             expect(variants).toContain(word);
             expect(variants.length).toBeLessThanOrEqual(19);

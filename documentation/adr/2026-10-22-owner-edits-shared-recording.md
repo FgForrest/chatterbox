@@ -1,7 +1,7 @@
 ---
 title: The owner keeps editing a recording shared with the Organization, as a curator of that recording
 date: 2026-10-22
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
@@ -140,11 +140,11 @@ processing card, which the maintainer reported as fine the same morning.
 - **A finished private Learn review was not covered.** The cancel-and-restart rule handles an
   unfinished run only; after sharing, the Organization view offered a fresh Learn for a recording
   whose review the owner had finished. The answer is [2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md)
-  (proposed).
-- **Decisions taken for the maintainer and not yet confirmed (PR #221):** withdrawal rebinds pending
-  steps to the profile the item would have now without the Organization placement, not the one it
-  had before sharing; an unclassified pre-change profile counts as an automatic placement when it
-  equals today's automatic resolution.
+  (PR #248).
+- **Decisions taken for the maintainer in PR #221, confirmed by the maintainer on 2026-10-22:**
+  withdrawal rebinds pending steps to the profile the item would have now without the Organization
+  placement, not the one it had before sharing; an unclassified pre-change profile counts as an
+  automatic placement when it equals today's automatic resolution.
 - Concurrent edits by owner and curator are not merged; the later write wins.
 
 ## Related work
@@ -162,3 +162,5 @@ processing card, which the maintainer reported as fine the same morning.
   the maintainer ruled the owner keeps editing (Option B), then chose Learn option B.
 - **2026-10-22**: PR #221 merged with the pipeline redesign.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: withdrawal rebinding and the classification of old profiles confirmed by the
+  maintainer.

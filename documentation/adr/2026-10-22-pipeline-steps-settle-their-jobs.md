@@ -1,15 +1,15 @@
 ---
 title: A pipeline step names its job and the worker settles both, one reconciler repairs drift, and the server says what each step waits for
 date: 2026-10-22
-updated: 2026-10-22 17:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: fix
 issues: []
 prs: [209, 216, 220, 221]
 areas: [src/lib/pipeline, src/db/queries/pipeline-jobs.ts, src/db/queries/pipeline-reconciler.ts, src/db/queries/async-jobs.ts, src/lib/jobs, src/hooks/use-item-processing.ts, src/lib/summary]
-supersedes: []
+supersedes: [2026-10-19-processing-profiles-and-workflow]
 superseded-by: []
-relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-owner-edits-shared-recording, 2026-09-13-durable-job-queue, 2026-10-22-summary-reads-the-preferred-transcript]
+relates: [2026-10-22-owner-edits-shared-recording, 2026-09-13-durable-job-queue, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
 # A pipeline step names its job and the worker settles both, one reconciler repairs drift, and the server says what each step waits for
@@ -114,7 +114,7 @@ automatic and manual runs and sharing, per-handler settlement would be simple en
   review. Hiding or gating it was raised as a gap; the maintainer ruled it fine, "at most we may
   inform user". PR #220 adds an amber note "Made from an earlier transcript" with Regenerate.
 - **Naming speakers is not a condition for the summary;** the summary waits only for the Learn
-  review. The maintainer's "this is wanted" was read as keeping today's behaviour.
+  review. The maintainer ruled it on 2026-10-21 ("this is wanted").
 - **The UI, not the server, enforces workflow order where order matters.** The server accepts almost
   every manual action whatever is still running; the maintainer does not want server-side limits,
   only a UI that effectively prevents the confusing states.
@@ -171,8 +171,8 @@ automatic and manual runs and sharing, per-handler settlement would be simple en
 
 - Stuck steps should now end within a minute or two as a retryable failure; a step left pending with
   nothing behind it is not a state the UI has copy for, by design.
-- **Awaiting the maintainer's confirmation** (listed in PR #221): stale jobs are reclaimed while
-  attempts remain instead of failing as lost at once.
+- **Confirmed by the maintainer on 2026-10-22** (listed for confirmation in PR #221): stale jobs are
+  reclaimed while attempts remain instead of failing as lost at once.
 - The server enforces almost no workflow order. A future server-side check should not be added "for
   safety" without a new decision, because the maintainer explicitly declined it.
 - PR #221 also changed `src/lib/sync/` (shared skips removed); `AGENTS.md` asks for a real Plaud
@@ -181,7 +181,8 @@ automatic and manual runs and sharing, per-handler settlement would be simple en
 ## Related work
 
 - [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md):
-  built the pipeline whose step bookkeeping this replaces.
+  built the pipeline whose step bookkeeping this replaces (step settlement by each handler and
+  recovery by targeted sweeps); this record supersedes that part, the rest of the campaign holds.
 - [2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): the same
   PR #221 decided who owns a shared item's steps; this record covers how steps and jobs agree.
 - [2026-09-13-durable-job-queue](2026-09-13-durable-job-queue.md): the claim-token scoping and
@@ -195,3 +196,4 @@ automatic and manual runs and sharing, per-handler settlement would be simple en
   rulings given; PR #220 (note on a summary made from an earlier transcript) merged.
 - **2026-10-22**: PR #221 merged with the settlement, reconciler and server status.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: stale-job reclaim confirmed by the maintainer.
