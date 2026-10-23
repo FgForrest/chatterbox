@@ -1,11 +1,11 @@
 ---
 title: Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 date: 2026-10-22
-updated: 2026-10-23 01:09
+updated: 2026-10-23 01:35
 status: accepted
 kind: feature
 issues: [260]
-prs: [262]
+prs: [262, 265]
 areas: [src/lib/sharing, src/db/queries/item-shares.ts, src/db/queries/task-visibility.ts, src/components/sharing, src/lib/mcp, src/lib/export, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries]
 superseded-by: []
