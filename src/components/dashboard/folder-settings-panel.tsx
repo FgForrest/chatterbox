@@ -2,7 +2,7 @@
 
 import { FolderInput, FolderPlus, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { type ComponentProps, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import {
@@ -38,7 +38,15 @@ import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
 import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { RecordingFolder } from "@/types/folder";
 
-export function FolderSettingsPanel({
+/** Settings for a folder the viewer owns or curates; received attachments have none. */
+export function FolderSettingsPanel(
+    props: ComponentProps<typeof OwnedFolderSettingsPanel>,
+) {
+    if (props.folder.receivedFolder) return null;
+    return <OwnedFolderSettingsPanel {...props} />;
+}
+
+function OwnedFolderSettingsPanel({
     folder,
     folders,
     count,

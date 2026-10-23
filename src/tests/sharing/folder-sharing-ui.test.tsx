@@ -267,6 +267,33 @@ describe("folder person sharing UI", () => {
         expect(screen.getByText("Accepted")).toBeTruthy();
         expect(requests).toHaveBeenCalledWith("/api/folders/outgoing/shares");
     });
+    it("opens no folder settings for a received attachment", () => {
+        render(
+            <ConfirmDialogProvider>
+                <PersonSharingProvider value>
+                    <FolderSettingsPanel
+                        folder={attached}
+                        folders={folders}
+                        count={1}
+                        open
+                        onOpenChange={vi.fn()}
+                        onRename={vi.fn()}
+                        onCreate={vi.fn()}
+                        onMove={vi.fn()}
+                        onDelete={vi.fn()}
+                        exportProviders={{
+                            filesystem: false,
+                            googleDrive: false,
+                            mail: false,
+                        }}
+                    />
+                </PersonSharingProvider>
+            </ConfirmDialogProvider>,
+        );
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(screen.queryByText("Delete folder")).toBeNull();
+        expect(requests).not.toHaveBeenCalled();
+    });
     it("uses folder invitation routes for every owner state", async () => {
         requests.mockImplementation(async (_path: string, init?: RequestInit) =>
             Response.json(

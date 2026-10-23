@@ -8,6 +8,7 @@ import {
     it,
     vi,
 } from "vitest";
+import { z } from "zod";
 import { PATCH as folderAction } from "@/app/api/folder-shares/[id]/route";
 import { POST as restoreRoute } from "@/app/api/folder-shares/restore/route";
 import { PUT as settingsRoute } from "@/app/api/folders/[id]/default-profiles/route";
@@ -108,6 +109,8 @@ import { taskViewer } from "@/lib/tasks/access";
 import {
     addTask,
     countNewTasks,
+    createPersonalTask,
+    followTask,
     listRecordingTasks,
     listTasks,
     markTasksSeen,
@@ -505,6 +508,18 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             .where(eq(recordingFolders.id, "source"));
         expect(decryptText(source.name)).toBe("Research");
     });
+    it("keeps the attachment's parent when a move only reorders", async () => {
+        const share = await accept();
+        await changeFolderShare("receiver", share.id, {
+            action: "move",
+            version: 1,
+            sortOrder: 7,
+        });
+        const [node] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        expect(node).toMatchObject({ parentId: "my-folder", sortOrder: 7 });
+    });
     it("refuses owner, Organization, attachment and unknown parent IDs for acceptance and movement", async () => {
         const share = await invite();
         for (const parentId of ["source", "org-folder", "missing"])
@@ -613,6 +628,36 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         expect(
             await database.db.select().from(receivedFolderAttachments),
         ).toHaveLength(1);
+    });
+    it("serializes owner cancellation against acceptance", async () => {
+        const share = await invite();
+        const [accepted, cancelled] = await Promise.allSettled([
+            changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: 0,
+            }),
+            changeFolderShare("owner", share.id, {
+                action: "cancel",
+                version: 0,
+            }),
+        ]);
+        expect(
+            [accepted, cancelled].filter(
+                (result) => result.status === "fulfilled",
+            ),
+        ).toHaveLength(1);
+        const attachments = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        const shares = await database.db.select().from(folderShares);
+        if (accepted.status === "fulfilled") {
+            expect(attachments).toHaveLength(1);
+            expect(shares.map((row) => row.state)).toEqual(["accepted"]);
+        } else {
+            expect(attachments).toEqual([]);
+            expect(shares).toEqual([]);
+            expect(await visibleIds()).toEqual([]);
+        }
     });
     it("refreshes receivers only after an automatic arrival commits", async () => {
         await accept();
@@ -1354,6 +1399,18 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         expect(rows[0].filename).toContain(
             "alex.•••••••••••••@mail.example.com",
         );
+        const masked = "Mail for alex.•••••••••••••@mail.example.com";
+        const attached = (
+            await listFolderOrganization("receiver")
+        ).folders.find((folder) => folder.receivedFolder);
+        expect(attached).toMatchObject({
+            name: masked,
+            receivedFolder: { originalName: masked },
+        });
+        const [stored] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        expect(decryptText(stored.name)).toBe(masked);
     });
     it.each([
         "audio",
@@ -1848,5 +1905,63 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
                 })
             ).some((row) => row.id === task.id),
         ).toBe(false);
+    });
+    it("keeps the owner's own tasks filed in a shared folder away from receivers", async () => {
+        const ownerViewer = await taskViewer(
+            { id: "owner", email: "alex@example.com" },
+            localActor("owner"),
+        );
+        const receiverViewer = await taskViewer(
+            { id: "receiver", email: "lena@example.com" },
+            localActor("receiver"),
+        );
+        const own = await createPersonalTask(ownerViewer, {
+            text: "Private follow-up",
+            folderId: "source",
+        });
+        await accept();
+        const [node] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        const query = {
+            state: "all",
+            due: null,
+            today: "2026-10-22",
+            sort: "created",
+        } as const;
+        for (const tab of ["mine", "followed", "tracked"] as const)
+            for (const folderId of [null, node.id]) {
+                const rows = await listTasks(receiverViewer, {
+                    ...query,
+                    tab,
+                    folderId,
+                });
+                expect(rows.some((row) => row.id === own.id)).toBe(false);
+            }
+        await expect(
+            followTask(receiverViewer, own.id, true),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        const tool = ALL_TOOLS.find((tool) => tool.name === "list_tasks");
+        if (!tool) throw new Error("Missing task tool");
+        const caller = userCaller(
+            "receiver",
+            "lena@example.com",
+            ["tasks:read"],
+            "organization",
+        );
+        const listed = await tool.run(
+            { caller, touched: [] },
+            z.object(tool.input(caller)).parse({ status: "all" }),
+        );
+        expect(JSON.stringify(listed)).not.toContain(own.id);
+        expect(
+            (
+                await listTasks(ownerViewer, {
+                    ...query,
+                    tab: "mine",
+                    folderId: "source",
+                })
+            ).some((row) => row.id === own.id),
+        ).toBe(true);
     });
 });

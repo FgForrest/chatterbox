@@ -1648,7 +1648,7 @@ export function Workstation({
     );
 
     const settingsFolder = folderOrganization.folders.find(
-        (folder) => folder.id === settingsFolderId,
+        (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
     );
     const navigation = useMemo(
         () =>
@@ -1853,7 +1853,8 @@ export function Workstation({
                                 canCurate={canCurate}
                                 onFolderCreated={handleFolderCreated}
                                 onFolderSettings={
-                                    selectedFolder
+                                    selectedFolder &&
+                                    !selectedFolder.receivedFolder
                                         ? () =>
                                               openFolderSettings(selectedFolder)
                                         : undefined

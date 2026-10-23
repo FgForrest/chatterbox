@@ -1108,7 +1108,7 @@ export async function deleteFolder(
             .for("update");
         const receivers = await endFolderSharesInTx(
             tx,
-            userId,
+            target.ownerId,
             deletedFolderIds,
         );
         // Its addresses and its subfolders' stop working for good, before the

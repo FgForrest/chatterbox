@@ -12,6 +12,7 @@ import {
     recordingFolders,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
@@ -48,8 +49,9 @@ async function ownedFolder(
     executor: Pick<typeof db, "select">,
     userId: string,
     folderId: string,
+    lock = true,
 ) {
-    const [folder] = await executor
+    const query = executor
         .select()
         .from(recordingFolders)
         .where(
@@ -58,8 +60,8 @@ async function ownedFolder(
                 eq(recordingFolders.userId, userId),
                 eq(recordingFolders.kind, "custom"),
             ),
-        )
-        .for("update");
+        );
+    const [folder] = await (lock ? query.for("update") : query);
     if (!folder) throw missing();
     return folder;
 }
@@ -67,7 +69,7 @@ async function ownedFolder(
 /** The owner's folder invitations, without any receiver placement or name. */
 export async function listFolderShares(userId: string, folderId: string) {
     await requirePersonSharing(userId);
-    await ownedFolder(db, userId, folderId);
+    await ownedFolder(db, userId, folderId, false);
     return db
         .select({
             id: folderShares.id,
@@ -205,15 +207,20 @@ export async function listMyFolderInvitations(userId: string) {
             ),
         )
         .orderBy(asc(folderShares.invitedAt));
-    const mask = await secretAddressMasker(
-        rows.map((row) => decryptText(row.title)),
-    );
-    return rows.map((row) => ({
+    const titles = await maskedFolderNames(rows.map((row) => row.title));
+    return rows.map((row, index) => ({
         ...row,
         kind: "folder" as const,
-        title: mask(decryptText(row.title)),
+        title: titles[index],
         ownerName: row.ownerName || row.ownerEmail,
     }));
+}
+
+/** Owner folder names as a receiver may see them: secret mail addresses masked. */
+async function maskedFolderNames(encrypted: readonly string[]) {
+    const names = encrypted.map((name) => decryptText(name));
+    const mask = await secretAddressMasker(names);
+    return names.map((name) => mask(name));
 }
 
 async function attachmentParent(
@@ -250,129 +257,146 @@ export async function changeFolderShare(
     },
 ) {
     await requirePersonSharing(userId);
-    const changed = await db.transaction(async (tx) => {
-        const condition = and(
-            eq(folderShares.id, shareId),
-            or(
-                eq(folderShares.userId, userId),
-                and(
-                    eq(folderShares.receiverUserId, userId),
-                    activeShareRecipientExistsCondition(userId),
-                ),
-            ),
-        );
-        const [reference] = await tx
-            .select()
-            .from(folderShares)
-            .where(condition);
-        if (!reference) throw missing();
-        const folder = await ownedFolder(
-            tx,
-            reference.userId,
-            reference.folderId,
-        );
-        const [share] = await tx
-            .select()
-            .from(folderShares)
-            .where(condition)
-            .for("update");
-        if (!share) throw missing();
-        if (share.version !== input.version) throw conflict();
-        const receiver = share.receiverUserId === userId;
-        if (input.action === "cancel") {
-            if (receiver) throw missing();
-            if (share.state !== "pending") throw conflict();
-            await tx
-                .delete(folderShares)
-                .where(
+    // Two receivers placing folders shared by each other lock the same rows in opposite order.
+    const changed = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const condition = and(
+                eq(folderShares.id, shareId),
+                or(
+                    eq(folderShares.userId, userId),
                     and(
-                        eq(folderShares.id, shareId),
-                        eq(folderShares.userId, userId),
+                        eq(folderShares.receiverUserId, userId),
+                        activeShareRecipientExistsCondition(userId),
                     ),
-                );
-            return share;
-        }
-        if (input.action !== "remove" && !receiver) throw missing();
-        const pending = input.action === "accept" || input.action === "decline";
-        if (share.state !== (pending ? "pending" : "accepted"))
-            throw conflict();
-        if (input.action === "accept") {
-            const parentId = await attachmentParent(tx, userId, input.parentId);
-            await tx.insert(receivedFolderAttachments).values({
-                userId,
-                shareId,
-                name: encryptText(
-                    nameOf(input.name ?? decryptText(folder.name)),
                 ),
-                parentId,
-                sortOrder: input.sortOrder ?? 1_000_000,
-            });
-        } else if (input.action === "remove") {
-            await tx
-                .delete(receivedFolderAttachments)
-                .where(
-                    and(
-                        eq(receivedFolderAttachments.shareId, shareId),
-                        eq(
-                            receivedFolderAttachments.userId,
-                            share.receiverUserId,
+            );
+            const [reference] = await tx
+                .select()
+                .from(folderShares)
+                .where(condition);
+            if (!reference) throw missing();
+            const folder = await ownedFolder(
+                tx,
+                reference.userId,
+                reference.folderId,
+            );
+            const [share] = await tx
+                .select()
+                .from(folderShares)
+                .where(condition)
+                .for("update");
+            if (!share) throw missing();
+            if (share.version !== input.version) throw conflict();
+            const receiver = share.receiverUserId === userId;
+            if (input.action === "cancel") {
+                if (receiver) throw missing();
+                if (share.state !== "pending") throw conflict();
+                await tx
+                    .delete(folderShares)
+                    .where(
+                        and(
+                            eq(folderShares.id, shareId),
+                            eq(folderShares.userId, userId),
+                        ),
+                    );
+                return share;
+            }
+            if (input.action !== "remove" && !receiver) throw missing();
+            const pending =
+                input.action === "accept" || input.action === "decline";
+            if (share.state !== (pending ? "pending" : "accepted"))
+                throw conflict();
+            if (input.action === "accept") {
+                const parentId = await attachmentParent(
+                    tx,
+                    userId,
+                    input.parentId,
+                );
+                await tx.insert(receivedFolderAttachments).values({
+                    userId,
+                    shareId,
+                    name: encryptText(
+                        nameOf(
+                            input.name ??
+                                (await maskedFolderNames([folder.name]))[0],
                         ),
                     ),
-                );
-        } else if (input.action === "rename" || input.action === "move") {
-            if (input.action === "rename" && input.name === undefined)
-                throw new AppError(
-                    ErrorCode.INVALID_INPUT,
-                    "A folder name is required",
-                    400,
-                );
-            const [updated] = await tx
-                .update(receivedFolderAttachments)
+                    parentId,
+                    sortOrder: input.sortOrder ?? 1_000_000,
+                });
+            } else if (input.action === "remove") {
+                await tx
+                    .delete(receivedFolderAttachments)
+                    .where(
+                        and(
+                            eq(receivedFolderAttachments.shareId, shareId),
+                            eq(
+                                receivedFolderAttachments.userId,
+                                share.receiverUserId,
+                            ),
+                        ),
+                    );
+            } else if (input.action === "rename" || input.action === "move") {
+                if (input.action === "rename" && input.name === undefined)
+                    throw new AppError(
+                        ErrorCode.INVALID_INPUT,
+                        "A folder name is required",
+                        400,
+                    );
+                const [updated] = await tx
+                    .update(receivedFolderAttachments)
+                    .set({
+                        ...(input.action === "rename"
+                            ? { name: encryptText(nameOf(input.name ?? "")) }
+                            : {
+                                  ...(input.parentId !== undefined
+                                      ? {
+                                            parentId: await attachmentParent(
+                                                tx,
+                                                userId,
+                                                input.parentId,
+                                            ),
+                                        }
+                                      : {}),
+                                  ...(input.sortOrder !== undefined
+                                      ? { sortOrder: input.sortOrder }
+                                      : {}),
+                              }),
+                        version: sql`${receivedFolderAttachments.version} + 1`,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(receivedFolderAttachments.shareId, shareId),
+                            eq(receivedFolderAttachments.userId, userId),
+                        ),
+                    )
+                    .returning({ id: receivedFolderAttachments.id });
+                if (!updated) throw missing();
+            }
+            await tx
+                .update(folderShares)
                 .set({
-                    ...(input.action === "rename"
-                        ? { name: encryptText(nameOf(input.name ?? "")) }
-                        : {
-                              parentId: await attachmentParent(
-                                  tx,
-                                  userId,
-                                  input.parentId,
-                              ),
-                              ...(input.sortOrder !== undefined
-                                  ? { sortOrder: input.sortOrder }
-                                  : {}),
-                          }),
-                    version: sql`${receivedFolderAttachments.version} + 1`,
+                    state:
+                        input.action === "accept"
+                            ? "accepted"
+                            : input.action === "decline"
+                              ? "declined"
+                              : input.action === "remove"
+                                ? "removed"
+                                : share.state,
+                    version: share.version + 1,
+                    respondedAt: pending ? new Date() : share.respondedAt,
+                    removedAt:
+                        input.action === "remove"
+                            ? new Date()
+                            : share.removedAt,
                     updatedAt: new Date(),
                 })
-                .where(
-                    and(
-                        eq(receivedFolderAttachments.shareId, shareId),
-                        eq(receivedFolderAttachments.userId, userId),
-                    ),
-                )
-                .returning({ id: receivedFolderAttachments.id });
-            if (!updated) throw missing();
-        }
-        await tx
-            .update(folderShares)
-            .set({
-                state:
-                    input.action === "accept"
-                        ? "accepted"
-                        : input.action === "decline"
-                          ? "declined"
-                          : input.action === "remove"
-                            ? "removed"
-                            : share.state,
-                version: share.version + 1,
-                respondedAt: pending ? new Date() : share.respondedAt,
-                removedAt:
-                    input.action === "remove" ? new Date() : share.removedAt,
-                updatedAt: new Date(),
-            })
-            .where(condition);
-        return share;
-    });
+                .where(condition);
+            return share;
+        }),
+    );
     await Promise.all([
         notifyPersonShareChanged(changed.userId),
         notifyPersonShareChanged(changed.receiverUserId),
@@ -427,8 +451,11 @@ export async function listReceivedFolderOrganization(
               )
               .limit(1)
         : [];
+    const originalNames = await maskedFolderNames(
+        rows.map((row) => row.originalName),
+    );
     const folders: RecordingFolder[] = rows.map(
-        ({ attachment, share, originalName, ownerName, ownerEmail }) => ({
+        ({ attachment, share, ownerName, ownerEmail }, index) => ({
             id: attachment.id,
             name: decryptText(attachment.name),
             parentId: attachment.parentId ?? root?.id ?? null,
@@ -440,7 +467,7 @@ export async function listReceivedFolderOrganization(
                 shareId: share.id,
                 shareVersion: share.version,
                 ownerName: ownerName || ownerEmail,
-                originalName: decryptText(originalName),
+                originalName: originalNames[index],
             },
         }),
     );

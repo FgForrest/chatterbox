@@ -528,7 +528,14 @@ export function FolderTree({
                         {folder.kind === "public" ? (
                             <Users className="size-4 shrink-0 text-organization" />
                         ) : (
-                            <SharedFolderIcon folder={folder} />
+                            <SharedFolderIcon
+                                folder={folder}
+                                className={
+                                    folder.kind !== "custom"
+                                        ? "fill-primary/10"
+                                        : undefined
+                                }
+                            />
                         )}
                         <span className="truncate">{folderLabel(folder)}</span>
                         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
