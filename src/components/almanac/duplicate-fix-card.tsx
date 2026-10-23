@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { CompareJoinDialog } from "@/components/almanac/compare-join-dialog";
 import { DuplicateSignals } from "@/components/almanac/duplicate-signals";
 import { Button } from "@/components/ui/button";
+import { getApiErrorMessage } from "@/lib/api-errors";
 import type { DuplicateCandidate } from "@/lib/knowledge/duplicates";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 
@@ -38,13 +39,23 @@ export function DuplicateFixCard({
                     right: candidate.right.id,
                 }),
             });
-            if (!response.ok) throw new Error();
+            if (!response.ok)
+                throw new Error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("Could not dismiss this pair"),
+                    ),
+                );
             toast.success(i18n("This pair will not be suggested again."));
             onResolved();
             router.refresh();
-        } catch {
+        } catch (error) {
             setHidden(false);
-            toast.error(i18n("Could not dismiss this pair"));
+            toast.error(
+                error instanceof Error && error.message
+                    ? error.message
+                    : i18n("Could not dismiss this pair"),
+            );
         }
     }
     if (hidden) return null;

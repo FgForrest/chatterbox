@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import type { CareProblem } from "@/lib/knowledge/care-types";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
@@ -21,7 +22,24 @@ export function CareProblemCard({
     const formatter = useFormatter();
     const vocabulary = useVocabularyLabels();
     const router = useRouter();
+    const confirm = useConfirm();
     const [hidden, setHidden] = useState(false);
+    async function erase() {
+        if (
+            await confirm({
+                title: i18n("Delete {name}?", {
+                    name: problem.records[0]?.name ?? "",
+                }),
+                description: i18n(
+                    "The record is erased from the Organization Almanac. This cannot be undone.",
+                ),
+                confirmLabel: i18n("Delete"),
+                destructive: true,
+                onConfirm: () => {},
+            })
+        )
+            await fix("delete");
+    }
     async function fix(
         action: "dismiss" | "keep" | "delete",
         optionId?: string,
@@ -105,7 +123,7 @@ export function CareProblemCard({
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => void fix("delete")}
+                        onClick={() => void erase()}
                     >
                         {i18n("Delete")}
                     </Button>

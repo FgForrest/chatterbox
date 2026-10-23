@@ -13,6 +13,15 @@ import { careProblemContent } from "@/lib/knowledge/care-types";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 
+const BATCH = 1000;
+
+function chunks<T>(rows: T[]): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < rows.length; i += BATCH)
+        out.push(rows.slice(i, i + BATCH));
+    return out;
+}
+
 /** Restore after Organization records, usage and facts, recomputing local fingerprints and checking every target. */
 export async function restoreCareArchive(
     actorId: string,
@@ -20,80 +29,97 @@ export async function restoreCareArchive(
     idMap: Record<string, string> = {},
 ): Promise<{ restored: number; skipped: number }> {
     const scope = await requireCareCurator(actorId);
+    const mapId = (id: string) =>
+        Object.hasOwn(idMap, id) ? (idMap[id] ?? id) : id;
     return db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         await requireCareCurator(actorId);
-        let restored = 0;
         let skipped = 0;
-        for (const pair of archive.duplicates) {
+        const pairs = archive.duplicates.map((pair) => ({
+            kind: pair.kind,
+            ids: [mapId(pair.left), mapId(pair.right)].sort(),
+        }));
+        const live = new Set<string>();
+        for (const kind of ["person", "entity"] as const) {
+            const table = kind === "person" ? people : knowledgeEntities;
             const ids = [
-                idMap[pair.left] ?? pair.left,
-                idMap[pair.right] ?? pair.right,
-            ].sort();
-            const table = pair.kind === "person" ? people : knowledgeEntities;
-            const rows = await tx
-                .select({ id: table.id })
-                .from(table)
-                .where(
-                    and(
-                        eq(table.userId, scope),
-                        inArray(table.id, ids),
-                        isNull(table.mergedIntoId),
-                    ),
-                );
-            if (rows.length !== 2 || ids[0] === ids[1]) {
+                ...new Set(
+                    pairs
+                        .filter((pair) => pair.kind === kind)
+                        .flatMap((pair) => pair.ids),
+                ),
+            ];
+            for (const batch of chunks(ids))
+                for (const row of await tx
+                    .select({ id: table.id })
+                    .from(table)
+                    .where(
+                        and(
+                            eq(table.userId, scope),
+                            inArray(table.id, batch),
+                            isNull(table.mergedIntoId),
+                        ),
+                    ))
+                    live.add(`${kind}:${row.id}`);
+        }
+        const dismissals: (typeof almanacDuplicateDismissals.$inferInsert)[] =
+            [];
+        for (const { kind, ids } of pairs) {
+            const [left, right] = ids;
+            if (
+                !left ||
+                !right ||
+                left === right ||
+                !live.has(`${kind}:${left}`) ||
+                !live.has(`${kind}:${right}`)
+            ) {
                 skipped++;
                 continue;
             }
-            await tx
-                .insert(almanacDuplicateDismissals)
-                .values({
-                    userId: scope,
-                    kind: pair.kind,
-                    ...(pair.kind === "person"
-                        ? { leftPersonId: ids[0], rightPersonId: ids[1] }
-                        : { leftEntityId: ids[0], rightEntityId: ids[1] }),
-                    dismissedByUserId: actorId,
-                })
-                .onConflictDoNothing();
-            restored++;
+            dismissals.push({
+                userId: scope,
+                kind,
+                ...(kind === "person"
+                    ? { leftPersonId: left, rightPersonId: right }
+                    : { leftEntityId: left, rightEntityId: right }),
+                dismissedByUserId: actorId,
+            });
         }
-        const current = await detectCareProblems(scope, tx);
+        const current = new Map(
+            (await detectCareProblems(scope, tx)).map((problem) => [
+                JSON.stringify(careProblemContent(problem)),
+                problem,
+            ]),
+        );
         for (const saved of archive.problems) {
             const mapped = {
                 ...saved,
                 records: saved.records
-                    .map((record) => ({
-                        ...record,
-                        id: idMap[record.id] ?? record.id,
-                    }))
+                    .map((record) => ({ ...record, id: mapId(record.id) }))
                     .sort((a, b) => a.id.localeCompare(b.id)),
                 relationKey: saved.relationKey
-                    ? (idMap[saved.relationKey] ?? saved.relationKey)
+                    ? mapId(saved.relationKey)
                     : null,
             };
-            const match = current.find(
-                (problem) =>
-                    JSON.stringify(careProblemContent(problem)) ===
-                    JSON.stringify(mapped),
-            );
+            const match = current.get(JSON.stringify(mapped));
             if (!match) {
                 skipped++;
                 continue;
             }
+            dismissals.push({
+                userId: scope,
+                kind: match.kind,
+                problemKey: match.key,
+                problemData: encryptJsonField(careProblemContent(match)),
+                dismissedByUserId: actorId,
+            });
+        }
+        for (const batch of chunks(dismissals))
             await tx
                 .insert(almanacDuplicateDismissals)
-                .values({
-                    userId: scope,
-                    kind: match.kind,
-                    problemKey: match.key,
-                    problemData: encryptJsonField(careProblemContent(match)),
-                    dismissedByUserId: actorId,
-                })
+                .values(batch)
                 .onConflictDoNothing();
-            restored++;
-        }
         await bumpScopeInTx(tx, [scope]);
-        return { restored, skipped };
+        return { restored: dismissals.length, skipped };
     });
 }

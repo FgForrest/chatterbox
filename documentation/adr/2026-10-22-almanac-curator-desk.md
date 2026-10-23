@@ -1,7 +1,7 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-23 12:57
+updated: 2026-10-23 13:35
 status: accepted
 kind: feature
 issues: [240]
@@ -112,9 +112,10 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by #275 (PR 3):
 
 ## Verification
 
-- **PR 3 review fixes:** 38 additional database regressions bring the Care integration file to 68
+- **PR 3 review fixes:** additional database regressions bring the Care integration file to 74
   cases. They cover private dependencies on both record kinds, private speaker/mail usage, withdrawn
-  sources, private correction cascades, 12 concurrent FK writes during all Care erasure paths, and
+  sources, private correction cascades, 15 concurrent FK writes (task, proposal, mail participant and
+  speaker link) during all Care erasure paths, and
   existing recording writers finishing before Care takes parent locks. The populated plan test uses
   50,002 heard-as forms, 40,000 facts, 100,000 historical dismissals and 10,000 unrelated shared items:
   indexed candidates stop at 32,000 facts, 16,000 forms and 2,000 records per kind; dismissal membership
@@ -182,7 +183,11 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by #275 (PR 3):
   dependency checks and erasure;
   concurrent FK writers wait and fail if the parent was erased. Indexed candidate limits precede
   joins, dismissal reads use current keys only, and thin detection skips records above 64 uses.
-  Restore accepts independently retryable chunks of at most 32 MiB including the ID map.
+  Restore accepts independently retryable chunks of at most 32 MiB including the ID map; it checks
+  archived pairs in batches and matches problems through one map of current problems.
+- Keeping one value of a fact conflict retires every other current value of that relation on the
+  subject, including values Care cannot display (an object merged away), so the single-valued rule
+  holds after the fix. Thin deletion and share undo ask for confirmation in the UI.
 - The archive restore endpoint restores Care decisions after records, facts and usage; a general
   archive-import UI remains separate work.
 - Each kind scans at most the newest 2,000 live records (`MAX_DUPLICATE_RECORDS` in

@@ -15,14 +15,20 @@ import AlmanacLayout from "@/app/(app)/almanac/layout";
 import { CareProblemCard } from "@/components/almanac/care-problem-card";
 import { CareQueue } from "@/components/almanac/care-queue";
 import { FolderCareFlags } from "@/components/almanac/folder-care-flags";
+import { ShareAdditionsGroupCard } from "@/components/almanac/share-additions-list";
 import { messagesForLocale } from "@/lib/i18n/messages";
 import type { CareProblem } from "@/lib/knowledge/care-types";
+import type {
+    ShareAddition,
+    SharedAdditionsGroup,
+} from "@/lib/knowledge/share-review";
 
 const mocks = vi.hoisted(() => ({
     fetch: vi.fn(),
     refresh: vi.fn(),
     curator: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(7),
+    confirm: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: mocks.refresh }),
@@ -54,6 +60,9 @@ vi.mock("@/lib/authz/curator", () => ({
 vi.mock("@/lib/knowledge/care-access", () => ({ canOpenCare: mocks.curator }));
 vi.mock("@/lib/knowledge/care-summary", () => ({ careCount: mocks.count }));
 vi.mock("@/components/app-header", () => ({ AppHeader: () => null }));
+vi.mock("@/components/confirm-dialog", () => ({
+    useConfirm: () => mocks.confirm,
+}));
 vi.mock("@/components/almanac/compare-join-dialog", () => ({
     CompareJoinDialog: () => null,
 }));
@@ -84,6 +93,7 @@ beforeEach(() => {
     mocks.refresh.mockClear();
     mocks.count.mockClear();
     mocks.curator.mockResolvedValue(true);
+    mocks.confirm.mockReset().mockResolvedValue(true);
     vi.stubGlobal("fetch", mocks.fetch);
     sessionStorage.clear();
 });
@@ -159,6 +169,124 @@ describe.each(["Care", "folder"] as const)("%s problem fixes", (variant) => {
             "dismiss",
         );
     });
+    it("asks before deleting a thin record", async () => {
+        mocks.confirm.mockResolvedValueOnce(false);
+        mount({
+            ...problem,
+            kind: "thin",
+            options: [],
+            lastAt: "2025-01-01T00:00:00Z",
+        });
+        const remove = () =>
+            fireEvent.click(
+                screen.getByRole("button", { name: "Delete", hidden: true }),
+            );
+        remove();
+        await waitFor(() => expect(mocks.confirm).toHaveBeenCalledOnce());
+        expect(mocks.confirm.mock.calls[0][0]).toMatchObject({
+            title: "Delete Velnaro?",
+            destructive: true,
+        });
+        expect(mocks.fetch).not.toHaveBeenCalled();
+        remove();
+        await waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+        expect(JSON.parse(mocks.fetch.mock.calls[0][1].body).action).toBe(
+            "delete",
+        );
+    });
+});
+
+function addition(id: string, label: string): ShareAddition {
+    return {
+        id,
+        kind: "person",
+        targetId: id,
+        personId: id,
+        entityId: null,
+        label,
+        removedAt: null,
+        keptReason: null,
+    };
+}
+const shareGroup: SharedAdditionsGroup = {
+    id: "share",
+    item: null,
+    sharer: "Jitka Dvořáková",
+    createdAt: "2026-10-22T10:00:00Z",
+    reviewedAt: null,
+    undoneAt: null,
+    nextOffset: 100,
+    additions: [addition("addition", "Nela Starling")],
+};
+it("asks before deleting one addition or undoing a share, and restores the rows when an action fails", async () => {
+    mocks.confirm.mockResolvedValueOnce(false);
+    render(<ShareAdditionsGroupCard group={shareGroup} onChanged={vi.fn()} />, {
+        wrapper,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete addition" }));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledOnce());
+    expect(mocks.confirm.mock.calls[0][0]).toMatchObject({
+        title: "Delete this addition?",
+        destructive: true,
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    mocks.fetch.mockResolvedValue(Response.json({}, { status: 500 }));
+    fireEvent.click(
+        screen.getByRole("button", {
+            name: "Undo all additions from this share",
+        }),
+    );
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    expect(mocks.confirm.mock.calls[1][0]).toMatchObject({
+        title: "Undo all additions from this share?",
+    });
+    expect(JSON.parse(mocks.fetch.mock.calls[0][1].body)).toEqual({
+        eventId: "share",
+        action: "undo",
+    });
+    await waitFor(() =>
+        expect(
+            screen
+                .getByRole("button", { name: "Delete addition" })
+                .hasAttribute("disabled"),
+        ).toBe(false),
+    );
+    expect(screen.queryByText("Removed")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+        expect(
+            screen
+                .getByRole("button", { name: "Mark reviewed" })
+                .hasAttribute("disabled"),
+        ).toBe(false),
+    );
+    expect(mocks.refresh).not.toHaveBeenCalled();
+});
+it("pages a share's additions", async () => {
+    mocks.fetch.mockResolvedValue(
+        Response.json({
+            groups: [
+                {
+                    ...shareGroup,
+                    nextOffset: null,
+                    additions: [addition("second", "Velnaro")],
+                },
+            ],
+            nextOffset: null,
+            openCount: 1,
+        }),
+    );
+    render(<ShareAdditionsGroupCard group={shareGroup} onChanged={vi.fn()} />, {
+        wrapper,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "More additions" }));
+    expect(await screen.findByText(/Velnaro/)).toBeTruthy();
+    expect(screen.getByText(/Nela Starling/)).toBeTruthy();
+    expect(String(mocks.fetch.mock.calls[0][0])).toContain(
+        "eventId=share&additionOffset=100",
+    );
+    expect(screen.queryByRole("button", { name: "More additions" })).toBeNull();
 });
 
 it("never shows flags or fixes without curator-only data", () => {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import type {
     KeptReason,
@@ -24,6 +25,7 @@ export function ShareAdditionsGroupCard({
     const i18n = useExtracted();
     const formatter = useFormatter();
     const router = useRouter();
+    const confirm = useConfirm();
     const [data, setData] = useState(group);
     const [busy, setBusy] = useState(false);
     const [reviewed, setReviewed] = useState(Boolean(group.reviewedAt));
@@ -108,6 +110,28 @@ export function ShareAdditionsGroupCard({
             setBusy(false);
         }
     }
+    async function remove(additionId?: string) {
+        if (
+            await confirm({
+                title: additionId
+                    ? i18n("Delete this addition?")
+                    : i18n("Undo all additions from this share?"),
+                description: additionId
+                    ? i18n(
+                          "It is removed from the Organization Almanac unless other knowledge depends on it. This cannot be undone.",
+                      )
+                    : i18n(
+                          "Untouched additions are removed from the Organization Almanac. The item stays shared. This cannot be undone.",
+                      ),
+                confirmLabel: additionId
+                    ? i18n("Delete addition")
+                    : i18n("Undo additions"),
+                destructive: true,
+                onConfirm: () => {},
+            })
+        )
+            await act(additionId ? "delete" : "undo", additionId);
+    }
     async function more() {
         if (data.nextOffset === null || busy) return;
         setBusy(true);
@@ -187,9 +211,7 @@ export function ShareAdditionsGroupCard({
                                     size="sm"
                                     variant="ghost"
                                     disabled={busy || Boolean(data.undoneAt)}
-                                    onClick={() =>
-                                        void act("delete", addition.id)
-                                    }
+                                    onClick={() => void remove(addition.id)}
                                 >
                                     {i18n("Delete addition")}
                                 </Button>
@@ -228,7 +250,7 @@ export function ShareAdditionsGroupCard({
                     size="sm"
                     variant="outline"
                     disabled={busy || Boolean(data.undoneAt)}
-                    onClick={() => void act("undo")}
+                    onClick={() => void remove()}
                 >
                     {i18n("Undo all additions from this share")}
                 </Button>

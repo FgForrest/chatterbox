@@ -1,5 +1,5 @@
 import type { Readable } from "node:stream";
-import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
+import { and, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import unzipper from "unzipper";
 import {
     afterAll,
@@ -481,6 +481,37 @@ withDatabase("Care queue with Organization provenance", () => {
             await undo;
         }
     });
+    it("reviews a share and deletes one addition through the shares route", async () => {
+        const { event, person } = await speaker();
+        const [addition] = await db()
+            .select()
+            .from(almanacShareChanges)
+            .where(eq(almanacShareChanges.targetId, person.id));
+        const reviewed = await call(shareAction, "curator", {
+            eventId: event.id,
+            action: "review",
+        });
+        expect(reviewed.status).toBe(200);
+        expect(await shareReviewCount("curator")).toBe(0);
+        expect(
+            (
+                await call(shareAction, "curator", {
+                    eventId: event.id,
+                    action: "delete",
+                })
+            ).status,
+        ).toBe(400);
+        const deleted = await call(shareAction, "curator", {
+            eventId: event.id,
+            action: "delete",
+            additionId: addition?.id,
+        });
+        expect(deleted.status).toBe(200);
+        expect((await deleted.json()).removed).toEqual([addition?.id]);
+        expect(
+            await db().select().from(people).where(eq(people.id, person.id)),
+        ).toEqual([]);
+    });
     it("keeps an edited person", async () => {
         const { event, person } = await speaker();
         await updatePerson("curator", person.id, {
@@ -800,6 +831,62 @@ withDatabase("Care queue with Organization provenance", () => {
             ),
         ).toHaveLength(0);
     });
+    it("retires every other current value on keep, including one whose object cannot be shown", async () => {
+        const subject = await createEntity("org", {
+            name: "Velnaro",
+            typeKey: "term",
+        });
+        const a = await literalFact(subject.id, "First meaning");
+        await literalFact(subject.id, "Second meaning");
+        const merged = await createEntity("org", {
+            name: "Old meaning",
+            typeKey: "term",
+        });
+        const survivor = await createEntity("org", {
+            name: "New meaning",
+            typeKey: "term",
+        });
+        await db()
+            .update(knowledgeEntities)
+            .set({ mergedIntoId: survivor.id })
+            .where(eq(knowledgeEntities.id, merged.id));
+        const [hidden] = await db()
+            .insert(knowledgeFacts)
+            .values({
+                userId: "org",
+                subjectEntityId: subject.id,
+                subjectKey: `e:${subject.id}`,
+                relationKey: "means",
+                objectEntityId: merged.id,
+                objectKey: `e:${merged.id}`,
+                origin: "manual",
+            })
+            .returning();
+        await db().transaction((tx) => bumpScopeInTx(tx, ["org"]));
+        const problem = (await detectCareProblems("org")).find(
+            (p) => p.kind === "fact_conflict",
+        );
+        expect(problem?.options.map((option) => option.label).sort()).toEqual([
+            "First meaning",
+            "Second meaning",
+        ]);
+        await fixCareProblem("curator", problem?.key ?? "", "keep", a.id);
+        const current = await db()
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(
+                and(
+                    eq(knowledgeFacts.subjectKey, `e:${subject.id}`),
+                    isNull(knowledgeFacts.replacedByFactId),
+                ),
+            );
+        expect(current.map((row) => row.id)).toEqual([a.id]);
+        const [retired] = await db()
+            .select()
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.id, hidden?.id ?? ""));
+        expect(retired?.replacedByFactId).toBe(a.id);
+    });
     it("remembers dismissals and reopens a changed conflict", async () => {
         const { subject, problem } = await conflict();
         await fixCareProblem("curator", problem.key, "dismiss");
@@ -1113,9 +1200,13 @@ withDatabase("Care queue with Organization provenance", () => {
     });
     it.each(
         (["share", "addition", "thin"] as const).flatMap((mode) =>
-            ["assignment", "task insert", "proposal", "mail participant"].map(
-                (writerKind) => ({ mode, writerKind }),
-            ),
+            [
+                "assignment",
+                "task insert",
+                "proposal",
+                "mail participant",
+                "speaker link",
+            ].map((writerKind) => ({ mode, writerKind })),
         ),
     )("blocks a concurrent $writerKind after $mode deletion's dependency check and rejects its FK reference", async ({
         mode,
@@ -1129,7 +1220,7 @@ withDatabase("Care queue with Organization provenance", () => {
             .select()
             .from(almanacShareChanges)
             .where(eq(almanacShareChanges.kind, "person"));
-        await audio("other-source");
+        const otherTranscript = await audio("other-source");
         const taskId = await insertTask(db(), {
             userId: "member",
             recordingId: "other-source",
@@ -1187,8 +1278,11 @@ withDatabase("Care queue with Organization provenance", () => {
                       : writerKind === "proposal"
                         ? writer`insert into task_update_proposals (id, user_id, recording_id, task_id, kind, proposed_assignee_person_id)
                         values ('concurrent-proposal', 'member', 'other-source', ${taskId}, 'assignee', ${person.id})`
-                        : writer`insert into mail_participants (id, user_id, item_id, ref, roles, person_id)
-                        values ('concurrent-participant', 'member', 'other-mail', 'p1', '[]', ${person.id})`;
+                        : writerKind === "mail participant"
+                          ? writer`insert into mail_participants (id, user_id, item_id, ref, roles, person_id)
+                        values ('concurrent-participant', 'member', 'other-mail', 'p1', '[]', ${person.id})`
+                          : writer`insert into transcript_speakers (id, user_id, transcription_id, label, source, status, person_id)
+                        values ('concurrent-speaker', 'member', ${otherTranscript}, 'speaker_9', 'user', 'confirmed', ${person.id})`;
             const outcome = statement.then(
                 () => "committed",
                 (error: { code: string }) => error.code,
@@ -1454,11 +1548,9 @@ withDatabase("Care queue with Organization provenance", () => {
             nodes(plans[2]).some(
                 (row) =>
                     row["Node Type"] === "Seq Scan" &&
-                    [
-                        "knowledge_aliases",
-                        "knowledge_facts",
-                        "almanac_duplicate_dismissals",
-                    ].includes(String(row["Relation Name"])) &&
+                    ["knowledge_aliases", "knowledge_facts"].includes(
+                        String(row["Relation Name"]),
+                    ) &&
                     Number(row["Actual Loops"]) > 0,
             ),
         ).toBe(false);

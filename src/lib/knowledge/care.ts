@@ -437,7 +437,29 @@ export async function fixCareProblem(
                     "Choose a current value",
                     400,
                 );
-            const ids = problem.options.map((option) => option.id);
+            const subject = problem.records[0];
+            const ids =
+                subject && problem.relationKey
+                    ? (
+                          await tx
+                              .select({ id: knowledgeFacts.id })
+                              .from(knowledgeFacts)
+                              .where(
+                                  and(
+                                      eq(knowledgeFacts.userId, scope),
+                                      eq(
+                                          knowledgeFacts.subjectKey,
+                                          `${subject.kind === "person" ? "p" : "e"}:${subject.id}`,
+                                      ),
+                                      eq(
+                                          knowledgeFacts.relationKey,
+                                          problem.relationKey,
+                                      ),
+                                      isNull(knowledgeFacts.replacedByFactId),
+                                  ),
+                              )
+                      ).map((row) => row.id)
+                    : [];
             await lockRecordingsNaming(tx, { factIds: ids });
             await tx
                 .update(knowledgeFacts)
