@@ -55,6 +55,7 @@ export function FolderPicker({
             matchFolders(
                 folders.filter(
                     (folder) =>
+                        !folder.receivedFolder &&
                         (!organizationOnly || folder.scope === "org") &&
                         (!scope || folder.scope === scope),
                 ),

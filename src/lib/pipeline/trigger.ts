@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
+import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import {
     incrementProcessingRequestInTx,
     wakePendingPipelineAdvanceInTx,
@@ -50,10 +51,18 @@ export async function requestAdvanceInTx(
     tx: Tx,
     input: RequestAdvanceInput,
 ): Promise<RequestAdvanceResult | null> {
-    return requestAdvanceForViewInTx(tx, {
+    const result = await requestAdvanceForViewInTx(tx, {
         ...input,
         ...pipelineDriver(input.userId),
     });
+    if (
+        result &&
+        (input.reason === "arrival" ||
+            input.reason === "placement" ||
+            input.reason === "categorized")
+    )
+        await notifyFolderReceiversInTx(tx, input.userId, input.itemId);
+    return result;
 }
 
 /** Advance an exact stored row when maintaining a legacy pipeline view. */

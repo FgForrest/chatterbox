@@ -3,7 +3,10 @@ import { Workstation } from "@/components/dashboard/workstation";
 import { PersonSharingProvider } from "@/components/sharing/person-sharing";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
-import { receivedItemCondition } from "@/db/queries/item-shares";
+import {
+    listOutgoingSharedItemIds,
+    receivedItemCondition,
+} from "@/db/queries/item-shares";
 import {
     aiEnhancements,
     chatterItems,
@@ -37,6 +40,7 @@ import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { getPlaudConnection } from "@/lib/settings/plaud-connection";
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
+import { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
 import { listMyInvitations } from "@/lib/sharing/person-shares";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -267,6 +271,7 @@ export default async function DashboardPage() {
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
+        outgoingItemIds,
     ] = await Promise.all([
         db
             .select({
@@ -336,6 +341,7 @@ export default async function DashboardPage() {
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),
+        listOutgoingSharedItemIds(session.user.id),
     ]);
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
@@ -412,7 +418,10 @@ export default async function DashboardPage() {
                   new Set(),
                   true,
               ),
-              listMyInvitations(session.user.id),
+              Promise.all([
+                  listMyInvitations(session.user.id),
+                  listMyFolderInvitations(session.user.id),
+              ]).then((lists) => lists.flat()),
               db
                   .select({
                       id: itemShares.id,
@@ -432,10 +441,23 @@ export default async function DashboardPage() {
     const receivedByItem = new Map(
         receivedShares.map((share) => [share.itemId, share]),
     );
+    const attachmentIds = new Set(
+        folderOrganization.folders
+            .filter((folder) => folder.receivedFolder)
+            .map((folder) => folder.id),
+    );
+    const receivedFoldersByItem = new Map<string, string[]>();
+    for (const assignment of folderOrganization.assignments) {
+        if (!attachmentIds.has(assignment.folderId)) continue;
+        const ids = receivedFoldersByItem.get(assignment.recordingId) ?? [];
+        ids.push(assignment.folderId);
+        receivedFoldersByItem.set(assignment.recordingId, ids);
+    }
     const receivedRecordings =
         receivedLibrary?.recordings.map((recording) => ({
             ...recording,
             receivedShare: receivedByItem.get(recording.id),
+            receivedFolderIds: receivedFoldersByItem.get(recording.id) ?? [],
         })) ?? [];
     const allTranscriptions = new Map([
         ...transcriptionMap,
@@ -464,8 +486,10 @@ export default async function DashboardPage() {
             <Workstation
                 userId={session.user.id}
                 recordings={[
-                    ...recordingsData,
-                    ...mailRows,
+                    ...[...recordingsData, ...mailRows].map((recording) => ({
+                        ...recording,
+                        sharedWithPeople: outgoingItemIds.has(recording.id),
+                    })),
                     ...receivedRecordings,
                 ]}
                 transcriptions={allTranscriptions}

@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
@@ -18,6 +19,7 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { notifyPersonShareChanged } from "@/lib/events/personal";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { isIdpAuthorization } from "@/lib/identity/factory";
 import { nudge } from "@/lib/jobs/nudge";
@@ -41,6 +43,12 @@ import { notifyOrgChange } from "@/lib/org/events";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { bindPlacementProfileInTx } from "@/lib/profiles/placement-binding";
 import { recordingJobSubject } from "@/lib/sharing/access";
+import {
+    endFolderSharesInTx,
+    listReceivedFolderOrganization,
+    notifyFolderSharesChanged,
+    sharedFolderIds,
+} from "@/lib/sharing/folder-shares";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import {
@@ -575,9 +583,26 @@ export async function listFolderOrganization(
         ? await listTreeOrganization(orgUserId, "org")
         : { folders: [], assignments: [] };
 
+    const [received, outgoing] = isOrg
+        ? [{ folders: [], assignments: [] }, new Set<string>()]
+        : await Promise.all([
+              listReceivedFolderOrganization(userId),
+              sharedFolderIds(userId),
+          ]);
     return {
-        folders: [...personal.folders, ...org.folders],
-        assignments: [...personal.assignments, ...org.assignments],
+        folders: [
+            ...personal.folders.map((folder) => ({
+                ...folder,
+                ...(outgoing.has(folder.id) ? { sharedWithPeople: true } : {}),
+            })),
+            ...org.folders,
+            ...received.folders,
+        ],
+        assignments: [
+            ...personal.assignments,
+            ...org.assignments,
+            ...received.assignments,
+        ],
     };
 }
 
@@ -761,6 +786,7 @@ export async function renameFolder(input: {
         await orgTreeChanged();
     } else {
         await scheduleFolderExportProjection(input.userId);
+        await notifyFolderSharesChanged(input.userId);
     }
     return serializeFolder(updated, target.scope);
 }
@@ -974,7 +1000,7 @@ export async function deleteFolder(
     { canCurate = false }: { canCurate?: boolean } = {},
 ): Promise<void> {
     const orgUserId = await getOrgUserId();
-    const scope = await db.transaction(async (tx) => {
+    const deleted = await db.transaction(async (tx) => {
         if (orgUserId) await lockOrgTree(tx);
         await lockPrivateFolderTree(tx, userId);
         const target = await resolveFolder(tx, userId, folderId, orgUserId);
@@ -1063,14 +1089,31 @@ export async function deleteFolder(
             }
         }
 
-        // Its addresses and its subfolders' stop working for good, before the
-        // cascade would leave them pointing nowhere.
-        await blockFolderAddressesInTx(tx, [
+        const deletedFolderIds = [
             ...subtreeIds(
                 await listTreeFolders(tx, target.ownerId),
                 target.folder.id,
             ),
-        ]);
+        ];
+        await tx
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, target.ownerId),
+                    inArray(recordingFolders.id, deletedFolderIds),
+                ),
+            )
+            .orderBy(recordingFolders.id)
+            .for("update");
+        const receivers = await endFolderSharesInTx(
+            tx,
+            target.ownerId,
+            deletedFolderIds,
+        );
+        // Its addresses and its subfolders' stop working for good, before the
+        // cascade would leave them pointing nowhere.
+        await blockFolderAddressesInTx(tx, deletedFolderIds);
         await tx
             .update(recordingTasks)
             .set({
@@ -1098,9 +1141,10 @@ export async function deleteFolder(
                     eq(recordingFolders.userId, target.ownerId),
                 ),
             );
-        return target.scope;
+        return { scope: target.scope, receivers };
     });
-    if (scope === "org") {
+    await Promise.all(deleted.receivers.map(notifyPersonShareChanged));
+    if (deleted.scope === "org") {
         await orgTreeChanged();
     } else {
         await scheduleFolderExportProjection(userId);
@@ -1175,6 +1219,13 @@ export async function pruneRedundantAssignmentsInTx(
         }
     }
     if (redundant.size > 0) {
+        for (const folderId of redundant)
+            await notifyFolderReceiversInTx(
+                tx,
+                treeOwnerId,
+                recordingId,
+                folderId,
+            );
         await tx
             .delete(recordingFolderAssignments)
             .where(
@@ -1439,6 +1490,12 @@ export async function removeRecordingFromFolder(input: {
 
     if (target.scope === "personal") {
         await db.transaction(async (tx) => {
+            await notifyFolderReceiversInTx(
+                tx,
+                input.userId,
+                input.recordingId,
+                input.folderId,
+            );
             await tx
                 .delete(recordingFolderAssignments)
                 .where(
@@ -1860,6 +1917,13 @@ export async function moveRecordingBetweenFolders(input: {
                     folderId: to.folder.id,
                 })
                 .onConflictDoNothing();
+            if (from.scope === "personal")
+                await notifyFolderReceiversInTx(
+                    tx,
+                    existing.userId,
+                    input.recordingId,
+                    from.folder.id,
+                );
             await tx
                 .delete(recordingFolderAssignments)
                 .where(

@@ -14,6 +14,11 @@ const { dbMock } = vi.hoisted(() => ({
     },
 }));
 
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+    requestAdvance: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),

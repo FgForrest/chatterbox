@@ -81,6 +81,7 @@ vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => null,
     isOrgAccount: async () => false,
     isOrgScopeEnabled: () => false,
+    isOrgScopeVisible: () => false,
 }));
 
 import { createFolder, ensureRootFolders } from "@/lib/folders/folders";

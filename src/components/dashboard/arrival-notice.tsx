@@ -17,6 +17,7 @@ export function ArrivalNotice({
     onOpen,
     onClose,
     invitation = false,
+    folderInvitation = false,
 }: {
     recording: Recording;
     more: number;
@@ -24,6 +25,7 @@ export function ArrivalNotice({
     onOpen: () => void;
     onClose: () => void;
     invitation?: boolean;
+    folderInvitation?: boolean;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -54,11 +56,17 @@ export function ArrivalNotice({
                             )}
                         >
                             {invitation
-                                ? i18n("{owner} shared an item with you", {
-                                      owner:
-                                          recording.ownerName ??
-                                          i18n("A colleague"),
-                                  })
+                                ? folderInvitation
+                                    ? i18n("{owner} shared a folder with you", {
+                                          owner:
+                                              recording.ownerName ??
+                                              i18n("A colleague"),
+                                      })
+                                    : i18n("{owner} shared an item with you", {
+                                          owner:
+                                              recording.ownerName ??
+                                              i18n("A colleague"),
+                                      })
                                 : mail
                                   ? i18n("New email")
                                   : i18n("New recording")}
@@ -84,9 +92,11 @@ export function ArrivalNotice({
                 </div>
                 <div className="mt-1 flex min-w-0 items-center justify-between gap-2.5">
                     <div className="truncate text-xs text-muted-foreground tabular-nums">
-                        {mail
-                            ? (recording.mail?.from ?? i18n("Unknown sender"))
-                            : formatDurationMs(recording.duration)}
+                        {folderInvitation
+                            ? i18n("Read-only shared folder")
+                            : mail
+                              ? (recording.mail?.from ?? i18n("Unknown sender"))
+                              : formatDurationMs(recording.duration)}
                         {" · "}
                         {formatDateTime(
                             recording.startTime,

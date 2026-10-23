@@ -22,6 +22,10 @@ import {
 import { toast } from "sonner";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { FolderPicker } from "@/components/recordings/folder-picker";
+import {
+    changeFolderShareRequest,
+    ReceivedFolderDialog,
+} from "@/components/sharing/folder-sharing";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -37,6 +41,7 @@ import {
 } from "@/components/ui/popover";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
+import type { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
 import type {
     listItemShares,
     listMyInvitations,
@@ -45,7 +50,9 @@ import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
 type Share = Awaited<ReturnType<typeof listItemShares>>[number];
-type Invitation = Awaited<ReturnType<typeof listMyInvitations>>[number];
+export type Invitation =
+    | Awaited<ReturnType<typeof listMyInvitations>>[number]
+    | Awaited<ReturnType<typeof listMyFolderInvitations>>[number];
 const SharingContext = createContext(false);
 const SharingRefreshContext = createContext<() => void>(() => {});
 
@@ -99,7 +106,7 @@ export async function changeShare(
     }
 }
 
-/** One owner dialog for recordings and mail, including invitation responses. */
+/** One owner sharing body for recordings, mail and folders, in dialogs or settings. */
 export function PersonShareDialog({
     itemId,
     title,
@@ -108,16 +115,23 @@ export function PersonShareDialog({
     onOpenChange,
     onChanged,
     allowInvite = true,
+    inline = false,
 }: {
     itemId: string;
     title: string;
-    kind: "audio" | "mail";
+    kind: "audio" | "mail" | "folder";
+    inline?: boolean;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onChanged?: (shares: Share[]) => void;
     allowInvite?: boolean;
 }) {
     const i18n = useExtracted();
+    const refreshSharing = usePersonSharingRefresh();
+    const endpoint =
+        kind === "folder"
+            ? `/api/folders/${encodeURIComponent(itemId)}/shares`
+            : `/api/items/${encodeURIComponent(itemId)}/shares`;
     const [shares, setShares] = useState<Share[]>([]);
     const [query, setQuery] = useState("");
     const [people, setPeople] = useState<
@@ -126,9 +140,7 @@ export function PersonShareDialog({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const load = useCallback(async () => {
-        const response = await fetch(
-            `/api/items/${encodeURIComponent(itemId)}/shares`,
-        );
+        const response = await fetch(endpoint);
         if (!response.ok)
             throw new Error(
                 await getApiErrorMessage(
@@ -139,9 +151,16 @@ export function PersonShareDialog({
         const data = (await response.json()) as { shares: Share[] };
         setShares(data.shares);
         onChanged?.(data.shares);
-    }, [itemId, i18n, onChanged]);
+    }, [endpoint, i18n, onChanged]);
     useEffect(() => {
-        if (open) void load().catch((error) => setError(String(error)));
+        if (!open) return;
+        const reload = () => {
+            void load().catch((error) => setError(String(error)));
+        };
+        reload();
+        return subscribeEvents((event) => {
+            if (event.type === "share") reload();
+        });
     }, [open, load]);
     useEffect(() => {
         if (!open || query.trim().length < 2) {
@@ -182,6 +201,7 @@ export function PersonShareDialog({
         try {
             await action();
             await load();
+            refreshSharing();
         } catch (error) {
             setError(
                 error instanceof Error
@@ -193,14 +213,11 @@ export function PersonShareDialog({
         }
     };
     const invite = async (receiverId: string) => {
-        const response = await fetch(
-            `/api/items/${encodeURIComponent(itemId)}/shares`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ receiverIds: [receiverId] }),
-            },
-        );
+        const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ receiverIds: [receiverId] }),
+        });
         if (!response.ok)
             throw new Error(
                 await getApiErrorMessage(
@@ -210,91 +227,91 @@ export function PersonShareDialog({
             );
         setQuery("");
     };
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-xl">
-                <DialogTitle className="flex items-center gap-2">
-                    <UserPlus className="size-5 text-person-share" />
-                    {kind === "mail"
-                        ? i18n("Share email")
-                        : i18n("Share recording")}
-                </DialogTitle>
-                <DialogDescription>{title}</DialogDescription>
-                {allowInvite && (
-                    <Input
-                        aria-label={i18n("Colleague's name or email")}
-                        placeholder={i18n("Colleague's name or email")}
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                    />
-                )}
-                {(allowInvite ? people : [])
-                    .filter(
-                        (person) =>
-                            !shares.some(
-                                (share) =>
-                                    share.receiverUserId === person.id &&
-                                    (share.state === "accepted" ||
-                                        share.state === "pending"),
-                            ),
-                    )
-                    .map((person) => (
-                        <div
-                            key={person.id}
-                            className="flex items-center justify-between gap-2 rounded border p-2"
-                        >
-                            <div>
-                                {person.name ?? person.email}
-                                <div className="text-xs text-muted-foreground">
-                                    {person.email}
-                                </div>
+    const content = (
+        <>
+            <h3 className="flex items-center gap-2">
+                <UserPlus className="size-5 text-person-share" />
+                {kind === "folder"
+                    ? i18n("Share folder")
+                    : kind === "mail"
+                      ? i18n("Share email")
+                      : i18n("Share recording")}
+            </h3>
+            <p className="text-sm text-muted-foreground">{title}</p>
+            {allowInvite && (
+                <Input
+                    aria-label={i18n("Colleague's name or email")}
+                    placeholder={i18n("Colleague's name or email")}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                />
+            )}
+            {(allowInvite ? people : [])
+                .filter(
+                    (person) =>
+                        !shares.some(
+                            (share) =>
+                                share.receiverUserId === person.id &&
+                                (share.state === "accepted" ||
+                                    share.state === "pending"),
+                        ),
+                )
+                .map((person) => (
+                    <div
+                        key={person.id}
+                        className="flex items-center justify-between gap-2 rounded border p-2"
+                    >
+                        <div>
+                            {person.name ?? person.email}
+                            <div className="text-xs text-muted-foreground">
+                                {person.email}
                             </div>
-                            <Button
-                                size="sm"
-                                disabled={busy}
-                                onClick={() =>
-                                    void act(() => invite(person.id))
-                                }
-                            >
-                                {i18n("Add")}
-                            </Button>
                         </div>
-                    ))}
-                <p className="text-sm font-medium">{i18n("Shared with")}</p>
-                <div className="max-h-72 space-y-2 overflow-auto">
-                    {shares.map((share) => (
-                        <div
-                            key={share.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"
+                        <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void act(() => invite(person.id))}
                         >
-                            <div>
-                                {share.name ?? share.email}
-                                <div className="text-xs text-muted-foreground">
-                                    {share.email}
-                                </div>
+                            {i18n("Add")}
+                        </Button>
+                    </div>
+                ))}
+            <p className="text-sm font-medium">{i18n("Shared with")}</p>
+            <div className="max-h-72 space-y-2 overflow-auto">
+                {shares.map((share) => (
+                    <div
+                        key={share.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"
+                    >
+                        <div>
+                            {share.name ?? share.email}
+                            <div className="text-xs text-muted-foreground">
+                                {share.email}
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs">
-                                    {share.state === "pending"
-                                        ? i18n("Waiting for acceptance")
-                                        : share.state === "accepted"
-                                          ? i18n("Accepted")
-                                          : share.state === "declined"
-                                            ? i18n("Declined")
-                                            : i18n("Removed")}
-                                </span>
-                                {(allowInvite ||
-                                    share.state === "pending" ||
-                                    share.state === "accepted") && (
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        disabled={busy}
-                                        onClick={() =>
-                                            void act(() =>
-                                                share.state === "pending" ||
-                                                share.state === "accepted"
-                                                    ? changeShare(
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs">
+                                {share.state === "pending"
+                                    ? i18n("Waiting for acceptance")
+                                    : share.state === "accepted"
+                                      ? i18n("Accepted")
+                                      : share.state === "declined"
+                                        ? i18n("Declined")
+                                        : i18n("Removed")}
+                            </span>
+                            {(allowInvite ||
+                                share.state === "pending" ||
+                                share.state === "accepted") && (
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busy}
+                                    onClick={() =>
+                                        void act(() =>
+                                            share.state === "pending" ||
+                                            share.state === "accepted"
+                                                ? kind === "folder"
+                                                    ? changeFolderShareRequest(
                                                           share.id,
                                                           share.version,
                                                           share.state ===
@@ -305,44 +322,83 @@ export function PersonShareDialog({
                                                               "Could not update sharing",
                                                           ),
                                                       )
-                                                    : invite(
-                                                          share.receiverUserId,
-                                                      ),
-                                            )
-                                        }
-                                    >
-                                        {share.state === "pending"
-                                            ? i18n("Cancel")
-                                            : share.state === "accepted"
-                                              ? i18n("Remove")
-                                              : i18n("Invite again")}
-                                    </Button>
-                                )}
-                            </div>
+                                                    : changeShare(
+                                                          share.id,
+                                                          share.version,
+                                                          share.state ===
+                                                              "pending"
+                                                              ? "cancel"
+                                                              : "remove",
+                                                          i18n(
+                                                              "Could not update sharing",
+                                                          ),
+                                                      )
+                                                : invite(share.receiverUserId),
+                                        )
+                                    }
+                                >
+                                    {share.state === "pending"
+                                        ? i18n("Cancel")
+                                        : share.state === "accepted"
+                                          ? i18n("Remove")
+                                          : i18n("Invite again")}
+                                </Button>
+                            )}
                         </div>
-                    ))}
-                </div>
-                <p className="flex gap-2 rounded bg-person-share/10 p-3 text-sm">
-                    <Lock className="size-4 shrink-0 text-person-share" />
-                    {allowInvite
-                        ? i18n(
-                              "This stays your private item. The Organization will not see it. Recipients can read it and complete tasks assigned to them.",
-                          )
-                        : i18n(
-                              "The Organization already sees this item. Existing person shares and their filing stay in place.",
-                          )}
+                    </div>
+                ))}
+            </div>
+            {kind === "folder" && (
+                <p className="rounded bg-person-share/10 p-3 text-sm">
+                    {i18n(
+                        "Only items directly in this folder are shared, never subfolders. Items you add later become visible to recipients. Items you remove stop being visible.",
+                    )}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                    {i18n("Everyone must accept their invitation.")}
+            )}
+            <p className="flex gap-2 rounded bg-person-share/10 p-3 text-sm">
+                <Lock className="size-4 shrink-0 text-person-share" />
+                {kind === "folder"
+                    ? i18n(
+                          "The folder and its items stay yours. Sharing with people does not share them with the Organization.",
+                      )
+                    : allowInvite
+                      ? i18n(
+                            "This stays your private item. The Organization will not see it. Recipients can read it and complete tasks assigned to them.",
+                        )
+                      : i18n(
+                            "The Organization already sees this item. Existing person shares and their filing stay in place.",
+                        )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+                {i18n("Everyone must accept their invitation.")}
+            </p>
+            {error && (
+                <p role="alert" className="text-sm text-destructive">
+                    {error}
                 </p>
-                {error && (
-                    <p role="alert" className="text-sm text-destructive">
-                        {error}
-                    </p>
-                )}
+            )}
+            {!inline && (
                 <Button className="ml-auto" onClick={() => onOpenChange(false)}>
                     {i18n("Done")}
                 </Button>
+            )}
+        </>
+    );
+    if (inline) return <div className="space-y-3">{content}</div>;
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-xl">
+                <DialogTitle className="sr-only">
+                    {kind === "folder"
+                        ? i18n("Share folder")
+                        : kind === "mail"
+                          ? i18n("Share email")
+                          : i18n("Share recording")}
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                    {title}
+                </DialogDescription>
+                {content}
             </DialogContent>
         </Dialog>
     );
@@ -572,7 +628,10 @@ export function PersonInvitations({
                                 <ArrivalNotice
                                     recording={{
                                         id: latest.itemId,
-                                        kind: latest.kind,
+                                        kind:
+                                            latest.kind === "folder"
+                                                ? "audio"
+                                                : latest.kind,
                                         filename: latest.title,
                                         startTime: String(latest.invitedAt),
                                         duration: 0,
@@ -581,6 +640,7 @@ export function PersonInvitations({
                                         ownerName: latest.ownerName,
                                     }}
                                     invitation
+                                    folderInvitation={latest.kind === "folder"}
                                     more={data.invitations.length - 1}
                                     dateTimeFormat="relative"
                                     onOpen={() => {
@@ -609,13 +669,21 @@ export function PersonInvitations({
             items.filter((item) => item.id !== invitation.id),
         );
         try {
-            await changeShare(
-                invitation.id,
-                invitation.version,
-                action,
-                i18n("Could not update sharing"),
-                folderId,
-            );
+            if (invitation.kind === "folder")
+                await changeFolderShareRequest(
+                    invitation.id,
+                    invitation.version,
+                    action,
+                    i18n("Could not update sharing"),
+                );
+            else
+                await changeShare(
+                    invitation.id,
+                    invitation.version,
+                    action,
+                    i18n("Could not update sharing"),
+                    folderId,
+                );
             setFiling(null);
             refresh();
         } catch (error) {
@@ -672,7 +740,9 @@ export function PersonInvitations({
                                         setOpen(false);
                                     }}
                                 >
-                                    {i18n("Accept and file…")}
+                                    {invitation.kind === "folder"
+                                        ? i18n("Accept and attach…")
+                                        : i18n("Accept and file…")}
                                 </Button>
                                 <Button
                                     size="sm"
@@ -691,7 +761,28 @@ export function PersonInvitations({
                     ))}
                 </DialogContent>
             </Dialog>
-            {filing && (
+            {filing?.kind === "folder" && (
+                <ReceivedFolderDialog
+                    key={filing.id}
+                    shareId={filing.id}
+                    version={filing.version}
+                    name={filing.title}
+                    ownerName={filing.ownerName}
+                    action="accept"
+                    folders={folders}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setFiling(null);
+                    }}
+                    onSaved={() => {
+                        setInvitations((items) =>
+                            items.filter((item) => item.id !== filing.id),
+                        );
+                        setFiling(null);
+                    }}
+                />
+            )}
+            {filing && filing.kind !== "folder" && (
                 <FolderPicker
                     folders={folders}
                     assignedIds={new Set()}
@@ -749,18 +840,33 @@ export function ReceivedItemBanner({
                             },
                         )}
             </p>
-            <Button
-                variant="outline"
-                size="sm"
-                className="text-person-share"
-                onClick={() => setFiling(true)}
-            >
-                <FolderInput className="size-4" />
-                {folders.find(
-                    (folder) =>
-                        folder.id === recording.receivedShare?.filingFolderId,
-                )?.name ?? i18n("Choose a folder")}
-            </Button>
+            {recording.receivedFolderIds?.map((id) => {
+                const folder = folders.find((folder) => folder.id === id);
+                return folder ? (
+                    <span
+                        key={id}
+                        className="inline-flex items-center gap-2 rounded border border-person-share/30 px-2 py-1 text-sm text-person-share"
+                    >
+                        <FolderInput className="size-4" />
+                        {folder.name}
+                    </span>
+                ) : null;
+            })}
+            {recording.receivedShare && (
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-person-share"
+                    onClick={() => setFiling(true)}
+                >
+                    <FolderInput className="size-4" />
+                    {folders.find(
+                        (folder) =>
+                            folder.id ===
+                            recording.receivedShare?.filingFolderId,
+                    )?.name ?? i18n("Choose a folder")}
+                </Button>
+            )}
             {recording.receivedShare && (
                 <FolderPicker
                     folders={folders}

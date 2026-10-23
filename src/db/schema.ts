@@ -981,6 +981,104 @@ export const itemShares = pgTable(
     }),
 );
 
+export const folderShares = pgTable(
+    "folder_shares",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        receiverUserId: text("receiver_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        invitedByUserId: text("invited_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        state: varchar("state", { length: 16 })
+            .$type<ItemShareState>()
+            .notNull()
+            .default("pending"),
+        version: integer("version").notNull().default(0),
+        invitedAt: timestamp("invited_at").notNull().defaultNow(),
+        respondedAt: timestamp("responded_at"),
+        removedAt: timestamp("removed_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        folderReceiverUnique: unique("folder_shares_folder_receiver_unique").on(
+            table.folderId,
+            table.receiverUserId,
+        ),
+        idReceiverUnique: unique("folder_shares_id_receiver_unique").on(
+            table.id,
+            table.receiverUserId,
+        ),
+        receivedIdx: index("folder_shares_receiver_state_idx").on(
+            table.receiverUserId,
+            table.state,
+        ),
+        ownerIdx: index("folder_shares_owner_folder_idx").on(
+            table.userId,
+            table.folderId,
+        ),
+        inviterIdx: index("folder_shares_inviter_idx").on(
+            table.invitedByUserId,
+        ),
+        stateCheck: check(
+            "folder_shares_state_check",
+            sql`${table.state} in ('pending', 'accepted', 'declined', 'removed')`,
+        ),
+        receiverCheck: check(
+            "folder_shares_receiver_check",
+            sql`${table.userId} <> ${table.receiverUserId}`,
+        ),
+    }),
+);
+
+export const receivedFolderAttachments = pgTable(
+    "received_folder_attachments",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        shareId: text("share_id")
+            .notNull()
+            .unique()
+            .references(() => folderShares.id, { onDelete: "cascade" }),
+        name: text("name").notNull(),
+        parentId: text("parent_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
+        sortOrder: integer("sort_order").notNull().default(0),
+        version: integer("version").notNull().default(0),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        receiverFk: foreignKey({
+            name: "received_folder_attachments_receiver_fk",
+            columns: [table.shareId, table.userId],
+            foreignColumns: [folderShares.id, folderShares.receiverUserId],
+        }).onDelete("cascade"),
+        userParentIdx: index("received_folder_attachments_user_parent_idx").on(
+            table.userId,
+            table.parentId,
+        ),
+        parentIdx: index("received_folder_attachments_parent_idx").on(
+            table.parentId,
+        ),
+    }),
+);
+
 export const folderDefaultProfiles = pgTable(
     "folder_default_profiles",
     {

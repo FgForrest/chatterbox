@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 // No corrections: transcripts export as they are.
 // The route says whether automatic Learn is offered here.
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+    requestAdvance: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
 }));

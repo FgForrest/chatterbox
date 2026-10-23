@@ -67,6 +67,8 @@ export type Recording = Omit<RecordingQueryResult, "startTime"> & {
     isOwn?: boolean;
     /** Display name of the owner, on Organization entries. */
     ownerName?: string | null;
+    sharedWithPeople?: boolean;
+    receivedFolderIds?: string[];
     receivedShare?: {
         id: string;
         version: number;

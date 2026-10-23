@@ -1,6 +1,7 @@
 import { and, eq, isNull, not, or } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, itemShares, users } from "@/db/schema";
+import { receivedItemCondition } from "@/db/queries/item-shares";
+import { accounts, chatterItems, users } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
 import { env } from "@/lib/env";
 import { getClaimsProvider, isIdpAuthorization } from "@/lib/identity/factory";
@@ -153,20 +154,17 @@ export async function resolveCaller(
                     ? new Set(
                           (
                               await db
-                                  .select({ itemId: itemShares.itemId })
-                                  .from(itemShares)
+                                  .select({ itemId: chatterItems.id })
+                                  .from(chatterItems)
                                   .where(
                                       and(
-                                          eq(
-                                              itemShares.receiverUserId,
-                                              linked.id,
-                                          ),
-                                          eq(itemShares.state, "accepted"),
+                                          isNull(chatterItems.deletedAt),
+                                          receivedItemCondition(linked.id),
                                           orgUserId
                                               ? not(
                                                     sharedItemCondition(
                                                         orgUserId,
-                                                        itemShares.itemId,
+                                                        chatterItems.id,
                                                     ),
                                                 )
                                               : undefined,

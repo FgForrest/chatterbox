@@ -9,7 +9,10 @@ import {
     sql,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { receivedItemCondition } from "@/db/queries/item-shares";
+import {
+    receivedItemCondition,
+    receivedThroughFolderCondition,
+} from "@/db/queries/item-shares";
 import {
     itemShares,
     recordingFolderAssignments,
@@ -36,6 +39,8 @@ export function folderRecordingCondition(
 ): SQL | null {
     const folder = organization.folders.find((entry) => entry.id === folderId);
     if (!folder) return null;
+    if (folder.receivedFolder)
+        return receivedThroughFolderCondition(userId, item.id, folder.id);
     if (folder.kind === "private")
         return or(
             eq(item.userId, userId),
@@ -54,8 +59,14 @@ export function folderRecordingCondition(
             ),
     );
     if (folder.scope !== "personal") return owned;
+    const attached = organization.folders.filter(
+        (entry) => entry.receivedFolder && ids.includes(entry.id),
+    );
     return or(
         owned,
+        ...attached.map((entry) =>
+            receivedThroughFolderCondition(userId, item.id, entry.id),
+        ),
         and(
             receivedItemCondition(userId, item.id),
             exists(

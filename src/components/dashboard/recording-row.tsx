@@ -4,6 +4,7 @@ import {
     Download,
     Folder,
     FolderInput,
+    FolderOutput,
     FolderPlus,
     Loader2,
     Mail,
@@ -218,6 +219,14 @@ export function RecordingRow({
                                     ? i18n("(no subject)")
                                     : "")}
                         </h3>
+                        {personSharing &&
+                            recording.isOwn !== false &&
+                            recording.sharedWithPeople && (
+                                <FolderOutput
+                                    className="size-3.5 shrink-0 text-person-share"
+                                    aria-label={i18n("Shared with people")}
+                                />
+                            )}
                         {recording.mail?.hasAttachments && (
                             <Paperclip
                                 className="size-3 shrink-0 text-muted-foreground"
