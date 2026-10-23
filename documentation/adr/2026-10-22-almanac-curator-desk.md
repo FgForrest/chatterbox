@@ -1,11 +1,11 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-23 12:51
+updated: 2026-10-23 12:57
 status: accepted
 kind: feature
 issues: [240]
-prs: [244, 247]
+prs: [244, 247, 275]
 areas: [src/app/(app)/almanac, src/lib/knowledge/name-match.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/components/almanac/merge-target-picker.tsx, src/db/queries/almanac-usage.ts, src/lib/knowledge/duplicate-score.ts, src/lib/knowledge/duplicates.ts, src/components/almanac/care-queue.tsx, src/lib/knowledge/read-folder-knowledge.ts, src/components/dashboard/folder-knowledge-panel.tsx, src/lib/transcription/almanac-terms.ts, src/lib/learn/correction-pass.ts, src/lib/authz/curator.ts]
 supersedes: []
 superseded-by: []
@@ -20,7 +20,7 @@ curators have to keep a growing Organization Almanac clean. Issue #240 plans thr
 "Péče" (Care) tab that finds likely duplicate people and things and joins them; a read-only view of
 the knowledge each folder contributes, including what the models receive; and the rest of the
 problem queue. Decided on 2026-10-22 from a design page. PR 2 merged as #244 and PR 1 as #247;
-PR 3 is built locally on 2026-10-23 for issue #240; its PR number is assigned after review.
+PR 3 is #275 (2026-10-23).
 
 ## Why
 
@@ -81,7 +81,7 @@ scope, history) stays in one place.
 
 ## Key technical details
 
-As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
+As merged in #247 (PR 1) and #244 (PR 2), and extended by #275 (PR 3):
 
 - **Signals for** a pair: nickname, Czech surname form, diacritics, typo, legal form, a shared heard-as
   form. **Signals against:** both are confirmed speakers in the same recording; different e-mails at
@@ -184,8 +184,7 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
   joins, dismissal reads use current keys only, and thin detection skips records above 64 uses.
   Restore accepts independently retryable chunks of at most 32 MiB including the ID map.
 - The archive restore endpoint restores Care decisions after records, facts and usage; a general
-  archive-import UI remains separate work. The `prs` list contains the two merged PR numbers;
-  the orchestrator adds PR 3's number when opening it.
+  archive-import UI remains separate work.
 - Each kind scans at most the newest 2,000 live records (`MAX_DUPLICATE_RECORDS` in
   `src/lib/knowledge/duplicate-limits.ts`; 8 aliases, 8 heard-as forms and 16 extra addresses per
   record, 40 nearest neighbours each). A new record is not paired with an older one beyond that cap;
@@ -220,4 +219,6 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
   curator-only picker ranking, fact evidence read for candidate records only, a database-backed
   e-mail conflict test).
 
-- **2026-10-23**: PR 3 built locally; provenance, safe undo, remaining problem kinds, shared folder fixes, badge and portable curator decisions.
+- **2026-10-23**: PR 3 built; provenance, safe undo, remaining problem kinds, shared folder fixes, badge and
+  portable curator decisions. A review before opening found a thin-record delete reaching private notes,
+  an undo race with concurrent task assignment and unindexed scans; all fixed. Opened as #275.
