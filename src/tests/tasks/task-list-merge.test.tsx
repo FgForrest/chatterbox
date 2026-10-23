@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TaskRequestError } from "@/components/tasks/task-api";
-import { showTaskMergeFailure } from "@/components/tasks/task-list";
+import { showTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
 

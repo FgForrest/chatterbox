@@ -1323,7 +1323,7 @@ export async function updateTask(
                 throw forbidden();
 
             if (change.note !== undefined && !task.canClose) throw forbidden();
-            if (change.note && change.note.length > MAX_TEXT)
+            if (change.note && change.note.trim().length > MAX_TEXT)
                 throw new AppError(
                     ErrorCode.INVALID_INPUT,
                     "Note must be at most 2000 characters",
@@ -1889,11 +1889,6 @@ function prepareTaskMerge(
     }
     if (target.status !== "open") {
         throw mergeRule("the target must be an open task");
-    }
-    if (source.shared && !target.shared) {
-        throw mergeRule(
-            "an Organization task can be merged only into an Organization task",
-        );
     }
     const proposal = source.status === "proposed";
     if (!proposal && source.status !== "open")

@@ -9,11 +9,15 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppNav } from "@/components/app-nav";
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
+import { RecordingTasks } from "@/components/tasks/recording-tasks";
+import { TaskDetail } from "@/components/tasks/task-detail";
 import { TaskList } from "@/components/tasks/task-list";
 import { TaskRow } from "@/components/tasks/task-row";
+import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
 import type { TaskView } from "@/lib/tasks/tasks";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -89,9 +93,13 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         ...overrides,
     };
 }
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<
+    typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>
+>;
 let folders: RecordingFolder[];
 beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
     folders = [];
     navigation.params = new URLSearchParams();
     navigation.push.mockClear();
@@ -126,6 +134,297 @@ afterEach(() => {
 });
 
 describe("#253 task desk UI", () => {
+    it("inserts an own task and closes immediately, then replaces the temporary row with the server row", async () => {
+        let finish: (response: Response) => void = () => {};
+        const response = new Promise<Response>((resolve) => {
+            finish = resolve;
+        });
+        const fallback = fetchMock.getMockImplementation();
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url === "/api/tasks" && init?.method === "POST")
+                return response;
+            if (!fallback) throw new Error("Missing fetch mock");
+            return fallback(url, init);
+        });
+        render(<TaskList organization={false} />);
+        await screen.findByText("Nothing here.");
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        fireEvent.change(screen.getByRole("textbox", { name: "Task text" }), {
+            target: { value: "Draft reminder" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        expect(screen.getByText("Draft reminder")).toBeTruthy();
+        expect(screen.queryByRole("textbox", { name: "Task text" })).toBeNull();
+        expect(document.activeElement).toBe(
+            screen.getByRole("button", { name: "Add task" }),
+        );
+        expect(screen.getByRole("checkbox").getAttribute("aria-disabled")).toBe(
+            "true",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        expect(screen.queryByRole("textbox", { name: "Task text" })).toBeNull();
+        await act(async () =>
+            finish(
+                Response.json(
+                    task({
+                        id: "saved",
+                        recordingId: null,
+                        own: true,
+                        source: "personal",
+                        text: "Saved reminder",
+                        version: 8,
+                    }),
+                ),
+            ),
+        );
+        expect(screen.queryByText("Draft reminder")).toBeNull();
+        expect(screen.getAllByText("Saved reminder")).toHaveLength(1);
+        expect(document.activeElement).toBe(
+            screen.getByRole("button", { name: "Add task" }),
+        );
+        fireEvent.click(screen.getByRole("checkbox", { name: "Done" }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/tasks/saved",
+                expect.objectContaining({
+                    method: "PATCH",
+                    body: JSON.stringify({ status: "done", version: 8 }),
+                }),
+            ),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        expect(
+            screen.getByRole("textbox", { name: "Task text" }),
+        ).toHaveProperty("value", "");
+    });
+    it("removes a failed temporary row, shows the server message and preserves the URL-opened draft", async () => {
+        folders = folderTree();
+        navigation.params.set("folder", "drafts");
+        navigation.params.set("add", "request");
+        let finish: (response: Response) => void = () => {};
+        const response = new Promise<Response>((resolve) => {
+            finish = resolve;
+        });
+        const fallback = fetchMock.getMockImplementation();
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url === "/api/tasks" && init?.method === "POST")
+                return response;
+            if (!fallback) throw new Error("Missing fetch mock");
+            return fallback(url, init);
+        });
+        const view = render(<TaskList organization={false} />);
+        await screen.findByText("Nothing here.");
+        await waitFor(() =>
+            expect(
+                screen.getByRole("combobox", { name: "Task folder" })
+                    .textContent,
+            ).toContain("Drafts"),
+        );
+        fireEvent.change(screen.getByRole("textbox", { name: "Task text" }), {
+            target: { value: "Keep my draft" },
+        });
+        fireEvent.change(screen.getByLabelText("Due date"), {
+            target: { value: "2026-10-30" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        expect(screen.getByText("Keep my draft")).toBeTruthy();
+        navigation.params.delete("add");
+        view.rerender(<TaskList organization={false} />);
+        await act(async () =>
+            finish(
+                Response.json(
+                    {
+                        error: "The selected folder is unavailable",
+                        code: "INVALID_INPUT",
+                    },
+                    { status: 400 },
+                ),
+            ),
+        );
+        expect(screen.queryByText("Keep my draft")).toBeNull();
+        expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+            "The selected folder is unavailable",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        expect(
+            screen.getByRole("textbox", { name: "Task text" }),
+        ).toHaveProperty("value", "Keep my draft");
+        expect(screen.getByLabelText("Due date")).toHaveProperty(
+            "value",
+            "2026-10-30",
+        );
+        expect(
+            screen.getByRole("combobox", { name: "Task folder" }).textContent,
+        ).toContain("Drafts");
+    });
+    it("focuses an existing draft for each navigation request without discarding its text", async () => {
+        navigation.params.set("add", "first");
+        const view = render(<TaskList organization={false} />);
+        await screen.findByText("Nothing here.");
+        const input = screen.getByRole("textbox", { name: "Task text" });
+        fireEvent.change(input, { target: { value: "Existing draft" } });
+        screen.getByLabelText("Due date").focus();
+        navigation.params.set("add", "second");
+        view.rerender(<TaskList organization={false} />);
+        expect(document.activeElement).toBe(input);
+        expect(input).toHaveProperty("value", "Existing draft");
+    });
+    it.each([
+        "Escape",
+        "Cancel",
+    ])("cancels with %s and returns focus to Add task", async (action) => {
+        render(<TaskList organization={false} />);
+        await screen.findByText("Nothing here.");
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        if (action === "Escape")
+            fireEvent.keyDown(
+                screen.getByRole("textbox", { name: "Task text" }),
+                { key: "Escape" },
+            );
+        else fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByRole("textbox", { name: "Task text" })).toBeNull();
+        expect(document.activeElement).toBe(
+            screen.getByRole("button", { name: "Add task" }),
+        );
+        expect(
+            fetchMock.mock.calls.some(
+                ([url, init]) =>
+                    url === "/api/tasks" && init?.method === "POST",
+            ),
+        ).toBe(false);
+    });
+    it.each([
+        "ContextMenu",
+        "F10",
+    ])("deduplicates %s and its native contextmenu without swallowing later context menus", (key) => {
+        vi.useFakeTimers();
+        render(<AppNav />);
+        const link = screen.getByRole("link", { name: "Tasks" });
+        fireEvent.keyDown(link, { key, shiftKey: key === "F10" });
+        fireEvent.contextMenu(link);
+        expect(navigation.push).toHaveBeenCalledTimes(1);
+        fireEvent.contextMenu(link);
+        expect(navigation.push).toHaveBeenCalledTimes(2);
+        fireEvent.keyDown(link, { key, shiftKey: key === "F10" });
+        act(() => vi.advanceTimersByTime(1001));
+        fireEvent.contextMenu(link);
+        expect(navigation.push).toHaveBeenCalledTimes(4);
+    });
+    it.each([
+        "list",
+        "detail",
+        "audio",
+        "mail",
+    ])("shows the localized merge refusal once and preserves the task in %s", async (surface) => {
+        const row = task({
+            evidenceItemKind: surface === "audio" ? "audio" : "mail",
+        });
+        const listRow = {
+            ...row,
+            recording: null,
+            evidence: null,
+            visibleMentionQuotes: [],
+        };
+        const refresh = vi.fn(async () => {});
+        fetchMock.mockImplementation(
+            async (url: string, init?: RequestInit) => {
+                if (url === "/api/folders")
+                    return Response.json({ folders: [] });
+                if (url.startsWith("/api/tasks?"))
+                    return Response.json({ tasks: [listRow] });
+                if (url === "/api/tasks/pending") return Response.json({});
+                if (init?.method === "POST")
+                    return Response.json(
+                        {
+                            error: "Merge rule: only the home owner or a curator may merge that owner's tasks",
+                            code: "FORBIDDEN",
+                        },
+                        { status: 403 },
+                    );
+                if (url.includes("target="))
+                    return Response.json({
+                        keepId: "target",
+                        mergeId: row.id,
+                        keepVersion: 8,
+                        mergeVersion: 3,
+                        text: "Merged preview",
+                        note: null,
+                        dueDate: null,
+                        privateToShared: false,
+                    });
+                return Response.json({
+                    candidates: [
+                        {
+                            id: "target",
+                            text: "Kept task",
+                            homeItem: null,
+                            assignee: null,
+                            dueDate: null,
+                            duePhrase: null,
+                        },
+                    ],
+                    nextOffset: null,
+                });
+            },
+        );
+        const state: RecordingTasksState = {
+            itemId: "item",
+            data: {
+                canEdit: true,
+                reviewed: true,
+                tasks: [row],
+                proposals: [],
+                updates: [],
+                matches: [],
+            },
+            failed: false,
+            reviewing: false,
+            waiting: 0,
+            accepting: false,
+            refresh,
+            update: vi.fn(),
+            add: vi.fn(),
+            merge: vi.fn(),
+            tickUpdate: vi.fn(),
+            tickMatch: vi.fn(),
+            mergeInto: vi.fn(),
+            undoMatch: vi.fn(),
+            accept: vi.fn(),
+        };
+        render(
+            surface === "list" ? (
+                <TaskList organization={false} />
+            ) : surface === "detail" ? (
+                <TaskDetail initialTask={listRow} />
+            ) : (
+                <RecordingTasks
+                    state={state}
+                    speakers={[]}
+                    organizationOnly
+                    fallback={null}
+                />
+            ),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Merge into another task",
+            }),
+        );
+        fireEvent.click(await screen.findByRole("option"));
+        await screen.findByText("Merged preview");
+        fireEvent.click(screen.getByRole("button", { name: "Merge task" }));
+        await waitFor(() =>
+            expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+                "Merge rule: only the task's home owner or a curator may merge it.",
+            ),
+        );
+        if (surface === "list")
+            expect(screen.getByText("Send the draft")).toBeTruthy();
+        else expect(screen.getByRole("dialog")).toBeTruthy();
+        expect(toast.success).not.toHaveBeenCalled();
+        expect(refresh).not.toHaveBeenCalled();
+        expect(navigation.replace).not.toHaveBeenCalled();
+    });
     const folderTree = (): RecordingFolder[] => [
         {
             id: "private",
@@ -268,6 +567,10 @@ describe("#253 task desk UI", () => {
             filed ? "Drafts" : "File in a folder",
         );
         expect(pill.classList.contains("task-row-folder-action")).toBe(!filed);
+        for (const utility of ["border-0", "px-0", "py-0"])
+            expect(pill.classList.contains(utility)).toBe(true);
+        for (const utility of ["border", "px-2", "py-1"])
+            expect(pill.classList.contains(utility)).toBe(false);
         expect(pill.parentElement?.textContent).toContain("Own task");
         fireEvent.click(pill);
         fireEvent.click(screen.getByRole("option", { name: /Later/ }));

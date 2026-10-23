@@ -10,6 +10,7 @@ import {
     changeTask,
     mergeTaskIntoTarget,
 } from "@/components/tasks/task-api";
+import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
@@ -18,6 +19,7 @@ import type { TaskListItem } from "@/lib/tasks/tasks";
 /** One task opened from search, independent of the task list's filters. */
 export function TaskDetail({ initialTask }: { initialTask: TaskListItem }) {
     const i18n = useExtracted();
+    const showMergeFailure = useTaskMergeFailure();
     const { refresh, replace } = useRouter();
     const [task, setTask] = useState(initialTask);
     const folders = useTaskFolderTree(initialTask.own);
@@ -63,15 +65,23 @@ export function TaskDetail({ initialTask }: { initialTask: TaskListItem }) {
                     organizationOnly={task.recording?.view === "org"}
                     onChange={update}
                     onMerge={async (target, options) => {
-                        const saved = await mergeTaskIntoTarget(
-                            task.id,
-                            target,
-                            options,
-                        );
-                        announceTasksChanged();
-                        if (saved.id === task.id) refresh();
-                        else replace(`/tasks/${encodeURIComponent(saved.id)}`);
-                        return { ownerNotified: saved.mergeOwnerNotified };
+                        try {
+                            const saved = await mergeTaskIntoTarget(
+                                task.id,
+                                target,
+                                options,
+                            );
+                            announceTasksChanged();
+                            if (saved.id === task.id) refresh();
+                            else
+                                replace(
+                                    `/tasks/${encodeURIComponent(saved.id)}`,
+                                );
+                            return { ownerNotified: saved.mergeOwnerNotified };
+                        } catch (error) {
+                            showMergeFailure(error);
+                            return false;
+                        }
                     }}
                 />
             </ul>

@@ -27,6 +27,7 @@ export function AppNav({ className }: { className?: string }) {
     const router = useRouter();
     const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pressed = useRef(false);
+    const suppressContextMenuUntil = useRef(0);
     const pressStart = useRef<{ x: number; y: number } | null>(null);
     const cancelLongPress = useCallback(() => {
         if (longPress.current) clearTimeout(longPress.current);
@@ -83,6 +84,13 @@ export function AppNav({ className }: { className?: string }) {
                                 if (!addsTask) return;
                                 event.preventDefault();
                                 cancelLongPress();
+                                if (
+                                    Date.now() <
+                                    suppressContextMenuUntil.current
+                                ) {
+                                    suppressContextMenuUntil.current = 0;
+                                    return;
+                                }
                                 if (!pressed.current) openAdd();
                             }}
                             onKeyDown={(event) => {
@@ -92,7 +100,9 @@ export function AppNav({ className }: { className?: string }) {
                                         (event.shiftKey && event.key === "F10"))
                                 ) {
                                     event.preventDefault();
-                                    openAdd();
+                                    suppressContextMenuUntil.current =
+                                        Date.now() + 1000;
+                                    if (!event.repeat) openAdd();
                                 }
                             }}
                             onPointerDown={(event) => {

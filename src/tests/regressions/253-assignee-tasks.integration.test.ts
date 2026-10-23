@@ -963,6 +963,44 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
         });
         expect(task.note).toBeNull();
     });
+    it.each([
+        "personal",
+        "item",
+    ])("validates %s notes after trimming and keeps encrypted content unchanged on refusal", async (kind) => {
+        const original =
+            kind === "personal"
+                ? await createPersonalTask(viewer("author"), {
+                      text: "Reminder",
+                  })
+                : await itemTask();
+        const note = "n".repeat(2000);
+        const saved = await updateTask(viewer("author"), original.id, {
+            version: original.version,
+            note: ` \n${note}\t `,
+        });
+        expect(saved.note).toBe(note);
+        const [stored] = await db()
+            .select()
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, saved.id));
+        expect(stored.note).not.toBe(note);
+        expect(decryptText(stored.note ?? "")).toBe(note);
+        await expect(
+            updateTask(viewer("author"), saved.id, {
+                version: saved.version,
+                note: ` ${note}n `,
+            }),
+        ).rejects.toMatchObject({ statusCode: 400 });
+        expect(await getVisibleTask(viewer("author"), saved.id)).toMatchObject({
+            note,
+            version: saved.version,
+        });
+        const cleared = await updateTask(viewer("author"), saved.id, {
+            version: saved.version,
+            note: " ".repeat(2001),
+        });
+        expect(cleared.note).toBeNull();
+    });
     it("accepts 2000-character text and notes, refusing longer content and invalid dates", async () => {
         const task = await createPersonalTask(viewer("author"), {
             text: "x".repeat(2000),
@@ -1142,15 +1180,19 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
             ).tasks,
         ).toHaveLength(1);
     });
-    it("always keeps the Organization task and requires private disclosure confirmation and current versions", async () => {
+    it.each([
+        true,
+        false,
+    ])("keeps the Organization task with shared source=%s, requiring disclosure confirmation and current versions", async (sharedSource) => {
         const shared = await itemTask();
         const own = await createPersonalTask(viewer("assignee"), {
             text: "Private addition",
         });
+        const [source, target] = sharedSource ? [shared, own] : [own, shared];
         const preview = await previewTaskMerge(
             viewer("assignee"),
-            shared.id,
-            own.id,
+            source.id,
+            target.id,
         );
         expect(preview).toMatchObject({
             keepId: shared.id,
@@ -1158,10 +1200,10 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
             privateToShared: true,
         });
         await expect(
-            mergeTaskIntoTask(viewer("assignee"), own.id, shared.id),
+            mergeTaskIntoTask(viewer("assignee"), source.id, target.id),
         ).rejects.toMatchObject({ statusCode: 403 });
         await expect(
-            mergeTaskIntoTask(viewer("assignee"), own.id, shared.id, {
+            mergeTaskIntoTask(viewer("assignee"), source.id, target.id, {
                 confirmPrivateToShared: true,
                 sourceVersion: 99,
                 targetVersion: 0,
@@ -1169,15 +1211,17 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
         ).rejects.toMatchObject({ statusCode: 409 });
         const result = await mergeTaskIntoTask(
             viewer("assignee"),
-            shared.id,
-            own.id,
+            source.id,
+            target.id,
             {
                 confirmPrivateToShared: true,
-                sourceVersion: shared.version,
-                targetVersion: own.version,
+                sourceVersion: source.version,
+                targetVersion: target.version,
             },
         );
         expect(result.id).toBe(shared.id);
+        expect(result.text).toBe(`Send the revised plan\nPrivate addition`);
+        expect(await getVisibleTask(viewer("assignee"), own.id)).toBeNull();
         expect(
             (await getVisibleTask(viewer("member"), shared.id))?.text,
         ).toContain("Private addition");

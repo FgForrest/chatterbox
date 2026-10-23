@@ -2,10 +2,11 @@
 
 import { Lock, Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { addOwnTask } from "@/components/tasks/task-api";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
+import { folderDisplayPath } from "@/lib/folders/labels";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -14,20 +15,33 @@ export function OwnTaskForm({
     open,
     onOpenChange,
     onAdded,
+    onReconciled,
     folders = [],
     defaultFolderId = null,
+    focusRequest,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onAdded: (task: TaskListItem) => void;
+    onReconciled: (temporaryId: string, task: TaskListItem | null) => void;
     folders?: RecordingFolder[];
     defaultFolderId?: string | null;
+    focusRequest?: string | null;
 }) {
     const i18n = useExtracted();
+    const formId = useId();
+    const nextId = useRef(0);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const restoreFocus = useRef(false);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     useEffect(() => {
+        void focusRequest;
         if (open) inputRef.current?.focus();
-    }, [open]);
+        else if (restoreFocus.current) {
+            triggerRef.current?.focus();
+            restoreFocus.current = false;
+        }
+    }, [open, focusRequest]);
     const [text, setText] = useState("");
     const [dueDate, setDueDate] = useState("");
     const [saving, setSaving] = useState(false);
@@ -35,13 +49,21 @@ export function OwnTaskForm({
         id: string | null;
     } | null>(null);
     const folderId = chosenFolder ? chosenFolder.id : defaultFolderId;
+    const close = () => {
+        restoreFocus.current = true;
+        onOpenChange(false);
+    };
     return (
         <li className="p-3 text-sm">
             {!open ? (
                 <button
+                    ref={triggerRef}
                     type="button"
                     className="flex w-full items-center gap-2 text-left"
-                    onClick={() => onOpenChange(true)}
+                    aria-disabled={saving}
+                    onClick={() => {
+                        if (!saving) onOpenChange(true);
+                    }}
                 >
                     <Plus className="size-4" />
                     {i18n("Add task")}
@@ -49,27 +71,101 @@ export function OwnTaskForm({
             ) : (
                 <form
                     className="space-y-2"
+                    onKeyDown={(event) => {
+                        if (event.key === "Escape" && !event.defaultPrevented) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            close();
+                        }
+                    }}
                     onSubmit={(event) => {
                         event.preventDefault();
                         if (!text.trim() || saving) return;
+                        const temporaryId = `pending-${formId}-${++nextId.current}`;
+                        const now = new Date().toISOString();
+                        const folder = folders.find(
+                            (entry) => entry.id === folderId,
+                        );
+                        const optimistic: TaskListItem = {
+                            id: temporaryId,
+                            recordingId: null,
+                            evidenceItemId: null,
+                            evidenceItemKind: "audio",
+                            evidenceAudioAvailable: false,
+                            status: "open",
+                            text: text.trim(),
+                            assignee: null,
+                            assigneeHasEmail: false,
+                            assigneeHint: null,
+                            assigneeCheck: false,
+                            dueDate: dueDate || null,
+                            duePhrase: null,
+                            quote: null,
+                            evidenceStartMs: null,
+                            evidenceText: null,
+                            evidenceProvenance: null,
+                            source: "personal",
+                            own: true,
+                            folder: folder
+                                ? {
+                                      id: folder.id,
+                                      name: folder.name,
+                                      path: folderDisplayPath(
+                                          folder,
+                                          new Map(
+                                              folders.map((entry) => [
+                                                  entry.id,
+                                                  entry,
+                                              ]),
+                                          ),
+                                          (entry) => entry.name,
+                                      ),
+                                  }
+                                : null,
+                            note: null,
+                            noteBy: null,
+                            noteUpdatedAt: null,
+                            following: false,
+                            automaticFollow: false,
+                            canFollow: false,
+                            canMerge: false,
+                            canEdit: false,
+                            canClose: false,
+                            canUndoMatch: false,
+                            ticked: true,
+                            version: 0,
+                            createdAt: now,
+                            acceptedAt: now,
+                            statusChangedAt: null,
+                            recording: null,
+                            evidence: null,
+                            visibleMentionQuotes: [],
+                        };
                         setSaving(true);
+                        onAdded(optimistic);
+                        close();
                         void addOwnTask(text, dueDate || null, folderId)
                             .then((task) => {
-                                onAdded(task);
+                                onReconciled(temporaryId, task);
                                 setText("");
                                 setDueDate("");
                                 setChosenFolder(null);
-                                onOpenChange(false);
                             })
-                            .catch(() =>
-                                toast.error(i18n("Could not save the task")),
-                            )
+                            .catch((error: unknown) => {
+                                onReconciled(temporaryId, null);
+                                toast.error(
+                                    error instanceof Error && error.message
+                                        ? error.message
+                                        : i18n("Could not save the task"),
+                                );
+                            })
                             .finally(() => setSaving(false));
                     }}
                 >
                     <textarea
                         ref={inputRef}
                         required
+                        disabled={saving}
                         maxLength={2000}
                         aria-label={i18n("Task text")}
                         placeholder={i18n("What needs doing?")}
@@ -92,6 +188,7 @@ export function OwnTaskForm({
                         />
                         <input
                             type="date"
+                            disabled={saving}
                             aria-label={i18n("Due date")}
                             value={dueDate}
                             onChange={(event) => setDueDate(event.target.value)}
@@ -100,7 +197,7 @@ export function OwnTaskForm({
                         <button
                             type="button"
                             className="ml-auto"
-                            onClick={() => onOpenChange(false)}
+                            onClick={close}
                         >
                             {i18n("Cancel")}
                         </button>
