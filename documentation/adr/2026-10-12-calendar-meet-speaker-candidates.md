@@ -1,7 +1,7 @@
 ---
 title: Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
 date: 2026-10-12
-updated: 2026-10-22 21:10
+updated: 2026-10-22 23:58
 status: superseded
 kind: feature
 issues: []
@@ -24,9 +24,10 @@ use the names as hints, but a speaker is named only from direct evidence in the 
 Attendance alone never assigns a speaker. Shipped as PRs #105 (all unnamed speakers assessed),
 #106 and #107 (Calendar and Meet), recreated as PR #117.
 
-**Superseded on 2026-10-22** by [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250): every Learn run,
-automatic ones included, now gets the roster, and the model guesses speakers from it for the user to
-confirm.
+**Superseded in part on 2026-10-22** by [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250): every Learn
+run, automatic ones included, now gets the roster, and the model guesses speakers from it for the
+user to confirm. The privacy limits below still hold: read-only scopes, nothing stored, no e-mail
+addresses requested.
 
 ## Why
 
@@ -132,7 +133,8 @@ Checked on 2026-10-22, the integration helped little in practice:
 - only the owner's primary calendar, only the private view, Meet data only for 30 days.
 
 [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250) addressed all but the e-mail link, which
-it dropped on purpose.
+is allowed and tracked in issue #256 (an early reading that it had been ruled out was corrected by
+the maintainer on 2026-10-22).
 
 ## Related work
 
@@ -150,4 +152,4 @@ it dropped on purpose.
 - **2026-10-12**: the gap found; PR #117 merged with both stranded commits.
 - **2026-10-22**: gaps reviewed; a successor rule proposed.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
-- **2026-10-22**: superseded by PR #250.
+- **2026-10-22**: superseded in part by PR #250.

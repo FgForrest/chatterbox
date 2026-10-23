@@ -16,7 +16,9 @@ file; this file is the full rule set.
 Search `documentation/adr/` for the area you are about to touch (`rg -l "src/lib/sync"
 documentation/adr/`, or a term) and read the **Consequences & open follow-ups** section of every
 hit. Prior decisions and knowingly deferred work live there; a change that contradicts one needs a
-new record that `supersedes` it, not a silent reversal.
+new record that `supersedes` it, not a silent reversal. That holds for a change to a single rule of
+an older record too (see *Partial reversals supersede* below). A record marked `superseded` may
+still be mostly in force: read its opening note to see which rule changed.
 
 ## When a record is required: the bar
 
@@ -54,11 +56,16 @@ of the diff plus its commit message would already understand.
 ### Where sub-threshold reasoning goes
 
 It still gets written down, just not here. `AGENTS.md` decides where (JSDoc on exported APIs only,
-no narrative or strategy comments in source, design rationale in the commit message), so:
+no narrative or strategy comments in source, design rationale in the commit message, plus one
+exception for constraint comments), so:
 
 - *Why this change*: the commit message, where `git blame` reaches it from the line.
 - *Why this exported API behaves this way*: its JSDoc, when the reasoning is part of the contract a
   caller needs.
+- *Why this line must stay as it is*: a one-line comment at the site, when a future change could
+  silently break a constraint there (a lock order, a literal a partial index depends on, a
+  deliberate omission). The next person to touch that line sees it; a record in a folder they do not
+  know to open would not stop them. One line, the constraint and not the story.
 
 ### Batching
 
@@ -131,10 +138,19 @@ Beyond that:
 - **Cross-link in both directions.** Adding `relates`/`supersedes` to a new record means editing the
   older one too, and bumping the older record's `status` to `superseded` plus its `superseded-by`.
   The generator fails on a one-sided link.
-- **Regenerate the index** in the same commit: `node scripts/generate-adr-index.mts`. Never
-  hand-edit the table between the `ADR-INDEX` markers; it is overwritten. `--check` verifies that
-  the index is current and that every record is valid, writes nothing, and is safe to run from CI
-  or a hook.
+- **Partial reversals supersede.** As soon as a later decision changes any rule of a record, even
+  one rule among many, the older record gets `status: superseded` and the newer record in
+  `superseded-by`, and the newer record lists the older one in `supersedes` (not in `relates`). A
+  record may be superseded by several records. Both sides say in prose which rule changed: the older
+  record in a short **Superseded in part** note after its opening paragraph that names the changed
+  rule, links the newer record and says the rest still holds; the newer record next to the link in
+  *Related work*. A follow-up that only adds to a record, or implements one of its deferred items,
+  is `relates`.
+- **Regenerate the index** in the same commit: `node scripts/generate-adr-index.mts` (or
+  `pnpm adr:index`). Never hand-edit the table between the `ADR-INDEX` markers; it is overwritten.
+  Issue and PR refs link to the GitHub repository named in `package.json`; `--plain` renders them
+  as plain `#n`. `--check` (`pnpm adr:index:check`) verifies that the index is current and that
+  every record is valid, writes nothing, and runs in CI's lint job.
 
 ## No real names, company name or production identifiers in records
 
@@ -186,9 +202,9 @@ rewrite, and a rewrite is the maintainer's call, not yours.
 
 Plans and TODOs that must survive a session go into GitHub Issues (`AGENTS.md`). In-flight working
 notes (design drafts, implementation plans, agent briefs, review outputs) live in **`docs/plans/`**,
-one file or folder per line of work, prefixed with the date (`docs/plans/2026-10-22-<slug>.md`).
-That folder holds *intent*, never outcome: nothing in it is evidence of what shipped, and it must
-never be read as such.
+and nowhere else, one file or folder per line of work, prefixed with the date
+(`docs/plans/2026-10-22-<slug>.md`). That folder holds *intent*, never outcome: nothing in it is
+evidence of what shipped, and it must never be read as such.
 
 **Plans are never committed.** `.gitignore` excludes every `plans/` directory, so a plan is working
 notes on disk and nothing more, and it exists only in the checkout where it was written: a worktree
@@ -196,7 +212,9 @@ does not see the main checkout's plans. This is mechanical rather than a matter 
 purpose: a rule that a routine command silently violates is not a rule.
 
 **Every plan must leave the disk when its work finalizes**: merged, abandoned, or decided against.
-There are exactly two exits, and no third:
+Once its work is implemented, a plan has no value of its own; only its lasting content does (the
+whys, the rejected options and why they lost, measurements), and that moves into a record or the
+commit message. There are exactly two exits, and no third:
 
 1. **It becomes a record**, if the work clears the bar above. Write the ADR, then delete the plan.
 2. **It is deleted outright**, if the work does not. The commit message of the last change carries

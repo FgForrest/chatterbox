@@ -1,15 +1,15 @@
 ---
 title: Export folders to Google Drive on self-host only, through a general Google connection with drive.file and the Picker
 date: 2026-09-28
-updated: 2026-10-22 16:00
-status: accepted
+updated: 2026-10-22 22:30
+status: superseded
 kind: feature
 issues: []
 prs: [61]
 areas: [src/lib/folder-exports, src/lib/integrations/google, src/app/api/integrations/google, src/db/schema.ts, content/docs/self-hosting/google-drive.mdx]
 supersedes: []
-superseded-by: []
-relates: [2026-10-06-export-ownership-ledger, 2026-09-14-speaker-identity-without-biometrics, 2026-10-12-calendar-meet-speaker-candidates]
+superseded-by: [2026-10-06-export-ownership-ledger]
+relates: [2026-09-14-speaker-identity-without-biometrics, 2026-10-12-calendar-meet-speaker-candidates]
 ---
 
 # Export folders to Google Drive on self-host only, through a general Google connection with drive.file and the Picker
@@ -21,6 +21,10 @@ change. The feature exists only on self-hosted instances whose Google Cloud proj
 picks the target folder in the Google Picker under the `drive.file` scope, and chooses per artifact
 type whether transcripts and summaries become `.md` files, Google Docs or both. The export trashes
 only folders it created itself, and overwrites a regenerated Doc even if someone edited it.
+
+**Superseded in part** by the [export ownership ledger](2026-10-06-export-ownership-ledger.md), for
+the deletion rule only: the export now moves its files when a placement changes and also trashes its
+own duplicate files, not only its own empty folders. Everything else here still holds.
 
 ## Why
 
@@ -158,7 +162,10 @@ record: verification, External consent and a domain allowlist change most of the
 - `drive_export_nodes` holds only items the export created; every created item is tagged in
   `appProperties` with the export id. A retry after a crash finds the item by parent, name and tag
   instead of creating a duplicate, so the table is a cache that can be rebuilt from Drive. A plan
-  checks the tree against one listing of tagged items.
+  checks the tree against one listing of tagged items. The tag carries only the export id, not a
+  hash of the item's logical path (the first design's choice): renaming a folder would make every
+  descendant's path hash stale, and the lookup by parent, name and tag already resolves a path one
+  level at a time.
 - Materializations carry `format` (`file` or `google_doc`) in their unique key; "both" is two
   materializations. Docs have no byte size, so the artifact digest is stored in `appProperties` and
   compared instead.
@@ -171,6 +178,10 @@ record: verification, External consent and a domain allowlist change most of the
 - Security: the refresh token is encrypted at rest; access tokens are minted on demand and never
   stored; OAuth state and PKCE verifier travel in an encrypted, httpOnly, short-lived cookie bound to
   the session user. Optional `GOOGLE_WORKSPACE_DOMAINS` re-checks the ID token's `hd` claim.
+- The Picker loads Google's script from `apis.google.com` into the page
+  (`src/lib/integrations/google/picker-client.ts`). That works because the app sends no page-wide
+  Content-Security-Policy; a CSP added later must allow the Picker's script and frames, or folder
+  choice breaks (frames inferred).
 - Availability: hidden when `IS_HOSTED` is set or the `GOOGLE_*` variables are missing
   (`src/lib/integrations/google/config.ts`). Drive HTTP is hand-written `fetch` with resumable
   uploads for audio, no Google SDK dependency.
@@ -206,7 +217,8 @@ record: verification, External consent and a domain allowlist change most of the
 ## Related work
 
 - [2026-10-06-export-ownership-ledger](2026-10-06-export-ownership-ledger.md): extends Drive deletion
-  from own empty folders to own duplicate files, and makes the export move files instead of copying.
+  from own empty folders to own duplicate files, and makes the export move files instead of copying;
+  it supersedes this record's deletion rule.
 - [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md):
   the earlier finding that the restricted Drive scopes need CASA, which kept both features on
   `drive.file` and the Picker.

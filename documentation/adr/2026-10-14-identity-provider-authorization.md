@@ -1,15 +1,15 @@
 ---
 title: Opt-in identity-provider authorization with access managed under the administrator's own sign-in
 date: 2026-10-14
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
 prs: [131]
 areas: [src/lib/authz, src/lib/access, src/lib/identity/providers/keycloak, src/lib/sso/auth-hooks.ts, src/lib/mcp/token.ts, src/components/settings-sections/access-section.tsx, content/docs/self-hosting/sso.mdx, docker-compose.local-authz.yml, e2e/authz]
-supersedes: []
+supersedes: [2026-09-23-shared-organization-scope, 2026-10-07-external-mcp-server]
 superseded-by: []
-relates: [2026-10-06-oidc-single-sign-on, 2026-10-21-curators-manage-organization-almanac, 2026-09-23-shared-organization-scope, 2026-10-19-processing-profiles-and-workflow, 2026-10-07-external-mcp-server]
+relates: [2026-10-06-oidc-single-sign-on, 2026-10-21-curators-manage-organization-almanac, 2026-10-19-processing-profiles-and-workflow]
 ---
 
 # Opt-in identity-provider authorization with access managed under the administrator's own sign-in
@@ -162,9 +162,9 @@ both-modes issuer binding if self-hosters routinely move realms.
   on; it deferred the claim-based Organization rights delivered here.
 - [2026-10-21-curators-manage-organization-almanac](2026-10-21-curators-manage-organization-almanac.md):
   builds on `org.curate`.
-- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization account model that `org.curate` extends.
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization account model that `org.curate` extends; supersedes its rule that curation goes only through the Organization account's login.
 - [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md): the roles that manage Organization providers and profiles in the processing work.
-- [2026-10-07-external-mcp-server](2026-10-07-external-mcp-server.md): the MCP token checks this record refined.
+- [2026-10-07-external-mcp-server](2026-10-07-external-mcp-server.md): the MCP token checks this record refined, superseding them in that part.
 
 ## Timeline
 

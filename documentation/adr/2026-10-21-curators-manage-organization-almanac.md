@@ -1,15 +1,15 @@
 ---
 title: Curators manage existing Organization Almanac entries; their new entries stay private
 date: 2026-10-21
-updated: 2026-10-22 17:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: fix
 issues: []
 prs: [222]
 areas: [src/lib/authz/curator.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/lib/knowledge/vocabulary.ts, src/db/queries/almanac-import.ts, src/app/(app)/almanac]
-supersedes: []
+supersedes: [2026-09-23-shared-organization-scope]
 superseded-by: []
-relates: [2026-10-01-almanac-and-new-records, 2026-10-22-organization-almanac-grows-on-share, 2026-10-14-identity-provider-authorization, 2026-09-23-shared-organization-scope, 2026-10-22-almanac-curator-desk]
+relates: [2026-10-01-almanac-and-new-records, 2026-10-22-organization-almanac-grows-on-share, 2026-10-14-identity-provider-authorization, 2026-10-22-almanac-curator-desk]
 ---
 
 # Curators manage existing Organization Almanac entries; their new entries stay private
@@ -97,7 +97,7 @@ each page shows, including Organization facts and nicknames. Locally the changed
 ## Consequences & open follow-ups
 
 - The next day the Organization Almanac was opened wider: a member's confirmed Learn findings become
-  Organization knowledge on share ([2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md), proposed). That
+  Organization knowledge on share ([2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md), PR #248). That
   makes curator tooling, not just curator rights, necessary: duplicate detection and per-folder
   knowledge views are tracked in issue #240.
 - Organization people still cannot be created directly by anyone but the organization account.
@@ -109,7 +109,7 @@ each page shows, including Organization facts and nicknames. Locally the changed
   organization-account-only rule unusable.
 - [2026-10-22-organization-almanac-grows-on-share](2026-10-22-organization-almanac-grows-on-share.md): widens what reaches the Organization Almanac,
   relying on these curator rights to clean up.
-- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization scope whose curator rule this record widens.
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the Organization scope whose curator rule this record widens, superseding that rule.
 - [2026-10-22-almanac-curator-desk](2026-10-22-almanac-curator-desk.md): the duplicate queue and folder knowledge view built on these curator rights.
 
 ## Timeline

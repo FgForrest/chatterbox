@@ -1,15 +1,15 @@
 ---
 title: The owner reviews a summary's tasks, the assignee never has to accept anything, and sharing does not wait for the review
 date: 2026-10-22
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: fix
 issues: []
 prs: [238]
 areas: [src/lib/tasks, src/lib/sharing/share-gate.ts, src/lib/pipeline/plan.ts]
-supersedes: [2026-10-21-tasks-accepted-automatically]
+supersedes: [2026-10-21-tasks-accepted-automatically, 2026-10-07-tasks-from-summaries, 2026-10-19-processing-profiles-and-workflow]
 superseded-by: []
-relates: [2026-10-07-tasks-from-summaries]
+relates: []
 ---
 
 # The owner reviews a summary's tasks, the assignee never has to accept anything, and sharing does not wait for the review
@@ -60,7 +60,9 @@ checked.
 
 - **Rejected because:** the maintainer answered "not necessarily, do what is simpler, we are in beta
   testing". With proposals hidden from colleagues until accepted, the gate is not needed to keep
-  unreviewed tasks private. Revisit if members find shared recordings with missing tasks confusing.
+  unreviewed tasks private. The maintainer confirmed on 2026-10-22 that sharing stays ungated until
+  the maintainer decides otherwise; the end of the beta does not reopen it by itself. Revisit if
+  members find shared recordings with missing tasks confusing.
 
 ### Option C: keep automatic acceptance and send only uncertain cases to the review (declined)
 
@@ -106,7 +108,9 @@ asked to remove from PR #224's ungated sharing. Tasks PR #224 had already accept
 - [2026-10-21-tasks-accepted-automatically](2026-10-21-tasks-accepted-automatically.md): the change
   this supersedes, and why it was made.
 - [2026-10-07-tasks-from-summaries](2026-10-07-tasks-from-summaries.md): the original review and its
-  defaults, restored here without the share gate.
+  defaults, restored here without the share gate; this supersedes its share-gate rule.
+- [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md):
+  its share gate's task rule stays removed here; this supersedes that rule.
 
 ## Timeline
 
@@ -114,3 +118,5 @@ asked to remove from PR #224's ungated sharing. Tasks PR #224 had already accept
 - **2026-10-22**: missing review reported as a bug, the misunderstanding explained; sharing left
   ungated; PR #238 merged and released in 2026.18.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: the maintainer confirmed that sharing stays ungated until the maintainer decides
+  otherwise.
