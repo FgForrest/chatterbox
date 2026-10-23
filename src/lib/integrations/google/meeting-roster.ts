@@ -125,14 +125,15 @@ export async function resolveMeetingRoster(input: {
             fetchImpl: input.fetchImpl,
         });
         const names = new Map<string, RosterAttendeeInput>();
-        for (const attendee of [
+        const attendees: RosterAttendeeInput[] = [
             ...event.attendees.map(({ name, email }) => ({
                 name,
                 source: "calendar" as const,
                 emails: email ? [email] : [],
             })),
             ...joined,
-        ] as RosterAttendeeInput[]) {
+        ];
+        for (const attendee of attendees) {
             const key =
                 attendeeNameKey(attendee.name) ||
                 (attendee.emails?.[0]
