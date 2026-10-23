@@ -17,6 +17,7 @@ import type { MailAuth } from "@/lib/mail/dkim";
 import type { AttachmentMeta } from "@/lib/mail/parse";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { getOrgUserId } from "@/lib/org/config";
+import { type RecordingView, requireRecordingView } from "@/lib/sharing/access";
 
 export interface MailParticipantView {
     ref: string;
@@ -61,9 +62,17 @@ export interface MailDetail {
 export async function loadMailDetail(
     viewerUserId: string,
     itemId: string,
+    view?: RecordingView,
 ): Promise<MailDetail | null> {
     const access = await resolveMailAccess(viewerUserId, itemId);
     if (!access) return null;
+    if (view)
+        await requireRecordingView(viewerUserId, itemId, view, {
+            kinds: ["mail"],
+        });
+    const receivedView = view
+        ? view === "received"
+        : access.role === "receiver";
     const ownerUserId = access.ownerUserId;
     const isOwn = access.role === "owner";
     const [row] = await db
@@ -126,7 +135,7 @@ export async function loadMailDetail(
                 ),
             )
             .limit(1),
-        access.role === "receiver"
+        receivedView
             ? db
                   .select({ folderId: itemShares.filingFolderId })
                   .from(itemShares)
@@ -209,7 +218,7 @@ export async function loadMailDetail(
             ...segment,
             text: mask(segment.text),
             at: segment.at ? new Date(segment.at).toISOString() : null,
-            ...(access.role === "receiver" ? { knownItemId: null } : {}),
+            ...(receivedView ? { knownItemId: null } : {}),
         })),
         attachments: attachments.map((attachment) => ({
             ...attachment,

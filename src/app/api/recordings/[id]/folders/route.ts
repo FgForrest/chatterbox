@@ -35,7 +35,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingAccess(session.user.id, id, {
         kinds: ["audio", "mail"],
     });
-    if (access.role === "receiver")
+    if (!access.shared && access.role === "receiver")
         throw new AppError(
             ErrorCode.FORBIDDEN,
             "Received items are read-only",
@@ -68,7 +68,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingAccess(session.user.id, id, {
         kinds: ["audio", "mail"],
     });
-    if (access.role === "receiver")
+    if (!access.shared && access.role === "receiver")
         throw new AppError(
             ErrorCode.FORBIDDEN,
             "Received items are read-only",
@@ -98,7 +98,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingAccess(session.user.id, id, {
         kinds: ["audio", "mail"],
     });
-    if (access.role === "receiver")
+    if (!access.shared && access.role === "receiver")
         throw new AppError(
             ErrorCode.FORBIDDEN,
             "Received items are read-only",

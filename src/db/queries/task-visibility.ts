@@ -1,4 +1,4 @@
-import { type AnyColumn, eq, or, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, not, or, type SQL, sql } from "drizzle-orm";
 import { receivedItemCondition } from "@/db/queries/item-shares";
 import {
     chatterItems,
@@ -68,12 +68,15 @@ export function taskVisible(
     ) as SQL;
 }
 
-/** SQL: an accepted person share grants read access to this task's item. */
+/** SQL: an accepted person share grants receiver-only rights while the item is private. */
 export function taskReceived(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
     return viewer.isOrg || viewer.includeReceived !== true
         ? sql`false`
-        : receivedItemCondition(viewer.userId, item.id);
+        : (and(
+              receivedItemCondition(viewer.userId, item.id),
+              not(taskRecordingShared(viewer, item)),
+          ) as SQL);
 }

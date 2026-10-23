@@ -7,6 +7,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemHeader } from "@/components/items/item-header";
@@ -17,12 +18,16 @@ import {
     ReceivedItemBanner,
 } from "@/components/sharing/person-sharing";
 import { TaskRow } from "@/components/tasks/task-row";
+import { Popover, PopoverContent } from "@/components/ui/popover";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { subscribeEvents } from "@/lib/events/client";
 import type { TaskView } from "@/lib/tasks/tasks";
 import type { Recording } from "@/types/recording";
+import csMessages from "../../../messages/cs-CZ.json";
+import enMessages from "../../../messages/en.json";
 
-const { refresh, notices } = vi.hoisted(() => ({
+const { refresh, notices, locale } = vi.hoisted(() => ({
+    locale: { current: "en" },
     refresh: vi.fn(),
     notices: vi.fn(),
 }));
@@ -35,7 +40,10 @@ vi.mock("next-intl", () => {
         text: string,
         values?: Record<string, string | number>,
     ) =>
-        text
+        (locale.current === "cs-CZ" && text === "Could not update sharing"
+            ? csMessages.s3TU5k
+            : text
+        )
             .replace(
                 /\{count, plural, one \{([^}]+)\} other \{([^}]+)\}\}/g,
                 (_match, one: string, other: string) =>
@@ -121,6 +129,7 @@ let shares: ReturnType<typeof share>[] = [];
 let requests: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+    locale.current = "en";
     shares = [];
     requests = vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "PATCH") return Response.json({ success: true });
@@ -425,5 +434,105 @@ describe("person sharing controls", () => {
         ).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
         expect(screen.queryByRole("textbox")).toBeNull();
+    });
+    it.each([
+        "http",
+        "network",
+        "stale",
+    ])("keeps link access neutral after a %s load failure", async (failure) => {
+        if (failure === "stale") {
+            shares = [share("accepted")];
+            header();
+            await screen.findByText("Shared with 1 person");
+        } else {
+            requests.mockImplementation(async () => {
+                if (failure === "network")
+                    throw new TypeError("Network failure");
+                return Response.json({}, { status: 429 });
+            });
+            header();
+        }
+        if (failure === "stale")
+            requests.mockResolvedValue(Response.json({}, { status: 429 }));
+        fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+        expect(
+            await screen.findByRole("dialog", { name: "Link access" }),
+        ).toBeTruthy();
+        expect(
+            await screen.findByText(
+                "This is a private link. Access depends on the item’s sharing settings.",
+            ),
+        ).toBeTruthy();
+        expect(screen.queryByText("Only you can open this link")).toBeNull();
+        expect(screen.queryByText(/Only you and/)).toBeNull();
+        expect(
+            screen.queryByText(
+                "Share the item first so a colleague can open the link.",
+            ),
+        ).toBeNull();
+        fireEvent.click(
+            within(
+                screen.getByRole("dialog", { name: "Link access" }),
+            ).getByRole("button", { name: "Copy link" }),
+        );
+        await waitFor(() =>
+            expect(navigator.clipboard.writeText).toHaveBeenCalledOnce(),
+        );
+    });
+
+    it.each([
+        "empty",
+        "missing",
+        "invalid",
+    ])("uses the extracted Czech fallback for a sharing response with an %s message", async (body) => {
+        locale.current = "cs-CZ";
+        shares = [share("accepted")];
+        requests.mockImplementation(
+            async (_input: string, init?: RequestInit) =>
+                init?.method === "PATCH"
+                    ? Response.json(
+                          body === "empty"
+                              ? { error: "", code: "INTERNAL_ERROR" }
+                              : body === "missing"
+                                ? {}
+                                : { error: 123 },
+                          { status: 500 },
+                      )
+                    : Response.json({ shares }),
+        );
+        render(
+            <PersonShareDialog
+                itemId="audio"
+                kind="audio"
+                title="Interview"
+                open
+                onOpenChange={vi.fn()}
+            />,
+        );
+        fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+        expect(await screen.findByRole("alert")).toHaveProperty(
+            "textContent",
+            "Sdílení se nepodařilo změnit",
+        );
+    });
+    it("uses the caller's accessible title for a reusable popover", () => {
+        render(
+            <Popover open>
+                <PopoverContent title="Sharing controls">
+                    Details
+                </PopoverContent>
+            </Popover>,
+        );
+        expect(
+            screen.getByRole("dialog", { name: "Sharing controls" }),
+        ).toBeTruthy();
+        expect(screen.queryByText("Link access")).toBeNull();
+    });
+
+    it("uses standard Czech invitation labels without changing the English source", () => {
+        expect(csMessages.HyiDcy).toBe("K přijetí");
+        expect(csMessages.eCzP2A).toBe("K přijetí ({count})");
+        expect(enMessages.HyiDcy).toBe("Invitations");
+        expect(enMessages.eCzP2A).toBe("Invitations ({count})");
     });
 });

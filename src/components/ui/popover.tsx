@@ -1,7 +1,6 @@
 "use client";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { useExtracted } from "next-intl";
 import {
     type ComponentProps,
     createContext,
@@ -36,10 +35,12 @@ export function PopoverTrigger(
 export function PopoverContent({
     className,
     children,
+    title,
     ...props
-}: ComponentProps<typeof DialogPrimitive.Content>) {
+}: Omit<ComponentProps<typeof DialogPrimitive.Content>, "title"> & {
+    title: string;
+}) {
     const anchor = useContext(AnchorContext);
-    const i18n = useExtracted();
     const [position, setPosition] = useState({ top: 0, right: 16 });
     useLayoutEffect(() => {
         const place = () => {
@@ -70,7 +71,7 @@ export function PopoverContent({
                 {...props}
             >
                 <DialogPrimitive.Title className="sr-only">
-                    {i18n("Link access")}
+                    {title}
                 </DialogPrimitive.Title>
                 {children}
             </DialogPrimitive.Content>

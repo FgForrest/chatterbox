@@ -29,6 +29,7 @@ export interface RecordingAccess {
     ownerUserId: string;
     role: RecordingAccessRole;
     shared: boolean;
+    received?: boolean;
     orgUserId: string | null;
 }
 
@@ -110,23 +111,19 @@ export async function resolveRecordingAccess(
             orgUserId,
         };
     }
-    if (await isItemReceived(userId, recordingId)) {
-        return {
-            recordingId,
-            kind: recording.kind,
-            ownerUserId: recording.userId,
-            role: "receiver",
-            shared,
-            orgUserId,
-        };
-    }
-    if (!shared) return null;
+    const received = await isItemReceived(userId, recordingId);
+    if (!shared && !received) return null;
     return {
         recordingId,
         kind: recording.kind,
         ownerUserId: recording.userId,
-        role: userId === orgUserId ? "curator" : "member",
+        role: shared
+            ? userId === orgUserId
+                ? "curator"
+                : "member"
+            : "receiver",
         shared,
+        received,
         orgUserId,
     };
 }
@@ -155,7 +152,7 @@ export async function requireRecordingView<V extends RecordingView>(
         (view === "private"
             ? access.role === "owner"
             : view === "received"
-              ? access.role === "receiver"
+              ? access.received === true
               : access.shared && access.orgUserId !== null);
     if (!access || !allowed) {
         throw new AppError(

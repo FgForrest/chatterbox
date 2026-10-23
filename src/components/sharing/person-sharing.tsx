@@ -35,7 +35,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
 import type {
     listItemShares,
@@ -81,6 +81,7 @@ export async function changeShare(
     id: string,
     version: number,
     action: string,
+    fallbackMessage: string,
     folderId?: string,
 ) {
     const response = await fetch(`/api/shares/${encodeURIComponent(id)}`, {
@@ -88,10 +89,14 @@ export async function changeShare(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, version, folderId }),
     });
-    if (!response.ok)
+    if (!response.ok) {
+        const error = await parseApiError(response);
         throw new Error(
-            await getApiErrorMessage(response, "Could not update sharing"),
+            error.code === "UNKNOWN_ERROR"
+                ? fallbackMessage
+                : error.error || fallbackMessage,
         );
+    }
 }
 
 /** One owner dialog for recordings and mail, including invitation responses. */
@@ -296,6 +301,9 @@ export function PersonShareDialog({
                                                               "pending"
                                                               ? "cancel"
                                                               : "remove",
+                                                          i18n(
+                                                              "Could not update sharing",
+                                                          ),
                                                       )
                                                     : invite(
                                                           share.receiverUserId,
@@ -366,43 +374,51 @@ export function OwnerSharingActions({
     const dialogOpen = open;
     const setDialogOpen = onOpenChange;
     const [popoverOpen, setPopoverOpen] = useState(false);
-    const [shares, setShares] = useState<Share[]>([]);
+    const [shares, setShares] = useState<Share[] | null>(null);
     const load = useCallback(async () => {
-        const response = await fetch(
-            `/api/items/${encodeURIComponent(itemId)}/shares`,
-        );
-        if (response.ok)
+        setShares(null);
+        try {
+            const response = await fetch(
+                `/api/items/${encodeURIComponent(itemId)}/shares`,
+            );
+            if (!response.ok) return;
             setShares(((await response.json()) as { shares: Share[] }).shares);
+        } catch {
+            setShares(null);
+        }
     }, [itemId]);
     useEffect(() => {
-        void load().catch(() => {});
+        void load();
     }, [load]);
-    const active = shares.filter(
+    const active = (shares ?? []).filter(
         (share) => share.state === "pending" || share.state === "accepted",
     );
     useEffect(() => {
-        onCountChange(active.length);
-    }, [active.length, onCountChange]);
+        if (shares !== null) onCountChange(active.length);
+    }, [shares, active.length, onCountChange]);
     useEffect(
         () =>
             subscribeEvents((event) => {
-                if (event.type === "share") void load().catch(() => {});
+                if (event.type === "share") void load();
             }),
         [load],
     );
     return (
         <>
-            {shared && shares.length > 0 && active.length === 0 && (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-person-share"
-                    onClick={() => setDialogOpen(true)}
-                >
-                    <FolderOutput className="size-4" />
-                    {i18n("Manage sharing")}
-                </Button>
-            )}
+            {shared &&
+                shares !== null &&
+                shares.length > 0 &&
+                active.length === 0 && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-person-share"
+                        onClick={() => setDialogOpen(true)}
+                    >
+                        <FolderOutput className="size-4" />
+                        {i18n("Manage sharing")}
+                    </Button>
+                )}
             {!shared && (
                 <Button
                     variant="outline"
@@ -428,14 +444,19 @@ export function OwnerSharingActions({
                             <Link className="size-4" />
                         </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-80 space-y-3">
+                    <PopoverContent
+                        title={i18n("Link access")}
+                        className="w-80 space-y-3"
+                    >
                         <p className="font-medium">
-                            {active.length
-                                ? i18n(
-                                      "Only you and {count, plural, one {# person} other {# people}} can open this link",
-                                      { count: active.length },
-                                  )
-                                : i18n("Only you can open this link")}
+                            {shares === null
+                                ? i18n("Link access")
+                                : active.length
+                                  ? i18n(
+                                        "Only you and {count, plural, one {# person} other {# people}} can open this link",
+                                        { count: active.length },
+                                    )
+                                  : i18n("Only you can open this link")}
                         </p>
                         {active.length ? (
                             <ul className="text-sm">
@@ -450,9 +471,13 @@ export function OwnerSharingActions({
                             </ul>
                         ) : (
                             <p className="text-sm text-muted-foreground">
-                                {i18n(
-                                    "Share the item first so a colleague can open the link.",
-                                )}
+                                {shares === null
+                                    ? i18n(
+                                          "This is a private link. Access depends on the item’s sharing settings.",
+                                      )
+                                    : i18n(
+                                          "Share the item first so a colleague can open the link.",
+                                      )}
                             </p>
                         )}
                         <div className="flex justify-end gap-2">
@@ -464,7 +489,7 @@ export function OwnerSharingActions({
                                     setDialogOpen(true);
                                 }}
                             >
-                                {active.length
+                                {shares === null || active.length
                                     ? i18n("Manage sharing")
                                     : i18n("Share…")}
                             </Button>
@@ -475,7 +500,7 @@ export function OwnerSharingActions({
                                     setPopoverOpen(false);
                                 }}
                             >
-                                {active.length
+                                {shares === null || active.length
                                     ? i18n("Copy link")
                                     : i18n("Copy anyway")}
                             </Button>
@@ -588,6 +613,7 @@ export function PersonInvitations({
                 invitation.id,
                 invitation.version,
                 action,
+                i18n("Could not update sharing"),
                 folderId,
             );
             setFiling(null);
@@ -750,6 +776,7 @@ export function ReceivedItemBanner({
                                 share.id,
                                 share.version,
                                 "file",
+                                i18n("Could not update sharing"),
                                 folderId,
                             );
                             refresh();

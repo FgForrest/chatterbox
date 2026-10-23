@@ -13,11 +13,15 @@
  */
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as errors from "@/lib/errors";
 import {
     createStreamEventParser,
     type SummaryStreamEvent,
 } from "@/lib/summary/progress-stream";
+import type * as summaryJob from "@/lib/summary/summary-job";
+import type * as sessionActor from "@/tests/helpers/session-actor";
 
+vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 // Without corrections a model reads the stored text as it is.
 vi.mock("@/lib/learn/llm-input", () => ({
     modelInput: vi.fn(async (transcript: { text: string }) => ({
@@ -46,9 +50,9 @@ vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@/lib/auth-server", async () => {
-    const { withSessionActor } = await vi.importActual<
-        typeof import("@/tests/helpers/session-actor")
-    >("@/tests/helpers/session-actor");
+    const { withSessionActor } = await vi.importActual<typeof sessionActor>(
+        "@/tests/helpers/session-actor",
+    );
     return withSessionActor({
         requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
     });
@@ -68,8 +72,7 @@ vi.mock("@/lib/profiles/resolve", () => ({
 }));
 
 vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
-    const actual =
-        await importOriginal<typeof import("@/lib/summary/summary-job")>();
+    const actual = await importOriginal<typeof summaryJob>();
     return { ...actual, enqueueSummaryJob: vi.fn() };
 });
 
@@ -91,7 +94,7 @@ const { recordingAccess } = vi.hoisted(() => ({
 // real database; here it answers "owner" unless a test says otherwise.
 vi.mock("@/lib/sharing/access", async () => {
     const { AppError, ErrorCode } =
-        await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
+        await vi.importActual<typeof errors>("@/lib/errors");
     return {
         requestedRecordingView: (request: Request) =>
             new URL(request.url).searchParams.get("view") === "org"

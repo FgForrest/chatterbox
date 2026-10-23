@@ -737,6 +737,7 @@ const itemId = "item-veln";
             expect(mocks.loadMailDetail).toHaveBeenCalledWith(
                 viewer,
                 "mail-veln",
+                "org",
             );
             mocks.loadMailDetail.mockClear();
             expect((await mailResponse("private", false)).status).toBe(
@@ -744,6 +745,11 @@ const itemId = "item-veln";
             );
             if (viewer !== owner)
                 expect(mocks.loadMailDetail).not.toHaveBeenCalled();
+            else
+                expect(mocks.loadMailDetail).toHaveBeenCalledWith(
+                    viewer,
+                    "mail-veln",
+                );
         });
         it("rejects unavailable mail views, tombstones, missing mail and audio ids", async () => {
             await makeMail();

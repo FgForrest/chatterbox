@@ -39,11 +39,13 @@ export async function resolveMailAccess(
     if (item.userId === userId) {
         return { itemId, ownerUserId: item.userId, role: "owner" };
     }
-    if (await isItemReceived(userId, itemId))
-        return { itemId, ownerUserId: item.userId, role: "receiver" };
     const orgUserId = await getOrgUserId();
-    if (!orgUserId || !(await isRecordingShared(itemId, orgUserId))) {
-        return null;
+    const shared =
+        orgUserId !== null && (await isRecordingShared(itemId, orgUserId));
+    if (!shared) {
+        return (await isItemReceived(userId, itemId))
+            ? { itemId, ownerUserId: item.userId, role: "receiver" }
+            : null;
     }
     return {
         itemId,

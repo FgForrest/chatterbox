@@ -115,7 +115,7 @@ export function taskEditable(
     return viewer.isCurator ? (or(own, shared) as SQL) : own;
 }
 
-/** Content writes retain the existing editor rule while explicitly refusing accepted receivers. */
+/** Content writes retain Organization editor rights and refuse receiver-only access. */
 export function taskContentEditable(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,

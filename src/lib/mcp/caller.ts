@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, not, or } from "drizzle-orm";
 import { db } from "@/db";
 import { accounts, itemShares, users } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
@@ -11,6 +11,7 @@ import {
     isOrgScopeEnabled,
     isOrgScopeVisible,
 } from "@/lib/org/config";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
 interface CallerBase {
@@ -161,6 +162,14 @@ export async function resolveCaller(
                                               linked.id,
                                           ),
                                           eq(itemShares.state, "accepted"),
+                                          orgUserId
+                                              ? not(
+                                                    sharedItemCondition(
+                                                        orgUserId,
+                                                        itemShares.itemId,
+                                                    ),
+                                                )
+                                              : undefined,
                                       ),
                                   )
                           ).map((row) => row.itemId),

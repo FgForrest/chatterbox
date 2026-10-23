@@ -341,6 +341,9 @@ export function RecordingRow({
                                                     share.id,
                                                     share.version,
                                                     "remove",
+                                                    i18n(
+                                                        "Could not update sharing",
+                                                    ),
                                                 );
                                                 refresh();
                                             } catch (error) {
@@ -453,6 +456,7 @@ export function RecordingRow({
                                 recording.receivedShare.id,
                                 recording.receivedShare.version,
                                 "file",
+                                i18n("Could not update sharing"),
                                 folderId,
                             );
                             refresh();

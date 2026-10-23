@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -18,6 +18,7 @@ import { GET as readAttachment } from "@/app/api/mail/[id]/attachments/[index]/r
 import { GET as readMailHtml } from "@/app/api/mail/[id]/html/route";
 import { GET as readMail } from "@/app/api/mail/[id]/route";
 import { GET as readAudio } from "@/app/api/recordings/[id]/audio/route";
+import { GET as readCorrections } from "@/app/api/recordings/[id]/corrections/route";
 import { GET as readLearn } from "@/app/api/recordings/[id]/learn/route";
 import { GET as readMarkdown } from "@/app/api/recordings/[id]/markdown/[kind]/route";
 import { GET as readItem } from "@/app/api/recordings/[id]/route";
@@ -30,9 +31,12 @@ import { POST as restoreRoute } from "@/app/api/shares/restore/route";
 import { GET as invitationsRoute } from "@/app/api/shares/route";
 import {
     aiEnhancements,
+    apiCredentials,
     asyncJobs,
     chatterItems,
     itemShares,
+    knowledgeEntities,
+    mailAddresses,
     mailContents,
     mailMessages,
     mailParticipants,
@@ -41,16 +45,20 @@ import {
     recordingFolders,
     recordingTasks,
     taskMentions,
+    transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
+    userAccessStates,
     userSettings,
     users,
 } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { archivedItemCondition } from "@/lib/export/archive-scope";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
+import * as knowledgeLoader from "@/lib/knowledge/knowledge-loader";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { resolveMailAccess } from "@/lib/mail/access";
+import { localPartHash } from "@/lib/mail/hash";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { mcpItemCondition } from "@/lib/mcp/scope";
 import { ALL_TOOLS } from "@/lib/mcp/tools";
@@ -96,6 +104,9 @@ const { ref, mockEnv, sendMail } = vi.hoisted(() => ({
         IS_HOSTED: false,
         SELF_HOST_MODE: "shared",
         AUTHZ_MODE: "local",
+        ORG_ACCOUNT_EMAIL: "organization@example.com",
+        ORG_ACCOUNT_PASSWORD: "demo-password",
+        ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60,
         KNOWLEDGE_MEMORY_MB: 64,
         MAIL_DOMAIN: "mail.example.com",
         MAIL_ADDRESS_HASH_SECRET: "m".repeat(40),
@@ -163,9 +174,24 @@ vi.mock("@/lib/auth-server", () => ({
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio")),
+        exists: vi.fn().mockResolvedValue(false),
+        deleteFile: vi.fn(),
     }),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/jobs/watch", () => ({
+    watchJob: vi.fn(async () => ({ row: null, reason: "timeout" })),
+}));
+vi.mock("@/lib/webhooks/emit", () => ({ emitEvent: vi.fn() }));
+vi.mock("@/lib/recordings/reconcile-storage", () => ({
+    reconcileRecordingStorage: vi.fn(
+        async (state: { storagePath: string; storageFilename: string }) => ({
+            changed: false,
+            storagePath: state.storagePath,
+            storageFilename: state.storageFilename,
+        }),
+    ),
+}));
 vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
@@ -202,8 +228,10 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
     });
     beforeEach(async () => {
         sendMail.mockClear();
+        mockEnv.AUTHZ_MODE = "local";
         mockEnv.IS_HOSTED = false;
         mockEnv.SELF_HOST_MODE = "shared";
+        await database.db.delete(mailAddresses);
         await database.db.delete(users);
         await database.db.insert(users).values([
             { id: owner, email: "alex@example.com", name: "Alex Morgan" },
@@ -229,6 +257,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             fileMd5: "demo-md5",
             storageType: "local",
             storagePath: "demo/audio.opus",
+            storageFilename: "audio.opus",
             plaudVersion: "1",
         });
         await database.db.insert(chatterItems).values({
@@ -788,6 +817,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
                       { handler: readItem, tail: "" },
                       { handler: readAudio, tail: "/audio" },
                       { handler: readSpeakers, tail: "/speakers" },
+                      { handler: readCorrections, tail: "/corrections" },
                       { handler: readTopics, tail: "/topics" },
                       { handler: readSummary, tail: "/summary" },
                       { handler: readMarkdown, tail: "/markdown/transcript" },
@@ -887,6 +917,27 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             "owner-folder",
         ])
             expect(payload).not.toContain(value);
+        await database.db.insert(recordingFolderAssignments).values({
+            userId: owner,
+            itemId: "audio-item",
+            folderId: "org-folder",
+        });
+        const sharedReceived = await readSpeakers(
+            new Request(
+                "http://localhost/api/recordings/audio-item/speakers?view=received",
+            ),
+            { params: Promise.resolve({ id: "audio-item" }) },
+        );
+        expect(sharedReceived.status).toBe(200);
+        expect(await sharedReceived.json()).toMatchObject({
+            speakers: [
+                {
+                    personName: "Priya Raman",
+                    personId: null,
+                    confirmedByUserId: null,
+                },
+            ],
+        });
         const learn = await readLearn(
             new Request(
                 "http://localhost/api/recordings/audio-item/learn?view=received",
@@ -1184,7 +1235,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         );
         expect(
             (await resolveRecordingAccess(receiver, "audio-item"))?.role,
-        ).toBe("receiver");
+        ).toBe("member");
         await expect(
             inviteToItem(owner, "audio-item", [outsider]),
         ).rejects.toMatchObject({ statusCode: 403 });
@@ -1203,5 +1254,562 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         expect((await listItemShares(owner, "audio-item"))[0].state).toBe(
             "removed",
         );
+    });
+    it.each([
+        "audio-item",
+        "mail-item",
+    ])("restores no invitation to Organization-visible %s", async (itemId) => {
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ userId: owner, itemId, folderId: "org-folder" });
+        expect(
+            await restoreArchivedItemShares(
+                owner,
+                [
+                    {
+                        itemId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", itemId]]),
+            ),
+        ).toEqual({
+            restored: 0,
+            skipped: [
+                {
+                    itemId: "old",
+                    receiverEmail: "lena@example.com",
+                    reason: "organization_shared",
+                },
+            ],
+        });
+        expect(await listItemShares(owner, itemId)).toEqual([]);
+    });
+
+    it("masks a secret inbound address in a pending mail invitation", async () => {
+        const localPart = "alex.private-token";
+        await database.db.insert(mailAddresses).values({
+            id: "base-mailbox",
+            localPartHash: localPartHash("alex"),
+            localPart: encryptText("alex"),
+            kind: "mailbox",
+            namespaceUserId: owner,
+        });
+        await database.db.insert(mailAddresses).values({
+            localPartHash: localPartHash(localPart),
+            localPart: encryptText(localPart),
+            kind: "secret",
+            namespaceUserId: owner,
+            baseAddressId: "base-mailbox",
+        });
+        await database.db
+            .update(chatterItems)
+            .set({
+                title: encryptText(`Plan for ${localPart}@mail.example.com`),
+            })
+            .where(eq(chatterItems.id, "mail-item"));
+        await inviteToItem(owner, "mail-item", [receiver]);
+        const response = await invitationsRoute(
+            new Request("http://localhost/api/shares"),
+        );
+        expect(response.status).toBe(200);
+        const payload = await response.text();
+        expect(payload).not.toContain("private-token");
+        expect(payload).toContain("alex.•••••••••••••@mail.example.com");
+    });
+
+    it.each([
+        "suspended",
+        "disabled",
+        "missing",
+        "not-granted",
+        "deleted",
+    ])("excludes %s accounts from lookup, new invitations and restore", async (state) => {
+        await inviteToItem(owner, "audio-item", [receiver]);
+        if (state === "suspended")
+            await database.db
+                .update(users)
+                .set({ suspendedAt: new Date() })
+                .where(eq(users.id, receiver));
+        else if (state === "deleted")
+            await database.db.delete(users).where(eq(users.id, receiver));
+        else {
+            mockEnv.AUTHZ_MODE = "idp";
+            await database.db.insert(userAccessStates).values({
+                userId: receiver,
+                issuer: "https://identity.example.com",
+                subject: "demo-subject",
+                status:
+                    state === "not-granted"
+                        ? "active"
+                        : (state as "disabled" | "missing"),
+                capabilities: state === "not-granted" ? [] : ["use"],
+                verifiedAt: new Date(),
+                source: "access-change",
+            });
+        }
+        expect(await findShareRecipients(owner, "Lena")).toEqual([]);
+        expect(await resolveRecordingAccess(receiver, "audio-item")).toBeNull();
+        await expect(
+            inviteToItem(owner, "mail-item", [receiver]),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(
+            await restoreArchivedItemShares(
+                owner,
+                [
+                    {
+                        itemId: "mail-item",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["mail-item", "mail-item"]]),
+            ),
+        ).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "receiver_missing" }],
+        });
+    });
+
+    it("keeps active identity-provider members invitable", async () => {
+        mockEnv.AUTHZ_MODE = "idp";
+        await database.db.insert(userAccessStates).values({
+            userId: receiver,
+            issuer: "https://identity.example.com",
+            subject: "demo-subject",
+            capabilities: ["use"],
+            verifiedAt: new Date(),
+            source: "login",
+        });
+        expect(
+            (await findShareRecipients(owner, "Lena")).map((row) => row.id),
+        ).toEqual([receiver]);
+        expect(
+            (await inviteToItem(owner, "audio-item", [receiver]))[0].state,
+        ).toBe("pending");
+    });
+
+    it("caps the restore item-id map at one hundred entries", async () => {
+        for (const count of [100, 101]) {
+            const response = await restoreRoute(
+                new Request("http://localhost/api/shares/restore", {
+                    method: "POST",
+                    headers: {
+                        "x-test-user": owner,
+                        "content-type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        shares: [],
+                        itemIds: Object.fromEntries(
+                            Array.from({ length: count }, (_, index) => [
+                                `old-${index}`,
+                                `new-${index}`,
+                            ]),
+                        ),
+                    }),
+                }),
+            );
+            expect(response.status).toBe(count === 100 ? 200 : 400);
+        }
+    });
+
+    it("returns correction words without consulting the owner's private Almanac", async () => {
+        const [share] = await inviteToItem(owner, "audio-item", [receiver]);
+        await changePersonShare(receiver, share.id, {
+            action: "accept",
+            version: share.version,
+            folderId: "receiver-folder",
+        });
+        await database.db.insert(knowledgeEntities).values({
+            id: "private-project",
+            userId: owner,
+            typeKey: "project",
+            name: encryptText("Confidential acquisition"),
+            nameHmac: "private-project",
+            description: encryptText("Private project notes"),
+        });
+        await database.db.insert(transcriptCorrections).values([
+            {
+                id: "linked",
+                userId: owner,
+                transcriptionId: "owner-transcript",
+                transcriptRevision: 0,
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 7,
+                heard: encryptText("Project"),
+                heardHmac: "project",
+                kind: "link",
+                targetEntityId: "private-project",
+            },
+            {
+                id: "corrected",
+                userId: owner,
+                transcriptionId: "owner-transcript",
+                transcriptRevision: 0,
+                turnIndex: 0,
+                charStart: 8,
+                charEnd: 12,
+                heard: encryptText("body"),
+                heardHmac: "body",
+                kind: "correct",
+                targetEntityId: "private-project",
+                replacement: encryptText("plan"),
+            },
+        ]);
+        const knowledge = vi.spyOn(knowledgeLoader, "knowledgeView");
+        try {
+            const response = await readCorrections(
+                new Request(
+                    "http://localhost/api/recordings/audio-item/corrections?view=received",
+                ),
+                { params: Promise.resolve({ id: "audio-item" }) },
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toMatchObject({
+                canUndo: false,
+                corrections: [
+                    { id: "linked", meaning: "Project", replacement: null },
+                    { id: "corrected", meaning: "plan", replacement: "plan" },
+                ],
+            });
+            expect(knowledge).not.toHaveBeenCalled();
+        } finally {
+            knowledge.mockRestore();
+        }
+    });
+
+    it.each([
+        ["demo-receiver", "audio-item"],
+        ["demo-curator", "audio-item"],
+        ["demo-receiver", "mail-item"],
+        ["demo-curator", "mail-item"],
+    ])("preserves %s Organization rights on %s and resumes receiver rights on withdrawal", async (userId, itemId) => {
+        const curates = userId === curator;
+        const filing =
+            userId === receiver ? "receiver-folder" : "curator-folder";
+        if (curates)
+            await database.db.insert(recordingFolders).values({
+                id: filing,
+                userId,
+                name: encryptText("Received"),
+                nameHash: "received",
+            });
+        const [share] = await inviteToItem(owner, itemId, [userId]);
+        await database.db.insert(people).values({
+            id: "org-assignee",
+            userId: organization,
+            displayName: encryptText("Lena Fischer"),
+            primaryEmailHash: lookupHash(
+                userId === receiver ? "lena@example.com" : "sam@example.com",
+            ),
+        });
+        const task = await addTask(
+            await taskViewer({ id: owner, email: "alex@example.com" }),
+            itemId,
+            {
+                text: "Send the plan",
+                status: "open",
+                assigneePersonId: "org-assignee",
+            },
+        );
+        const other = await addTask(
+            await taskViewer({ id: owner, email: "alex@example.com" }),
+            itemId,
+            { text: "Check the route", status: "open" },
+        );
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ userId: owner, itemId, folderId: "org-folder" });
+        await database.db.insert(apiCredentials).values({
+            userId: organization,
+            provider: "local",
+            apiKey: encryptText("demo-key"),
+            defaultModel: "demo",
+        });
+        const routes = personWriteRoutes.filter(
+            (route) =>
+                (route.path === "recordings/[id]/route.ts" &&
+                    route.method === "PATCH") ||
+                (route.path === "recordings/[id]/summary/route.ts" &&
+                    route.method === "POST") ||
+                route.path === "recordings/[id]/tasks/route.ts" ||
+                (itemId === "audio-item" &&
+                    [
+                        "recordings/[id]/speakers/route.ts",
+                        "recordings/[id]/topics/route.ts",
+                    ].includes(route.path)),
+        );
+        const callWrites = async () => {
+            const statuses: number[] = [];
+            for (const route of routes) {
+                const response = await route.handler(
+                    new Request(
+                        `http://localhost/api/${route.path.replace("route.ts", "").replace("[id]", itemId)}?view=org`,
+                        {
+                            method: route.method,
+                            headers: {
+                                "x-test-user": userId,
+                                "content-type": "application/json",
+                            },
+                            body: JSON.stringify({
+                                filename: "Updated title",
+                                text: "A task",
+                                status: "open",
+                                transcriptionId: "owner-transcript",
+                                revision: 0,
+                                label: "speaker_0",
+                                unknown: true,
+                            }),
+                        },
+                    ),
+                    {
+                        params: Promise.resolve({
+                            id: itemId,
+                            correctionId: "missing",
+                            folderId: "org-folder",
+                            itemId: "missing",
+                            taskId: "missing",
+                            updateId: "missing",
+                        }),
+                    },
+                );
+                const payload = await response.text();
+                expect(payload).not.toContain("Received items are read-only");
+                expect(response.status, `${route.path}: ${payload}`).toBe(
+                    curates
+                        ? route.path.includes("topics/") ||
+                          route.path.includes("summary/")
+                            ? 202
+                            : route.path.includes("tasks/")
+                              ? 201
+                              : 200
+                        : 403,
+                );
+                statuses.push(response.status);
+            }
+            return statuses;
+        };
+        const before = await callWrites();
+        await database.db
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, itemId),
+                    eq(recordingFolderAssignments.folderId, "org-folder"),
+                ),
+            );
+        await changePersonShare(userId, share.id, {
+            action: "accept",
+            version: share.version,
+            folderId: filing,
+        });
+        expect(
+            await resolveRecordingAccess(userId, itemId, {
+                kinds: ["audio", "mail"],
+            }),
+        ).toMatchObject({ role: "receiver", shared: false });
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ userId: owner, itemId, folderId: "org-folder" });
+        expect(
+            await requireRecordingView(userId, itemId, "org", {
+                kinds: ["audio", "mail"],
+            }),
+        ).toMatchObject({ role: "member", shared: true, received: true });
+        expect(
+            await requireRecordingView(userId, itemId, "received", {
+                kinds: ["audio", "mail"],
+            }),
+        ).toMatchObject({ received: true });
+        expect(await callWrites()).toEqual(before);
+        if (itemId === "audio-item") {
+            const learned = await readLearn(
+                new Request(
+                    `http://localhost/api/recordings/${itemId}/learn?view=org`,
+                    { headers: { "x-test-user": userId } },
+                ),
+                { params: Promise.resolve({ id: itemId }) },
+            );
+            expect(learned.status).toBe(curates ? 200 : 403);
+        } else {
+            for (const view of ["org", "received"]) {
+                const mail = await readMail(
+                    new Request(
+                        `http://localhost/api/mail/${itemId}?view=${view}`,
+                        { headers: { "x-test-user": userId } },
+                    ),
+                    { params: Promise.resolve({ id: itemId }) },
+                );
+                expect(mail.status).toBe(200);
+                expect(await mail.json()).toMatchObject({
+                    folderIds: [view === "org" ? "org-folder" : filing],
+                });
+            }
+            expect((await resolveMailAccess(userId, itemId))?.role).toBe(
+                "member",
+            );
+        }
+        const viewer = await taskViewer({
+            id: userId,
+            email: userId === receiver ? "lena@example.com" : "sam@example.com",
+        });
+        const listed = await listRecordingTasks(viewer, itemId);
+        expect(listed?.tasks.find((row) => row.id === task.id)).toMatchObject({
+            canEdit: curates,
+            canClose: true,
+            assignee: { personId: "org-assignee" },
+        });
+        expect(listed?.tasks.find((row) => row.id === other.id)).toMatchObject({
+            canEdit: curates,
+            canClose: curates,
+        });
+        const mine = await listTasks(viewer, {
+            tab: "mine",
+            state: "all",
+            folderId: null,
+            due: null,
+            today: "2026-10-22",
+            sort: "created",
+        });
+        expect(mine.some((row) => row.id === task.id)).toBe(true);
+        if (curates) {
+            const tracked = await listTasks(viewer, {
+                tab: "tracked",
+                state: "all",
+                folderId: null,
+                due: null,
+                today: "2026-10-22",
+                sort: "created",
+            });
+            expect(tracked.some((row) => row.id === other.id)).toBe(true);
+        }
+        const done = await updateTask(viewer, task.id, {
+            version: task.version,
+            status: "done",
+        });
+        const opened = await updateTask(viewer, task.id, {
+            version: done.version,
+            status: "open",
+        });
+        if (curates)
+            await updateTask(viewer, task.id, {
+                version: opened.version,
+                text: "Updated task",
+            });
+        else
+            await expect(
+                updateTask(viewer, task.id, {
+                    version: opened.version,
+                    text: "Updated task",
+                }),
+            ).rejects.toMatchObject({ statusCode: 403 });
+        const withdrawal = personWriteRoutes.find(
+            (route) =>
+                route.path === "recordings/[id]/folders/route.ts" &&
+                route.method === "DELETE",
+        );
+        if (!withdrawal) throw new Error("Missing withdrawal route");
+        const withdraw = (actor: string) =>
+            withdrawal.handler(
+                new Request(
+                    `http://localhost/api/recordings/${itemId}/folders?view=org`,
+                    {
+                        method: "DELETE",
+                        headers: {
+                            "x-test-user": actor,
+                            "content-type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            organization: true,
+                            withdraw: true,
+                        }),
+                    },
+                ),
+                { params: Promise.resolve({ id: itemId }) },
+            );
+        expect((await withdraw(userId)).status).toBe(403);
+        expect((await withdraw(organization)).status).toBe(200);
+        expect(
+            await requireRecordingView(userId, itemId, "received", {
+                kinds: ["audio", "mail"],
+            }),
+        ).toMatchObject({ role: "receiver", received: true, shared: false });
+        await expect(
+            requireRecordingView(userId, itemId, "org", {
+                kinds: ["audio", "mail"],
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect((await listItemShares(owner, itemId))[0]).toMatchObject({
+            state: "accepted",
+        });
+        expect(
+            (
+                await database.db
+                    .select()
+                    .from(itemShares)
+                    .where(
+                        and(
+                            eq(itemShares.id, share.id),
+                            eq(itemShares.receiverUserId, userId),
+                        ),
+                    )
+            )[0].filingFolderId,
+        ).toBe(filing);
+        expect(
+            (await listRecordingTasks(viewer, itemId))?.tasks.find(
+                (row) => row.id === task.id,
+            ),
+        ).toMatchObject({
+            canEdit: false,
+            canClose: true,
+            assignee: { personId: "" },
+        });
+        expect(
+            (await listRecordingTasks(viewer, itemId))?.tasks.find(
+                (row) => row.id === other.id,
+            ),
+        ).toMatchObject({ canEdit: false, canClose: false });
+    });
+    it.each([
+        "audio-item",
+        "mail-item",
+    ])("lets an accepted curator delete the Organization summary of %s", async (itemId) => {
+        const [share] = await inviteToItem(owner, itemId, [curator]);
+        await database.db.insert(recordingFolders).values({
+            id: "curator-filing",
+            userId: curator,
+            name: encryptText("Received"),
+            nameHash: "received",
+        });
+        await changePersonShare(curator, share.id, {
+            action: "accept",
+            version: share.version,
+            folderId: "curator-filing",
+        });
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ itemId, userId: owner, folderId: "org-folder" });
+        const route = personWriteRoutes.find(
+            (entry) =>
+                entry.path === "recordings/[id]/summary/route.ts" &&
+                entry.method === "DELETE",
+        );
+        if (!route) throw new Error("Summary route missing");
+        const response = await route.handler(
+            new Request(
+                `http://localhost/api/recordings/${itemId}/summary?view=org`,
+                { method: "DELETE", headers: { "x-test-user": curator } },
+            ),
+            { params: Promise.resolve({ id: itemId }) },
+        );
+        expect(response.status).toBe(200);
+        expect(
+            await database.db
+                .select()
+                .from(aiEnhancements)
+                .where(eq(aiEnhancements.itemId, itemId)),
+        ).toEqual([]);
     });
 });

@@ -37,7 +37,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const view = requestedRecordingView(request);
 
     const access = await requireRecordingView(session.user.id, id, view);
-    if (access.role === "receiver") {
+    if (view === "received") {
         const transcript = await requireTranscript(
             access.ownerUserId,
             id,

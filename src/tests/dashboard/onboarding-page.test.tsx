@@ -250,7 +250,7 @@ describe("layout onboarding seed", () => {
         finishReview(new Set());
         await Promise.all([layoutConfig, render]);
     });
-    it("keeps an accepted receiver read-only in both the personal and Organization libraries", async () => {
+    it("keeps the Organization entry and the received copy in separate libraries", async () => {
         state.personSharing = true;
         const page = (await DashboardPage()) as ReactElement<{
             children: ReactElement<{
@@ -260,14 +260,21 @@ describe("layout onboarding seed", () => {
         }>;
         const { recordings: personal, organizationLibrary } =
             page.props.children.props;
-        for (const items of [personal, organizationLibrary.recordings]) {
-            expect(
-                items.find((item) => item.id === "received-audio"),
-            ).toMatchObject({
-                view: "received",
-                isOwn: false,
-                receivedShare: { id: "share", filingFolderId: "personal" },
-            });
-        }
+        expect(
+            personal.find((item) => item.id === "received-audio"),
+        ).toMatchObject({
+            view: "received",
+            isOwn: false,
+            receivedShare: { id: "share", filingFolderId: "personal" },
+        });
+        expect(
+            organizationLibrary.recordings.find(
+                (item) => item.id === "received-audio",
+            ),
+        ).toMatchObject({
+            view: "org",
+            isOwn: false,
+        });
+        expect(organizationLibrary.recordings[0].receivedShare).toBeUndefined();
     });
 });

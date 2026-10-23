@@ -579,7 +579,7 @@ async function summaryUsesOlderContent(
 
 // DELETE - Remove summary
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
 
     const { id } = await (context as IdContext).params;
     const source = requestedSummarySource(request);
@@ -588,7 +588,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         kinds: ALL_ITEM_KINDS,
     });
 
-    assertMayChange(access, session.user.id);
+    const curates = view === "org" && (await actsForOrganization(actor));
+    assertMayChange(access, session.user.id, curates);
     const ownerUserId = access.ownerUserId;
     const isMail = access.kind === "mail";
 
@@ -624,6 +625,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             ownerUserId,
             actorUserId: session.user.id,
             orgUserId: access.orgUserId,
+            actsForOrganization: curates,
         });
         if (refusal) throw writerRefusalError(refusal);
 

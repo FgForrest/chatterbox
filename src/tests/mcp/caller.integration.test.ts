@@ -16,7 +16,14 @@ import {
     it,
     vi,
 } from "vitest";
-import { accounts, chatterItems, itemShares, users } from "@/db/schema";
+import {
+    accounts,
+    chatterItems,
+    itemShares,
+    recordingFolderAssignments,
+    recordingFolders,
+    users,
+} from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
 import {
     createMigratedTestDatabase,
@@ -72,6 +79,7 @@ vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import { resolveCaller } from "@/lib/mcp/caller";
+import { recordingViewFor } from "@/lib/mcp/scope";
 import type { McpTokenClaims } from "@/lib/mcp/token";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -366,5 +374,77 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
         await expect(
             resolveCaller(claims("org-sub", ["knowledge:read"])),
         ).resolves.toEqual({ ok: false, reason: "no-account" });
+    });
+    it("uses Organization views for accepted shares while shared and resumes received views after withdrawal", async () => {
+        if (!orgUserId) throw new Error("Organization account missing");
+        await db()
+            .insert(chatterItems)
+            .values({
+                id: "shared-mail",
+                userId: BOB,
+                kind: "mail",
+                title: encryptText("Project mail"),
+                occurredAt: new Date(),
+            });
+        await db().insert(itemShares).values({
+            itemId: "shared-mail",
+            userId: BOB,
+            receiverUserId: ALICE,
+            state: "accepted",
+        });
+        await db()
+            .insert(recordingFolders)
+            .values({
+                id: "shared-folder",
+                userId: orgUserId,
+                name: encryptText("Shared"),
+                nameHash: "shared",
+            });
+        const view = async () => {
+            const result = await resolveCaller(
+                claims("alice-sub", ["mail:read"]),
+            );
+            if (!result.ok) throw new Error(result.reason);
+            return recordingViewFor(result.caller, BOB, "shared-mail");
+        };
+        expect(await view()).toBe("received");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "shared-mail",
+            userId: BOB,
+            folderId: "shared-folder",
+        });
+        expect(await view()).toBe("org");
+        await db()
+            .delete(recordingFolderAssignments)
+            .where(eq(recordingFolderAssignments.itemId, "shared-mail"));
+        expect(await view()).toBe("received");
+    });
+
+    it("loads the full accepted-share set for view resolution beyond a list page", async () => {
+        const ids = Array.from({ length: 105 }, (_, index) => `mail-${index}`);
+        await db()
+            .insert(chatterItems)
+            .values(
+                ids.map((id) => ({
+                    id,
+                    userId: BOB,
+                    kind: "mail" as const,
+                    title: encryptText("Mail"),
+                    occurredAt: new Date(),
+                })),
+            );
+        await db()
+            .insert(itemShares)
+            .values(
+                ids.map((itemId) => ({
+                    itemId,
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    state: "accepted" as const,
+                })),
+            );
+        const result = await resolveCaller(claims("alice-sub", ["mail:read"]));
+        if (!result.ok) throw new Error(result.reason);
+        expect(result.caller.receivedItemIds).toEqual(new Set(ids));
     });
 });

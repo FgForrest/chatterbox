@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     rows: vi.fn(),
     items: vi.fn(),
 }));
+vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 vi.mock("@/db", () => ({
     db: {
         select: () => ({

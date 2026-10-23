@@ -42,7 +42,9 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             noStore,
         );
     const [detail, processing] = await Promise.all([
-        loadMailDetail(session.user.id, id),
+        access.view === "private"
+            ? loadMailDetail(session.user.id, id)
+            : loadMailDetail(session.user.id, id, access.view),
         processingRequest,
     ]);
     if (!detail) {

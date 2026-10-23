@@ -76,7 +76,10 @@ export function assertMayChange<
     actorUserId: string,
     actsForOrganization = actorUserId === access.orgUserId,
 ): asserts access is T & { view: "private" | "org" } {
-    if (access.view === "received" || access.role === "receiver") {
+    if (
+        access.view === "received" ||
+        (!access.shared && access.role === "receiver")
+    ) {
         throw new AppError(
             ErrorCode.FORBIDDEN,
             "Received items are read-only",
