@@ -1,5 +1,5 @@
 interface ItemChangePermission {
-    view: "private" | "org";
+    view: "private" | "org" | "received";
     isOwn: boolean;
     isOrgAccount: boolean;
     canCurate: boolean;
@@ -12,6 +12,7 @@ export function canChangeItem({
     isOrgAccount,
     canCurate,
 }: ItemChangePermission): boolean {
+    if (view === "received") return false;
     if (view === "org") return isOwn || isOrgAccount || canCurate;
     return isOwn;
 }

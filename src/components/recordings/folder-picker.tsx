@@ -29,6 +29,7 @@ export function FolderPicker({
     scope,
     canCurate = false,
     onCreated,
+    title,
 }: {
     folders: RecordingFolder[];
     assignedIds: ReadonlySet<string>;
@@ -40,6 +41,7 @@ export function FolderPicker({
     scope?: RecordingFolder["scope"];
     canCurate?: boolean;
     onCreated?: (folder: RecordingFolder) => void;
+    title?: string;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -122,7 +124,7 @@ export function FolderPicker({
                 }}
                 className="top-[15vh] max-h-[80dvh] -translate-y-0 overflow-y-auto gap-3 p-4 sm:max-w-md"
             >
-                <DialogTitle>{i18n("Choose a folder")}</DialogTitle>
+                <DialogTitle>{title ?? i18n("Choose a folder")}</DialogTitle>
                 <DialogDescription className="sr-only">
                     {i18n("Search by folder name or path.")}
                 </DialogDescription>

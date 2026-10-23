@@ -91,6 +91,7 @@ vi.mock("@/lib/org/config", () => ({
     isOrgAccount: async (id: string) => id === "org",
     assertOrgScopeWritable: vi.fn(),
     isOrgScopeEnabled: () => true,
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: async (id: string) =>

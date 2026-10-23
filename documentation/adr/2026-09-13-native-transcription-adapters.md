@@ -1,7 +1,7 @@
 ---
 title: Transcription providers that are not OpenAI-compatible get a native adapter chosen by transcriptionStyle, not a proxy
 date: 2026-09-13
-updated: 2026-10-22 16:00
+updated: 2026-10-22 20:45
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [24]
 areas: [src/lib/ai/provider-presets.ts, src/lib/transcription, AGENTS.md, content/docs/guides/ai-providers.mdx]
 supersedes: []
 superseded-by: []
-relates: [2026-10-02-almanac-guided-transcript-correction]
+relates: [2026-10-02-almanac-guided-transcript-correction, 2026-10-22-security-assessment-hardening]
 ---
 
 # Transcription providers that are not OpenAI-compatible get a native adapter chosen by transcriptionStyle, not a proxy
@@ -111,6 +111,8 @@ alternative.
   up as failed transcriptions in use.
 
 ## Related work
+
+- [Security assessment hardening](2026-10-22-security-assessment-hardening.md): hosted native adapters now share the public-target transport with SDK clients.
 
 - [2026-10-02-almanac-guided-transcript-correction](2026-10-02-almanac-guided-transcript-correction.md):
   sends Almanac terms through the native vocabulary fields these adapters expose.

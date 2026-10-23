@@ -8,8 +8,10 @@ import {
     isNull,
     or,
     type SQL,
+    sql,
 } from "drizzle-orm";
 import { db } from "@/db";
+import { taskReceived } from "@/db/queries/task-visibility";
 import {
     chatterItems,
     people,
@@ -91,7 +93,9 @@ export function taskMentionVisible(
         eq(item.id, mention.itemId),
         eq(item.userId, mention.userId),
         isNull(item.deletedAt),
-        viewer.isOrg ? organization : or(own, organization),
+        viewer.isOrg
+            ? organization
+            : or(own, organization, taskReceived(viewer, item)),
     ) as SQL;
 }
 
@@ -128,6 +132,7 @@ export interface TaskMentionEvidence {
     audioAvailable: boolean;
     occurredAt: Date;
     ownerUserId: string;
+    received: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceSegmentIndex: number | null;
@@ -146,6 +151,7 @@ export interface LoadedTaskMentions {
 async function loadTaskMentions(
     taskIds: readonly string[],
     visible: SQL,
+    viewer?: TaskViewer,
 ): Promise<LoadedTaskMentions> {
     const latest = new Map<string, TaskMentionEvidence>();
     const quotes = new Map<
@@ -177,6 +183,9 @@ async function loadTaskMentions(
                 audioDeletedAt: recordings.deletedAt,
                 occurredAt: chatterItems.occurredAt,
                 ownerUserId: chatterItems.userId,
+                received: viewer
+                    ? sql<boolean>`${taskReceived(viewer, chatterItems)}`
+                    : sql<boolean>`false`,
                 quote: taskMentions.quote,
                 evidenceStartMs: taskMentions.evidenceStartMs,
                 evidenceSegmentIndex: taskMentions.evidenceSegmentIndex,
@@ -241,7 +250,7 @@ export function loadVisibleTaskMentions(
     viewer: TaskViewer,
     taskIds: readonly string[],
 ): Promise<LoadedTaskMentions> {
-    return loadTaskMentions(taskIds, taskMentionVisible(viewer));
+    return loadTaskMentions(taskIds, taskMentionVisible(viewer), viewer);
 }
 
 /** The newest archive-visible evidence and all visible quotes for each task. */

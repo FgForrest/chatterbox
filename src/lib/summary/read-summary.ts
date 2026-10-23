@@ -13,7 +13,7 @@ import { db } from "@/db";
 import { aiEnhancements } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
-import type { PipelineView } from "@/lib/pipeline/types";
+import type { RecordingView } from "@/lib/sharing/view";
 import type {
     EnhancementSource,
     ProcessingRunInputs,
@@ -88,7 +88,7 @@ export async function readStoredSummary(
     userId: string,
     recordingId: string,
     source?: EnhancementSource,
-    view: PipelineView = "private",
+    view: RecordingView = "private",
 ): Promise<StoredSummary | null> {
     const conditions = [
         eq(aiEnhancements.itemId, recordingId),
@@ -109,6 +109,7 @@ export async function readStoredSummary(
     const storedScope = inputs?.scopeFingerprint;
     const scopeChanged =
         typeof storedScope === "string" &&
+        view !== "received" &&
         storedScope !== (await itemScopeFingerprint(recordingId, view, userId));
     return storedSummaryOf(enhancement, scopeChanged);
 }
@@ -150,7 +151,7 @@ export function storedSummaryOf(
 export async function readStoredSummaries(
     userId: string,
     recordingId: string,
-    view: PipelineView = "private",
+    view: RecordingView = "private",
 ): Promise<StoredSummary[]> {
     const rows = await db
         .select()
@@ -165,9 +166,10 @@ export async function readStoredSummaries(
         const inputs = row.inputs as { scopeFingerprint?: unknown } | null;
         return typeof inputs?.scopeFingerprint === "string";
     });
-    const currentScope = hasStoredScope
-        ? await itemScopeFingerprint(recordingId, view, userId)
-        : null;
+    const currentScope =
+        hasStoredScope && view !== "received"
+            ? await itemScopeFingerprint(recordingId, view, userId)
+            : null;
     const ordered = (["plaud", "riffado"] as const).flatMap((source) => {
         const row = rows.find((candidate) => candidate.source === source);
         return row ? [row] : [];
@@ -176,7 +178,8 @@ export async function readStoredSummaries(
         const inputs = row.inputs as { scopeFingerprint?: unknown } | null;
         return storedSummaryOf(
             row,
-            typeof inputs?.scopeFingerprint === "string" &&
+            view !== "received" &&
+                typeof inputs?.scopeFingerprint === "string" &&
                 inputs.scopeFingerprint !== currentScope,
         );
     });

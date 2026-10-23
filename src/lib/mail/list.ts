@@ -9,6 +9,7 @@ import {
     sql,
 } from "drizzle-orm";
 import { db } from "@/db";
+import { receivedItemCondition } from "@/db/queries/item-shares";
 import {
     aiEnhancements,
     chatterItems,
@@ -187,4 +188,16 @@ export async function loadSharedMailRows(
         viewerUserId,
         organization: true,
     });
+}
+
+/** Accepted mail invitations as read-only entries of the receiver's library. */
+export async function loadReceivedMailRows(
+    viewerUserId: string,
+): Promise<Recording[]> {
+    return (
+        await mailRows(receivedItemCondition(viewerUserId), {
+            viewerUserId,
+            organization: true,
+        })
+    ).map((row) => ({ ...row, view: "received" }));
 }

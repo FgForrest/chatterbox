@@ -2,9 +2,10 @@ import { EventEmitter } from "node:events";
 import { sqlClient } from "@/db";
 import { publishEvent } from "@/db/queries/events";
 import { isMailEnabled } from "@/lib/mail/config";
+import { isOrgScopeVisible } from "@/lib/org/config";
 
 interface PersonalEvent {
-    type: "mail";
+    type: "mail" | "share";
     userId: string;
 }
 
@@ -23,12 +24,12 @@ export function parsePersonalEvent(payload: string): PersonalEvent | null {
             !Array.isArray(value) &&
             Object.keys(value).length === 2 &&
             "type" in value &&
-            value.type === "mail" &&
+            (value.type === "mail" || value.type === "share") &&
             "userId" in value &&
             typeof value.userId === "string" &&
             value.userId.length > 0
         ) {
-            return { type: "mail", userId: value.userId };
+            return { type: value.type, userId: value.userId };
         }
     } catch {}
     return null;
@@ -49,7 +50,11 @@ function ensureListening(): void {
     listening = sqlClient
         .listen(CHANNEL, (payload) => {
             const event = parsePersonalEvent(payload);
-            if (event && isMailEnabled()) emitter.emit(`user:${event.userId}`);
+            if (
+                event &&
+                (event.type === "mail" ? isMailEnabled() : isOrgScopeVisible())
+            )
+                emitter.emit(`user:${event.userId}`, event);
         })
         .catch((error: unknown) => {
             console.error("[personal-events] listen failed:", error);
@@ -60,12 +65,22 @@ function ensureListening(): void {
 /** Subscribe only to this session user's personal invalidations. */
 export function subscribePersonalEvents(
     userId: string,
-    listener: () => void,
+    listener: (event: PersonalEvent) => void,
 ): () => void {
-    if (!isMailEnabled()) return () => {};
+    if (!isMailEnabled() && !isOrgScopeVisible()) return () => {};
     emitter.on(`user:${userId}`, listener);
     ensureListening();
     return () => {
         emitter.off(`user:${userId}`, listener);
     };
+}
+
+/** Best-effort invalidation after a person share transaction commits. */
+export async function notifyPersonShareChanged(userId: string): Promise<void> {
+    if (!isOrgScopeVisible()) return;
+    try {
+        await publishEvent(CHANNEL, { type: "share", userId });
+    } catch {
+        console.error("[personal-events] share invalidation failed");
+    }
 }

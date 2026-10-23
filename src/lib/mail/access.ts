@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
+import { isItemReceived } from "@/db/queries/item-shares";
 import { chatterItems } from "@/db/schema";
 import { getOrgUserId } from "@/lib/org/config";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -12,7 +13,7 @@ import { isRecordingShared } from "@/lib/sharing/shared";
 export interface MailAccess {
     itemId: string;
     ownerUserId: string;
-    role: "owner" | "member" | "curator";
+    role: "owner" | "member" | "curator" | "receiver";
 }
 
 /**
@@ -39,8 +40,12 @@ export async function resolveMailAccess(
         return { itemId, ownerUserId: item.userId, role: "owner" };
     }
     const orgUserId = await getOrgUserId();
-    if (!orgUserId || !(await isRecordingShared(itemId, orgUserId))) {
-        return null;
+    const shared =
+        orgUserId !== null && (await isRecordingShared(itemId, orgUserId));
+    if (!shared) {
+        return (await isItemReceived(userId, itemId))
+            ? { itemId, ownerUserId: item.userId, role: "receiver" }
+            : null;
     }
     return {
         itemId,

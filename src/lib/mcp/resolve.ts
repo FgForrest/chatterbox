@@ -317,7 +317,7 @@ export async function resolveRecording(
         ownerUserId: row.userId,
         title,
         recordedAt: row.startTime.toISOString(),
-        view: recordingViewFor(caller, row.userId),
+        view: recordingViewFor(caller, row.userId, row.id),
         matchedBy,
     });
 

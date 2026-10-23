@@ -11,6 +11,7 @@ import { processAgainPending } from "@/lib/pipeline/outdated";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { requireRecordingView } from "@/lib/sharing/access";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -18,6 +19,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const userId = session.user.id;
     const { id: itemId } = await (context as IdContext).params;
+    await requireRecordingView(userId, itemId, "private", {
+        kinds: ["audio", "mail"],
+    });
     const profile = await resolveItemProfile(itemId, "private", userId);
     const steps = profile.settings.steps;
     const hasAutomaticStep = Object.values(steps).some(

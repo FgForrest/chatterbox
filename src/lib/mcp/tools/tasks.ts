@@ -89,6 +89,7 @@ const taskItem = z.object({
     note_updated_at: z.string().nullable(),
     following: z.boolean(),
     can_merge: z.boolean(),
+    received_owner_name: z.string().optional(),
     /** Its recording or mail; null for a mail the caller may not read. */
     recording: z
         .object({
@@ -168,6 +169,7 @@ async function mailMasker(tasks: readonly TaskListItem[]): Promise<Mask> {
                 task.assigneeHint ?? "",
                 task.assignee?.name ?? "",
                 task.recording?.title ?? "",
+                task.receivedOwnerName ?? "",
                 task.note ?? "",
             ]),
         ...tasks.flatMap((task) =>
@@ -213,6 +215,10 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
                   duePhrase: optional(task.duePhrase),
                   assigneeHint: optional(task.assigneeHint),
                   note: optional(task.note),
+                  receivedOwnerName:
+                      task.receivedOwnerName === undefined
+                          ? undefined
+                          : mask(task.receivedOwnerName),
                   recording: task.recording
                       ? {
                             ...task.recording,
@@ -275,6 +281,9 @@ function toItem(caller: McpCaller, task: TaskListItem): TaskItem {
         note_updated_at: noteVisible ? task.noteUpdatedAt : null,
         following: task.following,
         can_merge: writes && task.canMerge,
+        ...(task.receivedOwnerName !== undefined
+            ? { received_owner_name: task.receivedOwnerName }
+            : {}),
         recording:
             source && homeUrl && task.recording
                 ? {
@@ -667,6 +676,7 @@ const updateTaskTool = defineTool({
                 recording: before.recording,
                 evidence: before.evidence,
                 visibleMentionQuotes: before.visibleMentionQuotes,
+                noteMailSourced: before.noteMailSourced,
             },
         ]);
         return {

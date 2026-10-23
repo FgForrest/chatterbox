@@ -27,19 +27,23 @@ const { mockEnv, linked, holderAccess } = vi.hoisted(() => ({
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/db", () => {
     const chain: Record<string, unknown> = {};
-    for (const step of ["select", "from", "innerJoin", "where"]) {
+    for (const step of ["select", "from", "innerJoin"]) {
         chain[step] = () => chain;
     }
-    chain.limit = async () => {
-        linked.queried++;
-        return linked.rows;
-    };
+    chain.where = () =>
+        Object.assign(Promise.resolve([]), {
+            limit: async () => {
+                linked.queried++;
+                return linked.rows;
+            },
+        });
     return { db: chain };
 });
 vi.mock("@/lib/authz/access-state", () => ({ holderAccess }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: vi.fn(async () => "org-user"),
     isOrgScopeEnabled: () => true,
+    isOrgScopeVisible: () => true,
 }));
 
 import { resolveCaller } from "@/lib/mcp/caller";

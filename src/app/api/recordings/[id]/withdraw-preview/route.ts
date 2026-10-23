@@ -22,7 +22,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
-    if (view === "org") assertMayChange(access, session.user.id);
+    if (view === "org" || view === "received")
+        assertMayChange(access, session.user.id);
     return NextResponse.json({
         due: await dueOnWithdrawal(id, access.ownerUserId),
     });

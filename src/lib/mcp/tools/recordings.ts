@@ -80,7 +80,7 @@ const recordingItem = z.object({
     recorded_at: z.string(),
     duration_ms: z.number().int(),
     confirmed_language: z.string().nullable(),
-    view: z.enum(["private", "org"]),
+    view: z.enum(["private", "org", "received"]),
     owner_is_me: z.boolean(),
     speakers: z.array(z.string()),
     url: z.string(),
@@ -97,7 +97,7 @@ async function describeRecordings(
         rows.map(({ row }) => row),
     );
     return rows.map(({ row, title }) => {
-        const view = recordingViewFor(caller, row.userId);
+        const view = recordingViewFor(caller, row.userId, row.id);
         return {
             id: row.id,
             title,

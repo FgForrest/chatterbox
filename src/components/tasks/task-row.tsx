@@ -97,7 +97,11 @@ export function TaskRow({
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
     let closeReason: string | null = null;
-    if (!task.canClose && !dropped) {
+    if (task.receivedOwnerName && !task.canClose && !dropped) {
+        closeReason = i18n("Only {owner} can edit this task.", {
+            owner: task.receivedOwnerName,
+        });
+    } else if (!task.canClose && !dropped) {
         if (!task.assignee) {
             closeReason = i18n(
                 "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
@@ -177,6 +181,13 @@ export function TaskRow({
                         {task.text}
                     </p>
                 )}
+                {task.receivedOwnerName && !editable && (
+                    <p className="text-xs text-muted-foreground">
+                        {i18n("Only {owner} can edit this task.", {
+                            owner: task.receivedOwnerName,
+                        })}
+                    </p>
+                )}
                 {pageRow && (
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         {own ? (
@@ -193,7 +204,7 @@ export function TaskRow({
                                 {" "}
                                 {evidence && (
                                     <Link
-                                        href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                        href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view !== "private" ? `&view=${evidence.view}` : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                         className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 hover:text-primary"
                                     >
                                         {evidence.kind === "mail" ? (

@@ -489,6 +489,13 @@ const baseEnvSchema = z.object({
 
     /** Trust X-Forwarded-For for IP rate limiting; only enable behind a trusted proxy. */
     RATE_LIMIT_TRUST_PROXY_HEADERS: optionalStrictBoolean,
+    RATE_LIMIT_CLIENT_IP_HEADER: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim().toLowerCase() || undefined)
+        .refine((val) => val === undefined || HEADER_NAME.test(val), {
+            message: "RATE_LIMIT_CLIENT_IP_HEADER must be an HTTP header name",
+        }),
 
     ENCRYPTION_KEY: z.string().optional(),
 
@@ -1667,6 +1674,7 @@ export function readEnvInput(): Record<EnvInputKey, string | undefined> {
             process.env.WEBHOOKS_REQUIRE_PUBLIC_TARGETS,
         RATE_LIMIT_TRUST_PROXY_HEADERS:
             process.env.RATE_LIMIT_TRUST_PROXY_HEADERS,
+        RATE_LIMIT_CLIENT_IP_HEADER: process.env.RATE_LIMIT_CLIENT_IP_HEADER,
         ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
         DEFAULT_STORAGE_TYPE: process.env.DEFAULT_STORAGE_TYPE,
         LOCAL_STORAGE_PATH: process.env.LOCAL_STORAGE_PATH,

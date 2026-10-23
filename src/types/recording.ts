@@ -67,6 +67,11 @@ export type Recording = Omit<RecordingQueryResult, "startTime"> & {
     isOwn?: boolean;
     /** Display name of the owner, on Organization entries. */
     ownerName?: string | null;
+    receivedShare?: {
+        id: string;
+        version: number;
+        filingFolderId: string | null;
+    };
 };
 
 // Helper to serialize a recording query result. Optional fields let
@@ -104,9 +109,9 @@ export function serializeRecording(
         waveformPeaks: flags?.waveformPeaks?.length
             ? flags.waveformPeaks
             : null,
-        ...(flags?.view === "org"
+        ...(flags?.view === "org" || flags?.view === "received"
             ? {
-                  view: "org" as const,
+                  view: flags.view,
                   isOwn: flags.isOwn ?? false,
                   ownerName: flags.ownerName ?? null,
               }

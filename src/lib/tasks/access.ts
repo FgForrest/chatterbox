@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, or, type SQL } from "drizzle-orm";
+import { and, eq, isNull, ne, not, or, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
     ANY_TASK_ITEM,
@@ -8,6 +8,7 @@ import {
     type TaskItemColumns,
     type TaskViewer,
     taskFollowed,
+    taskReceived,
     taskRecordingShared,
     taskVisible,
 } from "@/db/queries/task-visibility";
@@ -28,6 +29,7 @@ export {
     taskVisible,
     assignedToViewer,
     taskFollowed,
+    taskReceived,
 };
 export type { TaskItemColumns, TaskViewer };
 
@@ -49,6 +51,7 @@ export async function taskViewer(
         isOrg: orgUserId !== null && orgUserId === user.id,
         isCurator,
         orgUserId,
+        includeReceived: true,
     };
 }
 
@@ -59,7 +62,10 @@ export async function taskViewerById(userId: string): Promise<TaskViewer> {
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
-    return taskViewer(user ?? { id: userId, email: "" });
+    return {
+        ...(await taskViewer(user ?? { id: userId, email: "" })),
+        includeReceived: false,
+    };
 }
 
 /**
@@ -84,9 +90,13 @@ export function taskClosable(
     includePersonal = false,
 ): SQL {
     const own = ownedByViewer(viewer, item, includePersonal);
-    const shared = taskRecordingShared(viewer, item);
-    if (viewer.isCurator) return or(own, shared) as SQL;
-    return or(own, and(shared, assignedToViewer(viewer))) as SQL;
+    const shared = and(
+        taskRecordingShared(viewer, item),
+        not(taskReceived(viewer, item)),
+    );
+    const received = and(taskReceived(viewer, item), assignedToViewer(viewer));
+    if (viewer.isCurator) return or(own, shared, received) as SQL;
+    return or(own, and(shared, assignedToViewer(viewer)), received) as SQL;
 }
 
 /** SQL: the viewer may change the task (`recordings` joined, or `item`). */
@@ -111,6 +121,18 @@ function ownedByViewer(
     ) as SQL;
 }
 
+/** Content writes retain Organization editor rights and refuse receiver-only access. */
+export function taskContentEditable(
+    viewer: TaskViewer,
+    item: TaskItemColumns = RECORDING_TASK_ITEM,
+    includePersonal = false,
+): SQL {
+    return and(
+        taskEditable(viewer, item, includePersonal),
+        not(taskReceived(viewer, item)),
+    ) as SQL;
+}
+
 /** Whether the viewer may remove `sourceOwnerUserId`'s task into the target. */
 export function mayMergeTaskOwners(
     viewer: TaskViewer,
@@ -132,6 +154,7 @@ export function taskMergeable(
 ): SQL {
     return and(
         taskVisible(viewer, item, true),
+        not(taskReceived(viewer, item)),
         or(taskEditable(viewer, item, true), assignedToViewer(viewer)),
     ) as SQL;
 }

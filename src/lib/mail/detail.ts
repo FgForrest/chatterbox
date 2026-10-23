@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
+    itemShares,
     mailContents,
     mailMessages,
     mailParticipants,
@@ -16,6 +17,7 @@ import type { MailAuth } from "@/lib/mail/dkim";
 import type { AttachmentMeta } from "@/lib/mail/parse";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { getOrgUserId } from "@/lib/org/config";
+import { type RecordingView, requireRecordingView } from "@/lib/sharing/access";
 
 export interface MailParticipantView {
     ref: string;
@@ -60,9 +62,17 @@ export interface MailDetail {
 export async function loadMailDetail(
     viewerUserId: string,
     itemId: string,
+    view?: RecordingView,
 ): Promise<MailDetail | null> {
     const access = await resolveMailAccess(viewerUserId, itemId);
     if (!access) return null;
+    if (view)
+        await requireRecordingView(viewerUserId, itemId, view, {
+            kinds: ["mail"],
+        });
+    const receivedView = view
+        ? view === "received"
+        : access.role === "receiver";
     const ownerUserId = access.ownerUserId;
     const isOwn = access.role === "owner";
     const [row] = await db
@@ -125,23 +135,37 @@ export async function loadMailDetail(
                 ),
             )
             .limit(1),
-        db
-            .select({ folderId: recordingFolderAssignments.folderId })
-            .from(recordingFolderAssignments)
-            .innerJoin(
-                recordingFolders,
-                eq(recordingFolders.id, recordingFolderAssignments.folderId),
-            )
-            .where(
-                and(
-                    eq(recordingFolderAssignments.itemId, itemId),
-                    eq(recordingFolderAssignments.userId, ownerUserId),
-                    // The owner's private folders are theirs alone.
-                    orgUserId
-                        ? eq(recordingFolders.userId, orgUserId)
-                        : undefined,
-                ),
-            ),
+        receivedView
+            ? db
+                  .select({ folderId: itemShares.filingFolderId })
+                  .from(itemShares)
+                  .where(
+                      and(
+                          eq(itemShares.itemId, itemId),
+                          eq(itemShares.receiverUserId, viewerUserId),
+                          eq(itemShares.state, "accepted"),
+                      ),
+                  )
+            : db
+                  .select({ folderId: recordingFolderAssignments.folderId })
+                  .from(recordingFolderAssignments)
+                  .innerJoin(
+                      recordingFolders,
+                      eq(
+                          recordingFolders.id,
+                          recordingFolderAssignments.folderId,
+                      ),
+                  )
+                  .where(
+                      and(
+                          eq(recordingFolderAssignments.itemId, itemId),
+                          eq(recordingFolderAssignments.userId, ownerUserId),
+                          // The owner's private folders are theirs alone.
+                          orgUserId
+                              ? eq(recordingFolders.userId, orgUserId)
+                              : undefined,
+                      ),
+                  ),
     ]);
     const segments =
         decryptJsonField<
@@ -194,13 +218,16 @@ export async function loadMailDetail(
             ...segment,
             text: mask(segment.text),
             at: segment.at ? new Date(segment.at).toISOString() : null,
+            ...(receivedView ? { knownItemId: null } : {}),
         })),
         attachments: attachments.map((attachment) => ({
             ...attachment,
             filename: attachment.filename ? mask(attachment.filename) : null,
         })),
         auth: decryptJsonField<MailAuth>(row.auth),
-        folderIds: assignments.map((assignment) => assignment.folderId),
+        folderIds: assignments.flatMap((assignment) =>
+            assignment.folderId ? [assignment.folderId] : [],
+        ),
     };
 }
 

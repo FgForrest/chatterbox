@@ -30,7 +30,19 @@ vi.mock("@/db/schema", async (importOriginal) => ({
     // the real recording and item tables.
     recordings: (await importOriginal<typeof Schema>()).recordings,
     chatterItems: (await importOriginal<typeof Schema>()).chatterItems,
-    users: { id: "users.id", role: "users.role" },
+    users: { id: "users.id", role: "users.role", email: "users.email" },
+    itemShares: {
+        __table: "itemShares",
+        id: "itemShares.id",
+        itemId: "itemShares.itemId",
+        userId: "itemShares.userId",
+        receiverUserId: "itemShares.receiverUserId",
+        folderShareId: "itemShares.folderShareId",
+        state: "itemShares.state",
+        invitedAt: "itemShares.invitedAt",
+        respondedAt: "itemShares.respondedAt",
+        removedAt: "itemShares.removedAt",
+    },
     learnRuns: {
         id: "learnRuns.id",
         scopeUserId: "learnRuns.scopeUserId",
@@ -286,6 +298,7 @@ function mockSelectSequence(
     results: Row[][],
     extras: {
         usage?: Row[];
+        shares?: Row[];
         rates?: Row[];
         folderDefaults?: Row[];
         itemChoices?: Row[];
@@ -306,6 +319,7 @@ function mockSelectSequence(
                 return { where: () => Promise.resolve([]) };
             }
             const processingRows = {
+                itemShares: extras.shares ?? [],
                 folderDefaultProfiles: extras.folderDefaults ?? [],
                 itemProcessing: extras.itemChoices ?? [],
                 mailPendingShares: extras.pendingOrganizationPlacements ?? [],
@@ -512,6 +526,68 @@ describe("buildAndUploadExportArchive", () => {
                 audioUsdPerHour: "1.000000",
             }),
         ]);
+    });
+
+    it("carries the owner's direct share list without the receiver's filing", async () => {
+        const date = new Date("2026-10-22T10:00:00Z");
+        mockSelectSequence(
+            [
+                [
+                    {
+                        id: "rec-1",
+                        userId: "user-1",
+                        title: "enc-interview",
+                        occurredAt: date,
+                        endTime: date,
+                        duration: 1000,
+                        filesize: 0,
+                        deviceSn: "local",
+                        storagePath: "audio/missing.mp3",
+                    },
+                ],
+                [],
+                [],
+            ],
+            {
+                shares: [
+                    {
+                        itemId: "rec-1",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                        invitedAt: date,
+                        respondedAt: date,
+                        removedAt: null,
+                    },
+                ],
+            },
+        );
+        await buildAndUploadExportArchive({
+            scope: { kind: "personal", userId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/shares.zip",
+        });
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries.get("sharing/people.json")?.buffer.toString("utf-8") ??
+                    "[]",
+            ),
+        ).toEqual([
+            {
+                itemId: "rec-1",
+                receiverEmail: "lena@example.com",
+                state: "accepted",
+                invitedAt: date.toISOString(),
+                respondedAt: date.toISOString(),
+                removedAt: null,
+            },
+        ]);
+        expect(
+            JSON.parse(
+                entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+            ).personShares,
+        ).toEqual({ count: 1, path: "sharing/people.json" });
     });
 
     it("carries the knowledge base so a restore keeps who was speaking", async () => {

@@ -39,6 +39,7 @@ import {
     type TaskViewer,
     taskClosable,
     taskEditable,
+    taskMergeable,
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
@@ -1339,7 +1340,7 @@ export async function searchAssignedMergeCandidates(
             and(
                 eq(recordingTasks.id, taskId),
                 eq(recordingTasks.status, "open"),
-                taskVisible(viewer, ANY_TASK_ITEM, true),
+                taskMergeable(viewer, ANY_TASK_ITEM),
                 assignedToViewer(viewer),
                 isNull(chatterItems.deletedAt),
             ),
@@ -1367,7 +1368,7 @@ export async function searchAssignedMergeCandidates(
             and(
                 ne(recordingTasks.id, taskId),
                 eq(recordingTasks.status, "open"),
-                taskVisible(viewer, ANY_TASK_ITEM, true),
+                taskMergeable(viewer, ANY_TASK_ITEM),
                 or(
                     assignedToViewer(viewer),
                     source.canEdit && source.itemId

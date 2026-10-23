@@ -22,6 +22,7 @@ const { holderAccessMock, isIdpAuthorizationMock, taskViewerMock } = vi.hoisted(
 vi.mock("@/lib/authz/access-state", () => ({
     holderAccess: holderAccessMock,
 }));
+vi.mock("@/lib/org/config", () => ({ isOrgScopeVisible: () => false }));
 vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/identity/factory", () => ({
     isIdpAuthorization: isIdpAuthorizationMock,

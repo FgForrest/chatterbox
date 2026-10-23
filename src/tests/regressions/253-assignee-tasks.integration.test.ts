@@ -67,6 +67,7 @@ import {
     type TaskTab,
     updateTask,
 } from "@/lib/tasks/tasks";
+import { localActor } from "@/tests/helpers/session-actor";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -114,6 +115,7 @@ vi.mock("@/lib/org/config", () => ({
     isOrgAccount: async (id: string) => id === "org",
     assertOrgScopeWritable: vi.fn(),
     isOrgScopeEnabled: () => true,
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: async (id: string) =>
@@ -132,6 +134,11 @@ vi.mock("@/lib/mcp/rate-limit", () => ({ allowMcpScan: async () => true }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
 vi.mock("@/lib/auth-server", () => ({
+    requireApiSessionActor: async () => ({
+        session: { user: { id: "author", email: "author@example.test" } },
+        actor: localActor("author"),
+        authTime: null,
+    }),
     requireApiSession: async () => ({
         user: { id: "author", email: "author@example.test" },
     }),
@@ -1237,6 +1244,17 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
                 )
             ).tasks,
         ).toHaveLength(1);
+        const replaced = await call("update_task", "assignee", {
+            task: keep.id,
+            version: 1,
+            note: "Replaced mail outcome",
+        });
+        expect(replaced.task).toMatchObject({
+            kind: "mail",
+            untrusted: true,
+            note: null,
+            text: "Audio task\nMail task inbox.••••••••••@mail.example.test",
+        });
     });
     it.each([
         true,

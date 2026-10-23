@@ -495,12 +495,14 @@ export async function recordingSpeakers(
     }
 
     const owners = new Map(rows.map((row) => [row.id, row.userId]));
-    const privateIds: string[] = [];
+    const privateIds = new Map<string, string[]>();
     const orgIds: string[] = [];
     for (const [transcriptionId, recordingId] of primary) {
         const owner = owners.get(recordingId) ?? "";
-        if (recordingViewFor(caller, owner) === "private") {
-            privateIds.push(transcriptionId);
+        if (recordingViewFor(caller, owner, recordingId) !== "org") {
+            const ids = privateIds.get(owner) ?? [];
+            ids.push(transcriptionId);
+            privateIds.set(owner, ids);
         } else {
             orgIds.push(transcriptionId);
         }
@@ -521,9 +523,14 @@ export async function recordingSpeakers(
                     isNotNull(transcriptSpeakers.personId),
                 ),
             ),
-        caller.kind === "user"
-            ? buildResolverMap(caller.userId, privateIds)
-            : Promise.resolve(new Map<string, SpeakerNameResolver>()),
+        Promise.all(
+            [...privateIds].map(([owner, ids]) => buildResolverMap(owner, ids)),
+        ).then(
+            (maps) =>
+                new Map<string, SpeakerNameResolver>(
+                    maps.flatMap((map) => [...map]),
+                ),
+        ),
         buildOrgResolverMap(orgIds),
     ]);
     const labelsOf = new Map<string, string[]>();

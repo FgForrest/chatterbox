@@ -56,6 +56,7 @@ import {
     archivedRecordingCondition,
     scopeUserId,
 } from "@/lib/export/archive-scope";
+import { collectArchivedItemShares } from "@/lib/export/item-shares";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { collectArchivedMail } from "@/lib/mail/archive";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -392,6 +393,7 @@ export async function buildAndUploadExportArchive(input: {
         };
         personalTasks?: { count: number; path: string };
         taskFollows?: { count: number; path: string };
+        personShares?: { count: number; path: string };
         taskEvidence?: {
             mentions: { count: number; path: string | null };
             homeMoves: { count: number; path: string | null };
@@ -858,6 +860,17 @@ export async function buildAndUploadExportArchive(input: {
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),
     ]);
+    const personShares = await collectArchivedItemShares(
+        scope,
+        containedItemIds,
+    );
+    if (personShares.length > 0) {
+        const path = "sharing/people.json";
+        archive.append(Buffer.from(JSON.stringify(personShares, null, 2)), {
+            name: path,
+        });
+        manifest.personShares = { count: personShares.length, path };
+    }
     const processingChoices = await collectProcessingChoices(scope);
     if (
         processingChoices.folderDefaults.length > 0 ||

@@ -37,6 +37,31 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const view = requestedRecordingView(request);
 
     const access = await requireRecordingView(session.user.id, id, view);
+    if (view === "received") {
+        const transcript = await requireTranscript(
+            access.ownerUserId,
+            id,
+            request,
+        );
+        const speakers = await getTranscriptSpeakers(
+            access.ownerUserId,
+            transcript.id,
+        );
+        return NextResponse.json({
+            transcriptionId: transcript.id,
+            revision: transcript.revision,
+            speakers: speakers
+                .filter((speaker) => speaker.status === "confirmed")
+                .map((speaker) => ({
+                    label: speaker.label,
+                    personName: speaker.personName,
+                    markedUnknown: speaker.markedUnknown,
+                    status: "confirmed",
+                    personId: null,
+                    confirmedByUserId: null,
+                })),
+        });
+    }
     if (access.shared) {
         const transcript = await requireTranscript(
             access.ownerUserId,

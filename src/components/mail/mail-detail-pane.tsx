@@ -23,6 +23,7 @@ import {
     WorkflowWidget,
 } from "@/components/pipeline/workflow-widget";
 import { ItemEraseMenu } from "@/components/recordings/erase-recording-menu";
+import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -251,12 +252,15 @@ export function MailDetailPane({
     );
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     const canChange = canChangeItem({
-        view: mail.view === "org" ? "org" : "private",
+        view: mail.view ?? "private",
         isOwn,
         isOrgAccount,
         canCurate,
     });
-    const contentMail = shared ? { ...mail, view: "org" as const } : mail;
+    const contentMail =
+        shared && mail.view !== "received"
+            ? { ...mail, view: "org" as const }
+            : mail;
     const metadata = [
         mail.mail?.from ?? i18n("Unknown sender"),
         formatDateTime(
@@ -342,28 +346,38 @@ export function MailDetailPane({
                 }
                 retentionNotes={retentionNotes}
             />
-            <ItemWorkflow
-                itemId={mail.id}
-                kind="mail"
-                canCurate={canCurate}
-                initialData={processing}
-                onProcessingChange={setProcessing}
-                folders={folders}
-                folderAssignments={folderAssignments}
-                onSelectFolder={onSelectFolder}
-                onAddToFolder={onAddToFolder}
-                onRemoveFromFolder={onRemoveFromFolder}
-                onMoveBetweenFolders={onMoveBetweenFolders}
-                isOwn={isOwn}
-                canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
-                view={mail.view === "org" ? "org" : "private"}
-                onLearn={() => openWidget(`mail-learn-${mail.id}`)}
-                onSummary={() => openWidget(`mail-summary-${mail.id}`)}
-                onReviewLearn={() => openWidget(`mail-learn-${mail.id}`)}
-                onReviewTasks={() => openWidget(`mail-task-review-${mail.id}`)}
-                onChanged={onChanged}
-                onFolderCreated={onFolderCreated}
-            />
+            {mail.view === "received" ? (
+                <ReceivedItemBanner
+                    recording={mail}
+                    folders={folders}
+                    shared={shared}
+                />
+            ) : (
+                <ItemWorkflow
+                    itemId={mail.id}
+                    kind="mail"
+                    canCurate={canCurate}
+                    initialData={processing}
+                    onProcessingChange={setProcessing}
+                    folders={folders}
+                    folderAssignments={folderAssignments}
+                    onSelectFolder={onSelectFolder}
+                    onAddToFolder={onAddToFolder}
+                    onRemoveFromFolder={onRemoveFromFolder}
+                    onMoveBetweenFolders={onMoveBetweenFolders}
+                    isOwn={isOwn}
+                    canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
+                    view={mail.view === "org" ? "org" : "private"}
+                    onLearn={() => openWidget(`mail-learn-${mail.id}`)}
+                    onSummary={() => openWidget(`mail-summary-${mail.id}`)}
+                    onReviewLearn={() => openWidget(`mail-learn-${mail.id}`)}
+                    onReviewTasks={() =>
+                        openWidget(`mail-task-review-${mail.id}`)
+                    }
+                    onChanged={onChanged}
+                    onFolderCreated={onFolderCreated}
+                />
+            )}
             <div className="space-y-3 border-y px-4 py-3 sm:px-6">
                 {failed && (
                     <p className="text-sm text-destructive">
@@ -608,15 +622,17 @@ export function MailDetailPane({
                     </WorkflowWidget>
                 )}
 
-            {detail && (!widgets || widgets.learn.visible) && (
-                <MailLearnCard
-                    mail={contentMail}
-                    detail={detail}
-                    canChange={canChange}
-                    widget={widgets?.learn}
-                    widgetId={`mail-learn-${mail.id}`}
-                />
-            )}
+            {detail &&
+                mail.view !== "received" &&
+                (!widgets || widgets.learn.visible) && (
+                    <MailLearnCard
+                        mail={contentMail}
+                        detail={detail}
+                        canChange={canChange}
+                        widget={widgets?.learn}
+                        widgetId={`mail-learn-${mail.id}`}
+                    />
+                )}
             {detail &&
                 !detail.unreadable &&
                 (!widgets || widgets.summary.visible) && (

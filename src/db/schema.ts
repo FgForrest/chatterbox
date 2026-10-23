@@ -910,6 +910,77 @@ export const recordingFolders = pgTable(
     }),
 );
 
+export type ItemShareState = "pending" | "accepted" | "declined" | "removed";
+
+export const itemShares = pgTable(
+    "item_shares",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        receiverUserId: text("receiver_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        invitedByUserId: text("invited_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        state: varchar("state", { length: 16 })
+            .$type<ItemShareState>()
+            .notNull()
+            .default("pending"),
+        filingFolderId: text("filing_folder_id").references(
+            () => recordingFolders.id,
+            { onDelete: "set null" },
+        ),
+        folderShareId: text("folder_share_id"),
+        version: integer("version").notNull().default(0),
+        invitedAt: timestamp("invited_at").notNull().defaultNow(),
+        respondedAt: timestamp("responded_at"),
+        removedAt: timestamp("removed_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        itemOwnerFk: foreignKey({
+            name: "item_shares_item_owner_fk",
+            columns: [table.itemId, table.userId],
+            foreignColumns: [chatterItems.id, chatterItems.userId],
+        }).onDelete("cascade"),
+        directUnique: uniqueIndex("item_shares_direct_unique")
+            .on(table.itemId, table.receiverUserId)
+            .where(sql`${table.folderShareId} is null`),
+        receivedIdx: index("item_shares_receiver_state_idx").on(
+            table.receiverUserId,
+            table.state,
+        ),
+        ownerItemIdx: index("item_shares_owner_item_idx").on(
+            table.userId,
+            table.itemId,
+        ),
+        filingIdx: index("item_shares_filing_folder_idx").on(
+            table.filingFolderId,
+        ),
+        folderShareIdx: index("item_shares_folder_share_idx").on(
+            table.folderShareId,
+        ),
+        inviterIdx: index("item_shares_inviter_idx").on(table.invitedByUserId),
+        stateCheck: check(
+            "item_shares_state_check",
+            sql`${table.state} in ('pending', 'accepted', 'declined', 'removed')`,
+        ),
+        receiverCheck: check(
+            "item_shares_receiver_check",
+            sql`${table.userId} <> ${table.receiverUserId}`,
+        ),
+    }),
+);
+
 export const folderDefaultProfiles = pgTable(
     "folder_default_profiles",
     {

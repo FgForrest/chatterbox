@@ -1,5 +1,5 @@
 export interface ItemDetailOptions {
-    view?: "private" | "org";
+    view?: "private" | "org" | "received";
     playFrom?: number | string;
     evidenceSegment?: number | string;
     evidenceStart?: number | string;
@@ -12,7 +12,8 @@ export function itemDetailHref(
     options: ItemDetailOptions = {},
 ): string {
     const query = new URLSearchParams({ recording: id });
-    if (options.view === "org") query.set("view", "org");
+    if (options.view && options.view !== "private")
+        query.set("view", options.view);
     for (const key of [
         "playFrom",
         "evidenceSegment",

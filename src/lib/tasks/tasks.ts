@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
+import { receivedItemSinceCondition } from "@/db/queries/item-shares";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import { taskNoteHasMailSource } from "@/db/queries/task-visibility";
 import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
@@ -63,10 +64,11 @@ import {
     personalTask,
     type TaskViewer,
     taskClosable,
-    taskEditable,
+    taskContentEditable,
     taskFollowed,
     taskListed,
     taskMergeable,
+    taskReceived,
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
@@ -148,6 +150,7 @@ export interface TaskView {
     canClose: boolean;
     /** This row is linked from the current item and that link may be undone. */
     canUndoMatch: boolean;
+    receivedOwnerName?: string;
 }
 
 /** A follow-up heard on a recording, about a task of another. */
@@ -329,6 +332,8 @@ function toView(
         automaticFollow: boolean;
         canMerge: boolean;
         canFollow: boolean;
+        received?: boolean;
+        ownerName?: string | null;
     },
     mentions?: LoadedTaskMentions,
     undoableTaskIds: ReadonlySet<string> = new Set(),
@@ -355,7 +360,7 @@ function toView(
         assignee:
             row.assigneePersonId && row.assigneeName
                 ? {
-                      personId: row.assigneePersonId,
+                      personId: row.received ? "" : row.assigneePersonId,
                       name: decryptText(row.assigneeName),
                   }
                 : null,
@@ -406,6 +411,7 @@ function toView(
         createdAt: (row.createdAt as Date).toISOString(),
         acceptedAt: iso(row.acceptedAt),
         statusChangedAt: iso(row.statusChangedAt),
+        ...(row.received ? { receivedOwnerName: row.ownerName ?? "" } : {}),
         canEdit: row.canEdit,
         canClose: row.canClose,
         canUndoMatch: undoableTaskIds.has(taskId),
@@ -423,12 +429,14 @@ function noteAuthorJoin() {
 
 function taskViewerColumns(viewer: TaskViewer) {
     return {
-        canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM, true)}`,
+        canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM, true)}`,
         canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM, true)}`,
         following: sql<boolean>`coalesce(${taskFollowed(viewer)}, false)`,
         automaticFollow: sql<boolean>`coalesce(${chatterItems.userId} = ${viewer.userId} and not (${assignedToViewer(viewer)}), false)`,
         canMerge: sql<boolean>`${taskMergeable(viewer)}`,
         canFollow: sql<boolean>`${!viewer.isOrg}`,
+        received: sql<boolean>`${taskReceived(viewer, ANY_TASK_ITEM)}`,
+        ownerName: sql<string>`coalesce(nullif(${users.name}, ''), ${users.email})`,
     };
 }
 
@@ -463,8 +471,9 @@ export async function listRecordingTasks(
             audioReapedAt: recordings.audioReapedAt,
             audioDeletedAt: recordings.deletedAt,
             occurredAt: chatterItems.occurredAt,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
+            received: sql<boolean>`${taskReceived(viewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
         .leftJoin(
@@ -519,6 +528,7 @@ export async function listRecordingTasks(
                 eq(taskAudio.userId, chatterItems.userId),
             ),
         )
+        .innerJoin(users, eq(users.id, recordingTasks.userId))
         .leftJoin(people, assigneeJoin())
         .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(
@@ -549,6 +559,7 @@ export async function listRecordingTasks(
             title: decryptText(recording.title),
             occurredAt: recording.occurredAt,
             ownerUserId: recording.ownerUserId,
+            received: recording.received,
             quote: decryptOptional(mention.quote),
         });
     }
@@ -596,7 +607,7 @@ export async function undoTaskMatch(
     const [item] = await db
         .select({
             ownerUserId: chatterItems.userId,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
         .where(
@@ -884,6 +895,7 @@ async function listUpdateProposals(
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .innerJoin(users, eq(users.id, recordingTasks.userId))
         .leftJoin(people, assigneeJoin())
         .leftJoin(
             proposedUpdateAssignee,
@@ -1020,7 +1032,7 @@ async function lockTask(
             text: recordingTasks.text,
             version: recordingTasks.version,
             visible: sql<boolean>`${taskVisible(viewer)}`,
-            canEdit: sql<boolean>`${taskEditable(viewer)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer)}`,
             canClose: sql<boolean>`${taskClosable(viewer)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer)}`,
         })
@@ -1068,7 +1080,7 @@ async function lockMailTask(
             text: recordingTasks.text,
             version: recordingTasks.version,
             visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
             canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
         })
@@ -1096,7 +1108,7 @@ async function lockRecordingForEdit(
             ownerUserId: recordings.userId,
             occurredAt: chatterItems.occurredAt,
             visible: sql<boolean>`${taskVisible(viewer)}`,
-            canEdit: sql<boolean>`${taskEditable(viewer)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer)}`,
         })
         .from(recordings)
@@ -1114,7 +1126,7 @@ async function lockRecordingForEdit(
                   ownerUserId: chatterItems.userId,
                   occurredAt: chatterItems.occurredAt,
                   visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
-                  canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+                  canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
                   shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
               })
               .from(chatterItems)
@@ -1500,6 +1512,7 @@ interface MergeTaskRow {
     assigned: boolean;
     visible: boolean;
     shared: boolean;
+    received: boolean;
 }
 
 interface MergeMentionRow {
@@ -1662,6 +1675,7 @@ async function readMergeTaskRows(
                 ),
             visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM, true)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
+            received: sql<boolean>`${taskReceived(viewer, ANY_TASK_ITEM)}`,
         })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
@@ -1876,6 +1890,7 @@ function prepareTaskMerge(
     options: MergeTaskOptions = {},
 ) {
     let { source, target } = pair;
+    if (source.received || target.received) throw forbidden();
     if (
         (options.sourceVersion !== undefined &&
             source.version !== options.sourceVersion) ||
@@ -2431,7 +2446,7 @@ export async function acceptReview(
     const [authorizedSource] = await db
         .select({
             ownerUserId: chatterItems.userId,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
         .where(
@@ -2887,6 +2902,7 @@ async function requireTaskView(
                 eq(taskAudio.userId, chatterItems.userId),
             ),
         )
+        .innerJoin(users, eq(users.id, recordingTasks.userId))
         .leftJoin(people, assigneeJoin())
         .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(
@@ -2928,7 +2944,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(recordingTasks.status, "proposed"),
-                    taskEditable(viewer, {
+                    taskContentEditable(viewer, {
                         id: recordingTasks.itemId,
                         userId: recordingTasks.userId,
                     }),
@@ -2943,7 +2959,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(taskUpdateProposals.state, "awaiting_source_review"),
-                    taskEditable(viewer, {
+                    taskContentEditable(viewer, {
                         id: taskUpdateProposals.itemId,
                         userId: taskUpdateProposals.userId,
                     }),
@@ -2963,7 +2979,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(taskMentions.matchDecision, "suggested"),
-                    taskEditable(viewer, {
+                    taskContentEditable(viewer, {
                         id: taskMentions.itemId,
                         userId: taskMentions.userId,
                     }),
@@ -3028,7 +3044,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             and(
                 inArray(chatterItems.id, [...waiting.keys()]),
                 isNull(chatterItems.deletedAt),
-                taskEditable(viewer, {
+                taskContentEditable(viewer, {
                     id: chatterItems.id,
                     userId: chatterItems.userId,
                 }),
@@ -3071,7 +3087,7 @@ export interface TaskListItem extends TaskView {
         title: string;
         startTime: string;
         /** The view the viewer opens it in. */
-        view: "private" | "org";
+        view: "private" | "org" | "received";
         /** What the item is: a recording or a mail. */
         kind: "audio" | "mail";
     } | null;
@@ -3080,7 +3096,7 @@ export interface TaskListItem extends TaskView {
         id: string;
         title: string;
         startTime: string;
-        view: "private" | "org";
+        view: "private" | "org" | "received";
         kind: "audio" | "mail";
     } | null;
 }
@@ -3337,6 +3353,7 @@ async function loadTaskListItems(
         )
         // Conditions over `recordings` (the MCP tools') keep to recordings.
         .leftJoin(recordings, eq(recordings.id, recordingTasks.itemId))
+        .innerJoin(users, eq(users.id, recordingTasks.userId))
         .leftJoin(people, assigneeJoin())
         .leftJoin(taskNoteAuthor, noteAuthorJoin())
         .where(and(...conditions))
@@ -3379,7 +3396,9 @@ async function loadTaskListItems(
                           view:
                               row.recordingOwner === viewer.userId
                                   ? "private"
-                                  : "org",
+                                  : row.received
+                                    ? "received"
+                                    : "org",
                           kind: row.recordingKind,
                       }
                     : null,
@@ -3408,7 +3427,9 @@ async function loadTaskListItems(
                               (evidence?.ownerUserId ?? row.recordingOwner) ===
                               viewer.userId
                                   ? "private"
-                                  : "org",
+                                  : (evidence?.received ?? row.received)
+                                    ? "received"
+                                    : "org",
                           kind: evidence?.kind ?? row.recordingKind,
                       }
                     : null,
@@ -3442,7 +3463,19 @@ export async function countNewTasks(viewer: TaskViewer): Promise<number> {
                           // Their own recording's tasks are not news to them.
                           ne(chatterItems.userId, viewer.userId),
                           settings?.seen
-                              ? gt(recordingTasks.assignedAt, settings.seen)
+                              ? or(
+                                    gt(
+                                        recordingTasks.assignedAt,
+                                        settings.seen,
+                                    ),
+                                    and(
+                                        taskReceived(viewer, ANY_TASK_ITEM),
+                                        receivedItemSinceCondition(
+                                            viewer.userId,
+                                            settings.seen,
+                                        ),
+                                    ),
+                                )
                               : undefined,
                       ),
                   )
