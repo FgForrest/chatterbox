@@ -609,10 +609,13 @@ const updateTaskTool = defineTool({
             ),
         note: z
             .string()
+            .trim()
             .max(2000)
             .nullable()
             .optional()
-            .describe("Replaces the note; null clears it. Requires can_close."),
+            .describe(
+                "Replaces the whole note. Read the task first to preserve existing text. Null or an empty string clears it. Requires can_close, and mail:read for a mail-sourced note.",
+            ),
         assignee: z
             .string()
             .min(1)
@@ -645,6 +648,12 @@ const updateTaskTool = defineTool({
         const before = await getCallerTask(viewer, args.task);
         if (!before) throw notFound();
         context.touched.push(before.id);
+        if (args.note !== undefined && !noteReadable(caller, before)) {
+            throw new McpToolError(
+                "mail:read is required to replace or clear this task's note",
+                "denied",
+            );
+        }
 
         const change: TaskChange = {
             version: args.version,

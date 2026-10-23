@@ -17,7 +17,7 @@ Claude sees what you see in Chatterbox and never more:
 
 Your administrator decides which areas are open to you: the Almanac, transcripts, summaries, tasks, and changing tasks. Claude is offered only the lookups for your areas, so it may say it cannot reach something you see in the app.
 
-Claude can change one thing: with the right to change tasks, it can mark a task done, open it again, drop it, or give it to someone else, where the Tasks page would let you. Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
+With the right to change tasks, Claude can manage tasks where the Tasks page would let you: create own tasks, edit, complete, reopen, drop, reassign, follow and merge. It can also write or clear the task’s one note (up to 2,000 characters) when you may complete that task. A new note replaces the whole previous note; to add to it, ask Claude to read it first. Completion and a note can be saved together. Mail-task notes require mail access to read or change. Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
 
 ## Before you connect
 
@@ -62,7 +62,7 @@ Ask the way you would ask a colleague who has read everything:
 - "Summarize what Priya Raman said in the Harbor kickoff."
 - "Who is Marek Dvořák, and what do we know about him?"
 - "Which of my tasks are overdue?"
-- "Mark the task about Dispatch API access as done."
+- "Mark the task about Dispatch API access as done and note that it shipped in release X."
 
 Names work wherever Claude would otherwise need an ID: people, things and recordings are found by their names, nicknames and titles. When a name could mean several people, Claude gets the candidates and should ask you which one.
 
