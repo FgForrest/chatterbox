@@ -82,11 +82,26 @@ Kurátoři Organizace najdou pod **Almanach → Péče → Možné duplicity** o
 
 Hledání kontroluje 2 000 nejnovějších živých záznamů každého druhu a jejich nejbližší shody. Duplicity se starším záznamem mimo tento limit se nenabízejí, ani když je druhý záznam nový. Procházení ani odmítání dvojic neposune hledání za tento limit. Omezené hledání označuje upozornění. Porovnání ukazuje sdílené položky a otevřené úkoly, soukromé položky kolegů zůstávají soukromé.
 
+<span id="care-sharing-and-other-problems" />
+
+## Péče: sdílení a další problémy
+
+Odznak **Péče** počítá otevřené dvojice duplicit, nezkontrolované skupiny sdílení a ostatní otevřené problémy. Hledání se ukládá až na pět minut a ověřuje podle změn Almanachu Organizace. Ostatní problémy hledá nejvýše mezi 2 000 nejnovějšími záznamy každého druhu, 32 000 aktuálními fakty a 16 000 přeslechnutými podobami. Problémy mimo tyto limity se nemusí zobrazit.
+
+- **Nové ze sdílení** seskupuje přírůstky za posledních 14 dní podle položky, sdílejícího a času. Ukazuje pouze aktuální pohled Organizace; soukromý název položky po zrušení sdílení zůstane skrytý. **Prohlédnout záznam** otevře záznam přírůstku, **Označit jako zkontrolované** odebere skupinu z odznaku. **Smazat přírůstek** a **Vrátit vše ze sdílení** odstraní nedotčené přírůstky. Položka zůstane sdílená. Upravené nebo sloučené záznamy, pozdější potvrzení, použití dalším sdílením a návazné znalosti z jiných zdrojů se zachovají s vysvětlením. Opakování vrácení dá stejný výsledek. Sdílení před touto aktualizací nemají záznam původu.
+- **Rozporná fakta** najdou dvě aktuální hodnoty vztahu, který připouští jednu. U správné hodnoty zvolte **Ponechat**. Ostatní přejdou do historie i s doklady. **Zamítnout** uloží rozhodnutí pro tento konkrétní problém v Organizaci.
+- **Opravy dvěma směry** najdou přeslechnutou podobu odkazující na různé záznamy Organizace. Ponechte správný cíl, čímž odstraníte opravy vedoucí k ostatním, nebo problém zamítněte.
+- **Slabé záznamy** mají přesně jednu zmínku v položce, žádná fakta v obou směrech a nebyly 120 dní použity ani upraveny. **Smazat** použije běžné smazání záznamu; **Ponechat** problém zamítne. Chybějící e-mail nikdy není druhem problému.
+
+Zamítnutý problém se vrátí při změně podkladových dat. Archiv Organizace obsahuje rozhodnutí kurátorů v `knowledge/care-decisions.json`; importér je obnoví po záznamech, faktech a použití podle obsahu s přemapováním ID. Záznamy původu sdílení ani historie jejich vrácení se nearchivují. Po obnově znalosti zůstanou, ale stará sdílení už nelze vrátit přes Péči.
+
 <span id="folder-knowledge" />
 
 ## Znalosti složky
 
 Na hlavní stránce otevřete složku a vedle jejího názvu zvolte **Znalosti**. Pohled může číst každý, kdo složku vidí. Zahrnuje položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
+
+Kurátoři navíc u záznamů Organizace, oprav a faktů vidí označení otevřených problémů. Rozbalením lze přímo ve složce použít stejné opravy jako v Péči. Ostatní čtenáři mají nadále pohled pouze pro čtení.
 
 Karta **Co dostanou modely** používá stejné funkce jako zpracování položek:
 

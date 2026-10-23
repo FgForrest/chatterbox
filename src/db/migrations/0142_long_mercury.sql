@@ -1,0 +1,1 @@
+ALTER TABLE "almanac_duplicate_dismissals" ADD COLUMN "problem_data" jsonb;

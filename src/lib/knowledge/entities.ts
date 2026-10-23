@@ -950,38 +950,48 @@ export async function deleteEntity(
     entityId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        await requireManageable(tx, actorUserId, entityId);
-        const doomed = await tx
-            .select({ id: knowledgeEntities.id })
-            .from(knowledgeEntities)
-            .where(
-                or(
-                    eq(knowledgeEntities.id, entityId),
-                    eq(knowledgeEntities.mergedIntoId, entityId),
-                ),
-            );
-        await lockRecordingsNaming(tx, {
-            entityIds: doomed.map((row) => row.id),
-        });
-        // Read before the delete: it takes everyone's aliases, notes, facts
-        // and corrections naming these.
-        const scopes = await scopesNamingInTx(tx, {
-            entityIds: doomed.map((row) => row.id),
-        });
-        // Before the cascade would: facts naming them as the value of a
-        // chain leave it whole.
-        await deleteFactsNamingInTx(tx, {
-            entityIds: doomed.map((row) => row.id),
-        });
-        await tx.delete(knowledgeEntities).where(
-            inArray(
-                knowledgeEntities.id,
-                doomed.map((row) => row.id),
-            ),
-        );
+        const scopes = await deleteEntityInTx(tx, actorUserId, entityId);
         await bumpScopeInTx(tx, scopes);
     });
+}
+
+/** Existing erasure path inside a caller's transaction; returns scopes to bump last. */
+export async function deleteEntityInTx(
+    tx: Tx,
+    actorUserId: string,
+    entityId: string,
+): Promise<Set<string>> {
+    await lockOrgPeople(tx);
+    await requireManageable(tx, actorUserId, entityId);
+    const doomed = await tx
+        .select({ id: knowledgeEntities.id })
+        .from(knowledgeEntities)
+        .where(
+            or(
+                eq(knowledgeEntities.id, entityId),
+                eq(knowledgeEntities.mergedIntoId, entityId),
+            ),
+        );
+    await lockRecordingsNaming(tx, {
+        entityIds: doomed.map((row) => row.id),
+    });
+    // Read before the delete: it takes everyone's aliases, notes, facts
+    // and corrections naming these.
+    const scopes = await scopesNamingInTx(tx, {
+        entityIds: doomed.map((row) => row.id),
+    });
+    // Before the cascade would: facts naming them as the value of a
+    // chain leave it whole.
+    await deleteFactsNamingInTx(tx, {
+        entityIds: doomed.map((row) => row.id),
+    });
+    await tx.delete(knowledgeEntities).where(
+        inArray(
+            knowledgeEntities.id,
+            doomed.map((row) => row.id),
+        ),
+    );
+    return scopes;
 }
 
 /**

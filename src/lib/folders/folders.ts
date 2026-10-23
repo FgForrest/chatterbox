@@ -1350,6 +1350,7 @@ export async function shareItemToOrganizationFolderInTx(
     });
     const assignees = await publishTaskAssigneesInTx(tx, {
         recordingId: input.itemId,
+        ownerUserId: input.ownerUserId,
         orgUserId: input.orgUserId,
     });
     await bumpScopeInTx(tx, [

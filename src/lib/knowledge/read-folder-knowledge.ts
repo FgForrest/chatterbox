@@ -8,6 +8,7 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveReadableFolder } from "@/lib/folders/folders";
+import { folderCareFor } from "@/lib/knowledge/folder-care";
 import {
     FOLDER_KNOWLEDGE_PAGE_SIZE,
     FOLDER_KNOWLEDGE_PREVIEW_TERMS,
@@ -88,6 +89,13 @@ export async function readFolderKnowledge(
         );
         return {
             ...metadata(context),
+            ...(await folderCareFor(
+                viewerId,
+                rows
+                    .slice(0, limit)
+                    .filter((row) => row.user_id === orgUserId)
+                    .map((row) => row.id),
+            )),
             tab,
             ...page(rows, total),
             records: rows.slice(0, limit).map((row) => ({
@@ -110,6 +118,13 @@ export async function readFolderKnowledge(
         );
         return {
             ...metadata(context),
+            ...(await folderCareFor(
+                viewerId,
+                rows
+                    .slice(0, limit)
+                    .filter((row) => row.user_id === orgUserId)
+                    .map((row) => row.target_id),
+            )),
             tab,
             ...page(rows, total),
             corrections: rows.slice(0, limit).map((row) => ({
@@ -141,6 +156,14 @@ export async function readFolderKnowledge(
         );
         return {
             ...metadata(context),
+            ...(await folderCareFor(
+                viewerId,
+                [],
+                rows
+                    .slice(0, limit)
+                    .filter((row) => row.user_id === orgUserId)
+                    .map((row) => row.fact_id),
+            )),
             tab,
             ...page(rows, total),
             facts: rows.slice(0, limit).map((row) => ({
