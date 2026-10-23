@@ -29,7 +29,7 @@ With Calendar access connected, every audio Learn run, manual or automatic, uses
 
 Learn combines those names with the transcript and known Almanac roles and facts to suggest likely speakers. Suggestions show **?** and their source: **Named in the transcript**, **Invited in Calendar**, **Joined in Google Meet**, or **Guess**, with a short reason. Guesses start unticked. Tick a correct guess once to accept it; finishing without ticking leaves the speaker unconfirmed. A new attendee can be added to the Almanac at the same time.
 
-Attendee names also help supported transcription providers and the correction pass spell names correctly. This does not name a speaker. Unconfirmed speaker guesses never appear as names in transcript text, summaries, exports or the API. No voice data, voiceprints or biometrics are used for identity; attendee emails are not requested.
+Attendee names also help supported transcription providers and the correction pass spell names correctly. This does not name a speaker. Unconfirmed speaker guesses never appear as names in transcript text, summaries, exports or the API. No voice data, voiceprints or biometrics are used for identity. When an attendee’s email matches a primary or extra address in the run’s Almanac, suggestions and spelling use that person’s Almanac name and show **Matched by e-mail**; ambiguous or conflicting matches fall back to names. Attendee addresses stay out of prompts and reviews, and Calendar and Meet are never consulted for mail items.
 
 ## Reviewing
 

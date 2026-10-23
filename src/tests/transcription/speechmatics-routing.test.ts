@@ -407,6 +407,7 @@ describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI S
         expect(resolveMeetingRoster).toHaveBeenCalledWith({
             ownerUserId: "user-sm",
             itemId: "rec-sm",
+            shared: false,
         });
         const submit = requests().find((r) => r.method === "POST");
         const config = JSON.parse(

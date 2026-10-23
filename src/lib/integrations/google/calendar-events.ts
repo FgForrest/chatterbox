@@ -16,7 +16,7 @@ export interface CalendarEventCandidate {
     title: string;
     start: string;
     end: string;
-    attendees: { name: string }[];
+    attendees: { name: string; email?: string }[];
     /** Meet code read from the event list; never returned to the browser. */
     meetingCode?: string | null;
 }
@@ -35,6 +35,7 @@ interface CalendarEventResponse {
         attendeesOmitted?: boolean;
         attendees?: {
             displayName?: string;
+            email?: string;
             responseStatus?: string;
             resource?: boolean;
             self?: boolean;
@@ -79,7 +80,7 @@ export async function listCalendarEventsForRecording(input: {
     url.searchParams.set("maxAttendees", "100");
     url.searchParams.set(
         "fields",
-        "nextPageToken,items(id,summary,status,hangoutLink,conferenceData,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,responseStatus,resource,self))",
+        "nextPageToken,items(id,summary,status,hangoutLink,conferenceData,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,email,responseStatus,resource,self))",
     );
     const token = await getGoogleAccessToken(input.userId, {
         expectedSubject: connection.subject,
@@ -125,19 +126,31 @@ export async function listCalendarEventsForRecording(input: {
                               .filter(
                                   (attendee) =>
                                       attendee &&
-                                      typeof attendee.displayName ===
-                                          "string" &&
+                                      (typeof attendee.displayName ===
+                                          "string" ||
+                                          typeof attendee.email === "string") &&
                                       !attendee.resource &&
                                       !attendee.self &&
                                       attendee.responseStatus !== "declined",
                               )
                               .slice(0, 100)
                               .map((attendee) => ({
-                                  name: (attendee.displayName ?? "")
+                                  name: (typeof attendee.displayName ===
+                                  "string"
+                                      ? attendee.displayName
+                                      : ""
+                                  )
                                       .trim()
                                       .slice(0, 120),
+                                  ...(typeof attendee.email === "string"
+                                      ? { email: attendee.email.trim() }
+                                      : {}),
                               }))
-                              .filter((attendee) => attendee.name.length > 0),
+                              .filter(
+                                  (attendee) =>
+                                      attendee.name.length > 0 ||
+                                      Boolean(attendee.email),
+                              ),
             },
         ];
     });

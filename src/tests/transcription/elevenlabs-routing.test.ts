@@ -447,6 +447,7 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         expect(resolveMeetingRoster).toHaveBeenCalledWith({
             ownerUserId: "user-el",
             itemId: "rec-el",
+            shared: false,
         });
         const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
             string,

@@ -31,7 +31,7 @@ Po připojení Kalendáře používá každý běh Učení nad zvukovou nahrávk
 
 Učení porovná tato jména s přepisem a známými rolemi a fakty v Almanachu a navrhne pravděpodobné mluvčí. Návrhy mají **?** a uvedený původ: **Zazněl v přepisu**, **Pozván v Kalendáři**, **Připojen v Google Meet** nebo **Odhad** s krátkým vysvětlením. Odhady začínají nezaškrtnuté. Správný odhad přijmete jedním zaškrtnutím; dokončení bez zaškrtnutí nechá mluvčího nepotvrzeného. Nového účastníka lze současně přidat do Almanachu.
 
-Jména účastníků také pomáhají podporovaným poskytovatelům přepisu a následné opravě správně psát jména. Tím se mluvčí nepojmenuje. Nepotvrzené odhady se jako jména nikdy nedostanou do textu přepisu, shrnutí, exportů ani API. K určování identity se nepoužívají hlasová data, hlasové otisky ani biometrie; e-maily účastníků se nevyžadují.
+Jména účastníků také pomáhají podporovaným poskytovatelům přepisu a následné opravě správně psát jména. Tím se mluvčí nepojmenuje. Nepotvrzené odhady se jako jména nikdy nedostanou do textu přepisu, shrnutí, exportů ani API. K určování identity se nepoužívají hlasová data, hlasové otisky ani biometrie. Pokud e-mail účastníka odpovídá hlavní nebo další adrese osoby v Almanachu daného běhu, návrhy i pravopis používají její jméno z Almanachu a uvádějí **Spárováno podle e-mailu**; nejednoznačné nebo rozporné shody se vracejí k porovnání jmen. Adresy účastníků se nepředávají do zadání AI ani kontroly a u pošty se Kalendář ani Meet nikdy nepoužívají.
 
 <span id="reviewing" />
 

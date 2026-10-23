@@ -1,7 +1,7 @@
 ---
 title: Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
 date: 2026-10-12
-updated: 2026-10-22 23:58
+updated: 2026-10-23 09:11
 status: superseded
 kind: feature
 issues: []
@@ -26,8 +26,10 @@ Attendance alone never assigns a speaker. Shipped as PRs #105 (all unnamed speak
 
 **Superseded in part on 2026-10-22** by [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250): every Learn
 run, automatic ones included, now gets the roster, and the model guesses speakers from it for the
-user to confirm. The privacy limits below still hold: read-only scopes, nothing stored, no e-mail
-addresses requested.
+user to confirm. Updated for issue #256 on 2026-10-23: the successor also supersedes the
+no-email-request rule. Addresses may be matched transiently through the existing hashes in the run’s
+scope, with ambiguity falling back to names. Read-only scopes and no stored roster addresses still
+hold; Calendar and Meet never apply to mail items.
 
 ## Why
 
@@ -133,15 +135,15 @@ Checked on 2026-10-22, the integration helped little in practice:
 - only the owner's primary calendar, only the private view, Meet data only for 30 days.
 
 [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md) (PR #250) addressed all but the e-mail link, which
-is allowed and tracked in issue #256 (an early reading that it had been ruled out was corrected by
-the maintainer on 2026-10-22).
+is implemented in issue #256 under the successor’s scope, hashing and ambiguity rules (an early
+reading that it had been ruled out was corrected by the maintainer on 2026-10-22).
 
 ## Related work
 
 - [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md): why identity comes from Calendar and Meet at all.
 - [2026-09-30-learn](2026-09-30-learn/README.md): the Learn passes and evaluation these candidates feed.
 - [2026-10-22-calendar-speaker-guesses-in-automatic-runs](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): the successor rule that supersedes this one
-  (roster on every run, guesses for the user to confirm).
+  (roster on every run, guesses for the user to confirm, and transient e-mail matching in issue #256).
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): the per-user Google connection Calendar and Meet reuse.
 
 ## Timeline
