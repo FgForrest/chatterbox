@@ -1,9 +1,11 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import { chatterItems, itemShares, recordingFolders, users } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
+import { secretAddressMasker } from "@/lib/mail/redact";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
 import {
     getOrgUserId,
@@ -112,7 +114,7 @@ export async function inviteToItem(
             .where(
                 and(
                     inArray(users.id, ids),
-                    ne(users.role, "org"),
+                    activeShareRecipientCondition(),
                     ne(users.id, userId),
                 ),
             );
@@ -198,9 +200,17 @@ export async function listMyInvitations(userId: string) {
             ),
         )
         .orderBy(asc(itemShares.invitedAt));
+    const mask = await secretAddressMasker(
+        rows
+            .filter((row) => row.kind === "mail")
+            .map((row) => decryptText(row.title)),
+    );
     return rows.map((row) => ({
         ...row,
-        title: decryptText(row.title),
+        title:
+            row.kind === "mail"
+                ? mask(decryptText(row.title))
+                : decryptText(row.title),
         ownerName: row.ownerName || row.ownerEmail,
     }));
 }
@@ -354,7 +364,7 @@ export async function findShareRecipients(userId: string, query: string) {
         .where(
             and(
                 ne(users.id, userId),
-                ne(users.role, "org"),
+                activeShareRecipientCondition(),
                 or(
                     sql`${users.name} ilike ${pattern} escape '\\'`,
                     sql`${users.email} ilike ${pattern} escape '\\'`,

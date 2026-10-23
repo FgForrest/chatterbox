@@ -10,9 +10,12 @@ export async function requirePersonShareSession(request: Request) {
         throw new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
     const session = await requireApiSession(request);
     await requirePersonSharing(session.user.id);
+    const read = request.method === "GET";
     const bucket = await consumeRateLimitBucket(
-        `person-shares:${request.method}:${session.user.id}`,
-        { limit: 60, windowMs: 60_000 },
+        read
+            ? `person-shares:read:${new URL(request.url).pathname}:${session.user.id}`
+            : `person-shares:${request.method}:${session.user.id}`,
+        { limit: read ? 240 : 60, windowMs: 60_000 },
     );
     if (!bucket.allowed)
         throw new AppError(

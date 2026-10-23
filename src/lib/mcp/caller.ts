@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, not, or } from "drizzle-orm";
 import { db } from "@/db";
 import { receivedItemCondition } from "@/db/queries/item-shares";
 import { accounts, chatterItems, users } from "@/db/schema";
@@ -12,6 +12,7 @@ import {
     isOrgScopeEnabled,
     isOrgScopeVisible,
 } from "@/lib/org/config";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
 interface CallerBase {
@@ -159,6 +160,14 @@ export async function resolveCaller(
                                       and(
                                           isNull(chatterItems.deletedAt),
                                           receivedItemCondition(linked.id),
+                                          orgUserId
+                                              ? not(
+                                                    sharedItemCondition(
+                                                        orgUserId,
+                                                        chatterItems.id,
+                                                    ),
+                                                )
+                                              : undefined,
                                       ),
                                   )
                           ).map((row) => row.itemId),

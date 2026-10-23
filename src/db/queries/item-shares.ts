@@ -6,9 +6,26 @@ import {
     itemShares,
     recordingFolderAssignments,
     recordingFolders,
+    userAccessStates,
     users,
 } from "@/db/schema";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import { isOrgScopeVisible } from "@/lib/org/config";
+
+/** SQL predicate for a member who can receive invitations in the current authorization mode. */
+export function activeShareRecipientCondition() {
+    return sql`${users.role} <> 'org' and ${users.suspendedAt} is null
+        ${
+            isIdpAuthorization()
+                ? sql`and exists (
+            select 1 from ${userAccessStates}
+            where ${userAccessStates.userId} = ${users.id}
+              and ${userAccessStates.status} = 'active'
+              and ${userAccessStates.capabilities} @> '["use"]'::jsonb
+        )`
+                : sql``
+        }`;
+}
 
 /** SQL predicate for accepted person shares, independent of Organization publication. */
 export function receivedItemCondition(
@@ -22,7 +39,7 @@ export function receivedItemCondition(
         where ${itemShares.itemId} = ${itemId}
           and ${itemShares.receiverUserId} = ${receiverUserId}
           and ${itemShares.state} = 'accepted'
-          and ${users.role} <> 'org'
+          and ${activeShareRecipientCondition()}
     ) or ${receivedThroughFolderCondition(receiverUserId, itemId)})`;
 }
 
@@ -77,7 +94,7 @@ export function receivedThroughFolderCondition(
             and ${folderShares.receiverUserId} = ${receiverUserId}
             and ${folderShares.state} = 'accepted'
             and ${recordingFolders.kind} = 'custom'
-            and ${users.role} <> 'org'
+            and ${activeShareRecipientCondition()}
             ${attachmentId ? sql`and attachment.id = ${attachmentId}` : sql``}
             ${since ? sql`and greatest(${folderShares.respondedAt}, ${recordingFolderAssignments.createdAt}) > ${since.toISOString()}::timestamp` : sql``}
     )`;

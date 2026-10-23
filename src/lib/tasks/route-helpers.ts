@@ -20,7 +20,7 @@ export async function requireTaskViewer(request: Request): Promise<TaskViewer> {
             decodeURIComponent(item[1]),
             { kinds: ["audio", "mail"] },
         );
-        if (access.role === "receiver")
+        if (!access.shared && access.role === "receiver")
             throw new AppError(
                 ErrorCode.FORBIDDEN,
                 "Received items are read-only",

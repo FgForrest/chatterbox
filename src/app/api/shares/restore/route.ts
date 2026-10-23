@@ -15,7 +15,9 @@ const restoreInput = z.object({
             }),
         )
         .max(100),
-    itemIds: z.record(z.string().min(1).max(256), z.string().min(1).max(256)),
+    itemIds: z
+        .record(z.string().min(1).max(256), z.string().min(1).max(256))
+        .refine((ids) => Object.keys(ids).length <= 100),
 });
 
 export const POST = apiHandler(async (request) => {

@@ -1,10 +1,13 @@
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import { chatterItems, itemShares, users } from "@/db/schema";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
 import type { ArchivedItemShare } from "@/lib/export/item-shares";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
+import { getOrgUserId } from "@/lib/org/config";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 /** Restore active direct shares after content import, requiring consent again on the target instance. */
 export async function restoreArchivedItemShares(
@@ -16,10 +19,12 @@ export async function restoreArchivedItemShares(
     itemIds: ReadonlyMap<string, string>,
 ) {
     await requirePersonSharing(userId);
+    const orgUserId = await getOrgUserId();
     const skipped: {
         itemId: string;
         receiverEmail: string;
         reason:
+            | "organization_shared"
             | "inactive"
             | "item_missing"
             | "receiver_missing"
@@ -56,6 +61,8 @@ export async function restoreArchivedItemShares(
                 )
                 .for("update");
             if (!item) return "item_missing" as const;
+            if (orgUserId && (await isRecordingShared(itemId, orgUserId, tx)))
+                return "organization_shared" as const;
             const [receiver] = await tx
                 .select({ id: users.id })
                 .from(users)
@@ -63,7 +70,7 @@ export async function restoreArchivedItemShares(
                     and(
                         sql`lower(${users.email}) = ${share.receiverEmail.trim().toLowerCase()}`,
                         ne(users.id, userId),
-                        ne(users.role, "org"),
+                        activeShareRecipientCondition(),
                     ),
                 )
                 .limit(1);

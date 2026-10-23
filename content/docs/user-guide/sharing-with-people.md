@@ -11,7 +11,7 @@ Open your item and choose **Share**, or **Share…** from its row menu. Search b
 
 You can cancel a waiting invitation, remove an accepted receiver, or invite again after a decline or removal. The plum **Shared with N people** marker opens this list. Sharing keeps the item private to you and its accepted receivers; curators and other Organization members gain no access.
 
-The link button explains who can open a private link before copying it. A waiting recipient must first accept. If you later share the item into the Organization, person shares and recipients' filing stay in place. Open the recipient count or **Manage sharing** to review existing shares, including declined and removed invitations.
+The link button explains who can open a private link before copying it. A waiting recipient must first accept. If you later share the item into the Organization, person shares and recipients' filing stay in place. The Organization library then uses your usual member or curator permissions; the received copy and your filing remain in your private tree. After withdrawal from the Organization, receiver permissions apply again. Open the recipient count or **Manage sharing** to review existing shares, including declined and removed invitations.
 
 ## Accept and file
 
@@ -27,7 +27,7 @@ Choose **Remove and end sharing** from the row menu to give up access. Removing 
 
 Your [MCP tools](../self-hosting/mcp) can read accepted items with the same content permissions, and close or reopen your assigned tasks. Person sharing publishes no Almanac knowledge and never feeds your Learn runs.
 
-Received items stay out of your backups and folder exports. The owner's archive includes `sharing/people.json`, containing their direct share list without your filing. Share metadata can be restored after importing the owner's content by posting that list and the old-to-new item ID map to `/api/shares/restore`. Existing target accounts are matched by email; active shares become pending invitations. The result reports missing receivers, missing items, inactive entries and existing shares skipped. A general archive importer is not available yet.
+Received items stay out of your backups and folder exports. The owner's archive includes `sharing/people.json`, containing their direct share list without your filing. Share metadata can be restored after importing the owner's content by posting that list and the old-to-new item ID map to `/api/shares/restore`. Existing target accounts are matched by email; active shares become pending invitations. The result reports missing receivers, missing items, inactive entries and existing shares skipped. Items already visible to the Organization and inactive accounts are also skipped. A general archive importer is not available yet.
 
 ## Share a folder
 

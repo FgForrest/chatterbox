@@ -69,7 +69,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     const { id } = await (context as IdContext).params;
 
-    if (requestedRecordingView(request) === "received") {
+    const view = requestedRecordingView(request);
+    if (view === "received") {
         const access = await requireRecordingView(
             session.user.id,
             id,
@@ -115,13 +116,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
 
     if (new URL(request.url).searchParams.get("processing") === "1") {
-        const access = await requireRecordingView(
-            session.user.id,
-            id,
-            requestedRecordingView(request),
-        );
-        if (access.view === "received")
-            return NextResponse.json({ processing: null });
+        const access = await requireRecordingView(session.user.id, id, view);
         return NextResponse.json({
             processing: await loadPrivateItemProcessing(
                 access.ownerUserId,

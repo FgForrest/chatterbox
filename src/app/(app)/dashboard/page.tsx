@@ -454,46 +454,6 @@ export default async function DashboardPage() {
             receivedShare: receivedByItem.get(recording.id),
             receivedFolderIds: receivedFoldersByItem.get(recording.id) ?? [],
         })) ?? [];
-    const receivedById = new Map(
-        receivedRecordings.map((recording) => [recording.id, recording]),
-    );
-    const receiverAwareOrganizationLibrary =
-        organizationLibrary && receivedLibrary && receivedById.size > 0
-            ? {
-                  ...organizationLibrary,
-                  recordings: organizationLibrary.recordings.map(
-                      (recording) =>
-                          receivedById.get(recording.id) ?? recording,
-                  ),
-                  transcriptions: new Map(organizationLibrary.transcriptions),
-                  transcriptVariants: new Map(
-                      organizationLibrary.transcriptVariants,
-                  ),
-              }
-            : organizationLibrary;
-    if (
-        receiverAwareOrganizationLibrary &&
-        receivedLibrary &&
-        receivedById.size > 0
-    ) {
-        for (const recording of receiverAwareOrganizationLibrary.recordings) {
-            if (recording.view !== "received") continue;
-            const transcript = receivedLibrary.transcriptions.get(recording.id);
-            const variants = receivedLibrary.transcriptVariants.get(
-                recording.id,
-            );
-            if (transcript)
-                receiverAwareOrganizationLibrary.transcriptions.set(
-                    recording.id,
-                    transcript,
-                );
-            if (variants)
-                receiverAwareOrganizationLibrary.transcriptVariants.set(
-                    recording.id,
-                    variants,
-                );
-        }
-    }
     const allTranscriptions = new Map([
         ...transcriptionMap,
         ...(receivedLibrary?.transcriptions ?? []),
@@ -527,7 +487,7 @@ export default async function DashboardPage() {
                 ]}
                 transcriptions={allTranscriptions}
                 transcriptVariants={allTranscriptVariants}
-                organizationLibrary={receiverAwareOrganizationLibrary}
+                organizationLibrary={organizationLibrary}
                 isOrgAccount={viewerIsOrgAccount}
                 initialSettings={initialSettings}
                 plaudNeedsReconnect={connectionRow?.invalidatedAt != null}

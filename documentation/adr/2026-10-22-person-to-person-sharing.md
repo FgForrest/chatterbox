@@ -1,7 +1,7 @@
 ---
 title: Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 date: 2026-10-22
-updated: 2026-10-23 01:35
+updated: 2026-10-23 01:40
 status: accepted
 kind: feature
 issues: [260]
@@ -40,7 +40,7 @@ The maintainer chose option a for all sixteen design decisions on 2026-10-22. Re
 | 8 | Primary-email assignees see received tasks in Mine and can close or reopen; other actions remain refused | Receivers act on no tasks. Rejected because the recording is shared so the colleague can carry out their assigned work. Task notes are outside PR 1 because #253 is not on the integration branch. |
 | 9 | Receiver MCP tools can read the same accepted content, subject to content permissions | Keep MCP to own and Organization items. Rejected because an AI client must reflect the user's readable pile; MCP writes stay limited to closing assigned tasks. |
 | 10 | No knowledge promotion, no receiver Learn or Almanac feed | Make confirmed facts visible to receivers. Rejected because an item invitation does not share the owner's private knowledge records. |
-| 11 | Later Organization sharing preserves direct shares and receiver filing | End person shares once everyone can read through the Organization. Rejected because it would discard the receiver's filing and independent consent. |
+| 11 | Later Organization sharing preserves direct shares and receiver filing; Organization roles apply while shared, and receiver rights resume after withdrawal | End person shares once everyone can read through the Organization. Rejected because it would discard the receiver's filing and independent consent. |
 | 12 | Hide all owner folder names in PR 1; only the receiver's filing is shown | Show every owner placement read-only. Rejected because folder names can disclose unrelated private context. Folder sharing reveals only the folder explicitly shared, as its original name alongside the receiver's own name. |
 | 13 | Plum token with incoming/outgoing folder arrows and UserPlus | Reuse the existing folder icon with a person badge and no new colour. Rejected because person sharing must remain distinguishable from Private and Organization. |
 | 14 | Two PRs, one decision record | One PR for items and folders together. Rejected because live folder membership adds an independent lifecycle and deserves its own review. |
@@ -55,7 +55,7 @@ Three implementation alternatives were also rejected:
 
 ## Decision
 
-Use versioned direct invitations with pending, accepted, declined and removed states, stored once per item and receiver. Acceptance is required before reading. Invitations and filing never alter Organization membership, processing profiles, knowledge or export ownership. Preserve one set of owner content, and resolve receiver read access separately at every entry point. An accepted folder invitation grants access through current direct assignments, without inherited item-share rows or subfolder recursion. When an item is Organization-shared, its Organization role takes precedence; person shares add received markers and receiver filing without reducing those rights.
+Use versioned direct invitations with pending, accepted, declined and removed states, stored once per item and receiver. Acceptance is required before reading. Invitations and filing never alter Organization membership, processing profiles, knowledge or export ownership. Preserve one set of owner content, and resolve receiver read access separately at every entry point. An accepted folder invitation grants access through current direct assignments, without inherited item-share rows or subfolder recursion. When an item is Organization-shared, its Organization role takes precedence; person shares add received markers and receiver filing without reducing those rights. The accepted marker and receiver filing remain independent; after withdrawal, receiver-only permissions apply again.
 
 ## Key technical details
 
@@ -73,7 +73,7 @@ Use versioned direct invitations with pending, accepted, declined and removed st
 
 ## Verification
 
-`src/tests/sharing/person-shares.integration.test.ts` has 24 PostgreSQL tests and exercises invitation states, cancellation and acceptance races, filing isolation, cascades, mode gates, both item kinds, task rights, search, MCP and archive share restoration. Its route inventory covers all 32 item write methods and fails when a new method lacks a receiver decision. Ten focused UI tests cover the owner dialog, copy-link explanations, invitation acceptance, received heading/banner and task controls. One dashboard-loader regression in `src/tests/dashboard/onboarding-page.test.tsx` checks the received view and receiver filing in both libraries after Organization publication. The folder extension adds 27 PostgreSQL integration tests and 14 focused UI tests covering live membership, direct-only contents, deduplication, names and placement, lifecycle and move confirmation, automatic-arrival invalidations, write refusals, mode gates, MCP, search, tasks, archives and restore. Additional existing-suite cases verify the Organization confirmation and archive metadata. The route inventory includes all folder-share endpoints. Final check counts are recorded in the PR description.
+`src/tests/sharing/person-shares.integration.test.ts` has 41 PostgreSQL tests and exercises invitation states, cancellation and acceptance races, filing isolation, cascades, mode gates, both item kinds, task rights, search, MCP and archive share restoration. Its route inventory covers all 32 item write methods and fails when a new method lacks a receiver decision. Eighteen focused UI tests cover the owner dialog, copy-link explanations, invitation acceptance, received heading/banner and task controls. One dashboard-loader regression in `src/tests/dashboard/onboarding-page.test.tsx` checks that Organization publication preserves the Organization entry and the separate received copy with receiver filing. Review regressions cover member and curator permissions before and after acceptance and withdrawal for both item kinds, private correction meanings, inactive recipients, masked invitations, restore refusals and neutral copy-link states after failed loads. The folder extension adds 27 PostgreSQL integration tests and 14 focused UI tests covering live membership, direct-only contents, deduplication, names and placement, lifecycle and move confirmation, automatic-arrival invalidations, write refusals, mode gates, MCP, search, tasks, archives and restore. Additional existing-suite cases verify the Organization confirmation and archive metadata. The route inventory includes all folder-share endpoints. Final check counts are recorded in the PR description.
 
 ## Consequences & open follow-ups
 
