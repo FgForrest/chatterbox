@@ -13,7 +13,7 @@ This is **server-held-key envelope encryption.** It is not zero-knowledge.
 
 | Column | Type | Notes |
 |---|---|---|
-| `recordings.filename` | text | Often carries topic info (e.g. AI-generated titles) |
+| `chatter_items.title` | text | Often carries topic info (e.g. AI-generated titles) |
 | `transcriptions.text` | text | Full transcript |
 | `ai_enhancements.summary` | text | LLM summary |
 | `ai_enhancements.key_points` | jsonb | Stored as `{ "c": "v1:..." }` envelope |
