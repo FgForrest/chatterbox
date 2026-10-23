@@ -523,7 +523,7 @@ export function validateLearnOutput(
             person !== undefined &&
             !fullNameNear(person, frame.turns, evidenceMs);
         // A first name alone that two people known here share names
-        // neither: "Michale" is Michal Vondra or Michal Bednář (the
+        // neither: "Michale" is Michal Kratochvíl or Michal Kovář (the
         // model sees only what its lookups found, often one of them).
         if (
             onlyFirstName &&

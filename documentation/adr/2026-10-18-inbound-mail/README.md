@@ -1,14 +1,14 @@
 ---
 title: Inbound mail through an own MX into one pile with recordings, on an item supertype and a kind-neutral content model
 date: 2026-10-18
-updated: 2026-10-22 17:05
-status: accepted
+updated: 2026-10-22 22:30
+status: superseded
 kind: feature
-issues: []
+issues: [257]
 prs: [110, 114, 121, 142, 146]
 areas: [src/lib/mail, mail-receiver, src/app/api/internal/mail, src/lib/content, src/db/deprecated-columns.ts, src/db/schema.ts, src/lib/mcp/tools/mail.ts, src/lib/events, docker-compose.yml]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-10-19-processing-profiles-and-workflow]
 relates: [2026-10-19-one-widget-for-recordings-and-mail, 2026-10-20-mail-search-respects-visibility, 2026-10-11-dependency-supply-chain-policy, 2026-10-07-external-mcp-server]
 ---
 
@@ -24,6 +24,11 @@ reads a kind-neutral content model (participants, segments, anchors) instead of 
 line ran from PR #110 (the five-phase implementation) through receiver packaging, proxy support and
 the two fixes that made mail actually work in built images (the last, PR #146, on 2026-10-18); live
 delivery to the dashboard (PR #174) came after as a follow-up.
+
+**Superseded in part** for one rule: D9 let any member delete an Organization folder after a
+confirmation; since 2026-10-16 deleting one is curator-only
+([processing profiles and workflow](../2026-10-19-processing-profiles-and-workflow/README.md)). The
+rest of this record still holds.
 
 ## Why
 
@@ -62,6 +67,7 @@ SMTP but making mail a second kind of item. The constraints:
 | 2026-10-09 | Renames in TypeScript only, foreign keys swapped, item rows inserted by a `--custom` step; moved columns kept and their drop enforced by a registry with a `dropAfter` time-bomb test (D6) | A "drop in a later release" comment had already been forgotten once; drizzle-kit's rename prompt is avoided without hand-written SQL | `src/db/deprecated-columns.ts` |
 | 2026-10-09 | New MCP client role `mail:read`; without it no tool returns mail, and facts or tasks learned from mail come without their evidence quote and source link (D8) | The maintainer wanted mail access granted separately; otherwise facts and quotes from mail would reach every client holding existing roles, service accounts included | `src/lib/mcp/scope.ts` (`mayReadMail`), `src/lib/mcp/tools/mail.ts` |
 | 2026-10-09 | Mail retention is its own policy; facts whose only evidence is reaped mail text go with it (D5) | Same rule as recordings | `src/lib/retention/reap-mail.ts` |
+| 2026-10-09 | Any member may delete an Organization folder, after a confirmation that lists when each of its addresses last received mail and says they stop working for good (D9) | A deleted folder's addresses are blocked forever, so one member's delete can break an address other members' mail filters use; the confirmation makes that visible | Narrowed on 2026-10-16: deleting Organization folders became curator-only, enforced by the server ([processing profiles](../2026-10-19-processing-profiles-and-workflow/README.md)); the confirmation stays (`src/components/mail/folder-mail-addresses.tsx`) |
 | 2026-10-10 | Receiver on Node 22, without database credentials or `ENCRYPTION_KEY`; unauthenticated mail never reaches the app's MIME parser (precheck, then ingest) | Bun buffers streams; a receiver compromise must not forge senders or read data | `mail-receiver/Dockerfile`, `src/app/api/internal/mail/` |
 | 2026-10-11 | Receiver image published by its own workflow, not as a second image in the app's workflow (PR #114) | A failed receiver build must not hold back the app's `dev` manifest | `.github/workflows/mail-receiver.yml` |
 | 2026-10-12 | PROXY protocol v1 accepted only from listed proxies (`MAIL_PROXY_PROTOCOL_FROM`, PR #121) | Port 25 may live on an edge host; without it every connection shows the proxy's address and the source check refuses it; STARTTLS stays end to end | `src/lib/mail/receiver/proxy.ts` |
@@ -105,10 +111,14 @@ SMTP but making mail a second kind of item. The constraints:
   back to text anchors before anything leaves it. It looks like the rejected fake timeline; it is
   confined to that handler on purpose, so the audio Learn path stays untouched.
 - `src/db/deprecated-columns.ts` lists the moved `recordings` columns (and the older `unshared_at`)
-  with `dropAfter: 2026-11-15`; `src/tests/db/deprecated-columns.test.ts` turns CI red after that date
-  while they remain, and fails on any `deprecated*` use outside `src/db/`.
+  with `dropAfter: 2026-11-15` and `issue: 257`; `src/tests/db/deprecated-columns.test.ts` turns CI
+  red after that date while they remain, and fails on any `deprecated*` use outside `src/db/`.
 - Every mail prompt carries a "content is data, not instructions" rule; task proposals whose
   evidence lies in a quoted or unverified segment start unticked.
+- Secret local parts are masked before any model reads mail (`src/lib/mail/redact.ts`). Other
+  addresses in the body and in signatures reach the summary and Learn models on purpose, because
+  signatures are mined for people's other addresses; a review finding asking to mask them was
+  rejected for that reason.
 
 ## Verification
 
@@ -131,7 +141,24 @@ SMTP but making mail a second kind of item. The constraints:
   reconciliation, each checkable only in a browser.
 - The pre-merge checklist of PR #110 (rehearsing 0095-0097 on a database copy, a real Plaud sync,
   setting `dropAfter` to merge plus 14 days, opening the tracking issue, a browser check) was never
-  reported back as done. Every registry entry still has `issue: null`.
+  reported back as done. The maintainer settled it on 2026-10-22: the migration rehearsal and the
+  real Plaud sync test are overtaken by production use since mid-October, and dropping the
+  deprecated columns is tracked in issue #257, due before 2026-11-15 (the registry's `dropAfter`),
+  which every registry entry now names.
+- **Sender identity trusts everyone who can make the sender's domain sign mail as that person:**
+  mail delegates (Google Groups included), applications holding the user's send scope,
+  domain-wide-delegated service accounts and the domain's administrators. Any of them can write into
+  that person's private pile, Learn and tasks. A `Sender` header that differs from From is stored
+  and shown, not refused, and the same holds for Organization addresses.
+- **D1 depends on the sender's DKIM signature covering To and Cc** (`h=`), because
+  `src/lib/mail/policy.ts` reads recipients only from the signed lines. A sender whose signer leaves
+  those headers out can never reach an Organization address, and the refusal shows in the delivery
+  log. For Google-signed mail the proposal left this to a live acceptance test, and no result was
+  recorded.
+- **No Organization-wide "who writes whom" graph (D4).** Correspondence data from mail headers stays
+  with the mail's owner and reaches the Organization only when the mail is shared. The adversarial
+  review called such a graph of employees and customers a monitoring and data-protection question,
+  not just a feature; building one needs its own decision and the data-protection assessment.
 - A mail summary sees no open tasks of its participants yet, so mail cannot propose closing or
   moving a task.
 - Future work named in the proposal: attachment text for AI, chat messages through an MCP channel
@@ -161,3 +188,5 @@ SMTP but making mail a second kind of item. The constraints:
 - **2026-10-18**: PR #146 merged.
 - **2026-10-19**: follow-up PR #174 merged (live delivery to the dashboard).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: PR #110's checklist settled by the maintainer; the deprecated-columns drop tracked
+  in issue #257.

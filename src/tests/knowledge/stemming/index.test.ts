@@ -23,7 +23,7 @@ describe("stemming by language", () => {
     });
 
     it("stems a word in its language, without its accents", () => {
-        expect(stemVariants("Šimákem", "cs")).toContain("simak");
+        expect(stemVariants("Dvořákem", "cs")).toContain("dvorak");
         expect(stemVariants("Bratislavou", "sk")).toContain("bratislav");
         expect(stemVariants("Krakowem", "pl")).toContain("krakow");
         expect(stemVariants("Bucureștiului", "ro")).toContain("bucurest");
@@ -57,10 +57,10 @@ describe("stemming by language", () => {
     });
 
     it("keeps the word as it is, and alone where no stemmer knows the language", () => {
-        expect(stemVariants("Šimákem", "cs")).toContain("simakem");
-        expect(stemVariants("Šimákem", "xx")).toEqual(["simakem"]);
+        expect(stemVariants("Dvořákem", "cs")).toContain("dvorakem");
+        expect(stemVariants("Dvořákem", "xx")).toEqual(["dvorakem"]);
         expect(stemVariants("Hughes", "en")).toEqual(["hughes"]);
-        expect(stemVariants("Šimákem", null)).toEqual(["simakem"]);
+        expect(stemVariants("Dvořákem", null)).toEqual(["dvorakem"]);
         expect(stemVariants("...", "cs")).toEqual([]);
     });
 });

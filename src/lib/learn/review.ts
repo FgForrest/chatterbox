@@ -528,7 +528,7 @@ async function readableRecordNameInTx(
  * only one the lookups would not find it by anyway. "Honza" for Jan
  * Novotný is; "Milan" for Milan Petrák is not (it would make every Milan
  * him), nor "MCP server" for MCP (every "server" would be MCP), nor a
- * misspelling or a word form ("Velltrix", "Šimákem").
+ * misspelling or a word form ("Velltrix", "Dvořákem").
  */
 function nicknameWorthKeeping(
     heard: string,

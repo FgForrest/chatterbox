@@ -7,7 +7,7 @@ run releases, not branches.
 
 | Branch | What it is | Who uses it |
 |--------|------------|-------------|
-| `dev` | Integration branch and the repository's default branch. Feature branches open PRs here and squash-merge as they land. May be broken at any commit. Every push publishes the `:dev` images. | Contributors, CI, the AI review |
+| `dev` | Integration branch and the repository's default branch. Feature branches open PRs here, merged with a merge commit as they land (squashing is optional). May be broken at any commit. Every push publishes the `:dev` images. | Contributors, CI, the AI review |
 | `main` | Release branch. Receives only merges from `dev`; every push to it is a release. | The release workflow, deployments via `:latest` |
 | `feature/*`, `fix/*`, etc. | Short-lived branches with PRs into `dev`. | Contributors |
 

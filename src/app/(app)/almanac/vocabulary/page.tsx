@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 /**
  * The viewer's own knowledge types to tend: a member's private ones, the
  * Organization's for its account, where those a share adopted from a
- * member come first until kept, renamed or merged (Johnny, 2026-09-29).
+ * member come first until kept, renamed or merged (maintainer, 2026-09-29).
  * Each merges into another of its kind the viewer has, or a core one.
  */
 export default async function VocabularyPage({

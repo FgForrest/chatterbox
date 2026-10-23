@@ -1,7 +1,7 @@
 /**
  * The stems a name's word may have in the language it was said in, so a
- * name heard inflected meets the name as written: "Šimákem" and
- * "Šimák", "Helsingissä" and "Helsinki"'s "helsing".
+ * name heard inflected meets the name as written: "Dvořákem" and
+ * "Dvořák", "Helsingissä" and "Helsinki"'s "helsing".
  *
  * Czech, Slovak, Polish and Romanian are written with accents that are
  * often left out (by people, and by transcription): their stemmers read a
