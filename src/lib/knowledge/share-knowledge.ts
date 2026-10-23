@@ -260,7 +260,7 @@ export async function publishKnowledgeInTx(
     }
 
     // The owner's private types what it names needs become the
-    // Organization's first (Johnny, 2026-09-29), so it all publishes.
+    // Organization's first (maintainer, 2026-09-29), so it all publishes.
     const adopted = await adoptTypesForShareInTx(tx, {
         ownerUserId,
         orgUserId,
