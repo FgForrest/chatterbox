@@ -549,6 +549,43 @@ describe("#253 task desk UI", () => {
             { note: "Resolved" },
         );
     });
+    it.each([
+        "page",
+        "item",
+    ])("matches the merge trigger to the note action in the %s row", async (variant) => {
+        render(
+            <TaskRow
+                task={task()}
+                recording={
+                    variant === "page"
+                        ? {
+                              id: "item",
+                              kind: "mail",
+                              title: "Planning",
+                              startTime: "2026-10-22T00:00:00Z",
+                              view: "org",
+                          }
+                        : undefined
+                }
+                currentItemId="item"
+                organizationOnly
+                onChange={vi.fn()}
+                onMerge={vi.fn(async () => true)}
+            />,
+        );
+        const note = screen.getByRole("button", { name: "Note" });
+        const merge = screen.getByRole("button", {
+            name: "Merge into another task",
+        });
+        expect(merge.className).toBe(note.className);
+        expect(merge.querySelector("svg")?.classList.contains("size-3")).toBe(
+            true,
+        );
+        fireEvent.click(merge);
+        expect(screen.getByRole("dialog")).toBeTruthy();
+        await screen.findByText("No matching open tasks");
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    });
     it("shows source and pills on separate rows, own privacy, saved note attribution and follow state", async () => {
         const evidence = {
             id: "item",
@@ -645,9 +682,15 @@ describe("#253 task desk UI", () => {
                 onMerge={merge}
             />,
         );
-        fireEvent.click(
-            screen.getByRole("button", { name: "Merge into another task" }),
-        );
+        const trigger = screen.getByRole("button", {
+            name: "Merge into another task",
+        });
+        expect(trigger.classList.contains("h-8")).toBe(true);
+        expect(trigger.classList.contains("text-sm")).toBe(true);
+        expect(
+            trigger.querySelector("svg")?.classList.contains("size-3.5"),
+        ).toBe(true);
+        fireEvent.click(trigger);
         fireEvent.click(await screen.findByRole("option"));
         await screen.findByText("Kept text Private text", { exact: false });
         const confirm = screen.getByRole("checkbox");

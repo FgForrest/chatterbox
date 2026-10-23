@@ -340,6 +340,7 @@ export function TaskRow({
                                     itemId={task.recordingId}
                                     sourceTaskId={task.id}
                                     taskVersion={task.version}
+                                    inlineTrigger
                                     onMerge={onMerge}
                                 />
                             )}

@@ -33,6 +33,7 @@ export function MergeTaskPicker({
     taskVersion,
     label,
     searchLabel,
+    inlineTrigger = false,
     onMerge,
 }: {
     itemId: string | null;
@@ -40,6 +41,7 @@ export function MergeTaskPicker({
     taskVersion?: number;
     label?: string;
     searchLabel?: string;
+    inlineTrigger?: boolean;
     onMerge: (
         targetTaskId: string,
         options?: TaskMergeOptions,
@@ -190,10 +192,20 @@ export function MergeTaskPicker({
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button type="button" size="sm" variant="ghost">
-                    <Combine className="size-3.5" aria-hidden="true" />
-                    {label ?? i18n("Merge into another task")}
-                </Button>
+                {inlineTrigger ? (
+                    <button
+                        type="button"
+                        className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                        <Combine className="size-3" aria-hidden="true" />
+                        {label ?? i18n("Merge into another task")}
+                    </button>
+                ) : (
+                    <Button type="button" size="sm" variant="ghost">
+                        <Combine className="size-3.5" aria-hidden="true" />
+                        {label ?? i18n("Merge into another task")}
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
