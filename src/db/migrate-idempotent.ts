@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { warnPendingRecordingColumnDrop } from "./queries/migration-warnings";
 
 const ADVISORY_LOCK_ID = 0x4f504c41;
 const LOCK_TIMEOUT_MS = 10 * 60_000;
@@ -73,6 +74,7 @@ const main = async () => {
     }
 
     try {
+        await warnPendingRecordingColumnDrop(sql);
         console.log("⏳ Running migrations...");
         const start = Date.now();
         await migrate(drizzle(sql), {

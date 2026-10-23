@@ -14,11 +14,12 @@
  * create scratch databases on.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { transcriptions, users } from "@/db/schema";
+import { migrationsThrough } from "@/tests/integration/migrations";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -39,6 +40,7 @@ function statements(file: string): string[] {
 
 describeWithDatabase("protecting existing titles (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
+    let historicalMigrations = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -46,14 +48,19 @@ describeWithDatabase("protecting existing titles (PostgreSQL)", () => {
     }
 
     beforeAll(async () => {
+        // Migrations 0060-0063 need the legacy columns removed after 0140.
+        historicalMigrations = migrationsThrough(140);
         database = await createMigratedTestDatabase(
             testDatabaseUrl ?? "",
             "title_protection",
+            historicalMigrations,
         );
     }, 120_000);
 
     afterAll(async () => {
         await database?.dispose();
+        if (historicalMigrations)
+            rmSync(historicalMigrations, { recursive: true, force: true });
     }, 30_000);
 
     async function insertRecording(id: string, transcriptReaped = false) {

@@ -11,16 +11,7 @@ type Executor = typeof db | Tx;
 /** Join condition from a recording to its item (same id, same owner). */
 export const recordingItemJoin = eq(chatterItems.id, recordings.id);
 
-const {
-    deprecatedFilename: _filename,
-    deprecatedStartTime: _startTime,
-    deprecatedTitleEditedAt: _titleEditedAt,
-    deprecatedSummaryDueAt: _summaryDueAt,
-    deprecatedTranscriptReapedAt: _transcriptReapedAt,
-    deprecatedSummaryReapedAt: _summaryReapedAt,
-    deprecatedUnsharedAt: _unsharedAt,
-    ...recordingOwnColumns
-} = getTableColumns(recordings);
+const recordingOwnColumns = getTableColumns(recordings);
 
 /**
  * A recording's own columns with what its item holds, for a select over
@@ -73,17 +64,7 @@ export function toRecordingResponseRow<
 }
 
 /** A recording's columns that are its own, as an insert takes them. */
-export type NewRecording = Omit<
-    typeof recordings.$inferInsert,
-    | "kind"
-    | "deprecatedFilename"
-    | "deprecatedStartTime"
-    | "deprecatedTitleEditedAt"
-    | "deprecatedSummaryDueAt"
-    | "deprecatedTranscriptReapedAt"
-    | "deprecatedSummaryReapedAt"
-    | "deprecatedUnsharedAt"
->;
+export type NewRecording = Omit<typeof recordings.$inferInsert, "kind">;
 
 /** A new recording with what its item holds. */
 export interface NewAudioItem extends NewRecording {
