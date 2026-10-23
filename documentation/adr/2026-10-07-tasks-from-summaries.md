@@ -1,7 +1,7 @@
 ---
 title: Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
 date: 2026-10-07
-updated: 2026-10-23 06:40
+updated: 2026-10-23 07:00
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [91, 92, 93]
 areas: [src/lib/tasks, src/components/tasks, src/app/(app)/tasks, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: [2026-10-19-processing-profiles-and-workflow, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-person-to-person-sharing]
-relates: [2026-10-07-backup-scope]
+relates: [2026-10-07-backup-scope, 2026-10-22-assignee-task-list]
 ---
 
 # Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
@@ -153,6 +153,7 @@ else.
 
 ## Consequences & open follow-ups
 
+- [Assignee task list](2026-10-22-assignee-task-list.md): Own tasks now have no item and are author-only; follows, outcome notes and assignee merges extend the task lifecycle.
 - **Revised by [processing profiles and workflow](2026-10-19-processing-profiles-and-workflow/README.md)
   (2026-10-14):** a task now lives while any of its mentions lives, not with one summary; candidates
   come from the folder scope (40, ranked), not from confirmed speakers (30); on a shared item the
@@ -174,7 +175,7 @@ else.
   generalized this task model across recordings, mail and folders, superseding its lifetime,
   candidate and shared-edit rules.
 - [2026-10-21-tasks-accepted-automatically](2026-10-21-tasks-accepted-automatically.md) and
-  [2026-10-22-owner-reviews-tasks-sharing-ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md):
+  [2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-person-to-person-sharing](2026-10-22-owner-reviews-tasks-sharing-ungated.md):
   the later changes to who reviews and whether sharing waits.
 - [2026-10-22-person-to-person-sharing](2026-10-22-person-to-person-sharing.md): tasks on a private
   item reach the people it is shared with, not only the Organization.

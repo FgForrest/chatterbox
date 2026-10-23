@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
@@ -7,8 +7,10 @@ import {
     people,
     recordingTasks,
     type TaskUpdateProposalKind,
+    taskFollowers,
     taskHomeMoves,
     taskMentions,
+    taskUnfollows,
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
@@ -26,6 +28,11 @@ export interface ArchivedTask {
     id: string;
     status: "proposed" | "open" | "done" | "dropped";
     text: string;
+    note?: string | null;
+    noteUpdatedAt?: string | null;
+    noteUpdatedByUserId?: string | null;
+    version?: number;
+    folderId?: string | null;
     assignee: { personId: string; name: string } | null;
     assigneeHint: string | null;
     dueDate: string | null;
@@ -189,16 +196,24 @@ function archivedTaskCondition(scope: TaskArchiveScope): SQL | undefined {
 export async function tasksForArchive(
     scope: TaskArchiveScope,
     recordingIds: readonly string[],
-    { proposals = false }: { proposals?: boolean } = {},
+    {
+        proposals = false,
+        personal = false,
+    }: { proposals?: boolean; personal?: boolean } = {},
 ): Promise<Map<string, ArchivedTask[]>> {
     const byRecording = new Map<string, ArchivedTask[]>();
-    if (recordingIds.length === 0) return byRecording;
+    if (recordingIds.length === 0 && !personal) return byRecording;
     const rows = await db
         .select({
             id: recordingTasks.id,
             recordingId: recordingTasks.itemId,
+            folderId: recordingTasks.folderId,
             status: recordingTasks.status,
             text: recordingTasks.text,
+            note: recordingTasks.note,
+            noteUpdatedAt: recordingTasks.noteUpdatedAt,
+            noteUpdatedByUserId: recordingTasks.noteUpdatedByUserId,
+            version: recordingTasks.version,
             assigneePersonId: recordingTasks.assigneePersonId,
             assigneeName: people.displayName,
             assigneeHint: recordingTasks.assigneeHint,
@@ -218,7 +233,7 @@ export async function tasksForArchive(
             statusChangedAt: recordingTasks.statusChangedAt,
         })
         .from(recordingTasks)
-        .innerJoin(
+        .leftJoin(
             chatterItems,
             and(
                 eq(chatterItems.id, recordingTasks.itemId),
@@ -229,7 +244,9 @@ export async function tasksForArchive(
         .where(
             and(
                 archivedTaskCondition(scope),
-                inArray(recordingTasks.itemId, [...recordingIds]),
+                personal
+                    ? isNull(recordingTasks.itemId)
+                    : inArray(recordingTasks.itemId, [...recordingIds]),
                 proposals ? undefined : ne(recordingTasks.status, "proposed"),
             ),
         )
@@ -251,12 +268,17 @@ export async function tasksForArchive(
             mention?.evidenceCharEnd ?? (legacy ? row.evidenceCharEnd : null);
         const provenance =
             mention?.provenance ?? (legacy ? row.evidenceProvenance : null);
-        const list = byRecording.get(row.recordingId) ?? [];
+        const list = byRecording.get(row.recordingId ?? "") ?? [];
         const status = row.status as ArchivedTask["status"];
         list.push({
             id: row.id,
             status,
             text: decryptText(row.text),
+            note: optional(row.note),
+            noteUpdatedAt: row.noteUpdatedAt?.toISOString() ?? null,
+            noteUpdatedByUserId: row.noteUpdatedByUserId,
+            version: row.version,
+            ...(row.source === "personal" ? { folderId: row.folderId } : {}),
             assignee:
                 row.assigneePersonId && row.assigneeName
                     ? {
@@ -294,7 +316,7 @@ export async function tasksForArchive(
                   }
                 : {}),
         });
-        byRecording.set(row.recordingId, list);
+        byRecording.set(row.recordingId ?? "", list);
     }
     return byRecording;
 }
@@ -604,4 +626,48 @@ export function archivedAssigneeIds(
         }
     }
     return [...ids];
+}
+
+export interface ArchivedTaskFollow {
+    taskId: string;
+    follow: boolean;
+    createdAt: string;
+}
+
+/** Own tasks belong only to their author's personal archive. */
+export async function personalTasksForArchive(
+    scope: ArchiveScope,
+): Promise<ArchivedTask[]> {
+    if (scope.kind !== "personal") return [];
+    return (
+        (
+            await tasksForArchive(scope, [], {
+                personal: true,
+                proposals: true,
+            })
+        ).get("") ?? []
+    );
+}
+
+/** Follow preferences include temporarily invisible tasks, without their content. */
+export async function followsForArchive(
+    scope: ArchiveScope,
+): Promise<ArchivedTaskFollow[]> {
+    if (scope.kind !== "personal") return [];
+    const lists = await Promise.all(
+        [taskFollowers, taskUnfollows].map((table) =>
+            db
+                .select({ taskId: table.taskId, createdAt: table.createdAt })
+                .from(table)
+                .where(eq(table.userId, scope.userId))
+                .orderBy(table.taskId),
+        ),
+    );
+    return lists.flatMap((rows, index) =>
+        rows.map((row) => ({
+            taskId: row.taskId,
+            follow: index === 0,
+            createdAt: row.createdAt.toISOString(),
+        })),
+    );
 }

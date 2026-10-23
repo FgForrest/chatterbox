@@ -18,7 +18,10 @@ vi.mock("next-intl", () => ({
         ),
     useLocale: () => "en",
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/tasks" }));
+vi.mock("next/navigation", () => ({
+    usePathname: () => "/tasks",
+    useRouter: () => ({ push: vi.fn() }),
+}));
 
 const dueProposal = {
     id: "routed-due",

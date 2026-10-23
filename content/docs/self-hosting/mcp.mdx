@@ -12,8 +12,7 @@ caller may use. In `AUTHZ_MODE=idp`, these come from the space-separated
 `scope` claim. In `AUTHZ_MODE=local`, the legacy Keycloak client-role
 contract (`resource_access[MCP_AUDIENCE].roles`) is retained.
 
-The server is read-only except for one thing: a task's status and
-assignee.
+The server reads content and manages tasks through the same permissions as the app.
 
 ## What it exposes
 
@@ -27,7 +26,7 @@ permissions allow; calling a known tool without its permission returns
 | `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
 | `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
 | `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
-| `tasks:write`      | `update_task` (status and assignee only)                                                           |
+| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                           |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders` and `list_recordings` come with any of `transcripts:read`,
@@ -57,7 +56,7 @@ Permissions combine, and some fields need two of them:
   needs `mail:read` instead.
 - Tasks and facts learned from mail are listed under `tasks:read` and
   `knowledge:read` alone, marked `kind: "mail"` (tasks) or
-  `origin: "mail"` (facts). Their quote, due phrase and mail (title and
+  `origin: "mail"` (facts). Their note, quote, due phrase and mail (title and
   link) come only with `mail:read`, and without it a search never matches
   a mail's words.
 - A summary's action items, in `get_summary` and in what
@@ -295,30 +294,26 @@ not serve, and a client without its connector key get 403 "Forbidden".
 The app log names the reason (see
 [When Claude cannot connect](./claude#when-claude-cannot-connect)).
 
-**Received items** become readable after the invitation is accepted, on self-host instances showing the Organization scope. Recording, transcript, summary and mail list/get/search tools include them under the same tool permissions. Links use `view=received`. Speaker names are the owner's confirmed names as plain text; the owner's private people, facts, aliases and folders stay hidden. Received items can be filtered by the receiver's own filing folders and accepted folder attachments. Service callers and unrelated curators gain no access to person shares.
+**Received items** become readable after the invitation is accepted, on self-host instances showing the Organization scope. Recording, transcript, summary and mail list/get/search tools include them under the same tool permissions. Links use `view=received`; received task results include `received_owner_name`. Speaker names are the owner's confirmed names as plain text; the owner's private people, facts, aliases and folders stay hidden. Received items can be filtered by the receiver's own filing folders and accepted folder attachments. Service callers and unrelated curators gain no access to person shares.
 
-**Shared folders:** `list_folders` includes accepted attachments in the receiver's private tree, with their chosen name, `shared: true` and `read_only: true`. Pass the attachment ID as `folder` to recording and mail listing/search tools. Results contain only the owner's current directly assigned items, never subfolder contents; direct and inherited access produce one result per item. The owner's original shared folder name is visible in the app, but their other folder names stay hidden. Outgoing shared folders also carry `shared: true`; they remain writable by their owner. Removing an attachment, deleting the source or moving it into the Organization ends that folder access.
+**Shared folders:** `list_folders` includes accepted attachments in the receiver's private tree, with their chosen name, `shared: true` and `read_only: true`. Pass the attachment ID as `folder` to recording and mail listing/search tools. Results contain only the owner's current directly assigned items, never subfolder contents; direct and inherited access produce one result per item. The owner's original shared folder name is visible in the app, but their other folder names stay hidden. Outgoing shared folders also carry `shared: true`; they remain writable by their owner. Removing the attachment or deleting the source ends that folder access; a private folder cannot be moved or filed into the Organization. An attachment is never a task filing target, and own tasks filed in a shared folder stay visible only to their author.
 
-Received tasks assigned to the caller appear in task list/search. With `tasks:write`, `update_task` may close or reopen those tasks; it cannot edit, drop or reassign them. Mail quotes, due phrases and source links still require `mail:read`. Person sharing never adds content to the receiver's Almanac or Learn.
+Received tasks assigned to the caller appear in task list/search. With `tasks:write`, `update_task` may close or reopen those tasks; it cannot edit, drop or reassign them. An assigned receiver may also replace or clear the note. Every receiver may follow a visible task; follows hide after a share ends and grant no access. A receiver-only task cannot be merged, even by its assignee. Mail notes, quotes, due phrases and source links still require `mail:read`. Person sharing never adds content to the receiver's Almanac or Learn.
 
-**Tasks** follow the Tasks page:
+**Tasks** follow the app's permissions. Own tasks are visible exclusively to their author, never to service clients or curators. Item tasks still require current item visibility; a follow grants no access by itself.
 
-- A user sees the tasks on their own recordings and mail, and on
-  Organization-shared ones those assigned to them. A service account
-  sees the tasks of every shared recording and mail.
-- With `tasks:write`, `update_task` marks a task done, open again or
-  dropped, or changes its assignee. Done and open again need `can_close`
-  (the recording's owner, the assignee on a shared recording, or the
-  Organization). Dropping, reopening a dropped task and reassigning need
-  `can_edit` (the owner of a private recording; on a shared recording
-  only the Organization, that is a service account). On a shared
-  recording only the Organization's people can be assigned.
-- Every task carries a `version`; `update_task` requires it, and a task
-  changed since answers with its current state instead of changing.
-- Proposals cannot be changed: review stays in the app. Task text, due
-  dates and new tasks stay in the app too.
-- A change is recorded as the user's, or as the Organization account's
-  for a service account; the access log names the client.
+| Tool | Input and behavior |
+| --- | --- |
+| `list_tasks` | Optional `list: mine|followed` and `folder` (ID from `list_folders`); existing status, assignee, recording, due and cursor filters remain. Folder filters include subfolders, as on the Tasks page. In Mine and the combined list, own tasks match only private folders; the Private root includes unfiled own tasks. Followed retains its item-folder filter. Reports `folder` (`{id, name, path}` or null for own tasks, null for item tasks), `own`, `note`, `note_by`, `note_updated_at`, `following`, `can_merge`, `can_edit`, `can_close`, and `version`. |
+| `search_tasks` | Also matches note text, with the same mail redaction as returned results. |
+| `create_task` | `text` (1–2,000 characters), optional `due_date` (`YYYY-MM-DD`) and `folder` (the caller's private subfolder ID, excluding the Private root). Creates an own task. Refused for an Organization service client. |
+| `update_task` | `task`, `version`, optional `status`, `assignee`, `text`, `due_date` (null clears), `note` (null clears), `folder` (own tasks only; ID sets, null clears). Text, due date, folder, assignee, dropping and reopening a dropped task need `can_edit`; marking done or open again and replacing or clearing a note need `can_close`. Text and notes allow at most 2,000 characters. Own tasks cannot be reassigned. |
+| `follow_task` | `task`, `follow: true|false`. Idempotent. Works on any currently visible accepted task; unavailable to service clients. |
+| `merge_tasks` | `keep`, `merge`, `keep_version`, `merge_version`, optional `confirm_private_to_shared`. Both open; assignee rights require both assigned to the caller. The Organization task always remains, even if the requested direction is reversed. Private text and notes entering it require explicit confirmation. |
+
+Merge appends text and notes, keeps the earlier due date, links and followers, moves pending proposals, and routes a notice for a cross-owner merge. Results longer than 2,000 characters are refused. All tools carry read or write annotations. `update_task` is marked destructive because text and note replacements or clearing cannot be undone; `merge_tasks` is also destructive and irreversible. Notes from mail are null without `mail:read`, and searches cannot match them. Proposed tasks still require the app's human review. Changes and client IDs remain audited.
+
+`list_folders` returns `id`, `parent_id`, `name`, `kind` and `scope`. Use these IDs for task filing and filtering. Only subfolders under the caller's `kind: private` root are filing targets; the root itself is refused (use null for no folder): Organization, Public and other users' folders return not found on writes, and setting or clearing a folder on an item task is refused. Filing never changes visibility. Deleting a folder or moving it outside Private clears its own-task references atomically; tasks remain author-only. Folder item counts exclude tasks.
 
 **Names work wherever ids do.** `entity`, `person`, `assignee` and
 `recording` take an id or text. People and things match by name, alias,

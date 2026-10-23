@@ -61,7 +61,10 @@ vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
 vi.mock("@/components/dashboard/markdown-actions", () => ({
     MarkdownActions: () => null,
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard" }));
+vi.mock("next/navigation", () => ({
+    usePathname: () => "/dashboard",
+    useRouter: () => ({ push: vi.fn() }),
+}));
 
 import { AppNav } from "@/components/app-nav";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";

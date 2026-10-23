@@ -2,8 +2,9 @@
 
 import { BookOpenText, ListChecks, MessagesSquare } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
+import { useCallback, useEffect, useRef } from "react";
 import { WaveformLogo } from "@/components/icons/waveform-logo";
 import { usePendingReviews } from "@/components/learn/review-events";
 import { useProductName } from "@/components/product-name-provider";
@@ -23,6 +24,18 @@ export function AppNav({ className }: { className?: string }) {
     const locale = useLocale();
     const name = useProductName();
     const pathname = usePathname();
+    const router = useRouter();
+    const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pressed = useRef(false);
+    const suppressContextMenuUntil = useRef(0);
+    const pressStart = useRef<{ x: number; y: number } | null>(null);
+    const cancelLongPress = useCallback(() => {
+        if (longPress.current) clearTimeout(longPress.current);
+        longPress.current = null;
+        pressStart.current = null;
+    }, []);
+    useEffect(() => cancelLongPress, [cancelLongPress]);
+    const openAdd = () => router.push(`/tasks?add=${Date.now()}`);
     // Learn reviews waiting for the viewer: a badge on the Almanac, which
     // lists them. Nothing shows where Learn is unavailable (the count is 0).
     const pendingReviews = usePendingReviews();
@@ -55,10 +68,83 @@ export function AppNav({ className }: { className?: string }) {
                 {sections.map((section) => {
                     const active = pathname.startsWith(section.href);
                     const Icon = section.icon;
+                    const addsTask = section.href === "/tasks";
                     return (
                         <Link
                             key={section.href}
                             href={section.href}
+                            title={
+                                addsTask
+                                    ? i18n(
+                                          "Right-click or long press to add an own task; hold Shift, Ctrl, Alt or Meta while right-clicking for the browser menu",
+                                      )
+                                    : undefined
+                            }
+                            onContextMenu={(event) => {
+                                if (
+                                    !addsTask ||
+                                    event.shiftKey ||
+                                    event.ctrlKey ||
+                                    event.altKey ||
+                                    event.metaKey
+                                )
+                                    return;
+                                event.preventDefault();
+                                cancelLongPress();
+                                if (
+                                    Date.now() <
+                                    suppressContextMenuUntil.current
+                                ) {
+                                    suppressContextMenuUntil.current = 0;
+                                    return;
+                                }
+                                if (!pressed.current) openAdd();
+                            }}
+                            onKeyDown={(event) => {
+                                if (
+                                    addsTask &&
+                                    (event.key === "ContextMenu" ||
+                                        (event.shiftKey && event.key === "F10"))
+                                ) {
+                                    event.preventDefault();
+                                    suppressContextMenuUntil.current =
+                                        Date.now() + 1000;
+                                    if (!event.repeat) openAdd();
+                                }
+                            }}
+                            onPointerDown={(event) => {
+                                if (!addsTask || event.pointerType !== "touch")
+                                    return;
+                                cancelLongPress();
+                                pressed.current = false;
+                                pressStart.current = {
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                };
+                                longPress.current = setTimeout(() => {
+                                    pressed.current = true;
+                                    openAdd();
+                                }, 550);
+                            }}
+                            onPointerMove={(event) => {
+                                const start = pressStart.current;
+                                if (
+                                    start &&
+                                    Math.hypot(
+                                        event.clientX - start.x,
+                                        event.clientY - start.y,
+                                    ) > 10
+                                )
+                                    cancelLongPress();
+                            }}
+                            onPointerUp={cancelLongPress}
+                            onPointerCancel={cancelLongPress}
+                            onClick={(event) => {
+                                if (addsTask && pressed.current) {
+                                    event.preventDefault();
+                                    pressed.current = false;
+                                }
+                            }}
                             aria-current={active ? "page" : undefined}
                             aria-label={
                                 section.href === "/tasks" && pendingTasks > 0

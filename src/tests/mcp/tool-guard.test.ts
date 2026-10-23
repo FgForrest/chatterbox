@@ -9,7 +9,12 @@ import type { McpCaller } from "@/lib/mcp/caller";
 import { MCP_ROLES } from "@/lib/mcp/roles";
 import { ALL_TOOLS } from "@/lib/mcp/tools";
 
-const WRITE_TOOLS = new Set(["update_task"]);
+const WRITE_TOOLS = new Set([
+    "update_task",
+    "create_task",
+    "follow_task",
+    "merge_tasks",
+]);
 
 const everything: McpCaller = {
     kind: "user",
@@ -58,8 +63,10 @@ describe("the MCP tool registry", () => {
         ALL_TOOLS.filter((tool) => WRITE_TOOLS.has(tool.name)).map(
             (tool) => [tool.name, tool] as const,
         ),
-    )("%s writes only with tasks:write", (_name, tool) => {
+    )("%s writes only with tasks:write", (name, tool) => {
         expect(tool.anyOf).toEqual(["tasks:write"]);
-        expect(tool.annotations.destructiveHint).toBe(false);
+        expect(tool.annotations.destructiveHint).toBe(
+            name === "merge_tasks" || name === "update_task",
+        );
     });
 });

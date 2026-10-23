@@ -390,7 +390,10 @@ describe("person sharing controls", () => {
         expect(requests).not.toHaveBeenCalled();
     });
 
-    it("lets an assigned receiver tick a task while hiding editing", () => {
+    it.each([
+        true,
+        false,
+    ])("keeps receiver note and follow controls with assigned=%s while hiding content actions", async (assigned) => {
         const task: TaskView = {
             id: "task",
             recordingId: "audio",
@@ -416,24 +419,55 @@ describe("person sharing controls", () => {
             acceptedAt: null,
             statusChangedAt: null,
             canEdit: false,
-            canClose: true,
+            canClose: assigned,
             canUndoMatch: false,
+            own: false,
+            note: null,
+            noteUpdatedAt: null,
+            noteBy: null,
+            following: false,
+            automaticFollow: false,
+            canFollow: true,
+            canMerge: false,
             receivedOwnerName: "Alex Morgan",
         };
         const change = vi.fn();
         render(
             <TaskRow task={task} organizationOnly={false} onChange={change} />,
         );
-        fireEvent.click(screen.getByRole("checkbox"));
-        expect(change).toHaveBeenCalledWith(
-            { status: "done" },
-            { status: "done" },
-        );
+        expect(screen.queryByRole("textbox")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+        expect(screen.queryByRole("button", { name: /Merge/ })).toBeNull();
         expect(
             screen.getByText("Only Alex Morgan can edit this task."),
         ).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
-        expect(screen.queryByRole("textbox")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+        await waitFor(() =>
+            expect(requests).toHaveBeenCalledWith(
+                "/api/tasks/task/follow",
+                expect.objectContaining({ method: "POST" }),
+            ),
+        );
+        fireEvent.click(screen.getByRole("checkbox"));
+        if (assigned) {
+            expect(change).toHaveBeenCalledWith(
+                { status: "done" },
+                { status: "done" },
+            );
+            expect(screen.getByRole("textbox", { name: "Note" })).toBeTruthy();
+            fireEvent.change(screen.getByRole("textbox", { name: "Note" }), {
+                target: { value: "Receiver outcome" },
+            });
+            fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+            expect(change).toHaveBeenCalledWith(
+                { note: "Receiver outcome" },
+                { note: "Receiver outcome" },
+            );
+        } else {
+            expect(change).not.toHaveBeenCalled();
+            expect(screen.queryByRole("button", { name: "Note" })).toBeNull();
+            expect(screen.queryByRole("textbox")).toBeNull();
+        }
     });
     it.each([
         "http",

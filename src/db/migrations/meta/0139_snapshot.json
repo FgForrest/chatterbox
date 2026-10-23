@@ -1,5 +1,5 @@
 {
-  "id": "fe7ddfc4-db0f-4015-b5fb-3c7422391de0",
+  "id": "17c1c6b2-6a56-4c07-a422-7c50fc273a5c",
   "prevId": "45f0e5af-6f2e-40be-862b-68f057541011",
   "version": "7",
   "dialect": "postgresql",
@@ -4080,233 +4080,6 @@
       },
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.folder_shares": {
-      "name": "folder_shares",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "receiver_user_id": {
-          "name": "receiver_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "folder_id": {
-          "name": "folder_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invited_by_user_id": {
-          "name": "invited_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "invited_at": {
-          "name": "invited_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "responded_at": {
-          "name": "responded_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "folder_shares_receiver_state_idx": {
-          "name": "folder_shares_receiver_state_idx",
-          "columns": [
-            {
-              "expression": "receiver_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "folder_shares_owner_folder_idx": {
-          "name": "folder_shares_owner_folder_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "folder_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "folder_shares_inviter_idx": {
-          "name": "folder_shares_inviter_idx",
-          "columns": [
-            {
-              "expression": "invited_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "folder_shares_user_id_users_id_fk": {
-          "name": "folder_shares_user_id_users_id_fk",
-          "tableFrom": "folder_shares",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "folder_shares_receiver_user_id_users_id_fk": {
-          "name": "folder_shares_receiver_user_id_users_id_fk",
-          "tableFrom": "folder_shares",
-          "tableTo": "users",
-          "columnsFrom": [
-            "receiver_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "folder_shares_folder_id_recording_folders_id_fk": {
-          "name": "folder_shares_folder_id_recording_folders_id_fk",
-          "tableFrom": "folder_shares",
-          "tableTo": "recording_folders",
-          "columnsFrom": [
-            "folder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "folder_shares_invited_by_user_id_users_id_fk": {
-          "name": "folder_shares_invited_by_user_id_users_id_fk",
-          "tableFrom": "folder_shares",
-          "tableTo": "users",
-          "columnsFrom": [
-            "invited_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "folder_shares_folder_receiver_unique": {
-          "name": "folder_shares_folder_receiver_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "folder_id",
-            "receiver_user_id"
-          ]
-        },
-        "folder_shares_id_receiver_unique": {
-          "name": "folder_shares_id_receiver_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "receiver_user_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "folder_shares_state_check": {
-          "name": "folder_shares_state_check",
-          "value": "\"folder_shares\".\"state\" in ('pending', 'accepted', 'declined', 'removed')"
-        },
-        "folder_shares_receiver_check": {
-          "name": "folder_shares_receiver_check",
-          "value": "\"folder_shares\".\"user_id\" <> \"folder_shares\".\"receiver_user_id\""
-        }
-      },
       "isRLSEnabled": false
     },
     "public.founding_member_reservations": {
@@ -10300,177 +10073,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.received_folder_attachments": {
-      "name": "received_folder_attachments",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "share_id": {
-          "name": "share_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "received_folder_attachments_user_parent_idx": {
-          "name": "received_folder_attachments_user_parent_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "received_folder_attachments_parent_idx": {
-          "name": "received_folder_attachments_parent_idx",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "received_folder_attachments_user_id_users_id_fk": {
-          "name": "received_folder_attachments_user_id_users_id_fk",
-          "tableFrom": "received_folder_attachments",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "received_folder_attachments_share_id_folder_shares_id_fk": {
-          "name": "received_folder_attachments_share_id_folder_shares_id_fk",
-          "tableFrom": "received_folder_attachments",
-          "tableTo": "folder_shares",
-          "columnsFrom": [
-            "share_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "received_folder_attachments_parent_id_recording_folders_id_fk": {
-          "name": "received_folder_attachments_parent_id_recording_folders_id_fk",
-          "tableFrom": "received_folder_attachments",
-          "tableTo": "recording_folders",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "received_folder_attachments_receiver_fk": {
-          "name": "received_folder_attachments_receiver_fk",
-          "tableFrom": "received_folder_attachments",
-          "tableTo": "folder_shares",
-          "columnsFrom": [
-            "share_id",
-            "user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "receiver_user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "received_folder_attachments_share_id_unique": {
-          "name": "received_folder_attachments_share_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "share_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.recording_capture_keys": {
       "name": "recording_capture_keys",
       "schema": "",
@@ -11387,7 +10989,13 @@
           "name": "recording_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "folder_id": {
+          "name": "folder_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -11406,6 +11014,24 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note_updated_at": {
+          "name": "note_updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note_updated_by_user_id": {
+          "name": "note_updated_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "assignee_person_id": {
           "name": "assignee_person_id",
@@ -11640,6 +11266,34 @@
           "method": "btree",
           "with": {}
         },
+        "recording_tasks_user_folder_status_idx": {
+          "name": "recording_tasks_user_folder_status_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "folder_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"recording_tasks\".\"folder_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "recording_tasks_created_by_user_id_idx": {
           "name": "recording_tasks_created_by_user_id_idx",
           "columns": [
@@ -11714,6 +11368,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "recording_tasks_note_updated_by_idx": {
+          "name": "recording_tasks_note_updated_by_idx",
+          "columns": [
+            {
+              "expression": "note_updated_by_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -11730,6 +11399,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "recording_tasks_folder_id_recording_folders_id_fk": {
+          "name": "recording_tasks_folder_id_recording_folders_id_fk",
+          "tableFrom": "recording_tasks",
+          "tableTo": "recording_folders",
+          "columnsFrom": [
+            "folder_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "recording_tasks_user_id_users_id_fk": {
           "name": "recording_tasks_user_id_users_id_fk",
           "tableFrom": "recording_tasks",
@@ -11741,6 +11423,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "recording_tasks_note_updated_by_user_id_users_id_fk": {
+          "name": "recording_tasks_note_updated_by_user_id_users_id_fk",
+          "tableFrom": "recording_tasks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "note_updated_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "recording_tasks_assignee_person_id_people_id_fk": {
@@ -11826,13 +11521,21 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "recording_tasks_personal_folder_check": {
+          "name": "recording_tasks_personal_folder_check",
+          "value": "\"recording_tasks\".\"folder_id\" is null or \"recording_tasks\".\"source\" = 'personal'"
+        },
         "recording_tasks_status_check": {
           "name": "recording_tasks_status_check",
           "value": "\"recording_tasks\".\"status\" in ('proposed', 'open', 'done', 'dropped')"
         },
         "recording_tasks_source_check": {
           "name": "recording_tasks_source_check",
-          "value": "\"recording_tasks\".\"source\" in ('riffado', 'plaud', 'manual')"
+          "value": "\"recording_tasks\".\"source\" in ('riffado', 'plaud', 'manual', 'personal')"
+        },
+        "recording_tasks_personal_item_check": {
+          "name": "recording_tasks_personal_item_check",
+          "value": "(\"recording_tasks\".\"source\" = 'personal') = (\"recording_tasks\".\"recording_id\" is null) and (\"recording_tasks\".\"source\" <> 'personal' or (\"recording_tasks\".\"assignee_person_id\" is null and \"recording_tasks\".\"status\" <> 'proposed'))"
         },
         "recording_tasks_evidence_check": {
           "name": "recording_tasks_evidence_check",
@@ -12884,6 +12587,89 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.task_followers": {
+      "name": "task_followers",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "task_followers_user_id_idx": {
+          "name": "task_followers_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "task_followers_task_id_recording_tasks_id_fk": {
+          "name": "task_followers_task_id_recording_tasks_id_fk",
+          "tableFrom": "task_followers",
+          "tableTo": "recording_tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_followers_user_id_users_id_fk": {
+          "name": "task_followers_user_id_users_id_fk",
+          "tableFrom": "task_followers",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "task_followers_task_id_user_id_pk": {
+          "name": "task_followers_task_id_user_id_pk",
+          "columns": [
+            "task_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.task_home_moves": {
       "name": "task_home_moves",
       "schema": "",
@@ -13394,6 +13180,89 @@
           "value": "(\"task_mentions\".\"evidence_segment_index\" is null and \"task_mentions\".\"evidence_char_start\" is null and \"task_mentions\".\"evidence_char_end\" is null) or (\"task_mentions\".\"evidence_start_ms\" is null and \"task_mentions\".\"evidence_segment_index\" >= 0 and \"task_mentions\".\"evidence_char_start\" >= 0 and \"task_mentions\".\"evidence_char_start\" < \"task_mentions\".\"evidence_char_end\")"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.task_unfollows": {
+      "name": "task_unfollows",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "task_unfollows_user_id_idx": {
+          "name": "task_unfollows_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "task_unfollows_task_id_recording_tasks_id_fk": {
+          "name": "task_unfollows_task_id_recording_tasks_id_fk",
+          "tableFrom": "task_unfollows",
+          "tableTo": "recording_tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_unfollows_user_id_users_id_fk": {
+          "name": "task_unfollows_user_id_users_id_fk",
+          "tableFrom": "task_unfollows",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "task_unfollows_task_id_user_id_pk": {
+          "name": "task_unfollows_task_id_user_id_pk",
+          "columns": [
+            "task_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.task_update_proposals": {

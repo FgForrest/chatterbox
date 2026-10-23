@@ -59,6 +59,7 @@ export interface RecordingTasksState {
     itemId: string;
     data: RecordingTasks | null;
     failed: boolean;
+    refresh?: () => Promise<void>;
     /** The reviewer has proposals or follow-ups to decide on. */
     reviewing: boolean;
     /** How many wait: proposals and follow-ups. */
@@ -381,6 +382,7 @@ export function useRecordingTasks(
         itemId: recordingId,
         data,
         failed,
+        refresh: reload,
         reviewing: Boolean(data?.canEdit) && waiting > 0,
         waiting,
         accepting,

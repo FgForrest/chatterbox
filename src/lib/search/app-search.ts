@@ -126,13 +126,19 @@ export async function searchTasks(
                 if (Date.now() - started >= TASK_DEADLINE_MS)
                     return { hits, limited: Boolean(query) };
                 scanned++;
-                if (matches(`${row.text} ${row.recording.title}`, query)) {
+                if (
+                    matches(
+                        `${row.text} ${row.note ?? ""} ${row.recording?.title ?? ""}`,
+                        query,
+                    )
+                ) {
                     hits.push({
                         id: row.id,
                         text: row.text,
                         status,
                         dueDate: row.dueDate,
                         recording: row.recording,
+                        folder: row.folder,
                         href: `/tasks/${encodeURIComponent(row.id)}`,
                     });
                 }

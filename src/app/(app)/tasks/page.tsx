@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { TaskList } from "@/components/tasks/task-list";
 import { requireAuth } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { isOrgAccount } from "@/lib/org/config";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,11 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
     const session = await requireAuth();
     const organization = await isOrgAccount(session.user.id);
+    const canCurate =
+        !organization && (await userCuratesOrganizationNow(session.user.id));
     return (
         <Suspense>
-            <TaskList organization={organization} />
+            <TaskList organization={organization} canCurate={canCurate} />
         </Suspense>
     );
 }
