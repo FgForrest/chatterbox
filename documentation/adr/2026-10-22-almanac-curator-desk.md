@@ -1,11 +1,11 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-22 22:30
-status: partially-implemented
+updated: 2026-10-23 13:35
+status: accepted
 kind: feature
 issues: [240]
-prs: [244, 247]
+prs: [244, 247, 275]
 areas: [src/app/(app)/almanac, src/lib/knowledge/name-match.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/components/almanac/merge-target-picker.tsx, src/db/queries/almanac-usage.ts, src/lib/knowledge/duplicate-score.ts, src/lib/knowledge/duplicates.ts, src/components/almanac/care-queue.tsx, src/lib/knowledge/read-folder-knowledge.ts, src/components/dashboard/folder-knowledge-panel.tsx, src/lib/transcription/almanac-terms.ts, src/lib/learn/correction-pass.ts, src/lib/authz/curator.ts]
 supersedes: []
 superseded-by: []
@@ -20,7 +20,7 @@ curators have to keep a growing Organization Almanac clean. Issue #240 plans thr
 "Péče" (Care) tab that finds likely duplicate people and things and joins them; a read-only view of
 the knowledge each folder contributes, including what the models receive; and the rest of the
 problem queue. Decided on 2026-10-22 from a design page. PR 2 merged as #244 and PR 1 as #247;
-PR 3 is not started.
+PR 3 is #275 (2026-10-23).
 
 ## Why
 
@@ -81,7 +81,7 @@ scope, history) stays in one place.
 
 ## Key technical details
 
-As merged in #247 (PR 1) and #244 (PR 2):
+As merged in #247 (PR 1) and #244 (PR 2), and extended by #275 (PR 3):
 
 - **Signals for** a pair: nickname, Czech surname form, diacritics, typo, legal form, a shared heard-as
   form. **Signals against:** both are confirmed speakers in the same recording; different e-mails at
@@ -100,8 +100,40 @@ As merged in #247 (PR 1) and #244 (PR 2):
   default profile language and the shared folder access check; the models tab sends what it shows plus
   a count, not the whole list.
 
+- **Share provenance:** speaker, correction/fact, finished-Learn and task-assignee publication all
+  record additions in their share transaction. Existing records are references, not additions.
+  A transaction identity groups publishers of one item, under the existing Organization lock.
+- **Fact conflicts:** reuse the existing relation `cardinality: one`; losing current values point at
+  the kept fact through `replacedByFactId`, retaining evidence. Correction conflicts use heard-as
+  forms; thin records use distinct Organization-visible item mentions, including mail participants.
+- **Deploy surface:** the generated additive migration `0142_spicy_inertia.sql` adds provenance and
+  extends the existing dismissal table. No environment or compose changes. Hosted and self-host
+  without an Organization expose no Care data.
+
 ## Verification
 
+- **PR 3 review fixes:** additional database regressions bring the Care integration file to 74
+  cases. They cover private dependencies on both record kinds, private speaker/mail usage, withdrawn
+  sources, private correction cascades, 15 concurrent FK writes (task, proposal, mail participant and
+  speaker link) during all Care erasure paths, and
+  existing recording writers finishing before Care takes parent locks. The populated plan test uses
+  50,002 heard-as forms, 40,000 facts, 100,000 historical dismissals and 10,000 unrelated shared items:
+  indexed candidates stop at 32,000 facts, 16,000 forms and 2,000 records per kind; dismissal membership
+  reads one indexed row. A 496-decision archive round-trips through the actual route above 16 KiB;
+  maximum decision content fits the documented 32 MiB chunk limit. Final whole Node 24 suite: 722
+  files / 8,558 tests passed, 12 files / 104 tests skipped, no failures or unhandled errors (1,711.40 s).
+  Final Node 22 selection: four files / 190 tests passed, none skipped. MDX, Biome (1,996 files, no
+  errors or warnings), TypeScript and the ADR index passed.
+- **PR 3:** `src/tests/regressions/240-care-queue.integration.test.ts` adds 30 database-backed
+  cases, including every publication path, untouched and protected undo, publication timestamps, reshare receipts,
+  private-scope boundaries, detector positives and negatives, dismissals, counts, all new routes,
+  the missing-Organization case, and actual archive export/restore. The 11 UI cases in
+  `src/tests/regressions/240-care-queue.test.tsx` cover shared Care/folder fixes, optimistic rollback,
+  section navigation, lazy folder share details, share outcomes and the layout badge. A regression
+  in the existing duplicate UI tests checks removal of every related pair after merging; they still run
+  against the extracted shared duplicate card. Whole Node 24 suite: 717 files and 8,468 tests
+  passed, 12 files and 103 tests skipped. Node 22 affected checks: 99 passed, seven Keycloak tests
+  skipped without an issuer. Biome, TypeScript, MDX, message extraction and the ADR index passed.
 - **PR 2 (#244):** `src/tests/knowledge/folder-knowledge.integration.test.ts` checks parity with
   `almanacTermsFor`, including an inherited pinned language, for private and Organization child
   folders; `src/tests/regressions/240-folder-knowledge-ranking.test.ts` covers the overflow and
@@ -133,11 +165,31 @@ As merged in #247 (PR 1) and #244 (PR 2):
 
 ## Consequences & open follow-ups
 
-- PR 3 is not started: what each share added with undo per share, conflicting facts, corrections
-  pointing two ways, thin records, problem flags in the folder view, and the Care badge count. It
-  depends on per-share provenance recorded at share time. The badge is wired but not fed:
-  `careCount` in `src/components/almanac/almanac-tabs.tsx` is never supplied by the Almanac layout
-  until PR 3 counts the problems.
+- PR 3 implements per-share review and safe undo, single-valued fact conflicts, two-way corrections,
+  thin records, folder flags with shared fixes, and the Care badge. Provenance starts at upgrade;
+  older shares cannot be undone through Care.
+- Organization archives preserve dismissals as portable problem content, encrypted in the database.
+  Restore matches the restored records, values and usage and recomputes instance-specific fingerprints.
+  Provenance and undo history are omitted: ciphertext fingerprints and dependencies cannot be reused
+  safely after re-encryption or id remapping. Imported knowledge stays, without undo of old shares.
+- The non-duplicate scan checks 2,000 newest records per kind, 32,000 current facts and 16,000 heard-as
+  forms, with at most 2,000 problems per detector. Its five-minute cache checks scope generation on
+  every read. Problems beyond these caps may be absent; the queue and user guide state the limits.
+- Share undo preserves any addition changed, merged, confirmed elsewhere or referenced by a later
+  share. It also keeps records whose deletion would affect private notes, aliases, facts or other
+  sources. This can retain more than the visible Organization evidence suggests; it must never
+  cascade into another source to make an undo look complete. Thin deletion applies the same protection.
+  Care holds the Organization lock, then existing recording locks, then parent row locks before
+  dependency checks and erasure;
+  concurrent FK writers wait and fail if the parent was erased. Indexed candidate limits precede
+  joins, dismissal reads use current keys only, and thin detection skips records above 64 uses.
+  Restore accepts independently retryable chunks of at most 32 MiB including the ID map; it checks
+  archived pairs in batches and matches problems through one map of current problems.
+- Keeping one value of a fact conflict retires every other current value of that relation on the
+  subject, including values Care cannot display (an object merged away), so the single-valued rule
+  holds after the fix. Thin deletion and share undo ask for confirmation in the UI.
+- The archive restore endpoint restores Care decisions after records, facts and usage; a general
+  archive-import UI remains separate work.
 - Each kind scans at most the newest 2,000 live records (`MAX_DUPLICATE_RECORDS` in
   `src/lib/knowledge/duplicate-limits.ts`; 8 aliases, 8 heard-as forms and 16 extra addresses per
   record, 40 nearest neighbours each). A new record is not paired with an older one beyond that cap;
@@ -171,3 +223,7 @@ As merged in #247 (PR 1) and #244 (PR 2):
 - **2026-10-22**: PR 1 merged as #247, after four review rounds (per-record comparison previews and
   curator-only picker ranking, fact evidence read for candidate records only, a database-backed
   e-mail conflict test).
+
+- **2026-10-23**: PR 3 built; provenance, safe undo, remaining problem kinds, shared folder fixes, badge and
+  portable curator decisions. A review before opening found a thin-record delete reaching private notes,
+  an undo race with concurrent task assignment and unindexed scans; all fixed. Opened as #275.

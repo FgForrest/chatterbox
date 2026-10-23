@@ -68,6 +68,9 @@ vi.mock("@/lib/auth-server", () => ({
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: vi.fn(async () => true),
 }));
+vi.mock("@/lib/knowledge/care-access", () => ({
+    canOpenCare: (actorId: string) => userCuratesOrganizationNow(actorId),
+}));
 vi.mock("next-intl/server", () => ({
     getExtracted: async () => (message: string) => message,
 }));
@@ -287,6 +290,29 @@ describe("Almanac curator care", () => {
             ),
         );
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+    it("removes every pending pair involving either merged record", async () => {
+        respond();
+        const related: DuplicateCandidate = {
+            ...candidate,
+            key: "person:left:third",
+            right: { ...candidate.right, id: "third", name: "Jitka Dvořáková" },
+        };
+        render(
+            <CareQueue
+                initial={{ ...initial, candidates: [candidate, related] }}
+                sessionKey="curator"
+            />,
+        );
+        fireEvent.click(screen.getAllByRole("button", { name: "Merge…" })[0]);
+        fireEvent.click(await screen.findByRole("radio", { name: "Lead" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Merge into “Ondřej Kalous”" }),
+        );
+        await waitFor(() =>
+            expect(screen.queryByText("Jitka Dvořáková")).toBeNull(),
+        );
+        expect(screen.getByText("All done here.")).toBeTruthy();
     });
     it("keeps a failed stale merge open and offers a fresh comparison", async () => {
         respond({ staleMerge: true });

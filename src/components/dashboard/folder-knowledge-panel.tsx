@@ -3,6 +3,7 @@
 import { ArrowLeft, BookOpen, Users } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
+import { FolderCareFlags } from "@/components/almanac/folder-care-flags";
 import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
@@ -234,6 +235,21 @@ export function FolderKnowledgePanel({
                                             <td className="p-2">
                                                 {record.name}
                                                 {organization(record.scope)}
+                                                <FolderCareFlags
+                                                    care={
+                                                        "care" in data
+                                                            ? data.care
+                                                            : undefined
+                                                    }
+                                                    recordId={record.id}
+                                                    onChanged={() => {
+                                                        setCache({});
+                                                        setRetry(
+                                                            (value) =>
+                                                                value + 1,
+                                                        );
+                                                    }}
+                                                />
                                             </td>
                                             <td className="p-2 text-muted-foreground">
                                                 {data.tab === "people"
@@ -279,6 +295,21 @@ export function FolderKnowledgePanel({
                                             <td className="p-2">
                                                 {row.targetName}
                                                 {organization(row.scope)}
+                                                <FolderCareFlags
+                                                    care={
+                                                        "care" in data
+                                                            ? data.care
+                                                            : undefined
+                                                    }
+                                                    recordId={row.targetId}
+                                                    onChanged={() => {
+                                                        setCache({});
+                                                        setRetry(
+                                                            (value) =>
+                                                                value + 1,
+                                                        );
+                                                    }}
+                                                />
                                             </td>
                                             <td className="p-2 tabular-nums">
                                                 {row.useCount}×
@@ -313,6 +344,21 @@ export function FolderKnowledgePanel({
                                                 )}{" "}
                                                 · {row.object}
                                                 {organization(row.scope)}
+                                                <FolderCareFlags
+                                                    care={
+                                                        "care" in data
+                                                            ? data.care
+                                                            : undefined
+                                                    }
+                                                    factId={row.factId}
+                                                    onChanged={() => {
+                                                        setCache({});
+                                                        setRetry(
+                                                            (value) =>
+                                                                value + 1,
+                                                        );
+                                                    }}
+                                                />
                                             </td>
                                             <td className="p-2">
                                                 {row.itemTitle}

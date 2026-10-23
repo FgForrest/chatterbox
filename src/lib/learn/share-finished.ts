@@ -18,11 +18,14 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import {
     findEntityByNameInTx,
     planEntityPromotionInTx,
-    promoteEntityInTx,
 } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { promotePersonInTx } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
+import {
+    shareEntityInTx,
+    shareEventInTx,
+    sharePersonInTx,
+} from "@/lib/knowledge/share-provenance";
 import {
     adoptTypesForShareInTx,
     dropUnusedAdoptionsInTx,
@@ -127,6 +130,7 @@ async function publishUnreferencedRecordsInTx(
     rows: ReviewRow[],
     orgUserId: string,
 ): Promise<Set<string>> {
+    const event = await shareEventInTx(tx, run.itemId, run.userId, orgUserId);
     const targets = await confirmedRecordsInTx(tx, run, rows);
     const personIds = targets.flatMap((target) =>
         "personId" in target ? [target.personId] : [],
@@ -134,47 +138,50 @@ async function publishUnreferencedRecordsInTx(
     const entityIds = targets.flatMap((target) =>
         "entityId" in target ? [target.entityId] : [],
     );
-    const privatePeople =
+    const confirmedPeople =
         personIds.length > 0
             ? await tx
                   .select({ id: people.id })
                   .from(people)
                   .where(
                       and(
-                          eq(people.userId, run.userId),
+                          inArray(people.userId, [run.userId, orgUserId]),
                           inArray(people.id, personIds),
                       ),
                   )
             : [];
-    const privateEntities =
+    const confirmedEntities =
         entityIds.length > 0
             ? await tx
                   .select({ id: knowledgeEntities.id })
                   .from(knowledgeEntities)
                   .where(
                       and(
-                          eq(knowledgeEntities.userId, run.userId),
+                          inArray(knowledgeEntities.userId, [
+                              run.userId,
+                              orgUserId,
+                          ]),
                           inArray(knowledgeEntities.id, entityIds),
                       ),
                   )
             : [];
     const scopes = await scopesNamingInTx(tx, {
-        personIds: privatePeople.map((person) => person.id),
-        entityIds: privateEntities.map((entity) => entity.id),
+        personIds: confirmedPeople.map((person) => person.id),
+        entityIds: confirmedEntities.map((entity) => entity.id),
     });
     const adopted = await adoptTypesForShareInTx(tx, {
         ownerUserId: run.userId,
         orgUserId,
-        entityIds: privateEntities.map((entity) => entity.id),
+        entityIds: confirmedEntities.map((entity) => entity.id),
         relationKeys: [],
     });
-    for (const person of privatePeople) {
-        await promotePersonInTx(tx, person.id, orgUserId);
+    for (const person of confirmedPeople) {
+        await sharePersonInTx(tx, person.id, orgUserId, event);
     }
-    for (const entity of privateEntities) {
+    for (const entity of confirmedEntities) {
         const plan = await planEntityPromotionInTx(tx, entity.id, orgUserId);
         if (plan && plan.kind !== "private") {
-            await promoteEntityInTx(tx, entity.id, orgUserId);
+            await shareEntityInTx(tx, entity.id, orgUserId, event);
         }
     }
     await dropUnusedAdoptionsInTx(tx, adopted);

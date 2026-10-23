@@ -43,6 +43,12 @@ vi.mock("@/lib/auth-server", () => ({
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: async () => false,
 }));
+vi.mock("@/lib/knowledge/care-access", () => ({
+    canOpenCare: async () => false,
+}));
+vi.mock("@/lib/knowledge/care-summary", () => ({
+    careCount: async () => 0,
+}));
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
     useExtracted: () => (source: string | { message: string }) =>
