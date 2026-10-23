@@ -1,12 +1,18 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, not, or } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, users } from "@/db/schema";
+import { receivedItemCondition } from "@/db/queries/item-shares";
+import { accounts, chatterItems, users } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
 import { env } from "@/lib/env";
 import { getClaimsProvider, isIdpAuthorization } from "@/lib/identity/factory";
 import type { McpRole } from "@/lib/mcp/roles";
 import type { McpTokenClaims } from "@/lib/mcp/token";
-import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import {
+    getOrgUserId,
+    isOrgScopeEnabled,
+    isOrgScopeVisible,
+} from "@/lib/org/config";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
 interface CallerBase {
@@ -18,6 +24,7 @@ interface CallerBase {
     roles: Set<McpRole>;
     /** The Organization account, when the instance shows the Organization. */
     orgUserId: string | null;
+    receivedItemIds?: ReadonlySet<string>;
 }
 
 /**
@@ -143,6 +150,29 @@ export async function resolveCaller(
                 userId: linked.id,
                 email: linked.email,
                 orgUserId,
+                receivedItemIds: isOrgScopeVisible()
+                    ? new Set(
+                          (
+                              await db
+                                  .select({ itemId: chatterItems.id })
+                                  .from(chatterItems)
+                                  .where(
+                                      and(
+                                          isNull(chatterItems.deletedAt),
+                                          receivedItemCondition(linked.id),
+                                          orgUserId
+                                              ? not(
+                                                    sharedItemCondition(
+                                                        orgUserId,
+                                                        chatterItems.id,
+                                                    ),
+                                                )
+                                              : undefined,
+                                      ),
+                                  )
+                          ).map((row) => row.itemId),
+                      )
+                    : new Set(),
             },
         };
     }

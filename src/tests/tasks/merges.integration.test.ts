@@ -300,7 +300,7 @@ describeWithDatabase("task merges", () => {
         });
     });
 
-    it("attaches an own shared task to another owner's task and routes every supported difference", async () => {
+    it("attaches an open shared task, appends text and keeps the earlier due date without a conflicting proposal", async () => {
         const statementAt = new Date("2026-10-05T12:00:00.000Z");
         await item("cross-source-item", ALICE, true);
         await item("cross-target-item", BOB, true);
@@ -309,7 +309,7 @@ describeWithDatabase("task merges", () => {
             itemId: "cross-source-item",
             userId: ALICE,
             text: "Publish the final launch brief",
-            status: "done",
+            status: "open",
             dueDate: "2026-10-20",
             duePhrase: "by launch day",
             statementAt,
@@ -338,7 +338,7 @@ describeWithDatabase("task merges", () => {
             .where(eq(recordingTasks.id, "cross-target"));
         expect(target).toMatchObject({ status: "open", dueDate: "2026-10-18" });
         expect(target?.text ? decryptText(target.text) : null).toBe(
-            "Publish the launch brief",
+            "Publish the launch brief\nPublish the final launch brief",
         );
         const proposals = await db()
             .select({
@@ -351,31 +351,18 @@ describeWithDatabase("task merges", () => {
             })
             .from(taskUpdateProposals)
             .where(eq(taskUpdateProposals.taskId, "cross-target"));
-        expect(proposals.map((row) => row.kind).sort()).toEqual([
-            "attach_merge",
-            "done",
-            "due",
+        expect(proposals).toEqual([
+            {
+                id: expect.any(String),
+                kind: "attach_merge",
+                state: "awaiting_target_review",
+                routedTo: [BOB],
+                dueDate: null,
+                duePhrase: null,
+            },
         ]);
-        expect(proposals).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    kind: "attach_merge",
-                    state: "awaiting_target_review",
-                    routedTo: [BOB],
-                }),
-                expect.objectContaining({ kind: "done" }),
-                expect.objectContaining({
-                    kind: "due",
-                    dueDate: "2026-10-20",
-                }),
-            ]),
-        );
-        const due = proposals.find((row) => row.kind === "due");
-        const attach = proposals.find((row) => row.kind === "attach_merge");
-        if (!attach || !due) throw new Error("missing routed merge proposals");
-        expect(due?.duePhrase ? decryptText(due.duePhrase) : null).toBe(
-            "by launch day",
-        );
+        const attach = proposals[0];
+        if (!attach) throw new Error("missing routed attachment notice");
         expect(
             await db()
                 .select({
@@ -399,18 +386,6 @@ describeWithDatabase("task merges", () => {
                 .from(recordingTasks)
                 .where(eq(recordingTasks.id, "cross-target")),
         ).toEqual([{ dueDate: "2026-10-18" }]);
-        await expect(
-            applyRoutedTaskProposal(viewer(BOB), "cross-source-item", due.id),
-        ).resolves.toEqual({ state: "applied", obsoleteReason: null });
-        expect(
-            await db()
-                .select({
-                    dueDate: recordingTasks.dueDate,
-                    dueEffectiveAt: recordingTasks.dueEffectiveAt,
-                })
-                .from(recordingTasks)
-                .where(eq(recordingTasks.id, "cross-target")),
-        ).toEqual([{ dueDate: "2026-10-20", dueEffectiveAt: statementAt }]);
     });
 
     it("refuses a merge by someone who owns neither task", async () => {
@@ -510,7 +485,7 @@ describeWithDatabase("task merges", () => {
             ),
         ).rejects.toMatchObject({
             statusCode: 403,
-            message: expect.stringContaining("shared"),
+            message: expect.stringContaining("private text becomes visible"),
         });
 
         await db().insert(recordingFolderAssignments).values({
@@ -763,21 +738,21 @@ describeWithDatabase("task merges", () => {
                     taskId: "pending-target",
                     state: "awaiting_source_review",
                     routedTo: null,
-                    version: 5,
+                    version: 6,
                 },
                 {
                     id: "pending-routed",
                     taskId: "pending-target",
                     state: "awaiting_target_review",
                     routedTo: [BOB],
-                    version: 5,
+                    version: 6,
                 },
                 {
                     id: "pending-share",
                     taskId: "pending-target",
                     state: "awaiting_share",
                     routedTo: null,
-                    version: 5,
+                    version: 6,
                 },
             ]),
         );
@@ -994,7 +969,7 @@ describeWithDatabase("task merges", () => {
         expect(duplicates).toEqual([]);
     });
 
-    it("refuses Organization tasks into private tasks for owners and curators", async () => {
+    it("requires confirmation when reversing Organization-to-private merges for owners and curators", async () => {
         await item("org-private-source-item", ALICE, true);
         await item("org-private-owner-target-item", ALICE);
         await item("org-private-curator-target-item", CAROL);
@@ -1017,7 +992,7 @@ describeWithDatabase("task merges", () => {
         const expected = {
             statusCode: 403,
             message:
-                "Merge rule: an Organization task can be merged only into an Organization task",
+                "Merge rule: confirm that private text becomes visible to the Organization",
         };
 
         await expect(
@@ -1105,11 +1080,12 @@ describeWithDatabase("task merges", () => {
         ).resolves.toEqual({ state: "applied", obsoleteReason: null });
     });
 
-    it("reports an earlier routed field statement distinctly", async () => {
+    it("reports an earlier routed field statement from proposal matching distinctly", async () => {
         await item("chronology-source-item", ALICE, true);
         await item("chronology-target-item", BOB, true);
         await task({
             id: "chronology-source",
+            status: "proposed",
             itemId: "chronology-source-item",
             userId: ALICE,
             dueDate: "2026-10-20",
@@ -1128,6 +1104,7 @@ describeWithDatabase("task merges", () => {
             viewer(ALICE),
             "chronology-source",
             "chronology-target",
+            { reviewItemId: "chronology-source-item" },
         );
         const [due] = await db()
             .select({ id: taskUpdateProposals.id })

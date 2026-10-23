@@ -11,6 +11,7 @@
  * needs and exactly what nobody would notice missing.
  */
 
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 // Which recordings a Learn review waits on is not what is tested here.
@@ -172,6 +173,22 @@ const RECORDING_ROW = {
     audioReapedAt: null,
 };
 
+async function renderDashboardWorkstation() {
+    const page = (await DashboardPage()) as ReactElement<{
+        children: ReactElement<{
+            transcriptions: Map<
+                string,
+                {
+                    turns: TranscriptTurn[] | null;
+                    text: string;
+                    readText?: string;
+                }
+            >;
+        }>;
+    }>;
+    return page.props.children;
+}
+
 describe("stored turns survive the dashboard SSR loader", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -185,11 +202,7 @@ describe("stored turns survive the dashboard SSR loader", () => {
         queueSelect([]);
         queueSelect([]);
 
-        const element = (await DashboardPage()) as {
-            props: {
-                transcriptions: Map<string, { turns: TranscriptTurn[] | null }>;
-            };
-        };
+        const element = await renderDashboardWorkstation();
 
         const selected = projections[1] as Record<string, unknown>;
         expect(selected.turns).toBe(transcriptions.turns);
@@ -221,14 +234,7 @@ describe("stored turns survive the dashboard SSR loader", () => {
         queueSelect([]);
         queueSelect([]);
 
-        const element = (await DashboardPage()) as {
-            props: {
-                transcriptions: Map<
-                    string,
-                    { text: string; readText?: string }
-                >;
-            };
-        };
+        const element = await renderDashboardWorkstation();
 
         expect(confirmedOverlays).toHaveBeenCalledWith({
             ownerUserId: "user-1",
@@ -246,11 +252,7 @@ describe("stored turns survive the dashboard SSR loader", () => {
         queueSelect([]);
         queueSelect([]);
 
-        const element = (await DashboardPage()) as {
-            props: {
-                transcriptions: Map<string, { turns: TranscriptTurn[] | null }>;
-            };
-        };
+        const element = await renderDashboardWorkstation();
 
         expect(element.props.transcriptions.get("rec-1")?.turns).toBeNull();
     });

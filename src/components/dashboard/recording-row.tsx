@@ -4,6 +4,7 @@ import {
     Download,
     Folder,
     FolderInput,
+    FolderOutput,
     FolderPlus,
     Loader2,
     Mail,
@@ -12,12 +13,19 @@ import {
     Play,
     Share2,
     Trash2,
+    UserPlus,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
 import { FolderPicker } from "@/components/recordings/folder-picker";
+import {
+    changeShare,
+    PersonShareDialog,
+    usePersonSharing,
+    usePersonSharingRefresh,
+} from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -100,6 +108,11 @@ export function RecordingRow({
     const i18n = useExtracted();
     const locale = useLocale();
     const confirm = useConfirm();
+    const personSharing = usePersonSharing();
+    const refresh = usePersonSharingRefresh();
+    const [shareOpen, setShareOpen] = useState(false);
+    const [removed, setRemoved] = useState(false);
+    const received = recording.view === "received";
     const label = useFolderLabel();
     const [pickerOpen, setPickerOpen] = useState(false);
     const source =
@@ -116,7 +129,7 @@ export function RecordingRow({
         firstFolder.folder.id !== sourceFolder?.id &&
         !subfolders.some((folder) => folder.id === firstFolder.folder.id);
     const sharedBy =
-        recording.view === "org" && recording.ownerName
+        (recording.view === "org" || received) && recording.ownerName
             ? recording.isOwn
                 ? i18n("Shared by you")
                 : i18n("Shared by {owner}", { owner: recording.ownerName })
@@ -146,6 +159,7 @@ export function RecordingRow({
             </span>
         );
     }
+    if (removed) return null;
     return (
         <div
             className={cn(
@@ -160,7 +174,7 @@ export function RecordingRow({
                     registerRef(recording.id, el);
                 }}
                 type="button"
-                draggable={!!onAssignRecording}
+                draggable={!!onAssignRecording && !received}
                 onDragStart={(event) => {
                     if (recording.isOwn === false)
                         event.dataTransfer.setData(
@@ -205,6 +219,14 @@ export function RecordingRow({
                                     ? i18n("(no subject)")
                                     : "")}
                         </h3>
+                        {personSharing &&
+                            recording.isOwn !== false &&
+                            recording.sharedWithPeople && (
+                                <FolderOutput
+                                    className="size-3.5 shrink-0 text-person-share"
+                                    aria-label={i18n("Shared with people")}
+                                />
+                            )}
                         {recording.mail?.hasAttachments && (
                             <Paperclip
                                 className="size-3 shrink-0 text-muted-foreground"
@@ -248,7 +270,14 @@ export function RecordingRow({
                                 <span>·</span>
                             )}
                             {sharedBy && (
-                                <span className="truncate">{sharedBy}</span>
+                                <span
+                                    className={cn(
+                                        "truncate",
+                                        received && "text-person-share",
+                                    )}
+                                >
+                                    {sharedBy}
+                                </span>
                             )}
                         </p>
                     )}
@@ -288,6 +317,56 @@ export function RecordingRow({
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
+                        {personSharing &&
+                            recording.isOwn !== false &&
+                            !shared &&
+                            recording.view !== "org" && (
+                                <DropdownMenuItem
+                                    onSelect={() => setShareOpen(true)}
+                                >
+                                    <UserPlus className="text-person-share" />
+                                    {i18n("Share…")}
+                                </DropdownMenuItem>
+                            )}
+                        {received && recording.receivedShare && (
+                            <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => {
+                                    const share = recording.receivedShare;
+                                    if (!share) return;
+                                    void confirm({
+                                        title: i18n("Remove and end sharing?"),
+                                        description: i18n(
+                                            "You will lose access to this item. The owner's item is kept.",
+                                        ),
+                                        confirmLabel: i18n(
+                                            "Remove and end sharing",
+                                        ),
+                                        destructive: true,
+                                        onConfirm: async () => {
+                                            setRemoved(true);
+                                            try {
+                                                await changeShare(
+                                                    share.id,
+                                                    share.version,
+                                                    "remove",
+                                                    i18n(
+                                                        "Could not update sharing",
+                                                    ),
+                                                );
+                                                refresh();
+                                            } catch (error) {
+                                                setRemoved(false);
+                                                throw error;
+                                            }
+                                        },
+                                    });
+                                }}
+                            >
+                                <Trash2 />
+                                {i18n("Remove and end sharing")}
+                            </DropdownMenuItem>
+                        )}
                         {onAssignRecording && (
                             <DropdownMenuItem
                                 onSelect={() => setPickerOpen(true)}
@@ -378,13 +457,33 @@ export function RecordingRow({
                     assignedIds={assignedIds}
                     open={pickerOpen}
                     onOpenChange={setPickerOpen}
-                    organizationOnly={recording.isOwn === false}
-                    scope={source?.scope}
-                    onSelect={(folderId) =>
-                        source && onMoveRecording
+                    organizationOnly={recording.isOwn === false && !received}
+                    scope={received ? "personal" : source?.scope}
+                    onSelect={async (folderId) => {
+                        if (received && recording.receivedShare) {
+                            await changeShare(
+                                recording.receivedShare.id,
+                                recording.receivedShare.version,
+                                "file",
+                                i18n("Could not update sharing"),
+                                folderId,
+                            );
+                            refresh();
+                            return;
+                        }
+                        return source && onMoveRecording
                             ? onMoveRecording(recording.id, source.id, folderId)
-                            : onAssignRecording(recording.id, folderId)
-                    }
+                            : onAssignRecording(recording.id, folderId);
+                    }}
+                />
+            )}
+            {personSharing && (
+                <PersonShareDialog
+                    itemId={recording.id}
+                    title={recording.filename}
+                    kind={recording.kind ?? "audio"}
+                    open={shareOpen}
+                    onOpenChange={setShareOpen}
                 />
             )}
             {recording.kind === "mail" && (

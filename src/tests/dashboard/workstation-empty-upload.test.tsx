@@ -148,6 +148,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         locationKey,
         inFlightActions,
         emptyState,
+        onFolderSettings,
     }: {
         ref?: Ref<RecordingListHandle>;
         recordings: Recording[];
@@ -159,6 +160,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         locationKey: string;
         inFlightActions: Map<string, "transcribing" | "summarizing">;
         emptyState?: React.ReactNode;
+        onFolderSettings?: () => void;
     }) => {
         useImperativeHandle(ref, () => ({
             next: () =>
@@ -191,6 +193,11 @@ vi.mock("@/components/dashboard/recording-list", () => ({
                 <span data-testid="list-actions">
                     {JSON.stringify([...inFlightActions])}
                 </span>
+                {onFolderSettings && (
+                    <button type="button" onClick={onFolderSettings}>
+                        Toolbar folder settings
+                    </button>
+                )}
                 {header}
                 {navigationContent}
                 {recordings.map((recording) => (
@@ -1533,6 +1540,36 @@ describe("Workstation folder locations", () => {
             ],
         },
     };
+    it("offers folder settings for an own folder but not for a received attachment", () => {
+        const attachment = {
+            ...personalChildFolder,
+            id: "attached",
+            name: "Shared research",
+            receivedFolder: {
+                shareId: "share",
+                shareVersion: 1,
+                ownerName: "Alex Morgan",
+                originalName: "Research",
+            },
+        };
+        const props = {
+            ...folderProps,
+            initialFolderOrganization: {
+                folders: [rootFolder, personalChildFolder, attachment],
+                assignments: [],
+            },
+        };
+        const settings = { name: "Toolbar folder settings" };
+        window.history.replaceState({}, "", "/dashboard?folder=attached");
+        render(<Workstation {...props} />);
+        expect(screen.getByTestId("location").textContent).toBe("attached");
+        expect(screen.queryByRole("button", settings)).toBeNull();
+        cleanup();
+        window.history.replaceState({}, "", "/dashboard?folder=personal-child");
+        render(<Workstation {...props} />);
+        fireEvent.click(screen.getByRole("button", settings));
+        expect(mocks.settingsProps?.folder.id).toBe("personal-child");
+    });
     it.each([
         "palette",
         "search",

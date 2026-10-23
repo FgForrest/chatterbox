@@ -71,13 +71,15 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         });
     });
     const names = new Map(
-        (
-            await knowledgeView({
-                kind: "recording",
-                ownerUserId: access.contentUserId,
-                shared: access.shared,
-            })
-        ).items.map((item) => [item.id, item.name]),
+        view === "received"
+            ? []
+            : (
+                  await knowledgeView({
+                      kind: "recording",
+                      ownerUserId: access.contentUserId,
+                      shared: access.shared,
+                  })
+              ).items.map((item) => [item.id, item.name]),
     );
     let canUndo = true;
     try {

@@ -1,7 +1,7 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-22 20:30
+updated: 2026-10-22 22:30
 status: partially-implemented
 kind: feature
 issues: [240]
@@ -44,8 +44,10 @@ Each question on the design page carried a recommendation and an alternative.
 
 - **Chosen:** a Péče tab in the Almanac, visible to curators, with a count badge, covering
   Organization records only; private records are their owner's business.
-- **Declined:** a section of the existing review tab. **Rejected because:** the maintainer took the
-  recommendation; a curator-only tab keeps member review and curation apart (inferred).
+- **Declined:** a section of the existing review tab. **Rejected because:** the maintainer wants
+  curation as a separate tab, placed last among the Almanac's tabs and visible only to curators.
+  `src/components/almanac/almanac-tabs.tsx` renders it after People, Things, Vocabulary and Review,
+  only when the layout reports the viewer as a curator; the page itself answers 404 to anyone else.
 
 ### B: who sees a folder's knowledge
 

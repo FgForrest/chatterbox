@@ -67,7 +67,7 @@ Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Klepna ji
 
 ![Směrovaný návrh úkolu ve schránce na stránce Úkoly](images/tasks-routed.png)
 
-U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zrušit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
+U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zrušit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít, napsat poznámku a sloučit s jiným úkolem přiřazeným jemu. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
 
 Po smazání domovské položky se domovem stane nejnovější přeživší zmínka ve stejném rozsahu. Pokud žádná nezůstane, úkol zmizí. Po odebrání sdílené domovské položky z Organizace se domovem stane nejnovější zbývající sdílená zmínka. Pokud žádná nezůstane, úkol se stane soukromým spolu s odebranou položkou. Odebraná zmínka již není v Organizaci viditelná. Retence, která odstraní zvuk nebo vytvořený obsah, domov nepřesouvá.
 
@@ -79,13 +79,41 @@ Po smazání domovské položky se domovem stane nejnovější přeživší zmí
 
 ![Úkoly přiřazené Vám](images/tasks-mine.png)
 
-- **Moje**: úkoly přiřazené Vám. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
-- **Sledované**: ostatní úkoly z Vašich položek, přiřazené jiným osobám nebo zatím nikomu.
+- **Moje**: úkoly přiřazené Vám a Vaše vlastní soukromé úkoly. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
+- **Sledované**: úkoly, které výslovně sledujete, a úkoly z Vašich položek přiřazené jiným osobám nebo nikomu. **Přestat sledovat** odebere oba druhy. Kurátoři mohou přepnout na **Všechny úkoly Organizace**; účet Organizace nadále vidí všechny sdílené úkoly. Staré odkazy `tab=tracked` otevírají tuto záložku.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)
 
 Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde bylo řečeno** pro každou zmínku.
 
-Akci **Sloučit do dřívějšího úkolu** zde použijte, pokud dva řádky představují stejnou práci. Cílovému úkolu zůstanou jeho pole. Rozdíly vyžadující oprávnění jiné osoby se předají jako návrhy a nepoužijí se potají. Soukromý úkol a úkol Organizace nelze sloučit způsobem, který by úkol Organizace před členy skryl.
+### Vlastní úkoly
+
+**Přidat úkol** je první řádek seznamu **Moje**. Zadejte nejvýše 2 000 znaků a volitelný termín. **Jen vy** znamená, že autor je vždy řešitelem a jediným čtenářem, i když Úkoly otevře kurátor nebo účet Organizace. Můžete upravit text a termín, úkol dokončit, zrušit, obnovit i sloučit. Nemá nahrávku, nelze jej sdílet ani změnit řešitele, nezvyšuje odznak a přežije retenci i smazání položek.
+
+Štítek složky vedle **Jen vy** umožňuje úkol volitelně zařadit do jedné z Vašich soukromých složek. Výchozí je soukromá složka vybraná ve filtru Úkolů, jinak **Bez složky**. V řádku zdroje úkolu klikněte na název složky nebo **Zařadit do složky**; volba **Bez složky** zařazení zruší. U nezařazeného úkolu se akce při použití myši zobrazí po najetí nebo zaměření klávesnicí, na dotykovém zařízení je stále viditelná. Složka slouží jen k orientaci: nikomu neuděluje přístup a úkoly nemění počty položek ve sloupcích knihovny. Úkoly z nahrávek a pošty nadále používají složky své zdrojové položky.
+
+Výběr soukromé složky v seznamu **Moje** zahrne vlastní úkoly zařazené do ní i jejích podsložek. Kořen **Soukromé** obsahuje všechny Vaše vlastní úkoly včetně nezařazených, stejně jako **Všechny složky**. Složka Organizace vlastní úkoly skryje. Smazání složky nebo její přesun mimo soukromý strom zruší zařazení úkolu ve stejné transakci; úkol přežije a zůstane soukromý.
+
+Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F10 nebo dlouhý dotyk otevřou Moje se zaměřeným formulářem. Ctrl+kliknutí a prostřední tlačítko nadále otevřou novou záložku prohlížeče. Pro nabídku prohlížeče podržte při kliknutí pravým tlačítkem Shift, Ctrl, Alt nebo Meta.
+
+### Poznámky a sledování
+
+Zaškrtnutí úkolu otevře nepovinnou poznámku. Zvolte **Přeskočit** nebo **Uložit poznámku**. Akce **Poznámka** ji otevře kdykoli. Úkol má jednu šifrovanou poznámku do 2 000 znaků; uložení nahradí předchozí text. Všichni čtenáři úkolu ji vidí spolu s autorem a časem. Psát ji může každý, kdo smí úkol označit jako hotový. Poznámky se prohledávají a zálohují, do instrukcí pro shrnutí se neposílají.
+
+**Sledovat** je dostupné u viditelných úkolů pod nahrávkou i poštou a na stránce Úkoly. Stav **Sledujete** zůstává viditelný. Sledování přežije odebrání sdílení: úkol se skryje a po obnovení viditelnosti se vrátí. Sledující může otevřít detail úkolu. Sledování i jeho výslovné zrušení patří do osobní zálohy sledujícího. Vlastní úkoly ani změny sledovaných úkolů nezvyšují odznak přiřazených úkolů.
+
+Na stránce Úkoly je zdroj malé tlačítko pod textem. Pod nahrávkou nebo poštou je **Kde to zaznělo** v řádku řešitele a termínu. Akce se při použití myši zobrazují po najetí nebo zaměření klávesnicí, na dotykovém zařízení jsou stále viditelné.
+
+### Slučování úkolů
+
+**Sloučit do jiného úkolu** spojí dva otevřené úkoly. Řešitel vybírá ze svých ostatních otevřených úkolů napříč nahrávkami, poštou a vlastními úkoly. Okno ukáže náhled vypočtený serverem: text ponechaného úkolu a za ním druhý text na novém řádku, poznámky ve stejném pořadí a dřívější termín. Odkazy na obě položky i sledující zůstanou, čekající návrhy se přesunou. Výsledek přes 2 000 znaků je odmítnut, aby se text neztratil.
+
+Úkol Organizace vždy zůstane. Připojení soukromého úkolu vyžaduje potvrzení, že jeho text a poznámku uvidí všichni čtenáři úkolu Organizace. Sloučení nelze vrátit. Při různých vlastnících dostane vlastník ponechaného úkolu oznámení do stávající schránky návrhů.
+
+### Záloha a obnova úkolů
+
+Osobní záloha obsahuje `tasks/personal.json`, `tasks/follows.json` a poznámky ve stávajících souborech úkolů položek. Záloha Organizace neobsahuje vlastní úkoly ani sledování členů. Po obnově odkazovaných položek a lidí lze přihlášenou relací poslat POST na `/api/tasks/restore` s `{personal, items, follows}`: `personal` je pole vlastních úkolů, `items` obsahuje `{itemId, tasks}` ze souboru `tasks.json` nahrávky nebo pole úkolů pošty a `follows` je pole sledování. Existující úkoly se nemění; ID jiného vlastníka jsou odmítnuta. Odkazy sledování na chybějící úkoly se přeskočí. Tímto se obnovují úkoly; Klepna nemá obecnou obrazovku obnovy celého archivu.
+
+Každý vlastní úkol nese `folderId`. Po obnově soukromých složek ze souboru `organization/folders.json` přidejte do požadavku `folders: [{id, restoredId}]`, kde `id` je ID složky v archivu a `restoredId` je ID obnovené soukromé složky. Odkaz bez mapování se nastaví na null, včetně složek vynechaných ze zálohy. Cílové složky Organizace i jiných uživatelů jsou odmítnuty. Zálohy Organizace se nemění.
 
 Dále: [Almanach](almanac.md)

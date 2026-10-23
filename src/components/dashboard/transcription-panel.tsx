@@ -223,7 +223,12 @@ export function TranscriptionPanel({
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
     // The Organization view of a shared recording: the one recording, its
     // summaries made with the Organization's templates.
-    const view = shared ? "org" : recording.view;
+    const view =
+        recording.view === "received"
+            ? "received"
+            : shared
+              ? "org"
+              : recording.view;
     const orgView = view === "org";
 
     const [activeSource, setActiveSource] = useState<string | undefined>(

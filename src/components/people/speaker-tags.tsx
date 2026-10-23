@@ -155,9 +155,9 @@ export function confirmedAttributions(
     const confirmed: Record<string, { personId: string; name: string }> = {};
     for (const speaker of speakers ?? []) {
         if (speaker.status !== "confirmed") continue;
-        if (!speaker.personId || !speaker.personName) continue;
+        if (!speaker.personName) continue;
         confirmed[speaker.label] = {
-            personId: speaker.personId,
+            personId: speaker.personId ?? "",
             name: speaker.personName,
         };
     }
@@ -457,7 +457,7 @@ export function SpeakerTags({
                                 <span key={label} id={speakerAnchorId(label)} />
                             ))}
                             {readOnly ? (
-                                attribution ? (
+                                attribution?.personId && view !== "received" ? (
                                     <Link
                                         href={`/almanac/${attribution.personId}`}
                                         className={`${segmentClass} min-w-0 break-words pr-3 text-left`}
@@ -590,7 +590,7 @@ export function SpeakerTags({
                     );
                 })}
             </fieldset>
-            {readOnly && (
+            {readOnly && view !== "received" && (
                 <p className="text-xs text-muted-foreground">
                     {i18n("Managed by the Organization")}
                 </p>

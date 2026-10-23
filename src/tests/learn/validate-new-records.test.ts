@@ -18,7 +18,7 @@ const TURNS: TranscriptTurn[] = [
         speaker: "speaker_1",
         startMs: 10_000,
         endMs: 20_000,
-        text: "Ahoj, já jsem Tomáš. Pracujeme na projektu Lumenka a řešíme náš backlog.",
+        text: "Ahoj, já jsem Ondřej. Pracujeme na projektu Lumenka a řešíme náš backlog.",
     },
     {
         speaker: "speaker_0",
@@ -430,7 +430,7 @@ describe("Learn's new records", () => {
                 newRecords: [
                     record("n1", "backlog", "0:10", { typeKey: "term" }),
                     record("n2", "sprint", "0:30", { typeKey: "term" }),
-                    record("n3", "tomáš", "0:10", {
+                    record("n3", "ondřej", "0:10", {
                         kind: "person",
                         typeKey: null,
                     }),
@@ -543,7 +543,7 @@ describe("Learn's new records", () => {
         const result = validateLearnOutput(
             output({
                 newRecords: [
-                    record("n1", "Tomáš", "0:10", {
+                    record("n1", "Ondřej", "0:10", {
                         kind: "person",
                         typeKey: null,
                     }),
@@ -556,7 +556,7 @@ describe("Learn's new records", () => {
             frame(),
         );
         expect(result.items.map((item) => item.payload)).toMatchObject([
-            { name: "Tomáš", onlyFirstName: true },
+            { name: "Ondřej", onlyFirstName: true },
             { name: "Petra Kolářová" },
         ]);
         expect(result.items[1]?.payload).not.toHaveProperty("onlyFirstName");
@@ -627,7 +627,7 @@ describe("Learn's new records", () => {
                 speaker: "speaker_0",
                 startMs: 50_000,
                 endMs: 60_000,
-                text: "To padlo mezi Vildou Brázdou a Tomášem.",
+                text: "To padlo mezi Vildou Brázdou a Ondřejem.",
             },
         ];
         const vilda = (evidence: string[]) =>

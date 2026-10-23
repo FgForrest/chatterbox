@@ -8,12 +8,15 @@
  */
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as writerRule from "@/lib/sharing/writer-rule";
 
+vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 vi.mock("@/lib/encryption/fields", () => ({
     encryptText: (value: string) => `enc:${value}`,
     encryptJsonField: <T>(value: T) => ({ c: value }),
 }));
 
+vi.mock("@/lib/org/config", () => ({ isOrgScopeVisible: () => false }));
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
@@ -35,9 +38,7 @@ vi.mock("@/lib/knowledge/speaker-labels", () => ({
 // Whether a recording is shared is tested against a real database
 // (`freeze.integration.test.ts`); here only what the write does with it.
 vi.mock("@/lib/sharing/writer", async () => ({
-    ...(await vi.importActual<typeof import("@/lib/sharing/writer-rule")>(
-        "@/lib/sharing/writer-rule",
-    )),
+    ...(await vi.importActual<typeof writerRule>("@/lib/sharing/writer-rule")),
     sharingOrgUserId: vi.fn(async () => "org-account"),
 }));
 vi.mock("@/lib/sharing/shared", () => ({

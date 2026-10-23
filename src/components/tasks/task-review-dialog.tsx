@@ -5,7 +5,6 @@ import {
     Combine,
     ListChecks,
     Loader2,
-    Plus,
     UserRoundPen,
     X,
 } from "lucide-react";
@@ -17,6 +16,7 @@ import {
     WorkflowWidgetLine,
 } from "@/components/pipeline/workflow-widget";
 import { usePlayback } from "@/components/playback/playback-context";
+import { AddTaskButton } from "@/components/tasks/add-task-button";
 import {
     AssigneePicker,
     type SpeakerChoice,
@@ -103,9 +103,9 @@ export function TaskReviewLink({
                 "[data-task-review-card]",
             ),
         ].find((element) => element.dataset.taskReviewCard === focusTaskId);
-        const input = card?.querySelector<HTMLInputElement>(
-            'input:not([type]), input[type="text"]',
-        );
+        const input = card?.querySelector<
+            HTMLInputElement | HTMLTextAreaElement
+        >('textarea, input:not([type]), input[type="text"]');
         if (!card || !input) return;
         card.scrollIntoView?.({ block: "nearest" });
         input.focus({ preventScroll: true });
@@ -264,27 +264,15 @@ export function TaskReviewLink({
                         count: String(waiting),
                     }),
                     actions: (
-                        <>
-                            {allowAdd && !merging && (
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => void addTask()}
-                                >
-                                    <Plus className="mr-1 size-3.5" />
-                                    {i18n("Add task")}
-                                </Button>
+                        <Button
+                            disabled={state.accepting || merging !== null}
+                            onClick={() => void state.accept()}
+                        >
+                            {state.accepting && (
+                                <Loader2 className="size-4 animate-spin" />
                             )}
-                            <Button
-                                disabled={state.accepting || merging !== null}
-                                onClick={() => void state.accept()}
-                            >
-                                {state.accepting && (
-                                    <Loader2 className="size-4 animate-spin" />
-                                )}
-                                {i18n("Apply selected changes")}
-                            </Button>
-                        </>
+                            {i18n("Apply selected changes")}
+                        </Button>
                     ),
                 }}
                 closeLabel={i18n("Save and continue later")}
@@ -477,44 +465,49 @@ export function TaskReviewLink({
                                     )}
                                 </div>
                             </div>
-                            <ul className="space-y-2">
-                                {visibleProposals.map((task) => (
-                                    <ProposalRow
-                                        key={task.id}
-                                        task={task}
-                                        speakers={speakers}
-                                        organizationOnly={organizationOnly}
-                                        onNavigate={() => setOpen(false)}
-                                        onMerge={(targetTaskId) =>
-                                            state.mergeInto(
-                                                task.id,
-                                                targetTaskId,
-                                            )
-                                        }
-                                        selection={
-                                            merging
-                                                ? {
-                                                      selected:
-                                                          merging.includes(
-                                                              task.id,
-                                                          ),
-                                                      onToggle: () =>
-                                                          toggleMerging(
-                                                              task.id,
-                                                          ),
-                                                  }
-                                                : null
-                                        }
-                                        onChange={(change, optimistic) =>
-                                            state.update(
-                                                task,
-                                                change,
-                                                optimistic,
-                                            )
-                                        }
-                                    />
-                                ))}
-                            </ul>
+                            {visibleProposals.length > 0 && (
+                                <ul className="space-y-2">
+                                    {visibleProposals.map((task) => (
+                                        <ProposalRow
+                                            key={task.id}
+                                            task={task}
+                                            speakers={speakers}
+                                            organizationOnly={organizationOnly}
+                                            onNavigate={() => setOpen(false)}
+                                            onMerge={(targetTaskId) =>
+                                                state.mergeInto(
+                                                    task.id,
+                                                    targetTaskId,
+                                                )
+                                            }
+                                            selection={
+                                                merging
+                                                    ? {
+                                                          selected:
+                                                              merging.includes(
+                                                                  task.id,
+                                                              ),
+                                                          onToggle: () =>
+                                                              toggleMerging(
+                                                                  task.id,
+                                                              ),
+                                                      }
+                                                    : null
+                                            }
+                                            onChange={(change, optimistic) =>
+                                                state.update(
+                                                    task,
+                                                    change,
+                                                    optimistic,
+                                                )
+                                            }
+                                        />
+                                    ))}
+                                </ul>
+                            )}
+                            {allowAdd && !merging && (
+                                <AddTaskButton onClick={() => void addTask()} />
+                            )}
                         </section>
                     )}
                     {standaloneUpdates.length > 0 && (
@@ -665,14 +658,14 @@ function ProposalRow({
                     />
                     <TaskEvidenceLink
                         evidence={{
-                            itemId: task.evidenceItemId,
+                            itemId: task.evidenceItemId ?? "",
                             itemKind: task.evidenceItemKind,
                             audioAvailable: task.evidenceAudioAvailable,
                             startMs: task.evidenceStartMs,
                             text: task.evidenceText,
                         }}
                         quote={task.quote}
-                        currentItemId={task.recordingId}
+                        currentItemId={task.recordingId ?? undefined}
                         onNavigate={onNavigate}
                     />
                     {task.quote &&

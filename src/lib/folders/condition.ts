@@ -4,11 +4,20 @@ import {
     eq,
     exists,
     inArray,
+    or,
     type SQL,
     sql,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { recordingFolderAssignments, recordings } from "@/db/schema";
+import {
+    receivedItemCondition,
+    receivedThroughFolderCondition,
+} from "@/db/queries/item-shares";
+import {
+    itemShares,
+    recordingFolderAssignments,
+    recordings,
+} from "@/db/schema";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import type { FolderOrganization } from "@/types/folder";
@@ -30,9 +39,15 @@ export function folderRecordingCondition(
 ): SQL | null {
     const folder = organization.folders.find((entry) => entry.id === folderId);
     if (!folder) return null;
-    if (folder.kind === "private") return eq(item.userId, userId);
+    if (folder.receivedFolder)
+        return receivedThroughFolderCondition(userId, item.id, folder.id);
+    if (folder.kind === "private")
+        return or(
+            eq(item.userId, userId),
+            receivedItemCondition(userId, item.id),
+        ) as SQL;
     const ids = [...descendantFolderIds(organization.folders, folderId)];
-    return exists(
+    const owned = exists(
         db
             .select({ one: sql`1` })
             .from(recordingFolderAssignments)
@@ -43,6 +58,32 @@ export function folderRecordingCondition(
                 ),
             ),
     );
+    if (folder.scope !== "personal") return owned;
+    const attached = organization.folders.filter(
+        (entry) => entry.receivedFolder && ids.includes(entry.id),
+    );
+    return or(
+        owned,
+        ...attached.map((entry) =>
+            receivedThroughFolderCondition(userId, item.id, entry.id),
+        ),
+        and(
+            receivedItemCondition(userId, item.id),
+            exists(
+                db
+                    .select({ one: sql`1` })
+                    .from(itemShares)
+                    .where(
+                        and(
+                            eq(itemShares.itemId, item.id),
+                            eq(itemShares.receiverUserId, userId),
+                            eq(itemShares.state, "accepted"),
+                            inArray(itemShares.filingFolderId, ids),
+                        ),
+                    ),
+            ),
+        ),
+    ) as SQL;
 }
 
 /**

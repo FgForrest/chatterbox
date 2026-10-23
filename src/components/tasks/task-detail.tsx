@@ -5,16 +5,24 @@ import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { announceTasksChanged, changeTask } from "@/components/tasks/task-api";
+import {
+    announceTasksChanged,
+    changeTask,
+    mergeTaskIntoTarget,
+} from "@/components/tasks/task-api";
+import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 
 /** One task opened from search, independent of the task list's filters. */
 export function TaskDetail({ initialTask }: { initialTask: TaskListItem }) {
     const i18n = useExtracted();
-    const { refresh } = useRouter();
+    const showMergeFailure = useTaskMergeFailure();
+    const { refresh, replace } = useRouter();
     const [task, setTask] = useState(initialTask);
+    const folders = useTaskFolderTree(initialTask.own);
     const version = useRef(initialTask.version);
     const pending = useRef(Promise.resolve());
     useEffect(() => {
@@ -51,10 +59,30 @@ export function TaskDetail({ initialTask }: { initialTask: TaskListItem }) {
             <ul className="rounded-lg border">
                 <TaskRow
                     task={task}
+                    folders={folders}
                     recording={task.recording}
                     evidence={task.evidence}
-                    organizationOnly={task.recording.view === "org"}
+                    organizationOnly={task.recording?.view === "org"}
                     onChange={update}
+                    onMerge={async (target, options) => {
+                        try {
+                            const saved = await mergeTaskIntoTarget(
+                                task.id,
+                                target,
+                                options,
+                            );
+                            announceTasksChanged();
+                            if (saved.id === task.id) refresh();
+                            else
+                                replace(
+                                    `/tasks/${encodeURIComponent(saved.id)}`,
+                                );
+                            return { ownerNotified: saved.mergeOwnerNotified };
+                        } catch (error) {
+                            showMergeFailure(error);
+                            return false;
+                        }
+                    }}
                 />
             </ul>
         </div>

@@ -43,6 +43,10 @@ paths:
    the adapter as `src/lib/transcription/<provider>-transcribe.ts` exporting a single
    `<provider>Transcribe()` function, and branch on the **style** in `transcribeRecording()`.
    Alternatively front the provider behind an OpenAI-compatible proxy and use option 1.
+   The adapter sends through `providerFetch` (`src/lib/ai/provider-fetch.ts`), or its
+   `fetchWithoutIdleTimeout` for a fixed vendor host, and an OpenAI SDK client gets
+   `fetch: providerFetch`. Plain `fetch` under Bun drops a request after five idle minutes
+   whatever its signal allows, which fails every long transcription (#266).
 3. A provider with no `chat/completions` surface sets `transcriptionOnly: true` on its preset. That
    keeps it out of the enhancement roles in the settings dialogs, provider routes, and default
    resolver.

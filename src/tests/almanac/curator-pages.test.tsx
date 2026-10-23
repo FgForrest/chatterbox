@@ -19,6 +19,7 @@ import { listOwnTypes } from "@/lib/knowledge/vocabulary";
 
 const viewer = vi.hoisted(() => ({ id: "curator" }));
 
+vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
     notFound: () => {
@@ -60,7 +61,7 @@ vi.mock("@/db", () => ({
 vi.mock("@/lib/knowledge/people", () => ({
     getPerson: async () => ({
         id: "person",
-        displayName: "Karel Vondra",
+        displayName: "Karel Kratochvíl",
         primaryEmail: null,
         notes: null,
         mergedIntoId: null,

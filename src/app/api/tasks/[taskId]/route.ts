@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
 import {
+    enforceTaskWriteRateLimit,
     invalid,
     optionalNullableString,
     readTaskBody,
@@ -20,6 +21,7 @@ const STATUSES = new Set(["open", "done", "dropped"]);
 export const PATCH = apiHandler<TaskContext>(async (request, context) => {
     const { taskId } = await (context as TaskContext).params;
     const viewer = await requireTaskViewer(request);
+    await enforceTaskWriteRateLimit(viewer);
     const body = await readTaskBody(request);
     const text = body.text;
     if (text !== undefined && typeof text !== "string") {
@@ -36,6 +38,8 @@ export const PATCH = apiHandler<TaskContext>(async (request, context) => {
         await updateTask(viewer, taskId, {
             version: readVersion(body.version),
             text,
+            note: optionalNullableString(body, "note"),
+            folderId: optionalNullableString(body, "folderId"),
             assigneePersonId: optionalNullableString(body, "assigneePersonId"),
             dueDate: optionalNullableString(body, "dueDate"),
             ticked: body.ticked as boolean | undefined,

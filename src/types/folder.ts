@@ -12,6 +12,13 @@ export interface RecordingFolder {
     scope: FolderScope;
     /** Optimistic-lock version; sent back on rename and move. */
     version: number;
+    sharedWithPeople?: boolean;
+    receivedFolder?: {
+        shareId: string;
+        shareVersion: number;
+        ownerName: string;
+        originalName: string;
+    };
 }
 
 export interface RecordingFolderAssignment {

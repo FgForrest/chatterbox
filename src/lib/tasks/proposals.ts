@@ -34,10 +34,12 @@ import { secretAddressMasker } from "@/lib/mail/redact";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
     ANY_TASK_ITEM,
+    assignedToViewer,
     mayMergeTaskOwners,
     type TaskViewer,
     taskClosable,
     taskEditable,
+    taskMergeable,
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
@@ -83,6 +85,8 @@ import type { TranscriptTurn } from "@/lib/transcription/turns";
 const MAX_DECIDED_IN_PROMPT = 60;
 /** A name match at least this good names the person (exact or every word). */
 const NAME_MATCH_FLOOR = 0.9;
+
+export const MERGE_CANDIDATE_SCAN_LIMIT = 2_000;
 
 /** The keyed fingerprint a task proposal is recognised by, rejected or kept. */
 export function taskFingerprint(text: string): string {
@@ -738,7 +742,8 @@ export interface MergeCandidateView {
         id: string;
         kind: "audio" | "mail";
         title: string;
-    };
+    } | null;
+    version?: number;
 }
 
 export interface MergeCandidatePage {
@@ -1314,5 +1319,107 @@ function matchPerson(
         aliases: person.names
             .filter((name) => name.kind === "alias")
             .map((name) => name.text),
+    };
+}
+
+/** Offer the assignee's other open tasks across all visible items and own tasks. */
+export async function searchAssignedMergeCandidates(
+    viewer: TaskViewer,
+    taskId: string,
+    query: { text: string; offset: number; limit: number },
+): Promise<MergeCandidatePage | null> {
+    const [source] = await db
+        .select({
+            text: recordingTasks.text,
+            itemId: recordingTasks.itemId,
+            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM, true)}`,
+        })
+        .from(recordingTasks)
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                eq(recordingTasks.id, taskId),
+                eq(recordingTasks.status, "open"),
+                taskMergeable(viewer, ANY_TASK_ITEM),
+                assignedToViewer(viewer),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!source) return null;
+    const rows = await db
+        .select({
+            id: recordingTasks.id,
+            text: recordingTasks.text,
+            dueDate: recordingTasks.dueDate,
+            duePhrase: recordingTasks.duePhrase,
+            version: recordingTasks.version,
+            createdAt: recordingTasks.createdAt,
+            assigneePersonId: recordingTasks.assigneePersonId,
+            assigneeName: people.displayName,
+            itemId: chatterItems.id,
+            kind: chatterItems.kind,
+            title: chatterItems.title,
+        })
+        .from(recordingTasks)
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(people, eq(people.id, recordingTasks.assigneePersonId))
+        .where(
+            and(
+                ne(recordingTasks.id, taskId),
+                eq(recordingTasks.status, "open"),
+                taskMergeable(viewer, ANY_TASK_ITEM),
+                or(
+                    assignedToViewer(viewer),
+                    source.canEdit && source.itemId
+                        ? eq(recordingTasks.itemId, source.itemId)
+                        : undefined,
+                ),
+                isNull(chatterItems.deletedAt),
+            ),
+        )
+        .orderBy(desc(recordingTasks.createdAt), asc(recordingTasks.id))
+        .limit(MERGE_CANDIDATE_SCAN_LIMIT);
+    const candidates = rows.map((row) => ({
+        ...row,
+        text: decryptText(row.text),
+        statementAt: row.createdAt,
+    }));
+    const ranked = rankTaskCandidates({
+        itemText: query.text || decryptText(source.text),
+        participantPersonIds: [],
+        candidates,
+    });
+    const matching = query.text
+        ? rankTaskSearchCandidates(ranked, query.text, false)
+        : ranked;
+    const page = matching.slice(query.offset, query.offset + query.limit);
+    return {
+        candidates: page.map(({ candidate: row }) => ({
+            id: row.id,
+            version: row.version,
+            text: row.text,
+            dueDate: row.dueDate,
+            duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            assignee:
+                row.assigneePersonId && row.assigneeName
+                    ? {
+                          personId: row.assigneePersonId,
+                          name: decryptText(row.assigneeName),
+                      }
+                    : null,
+            homeItem:
+                row.itemId && row.kind && row.title
+                    ? {
+                          id: row.itemId,
+                          kind: row.kind,
+                          title: decryptText(row.title),
+                      }
+                    : null,
+        })),
+        nextOffset:
+            query.offset + page.length < matching.length
+                ? query.offset + page.length
+                : null,
     };
 }

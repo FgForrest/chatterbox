@@ -8,6 +8,7 @@ import {
     unshareRecording,
 } from "@/lib/folders/folders";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
+import { requireRecordingAccess } from "@/lib/sharing/access";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -31,6 +32,15 @@ function readString(body: unknown, field: string): string {
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
+    const access = await requireRecordingAccess(session.user.id, id, {
+        kinds: ["audio", "mail"],
+    });
+    if (!access.shared && access.role === "receiver")
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Received items are read-only",
+            403,
+        );
     const folderId = readString(
         await request.json().catch(() => null),
         "folderId",
@@ -55,6 +65,15 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
+    const access = await requireRecordingAccess(session.user.id, id, {
+        kinds: ["audio", "mail"],
+    });
+    if (!access.shared && access.role === "receiver")
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Received items are read-only",
+            403,
+        );
     const body = await request.json().catch(() => null);
     await moveRecordingBetweenFolders({
         userId: session.user.id,
@@ -76,6 +95,15 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
+    const access = await requireRecordingAccess(session.user.id, id, {
+        kinds: ["audio", "mail"],
+    });
+    if (!access.shared && access.role === "receiver")
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Received items are read-only",
+            403,
+        );
     const body = await request.json().catch(() => null);
     if (
         typeof body === "object" &&

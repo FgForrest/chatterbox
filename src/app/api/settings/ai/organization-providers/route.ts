@@ -91,7 +91,7 @@ export const POST = apiHandler(async (request: Request) => {
             { field: "defaultModel" },
         );
     }
-    const baseUrlCheck = validateAiBaseUrl(body.baseUrl, {
+    const baseUrlCheck = await validateAiBaseUrl(body.baseUrl, {
         isHosted: env.IS_HOSTED,
     });
     if (!baseUrlCheck.ok) {

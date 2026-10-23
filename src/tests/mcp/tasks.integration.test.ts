@@ -456,6 +456,13 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
                 version: 0,
                 can_edit: false,
                 can_close: false,
+                can_merge: false,
+                own: false,
+                folder: null,
+                note: null,
+                note_by: null,
+                note_updated_at: null,
+                following: true,
                 recording: {
                     id: "a-private",
                     title: "Pricing call",
@@ -974,7 +981,7 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
             return client;
         }
 
-        it("lists update_task only with tasks:write", async () => {
+        it("lists task writes only with tasks:write", async () => {
             const reader = await connect(alice());
             expect((await reader.listTools()).tools.map((t) => t.name)).toEqual(
                 ["list_tasks", "search_tasks"],
@@ -986,12 +993,15 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
                 "list_tasks",
                 "search_tasks",
                 "update_task",
+                "create_task",
+                "follow_task",
+                "merge_tasks",
             ]);
             expect(
                 listed.tools.find((t) => t.name === "update_task")?.annotations,
             ).toMatchObject({
                 readOnlyHint: false,
-                destructiveHint: false,
+                destructiveHint: true,
                 idempotentHint: true,
             });
             await writer.close();

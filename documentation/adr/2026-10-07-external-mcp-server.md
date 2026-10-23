@@ -1,15 +1,15 @@
 ---
 title: External MCP server in the app, gated by Keycloak client roles from the SSO realm
 date: 2026-10-07
-updated: 2026-10-22 16:00
-status: accepted
+updated: 2026-10-23 07:00
+status: superseded
 kind: feature
 issues: []
 prs: [98]
 areas: [src/app/api/mcp/route.ts, src/lib/mcp, src/app/.well-known/oauth-protected-resource, content/docs/self-hosting/mcp.mdx, e2e/keycloak/riffado-e2e-realm.json]
 supersedes: []
-superseded-by: []
-relates: [2026-10-06-oidc-single-sign-on, 2026-10-11-claude-connector-through-sso-realm, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-14-identity-provider-authorization]
+superseded-by: [2026-10-11-claude-connector-through-sso-realm, 2026-10-14-identity-provider-authorization]
+relates: [2026-10-06-oidc-single-sign-on, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-22-assignee-task-list, 2026-10-22-security-assessment-hardening]
 ---
 
 # External MCP server in the app, gated by Keycloak client roles from the SSO realm
@@ -21,6 +21,12 @@ Keycloak access token from the SSO realm; the client roles in `resource_access[M
 tools are listed and callable. Roles only narrow what Chatterbox already shows the caller. Reads
 cover the Almanac, transcripts, summaries and tasks; the only write is a task's status or assignee
 through the existing `updateTask` rules.
+
+**Superseded in part:** the per-IP limit before token validation was removed
+([Claude connector](2026-10-11-claude-connector-through-sso-realm.md)), and the token rules (unknown
+key id, allowed clients, MCP token type, service clients) changed with
+[identity-provider authorization](2026-10-14-identity-provider-authorization.md). The rest still
+holds.
 
 ## Why
 
@@ -163,6 +169,7 @@ app.
 
 ## Consequences & open follow-ups
 
+- [Assignee task list](2026-10-22-assignee-task-list.md): The task-write restriction is partly replaced: text, due dates, own-task creation, notes, follows and merges now use the existing task permissions; proposal review remains app-only.
 - The per-IP limit before token validation (120 a minute) was removed for Claude, whose users share
   a few Anthropic addresses; see
   [2026-10-11-claude-connector-through-sso-realm](2026-10-11-claude-connector-through-sso-realm.md).
@@ -178,14 +185,15 @@ app.
 
 ## Related work
 
+- [Security assessment hardening](2026-10-22-security-assessment-hardening.md): shared client-IP selection and the boundary between operator-configured discovery and user-configured outbound URLs.
 - [2026-10-06-oidc-single-sign-on](2026-10-06-oidc-single-sign-on.md): the realm and the linked
   accounts this server trusts.
 - [2026-10-11-claude-connector-through-sso-realm](2026-10-11-claude-connector-through-sso-realm.md):
-  opens this server to hosted Claude and Claude Code.
+  opens this server to hosted Claude and Claude Code, and supersedes its per-IP limit.
 - [2026-10-20-mail-search-respects-visibility](2026-10-20-mail-search-respects-visibility.md):
   extends the bounded scan to mail.
 - [2026-10-18-inbound-mail](2026-10-18-inbound-mail/README.md): mail tools and the `mail:read` role added to this server.
-- [2026-10-14-identity-provider-authorization](2026-10-14-identity-provider-authorization.md): later changed MCP token rules (unknown key id, allowed clients).
+- [2026-10-14-identity-provider-authorization](2026-10-14-identity-provider-authorization.md): later changed MCP token rules (unknown key id, allowed clients); supersedes them.
 
 ## Timeline
 

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     rows: vi.fn(),
     items: vi.fn(),
 }));
+vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 vi.mock("@/db", () => ({
     db: {
         select: () => ({
@@ -22,7 +23,10 @@ vi.mock("@/lib/knowledge/knowledge-loader", () => ({
 vi.mock("@/lib/knowledge/vocabulary", () => ({
     vocabularyVisibleTo: async () => ({ entityTypes: [] }),
 }));
-vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => null }));
+vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: async () => null,
+    isOrgScopeVisible: () => false,
+}));
 vi.mock("@/lib/mail/redact", () => ({ secretAddressMasker: vi.fn() }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: (text: string) => text,

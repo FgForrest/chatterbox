@@ -1,3 +1,4 @@
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { env } from "@/lib/env";
 import {
     renderTurnsAsText,
@@ -122,7 +123,7 @@ export async function elevenLabsTranscribe({
         }
     }
 
-    const response = await fetch(resolveElevenLabsUrl(baseUrl), {
+    const response = await providerFetch(resolveElevenLabsUrl(baseUrl), {
         method: "POST",
         headers: { "xi-api-key": apiKey },
         body: form,

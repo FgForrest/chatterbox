@@ -201,6 +201,7 @@ describeWithDatabase("MCP caller scopes (PostgreSQL)", () => {
             isOrg: false,
             isCurator: false,
             orgUserId,
+            includeReceived: true,
         });
         await expect(taskViewerFor(service())).resolves.toEqual({
             userId: orgUserId,
@@ -208,6 +209,7 @@ describeWithDatabase("MCP caller scopes (PostgreSQL)", () => {
             isOrg: true,
             isCurator: true,
             orgUserId,
+            includeReceived: false,
         });
     });
 });

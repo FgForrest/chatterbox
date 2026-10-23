@@ -1,10 +1,16 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Workstation } from "@/components/dashboard/workstation";
+import { PersonSharingProvider } from "@/components/sharing/person-sharing";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import {
+    listOutgoingSharedItemIds,
+    receivedItemCondition,
+} from "@/db/queries/item-shares";
+import {
     aiEnhancements,
     chatterItems,
+    itemShares,
     recordings,
     transcriptions,
     users,
@@ -20,12 +26,22 @@ import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
 import { isMailEnabled } from "@/lib/mail/config";
-import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
-import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
+import {
+    loadMailListRows,
+    loadReceivedMailRows,
+    loadSharedMailRows,
+} from "@/lib/mail/list";
+import {
+    getOrgUserId,
+    isOrgAccount,
+    isOrgScopeVisible,
+} from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { getPlaudConnection } from "@/lib/settings/plaud-connection";
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
+import { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
+import { listMyInvitations } from "@/lib/sharing/person-shares";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { serializeRecording } from "@/types/recording";
@@ -116,6 +132,7 @@ async function loadOrganizationLibrary(
     preferredSource: string,
     /** Recordings whose review waits for the viewer (the organization account's). */
     reviewIds: ReadonlySet<string> = new Set(),
+    received = false,
 ) {
     const rows = await db
         .select({
@@ -139,7 +156,9 @@ async function loadOrganizationLibrary(
         .where(
             and(
                 isNull(recordings.deletedAt),
-                sharedRecordingCondition(orgUserId),
+                received
+                    ? receivedItemCondition(viewerId, recordings.id)
+                    : sharedRecordingCondition(orgUserId),
             ),
         )
         .orderBy(desc(chatterItems.occurredAt));
@@ -157,7 +176,9 @@ async function loadOrganizationLibrary(
             .where(
                 and(
                     isNull(recordings.deletedAt),
-                    sharedRecordingCondition(orgUserId),
+                    received
+                        ? receivedItemCondition(viewerId, recordings.id)
+                        : sharedRecordingCondition(orgUserId),
                 ),
             )
             .then((found) => found.map((row) => row.transcription)),
@@ -175,7 +196,9 @@ async function loadOrganizationLibrary(
                 and(
                     isNotNull(aiEnhancements.summary),
                     isNull(recordings.deletedAt),
-                    sharedRecordingCondition(orgUserId),
+                    received
+                        ? receivedItemCondition(viewerId, recordings.id)
+                        : sharedRecordingCondition(orgUserId),
                 ),
             ),
     ]);
@@ -184,7 +207,7 @@ async function loadOrganizationLibrary(
     const variants = buildTranscriptVariants(
         transcriptRows,
         preferredSource,
-        transcriptRows.length > 0
+        transcriptRows.length > 0 && !received
             ? await confirmedOverlays({ organization: true })
             : new Map(),
     );
@@ -212,13 +235,15 @@ async function loadOrganizationLibrary(
                     waveformPeaks: Array.isArray(waveformPeaks)
                         ? (waveformPeaks as number[])
                         : null,
-                    view: "org",
+                    view: received ? "received" : "org",
                     isOwn: userId === viewerId,
                     ownerName: ownerName || ownerEmail,
                 },
             ),
     );
-    const sharedMail = await loadSharedMailRows(viewerId, orgUserId);
+    const sharedMail = received
+        ? await loadReceivedMailRows(viewerId)
+        : await loadSharedMailRows(viewerId, orgUserId);
     return {
         recordings:
             sharedMail.length > 0
@@ -246,6 +271,7 @@ export default async function DashboardPage() {
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
+        outgoingItemIds,
     ] = await Promise.all([
         db
             .select({
@@ -315,6 +341,7 @@ export default async function DashboardPage() {
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),
+        listOutgoingSharedItemIds(session.user.id),
     ]);
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
@@ -381,6 +408,66 @@ export default async function DashboardPage() {
           )
         : null;
 
+    const personSharingEnabled = isOrgScopeVisible() && !viewerIsOrgAccount;
+    const [receivedLibrary, invitations, receivedShares] = personSharingEnabled
+        ? await Promise.all([
+              loadOrganizationLibrary(
+                  session.user.id,
+                  orgUserId ?? "",
+                  preferredTranscriptSource,
+                  new Set(),
+                  true,
+              ),
+              Promise.all([
+                  listMyInvitations(session.user.id),
+                  listMyFolderInvitations(session.user.id),
+              ]).then((lists) => lists.flat()),
+              db
+                  .select({
+                      id: itemShares.id,
+                      itemId: itemShares.itemId,
+                      version: itemShares.version,
+                      filingFolderId: itemShares.filingFolderId,
+                  })
+                  .from(itemShares)
+                  .where(
+                      and(
+                          eq(itemShares.receiverUserId, session.user.id),
+                          eq(itemShares.state, "accepted"),
+                      ),
+                  ),
+          ])
+        : ([null, [], []] as const);
+    const receivedByItem = new Map(
+        receivedShares.map((share) => [share.itemId, share]),
+    );
+    const attachmentIds = new Set(
+        folderOrganization.folders
+            .filter((folder) => folder.receivedFolder)
+            .map((folder) => folder.id),
+    );
+    const receivedFoldersByItem = new Map<string, string[]>();
+    for (const assignment of folderOrganization.assignments) {
+        if (!attachmentIds.has(assignment.folderId)) continue;
+        const ids = receivedFoldersByItem.get(assignment.recordingId) ?? [];
+        ids.push(assignment.folderId);
+        receivedFoldersByItem.set(assignment.recordingId, ids);
+    }
+    const receivedRecordings =
+        receivedLibrary?.recordings.map((recording) => ({
+            ...recording,
+            receivedShare: receivedByItem.get(recording.id),
+            receivedFolderIds: receivedFoldersByItem.get(recording.id) ?? [],
+        })) ?? [];
+    const allTranscriptions = new Map([
+        ...transcriptionMap,
+        ...(receivedLibrary?.transcriptions ?? []),
+    ]);
+    const allTranscriptVariants = new Map([
+        ...transcriptVariants,
+        ...(receivedLibrary?.transcriptVariants ?? []),
+    ]);
+
     // One source of truth for InitialSettings + their defaults lives in
     // `src/lib/settings/initial-settings.ts`; adding a new preference
     // there is the only place callers need to touch.
@@ -395,20 +482,44 @@ export default async function DashboardPage() {
     const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
 
     return (
-        <Workstation
-            userId={session.user.id}
-            recordings={[...recordingsData, ...mailRows]}
-            transcriptions={transcriptionMap}
-            transcriptVariants={transcriptVariants}
-            organizationLibrary={organizationLibrary}
-            isOrgAccount={viewerIsOrgAccount}
-            initialSettings={initialSettings}
-            plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
-            isHosted={env.IS_HOSTED}
-            mailEnabled={mailAvailable}
-            canCurate={actor ? await actsForOrganization(actor) : false}
-            exportProviders={exportProvidersAvailability()}
-            initialFolderOrganization={visibleFolderOrganization}
-        />
+        <PersonSharingProvider value={personSharingEnabled}>
+            <Workstation
+                userId={session.user.id}
+                recordings={[
+                    ...[...recordingsData, ...mailRows].map((recording) => ({
+                        ...recording,
+                        sharedWithPeople: outgoingItemIds.has(recording.id),
+                    })),
+                    ...receivedRecordings,
+                ]}
+                transcriptions={allTranscriptions}
+                transcriptVariants={allTranscriptVariants}
+                organizationLibrary={organizationLibrary}
+                isOrgAccount={viewerIsOrgAccount}
+                initialSettings={initialSettings}
+                plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
+                isHosted={env.IS_HOSTED}
+                mailEnabled={mailAvailable}
+                canCurate={actor ? await actsForOrganization(actor) : false}
+                exportProviders={exportProvidersAvailability()}
+                initialInvitations={[...invitations]}
+                initialFolderOrganization={{
+                    ...visibleFolderOrganization,
+                    assignments: [
+                        ...visibleFolderOrganization.assignments,
+                        ...receivedShares.flatMap((share) =>
+                            share.filingFolderId
+                                ? [
+                                      {
+                                          recordingId: share.itemId,
+                                          folderId: share.filingFolderId,
+                                      },
+                                  ]
+                                : [],
+                        ),
+                    ],
+                }}
+            />
+        </PersonSharingProvider>
     );
 }

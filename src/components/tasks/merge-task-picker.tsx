@@ -4,6 +4,10 @@ import { Combine, Loader2, Search } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+    previewTaskMerge,
+    type TaskMergeOptions,
+} from "@/components/tasks/task-api";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,6 +19,7 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import type { MergeCandidateView } from "@/lib/tasks/proposals";
+import type { TaskMergePreview } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 
 export interface TaskMergeResult {
@@ -25,15 +30,22 @@ export interface TaskMergeResult {
 export function MergeTaskPicker({
     itemId,
     sourceTaskId,
+    taskVersion,
     label,
     searchLabel,
+    inlineTrigger = false,
     onMerge,
 }: {
-    itemId: string;
+    itemId: string | null;
     sourceTaskId: string;
+    taskVersion?: number;
     label?: string;
     searchLabel?: string;
-    onMerge: (targetTaskId: string) => Promise<TaskMergeResult | boolean>;
+    inlineTrigger?: boolean;
+    onMerge: (
+        targetTaskId: string,
+        options?: TaskMergeOptions,
+    ) => Promise<TaskMergeResult | boolean>;
 }) {
     const i18n = useExtracted();
     const searchError = i18n("Could not search tasks");
@@ -49,6 +61,24 @@ export function MergeTaskPicker({
     const [selected, setSelected] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [merging, setMerging] = useState(false);
+    const [preview, setPreview] = useState<TaskMergePreview | null>(null);
+    const [confirmed, setConfirmed] = useState(false);
+    useEffect(() => {
+        setPreview(null);
+        setConfirmed(false);
+        if (!open || !selected || taskVersion === undefined) return;
+        let current = true;
+        void previewTaskMerge(sourceTaskId, selected)
+            .then((value) => {
+                if (current) setPreview(value);
+            })
+            .catch(() => {
+                if (current) toast.error(searchErrorRef.current);
+            });
+        return () => {
+            current = false;
+        };
+    }, [open, selected, sourceTaskId, taskVersion]);
 
     const loadPage = useCallback(
         async (offset: number, replace: boolean) => {
@@ -64,7 +94,9 @@ export function MergeTaskPicker({
             setLoading(true);
             try {
                 const response = await fetch(
-                    `/api/recordings/${encodeURIComponent(itemId)}/tasks/merge?${params.toString()}`,
+                    taskVersion !== undefined
+                        ? `/api/tasks/${encodeURIComponent(sourceTaskId)}/merge?${params.toString()}`
+                        : `/api/recordings/${encodeURIComponent(itemId ?? "")}/tasks/merge?${params.toString()}`,
                     { signal: controller.signal },
                 );
                 if (!response.ok) throw new Error();
@@ -102,7 +134,7 @@ export function MergeTaskPicker({
                 if (request.current === controller) setLoading(false);
             }
         },
-        [itemId, query, sourceTaskId],
+        [itemId, query, sourceTaskId, taskVersion],
     );
 
     useEffect(() => {
@@ -123,7 +155,22 @@ export function MergeTaskPicker({
         if (!selected) return;
         setMerging(true);
         try {
-            const result = await onMerge(selected);
+            const result = await onMerge(
+                selected,
+                preview
+                    ? {
+                          sourceVersion:
+                              preview.keepId === sourceTaskId
+                                  ? preview.keepVersion
+                                  : preview.mergeVersion,
+                          targetVersion:
+                              preview.keepId === sourceTaskId
+                                  ? preview.mergeVersion
+                                  : preview.keepVersion,
+                          confirmPrivateToShared: confirmed,
+                      }
+                    : undefined,
+            );
             if (result === false) return;
             setOpen(false);
             if (typeof result === "object" && result.ownerNotified) {
@@ -135,6 +182,8 @@ export function MergeTaskPicker({
             } else {
                 toast.success(i18n("Tasks merged"));
             }
+        } catch {
+            toast.error(i18n("Could not save the task"));
         } finally {
             setMerging(false);
         }
@@ -143,10 +192,20 @@ export function MergeTaskPicker({
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button type="button" size="sm" variant="ghost">
-                    <Combine className="size-3.5" aria-hidden="true" />
-                    {label ?? i18n("Merge into another task")}
-                </Button>
+                {inlineTrigger ? (
+                    <button
+                        type="button"
+                        className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                        <Combine className="size-3" aria-hidden="true" />
+                        {label ?? i18n("Merge into another task")}
+                    </button>
+                ) : (
+                    <Button type="button" size="sm" variant="ghost">
+                        <Combine className="size-3.5" aria-hidden="true" />
+                        {label ?? i18n("Merge into another task")}
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
@@ -247,7 +306,9 @@ export function MergeTaskPicker({
                                     {candidate.dueDate ??
                                         candidate.duePhrase ??
                                         i18n("No due date")}{" "}
-                                    · {candidate.homeItem.title}
+                                    ·{" "}
+                                    {candidate.homeItem?.title ??
+                                        i18n("Own task")}
                                 </span>
                             </button>
                         ))}
@@ -266,10 +327,52 @@ export function MergeTaskPicker({
                         </Button>
                     )}
                 </div>
+                {preview && (
+                    <div className="space-y-2 rounded-md border border-dashed p-3 text-sm">
+                        <p className="font-medium">{i18n("Result")}</p>
+                        <p className="whitespace-pre-wrap">{preview.text}</p>
+                        {preview.note && (
+                            <p className="whitespace-pre-wrap border-l-2 pl-2">
+                                {preview.note}
+                            </p>
+                        )}
+                        <p>
+                            {i18n("Due date")}:{" "}
+                            {preview.dueDate ?? i18n("No due date")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Links and followers of both tasks stay. This cannot be undone.",
+                            )}
+                        </p>
+                        {preview.privateToShared && (
+                            <label className="flex gap-2 rounded-md bg-amber-500/10 p-2">
+                                <input
+                                    type="checkbox"
+                                    checked={confirmed}
+                                    onChange={(event) =>
+                                        setConfirmed(event.target.checked)
+                                    }
+                                />
+                                <span>
+                                    {i18n(
+                                        "The Organization task will remain. Your private text and note will be visible to everyone who can see it. Confirm to merge.",
+                                    )}
+                                </span>
+                            </label>
+                        )}
+                    </div>
+                )}
                 <DialogFooter>
                     <Button
                         type="button"
-                        disabled={!selected || merging}
+                        disabled={
+                            !selected ||
+                            merging ||
+                            (taskVersion !== undefined &&
+                                (!preview ||
+                                    (preview.privateToShared && !confirmed)))
+                        }
                         onClick={() => void merge()}
                     >
                         {merging && (

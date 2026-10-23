@@ -193,12 +193,12 @@ describeWithDatabase("Organization curators manage the Almanac", () => {
     it("renames, merges and erases Organization people, moving tasks and speakers", async () => {
         const keep = await createPerson({
             userId: "org",
-            displayName: "Karel Vondra",
+            displayName: "Karel Kratochvíl",
             createdByUserId: "member",
         });
         const lose = await createPerson({
             userId: "org",
-            displayName: "Karel Vondra",
+            displayName: "Karel Kratochvíl",
         });
         await insertRecording(db(), { id: "rec", userId: "other" });
         const [transcript] = await db()

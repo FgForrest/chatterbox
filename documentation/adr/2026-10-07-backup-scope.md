@@ -1,7 +1,7 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-10-22 16:00
+updated: 2026-10-23 06:40
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [89]
 areas: [src/lib/export/archive-scope.ts, src/lib/export/resolve-archive-scope.ts, src/lib/export/build-archive.ts, src/lib/export/document-sidecars.ts, src/app/api/backup]
 supersedes: []
 superseded-by: []
-relates: [2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries]
+relates: [2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries]
 ---
 
 # Backups and exports carry one scope, chosen by the account, personal or Organization, never both
@@ -126,8 +126,17 @@ Postgres, 2894 passed and 16 skipped (opt-in live tests).
 - Archives are not encrypted and downloads need no re-authentication; whoever holds the account holds
   the archive.
 - Archive restore was out of scope and still does not exist.
+- **Self-host has no backup cooldown and no cap on stored archives (PR #68).** The 24-hour cooldown
+  applies only when `IS_HOSTED` is set: a self-hosted instance pays for its own disk, and the last
+  archive may be exactly the one to replace. Each finished archive stays for 7 days
+  (`EXPORT_ARCHIVE_RETENTION_MS` in `src/db/queries/export-jobs.ts`), so on a shared instance one
+  member can fill the disk by repeating full backups. A review suggested deleting a superseded
+  archive once its replacement succeeds, or capping archives per user by count or bytes; neither was
+  built.
 
 ## Related work
+
+- [Person-to-person sharing](2026-10-22-person-to-person-sharing.md): adds accepted receivers without publishing items or knowledge to the Organization; receiver archives still exclude those items.
 
 - [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): defines the personal and Organization scopes split here.
 - [2026-10-07-tasks-from-summaries](2026-10-07-tasks-from-summaries.md): tasks joined the archives under the same rules the same day.

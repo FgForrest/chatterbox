@@ -44,8 +44,9 @@ export function uploadFolderParents(
     return folders
         .filter(
             (folder) =>
-                (folder.scope === "personal" && folder.parentId === null) ||
-                (folder.scope === "org" && includeOrganization),
+                !folder.receivedFolder &&
+                ((folder.scope === "personal" && folder.parentId === null) ||
+                    (folder.scope === "org" && includeOrganization)),
         )
         .map((folder) => ({
             id: folder.id,
@@ -63,6 +64,7 @@ export function uploadFolderOptions(
     return folders
         .filter(
             (folder) =>
+                !folder.receivedFolder &&
                 folder.parentId !== null &&
                 (folder.scope === "personal" || includeOrganization),
         )

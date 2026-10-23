@@ -3,7 +3,12 @@ import type { RecordingFolder } from "@/types/folder";
 /** The folder fields that decide its display name. */
 export type LabelledFolder = Pick<
     RecordingFolder,
-    "name" | "parentId" | "kind" | "scope"
+    | "name"
+    | "parentId"
+    | "kind"
+    | "scope"
+    | "sharedWithPeople"
+    | "receivedFolder"
 >;
 
 /** Display roots by kind while preserving user-chosen folder names. */

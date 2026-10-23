@@ -42,12 +42,27 @@ nezávisel na produkčních tajemstvích.
 | `RIFFADO_VERSION`                | nenastaveno                        | Zastaralá po dobu jednoho vydání. Použije se pouze tehdy, když `CHATTERBOX_VERSION` není nastavena.                |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro rozdělování limitů počtu požadavků. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
+| `RATE_LIMIT_CLIENT_IP_HEADER` | nenastaveno | Pro limity podle IP (vyžaduje `RATE_LIMIT_TRUST_PROXY_HEADERS=true`) a seznam povolených IP administrace čte pouze toto záhlaví. U `x-forwarded-for` bere poslední položku. Jiné záhlaví jako náhradu nezkouší. |
 | `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace tajného klíče relací. |
 
 Nastavení `RATE_LIMIT_TRUST_PROXY_HEADERS=true` bez proxy,
 která přepisuje přeposílací záhlaví, umožní klientům falšovat vlastní IP adresy
 a zcela obejít omezení počtu požadavků. Pokud si nejste jistí, že Vaše proxy tato záhlaví
 přepisuje/maže, ponechte nenastaveno.
+
+Nastavte `RATE_LIMIT_CLIENT_IP_HEADER=x-real-ip`, pokud Vaše proxy přepisuje
+pouze `X-Real-IP`. Klientem dodaná záhlaví `CF-Connecting-IP` a
+`X-Forwarded-For` pak nemají vliv. Při volbě `x-forwarded-for` Klepna použije
+poslední položku, kterou musí důvěryhodná proxy připojit nebo přepsat.
+Chybějící či prázdné zvolené záhlaví znamená neznámou IP adresu; jiné záhlaví
+se nezkouší. Bez této volby limity zachovávají původní pořadí:
+`CF-Connecting-IP`, `X-Real-IP`, potom první neprázdnou položku
+`X-Forwarded-For`. Administrace bez této volby zachovává své původní pořadí
+s XFF na prvním místě.
+U `x-forwarded-for` je poslední položka klientem pouze tehdy, když je důvěryhodná proxy jediným prostředníkem před aplikací; při více proxy zvolte záhlaví, které nastavuje poslední proxy, například `x-real-ip`.
+Stávající instalace nevyžadují žádnou změnu.
+Pro zapnutí předejte novou proměnnou v `environment:` služby aplikace
+a nastavte ji v `.env`.
 
 Chcete-li změnit `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, musí jej produkční
 soubor Compose předat službě aplikace. Do jejího bloku `environment:` přidejte

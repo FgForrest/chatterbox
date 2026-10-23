@@ -1,7 +1,7 @@
 import { and, eq, getTableColumns } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { db } from "@/db";
-import { chatterItems, recordings } from "@/db/schema";
+import { chatterItems, itemShares, recordings } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
@@ -182,6 +182,14 @@ export async function markItemDeleted(
             and(
                 eq(chatterItems.id, input.id),
                 eq(chatterItems.userId, input.userId),
+            ),
+        );
+    await executor
+        .delete(itemShares)
+        .where(
+            and(
+                eq(itemShares.itemId, input.id),
+                eq(itemShares.userId, input.userId),
             ),
         );
 }

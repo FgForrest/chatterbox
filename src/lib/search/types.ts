@@ -18,7 +18,12 @@ export interface TaskSearchHit {
     text: string;
     status: "open" | "done";
     dueDate: string | null;
-    recording: { id: string; title: string; view: "private" | "org" };
+    folder?: { id: string; name: string; path: string } | null;
+    recording: {
+        id: string;
+        title: string;
+        view: "private" | "org" | "received";
+    } | null;
     href: string;
 }
 

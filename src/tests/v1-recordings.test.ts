@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+    requestAdvance: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

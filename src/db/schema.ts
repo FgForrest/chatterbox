@@ -910,6 +910,175 @@ export const recordingFolders = pgTable(
     }),
 );
 
+export type ItemShareState = "pending" | "accepted" | "declined" | "removed";
+
+export const itemShares = pgTable(
+    "item_shares",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        receiverUserId: text("receiver_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        invitedByUserId: text("invited_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        state: varchar("state", { length: 16 })
+            .$type<ItemShareState>()
+            .notNull()
+            .default("pending"),
+        filingFolderId: text("filing_folder_id").references(
+            () => recordingFolders.id,
+            { onDelete: "set null" },
+        ),
+        folderShareId: text("folder_share_id"),
+        version: integer("version").notNull().default(0),
+        invitedAt: timestamp("invited_at").notNull().defaultNow(),
+        respondedAt: timestamp("responded_at"),
+        removedAt: timestamp("removed_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        itemOwnerFk: foreignKey({
+            name: "item_shares_item_owner_fk",
+            columns: [table.itemId, table.userId],
+            foreignColumns: [chatterItems.id, chatterItems.userId],
+        }).onDelete("cascade"),
+        directUnique: uniqueIndex("item_shares_direct_unique")
+            .on(table.itemId, table.receiverUserId)
+            .where(sql`${table.folderShareId} is null`),
+        receivedIdx: index("item_shares_receiver_state_idx").on(
+            table.receiverUserId,
+            table.state,
+        ),
+        ownerItemIdx: index("item_shares_owner_item_idx").on(
+            table.userId,
+            table.itemId,
+        ),
+        filingIdx: index("item_shares_filing_folder_idx").on(
+            table.filingFolderId,
+        ),
+        folderShareIdx: index("item_shares_folder_share_idx").on(
+            table.folderShareId,
+        ),
+        inviterIdx: index("item_shares_inviter_idx").on(table.invitedByUserId),
+        stateCheck: check(
+            "item_shares_state_check",
+            sql`${table.state} in ('pending', 'accepted', 'declined', 'removed')`,
+        ),
+        receiverCheck: check(
+            "item_shares_receiver_check",
+            sql`${table.userId} <> ${table.receiverUserId}`,
+        ),
+    }),
+);
+
+export const folderShares = pgTable(
+    "folder_shares",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        receiverUserId: text("receiver_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        invitedByUserId: text("invited_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        state: varchar("state", { length: 16 })
+            .$type<ItemShareState>()
+            .notNull()
+            .default("pending"),
+        version: integer("version").notNull().default(0),
+        invitedAt: timestamp("invited_at").notNull().defaultNow(),
+        respondedAt: timestamp("responded_at"),
+        removedAt: timestamp("removed_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        folderReceiverUnique: unique("folder_shares_folder_receiver_unique").on(
+            table.folderId,
+            table.receiverUserId,
+        ),
+        idReceiverUnique: unique("folder_shares_id_receiver_unique").on(
+            table.id,
+            table.receiverUserId,
+        ),
+        receivedIdx: index("folder_shares_receiver_state_idx").on(
+            table.receiverUserId,
+            table.state,
+        ),
+        ownerIdx: index("folder_shares_owner_folder_idx").on(
+            table.userId,
+            table.folderId,
+        ),
+        inviterIdx: index("folder_shares_inviter_idx").on(
+            table.invitedByUserId,
+        ),
+        stateCheck: check(
+            "folder_shares_state_check",
+            sql`${table.state} in ('pending', 'accepted', 'declined', 'removed')`,
+        ),
+        receiverCheck: check(
+            "folder_shares_receiver_check",
+            sql`${table.userId} <> ${table.receiverUserId}`,
+        ),
+    }),
+);
+
+export const receivedFolderAttachments = pgTable(
+    "received_folder_attachments",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        shareId: text("share_id")
+            .notNull()
+            .unique()
+            .references(() => folderShares.id, { onDelete: "cascade" }),
+        name: text("name").notNull(),
+        parentId: text("parent_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
+        sortOrder: integer("sort_order").notNull().default(0),
+        version: integer("version").notNull().default(0),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        receiverFk: foreignKey({
+            name: "received_folder_attachments_receiver_fk",
+            columns: [table.shareId, table.userId],
+            foreignColumns: [folderShares.id, folderShares.receiverUserId],
+        }).onDelete("cascade"),
+        userParentIdx: index("received_folder_attachments_user_parent_idx").on(
+            table.userId,
+            table.parentId,
+        ),
+        parentIdx: index("received_folder_attachments_parent_idx").on(
+            table.parentId,
+        ),
+    }),
+);
+
 export const folderDefaultProfiles = pgTable(
     "folder_default_profiles",
     {
@@ -1626,14 +1795,14 @@ export const knowledgeEntityTypes = pgTable(
         // same name: the user's later facts use the shared key.
         adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
         // An Organization type a share made from a member's private one
-        // (Johnny, 2026-09-29): listed first for the curator, until they
+        // (maintainer, 2026-09-29): listed first for the curator, until they
         // keep, rename or merge it.
         adoptedFromShare: boolean("adopted_from_share")
             .notNull()
             .default(false),
         // Set on a member's type when the curator deleted the Organization
-        // type it was adopted as (Johnny, 2026-09-29): a share adopts it no
-        // more, until the Organization has a type of its name, or of the
+        // type it was adopted as (maintainer, 2026-09-29): a share adopts it
+        // no more, until the Organization has a type of its name, or of the
         // deleted one's (`adoptionRefusedAs`, its `labelHmac`), again.
         adoptionRefusedAt: timestamp("adoption_refused_at"),
         adoptionRefusedAs: varchar("adoption_refused_as", { length: 64 }),
@@ -2674,9 +2843,12 @@ export const recordingTasks = pgTable(
         id: text("id")
             .primaryKey()
             .$defaultFn(() => nanoid()),
-        itemId: text("recording_id")
-            .notNull()
-            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        itemId: text("recording_id").references(() => chatterItems.id, {
+            onDelete: "cascade",
+        }),
+        folderId: text("folder_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
         // The recording's owner.
         userId: text("user_id")
             .notNull()
@@ -2686,6 +2858,12 @@ export const recordingTasks = pgTable(
             .notNull(),
         // Encrypted.
         text: text("text").notNull(),
+        note: text("note"),
+        noteUpdatedAt: timestamp("note_updated_at"),
+        noteUpdatedByUserId: text("note_updated_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
         // Who has to do it: a person of the Almanac (the owner's, or the
         // Organization's on a shared recording); null for nobody yet.
         assigneePersonId: text("assignee_person_id").references(
@@ -2713,7 +2891,7 @@ export const recordingTasks = pgTable(
             length: 16,
         }).$type<EvidenceProvenance>(),
         source: varchar("source", { length: 16 })
-            .$type<"riffado" | "plaud" | "manual">()
+            .$type<"riffado" | "plaud" | "manual" | "personal">()
             .notNull(),
         // A proposal's draft: whether accepting the review keeps it.
         ticked: boolean("ticked").notNull().default(true),
@@ -2761,6 +2939,13 @@ export const recordingTasks = pgTable(
             table.userId,
             table.status,
         ),
+        userFolderStatusIdx: index("recording_tasks_user_folder_status_idx")
+            .on(table.userId, table.folderId, table.status)
+            .where(sql`${table.folderId} is not null`),
+        personalFolderCheck: check(
+            "recording_tasks_personal_folder_check",
+            sql`${table.folderId} is null or ${table.source} = 'personal'`,
+        ),
         createdByIdx: index("recording_tasks_created_by_user_id_idx").on(
             table.createdByUserId,
         ),
@@ -2782,12 +2967,53 @@ export const recordingTasks = pgTable(
         ),
         sourceCheck: check(
             "recording_tasks_source_check",
-            sql`${table.source} in ('riffado', 'plaud', 'manual')`,
+            sql`${table.source} in ('riffado', 'plaud', 'manual', 'personal')`,
+        ),
+        personalItemCheck: check(
+            "recording_tasks_personal_item_check",
+            sql`(${table.source} = 'personal') = (${table.itemId} is null) and (${table.source} <> 'personal' or (${table.assigneePersonId} is null and ${table.status} <> 'proposed'))`,
+        ),
+        noteUpdatedByIdx: index("recording_tasks_note_updated_by_idx").on(
+            table.noteUpdatedByUserId,
         ),
         evidenceCheck: check(
             "recording_tasks_evidence_check",
             sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
         ),
+    }),
+);
+
+export const taskFollowers = pgTable(
+    "task_followers",
+    {
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.taskId, table.userId] }),
+        userIdIdx: index("task_followers_user_id_idx").on(table.userId),
+    }),
+);
+
+export const taskUnfollows = pgTable(
+    "task_unfollows",
+    {
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.taskId, table.userId] }),
+        userIdIdx: index("task_unfollows_user_id_idx").on(table.userId),
     }),
 );
 

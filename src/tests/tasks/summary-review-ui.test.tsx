@@ -55,6 +55,14 @@ const task: TaskView = {
     canEdit: true,
     canClose: true,
     canUndoMatch: false,
+    own: false,
+    note: null,
+    noteUpdatedAt: null,
+    noteBy: null,
+    following: false,
+    automaticFollow: false,
+    canFollow: false,
+    canMerge: false,
 };
 
 it("offers Review tasks and applies the owner-selected proposals", async () => {

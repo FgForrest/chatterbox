@@ -1,5 +1,6 @@
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { receivedItemCondition } from "@/db/queries/item-shares";
 import { chatterItems } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -125,13 +126,19 @@ export async function searchTasks(
                 if (Date.now() - started >= TASK_DEADLINE_MS)
                     return { hits, limited: Boolean(query) };
                 scanned++;
-                if (matches(`${row.text} ${row.recording.title}`, query)) {
+                if (
+                    matches(
+                        `${row.text} ${row.note ?? ""} ${row.recording?.title ?? ""}`,
+                        query,
+                    )
+                ) {
                     hits.push({
                         id: row.id,
                         text: row.text,
                         status,
                         dueDate: row.dueDate,
                         recording: row.recording,
+                        folder: row.folder,
                         href: `/tasks/${encodeURIComponent(row.id)}`,
                     });
                 }
@@ -156,6 +163,7 @@ async function searchChatter(
     signal?.throwIfAborted();
     const visibility = or(
         eq(chatterItems.userId, userId),
+        receivedItemCondition(userId),
         orgUserId ? sharedItemCondition(orgUserId, chatterItems.id) : undefined,
     );
     const searches = query
@@ -193,6 +201,7 @@ async function searchChatter(
             userId: chatterItems.userId,
             title: chatterItems.title,
             kind: chatterItems.kind,
+            received: sql<boolean>`${receivedItemCondition(userId)}`,
         })
         .from(chatterItems)
         .where(
@@ -223,7 +232,7 @@ async function searchChatter(
                     ? mask(row.title)
                     : row.title,
             snippet: found.get(row.id)?.snippet ?? null,
-            href: `/dashboard?recording=${encodeURIComponent(row.id)}${row.userId !== userId || row.userId === orgUserId ? "&view=org" : ""}`,
+            href: `/dashboard?recording=${encodeURIComponent(row.id)}${row.received ? "&view=received" : row.userId !== userId || row.userId === orgUserId ? "&view=org" : ""}`,
         })),
         limited:
             Boolean(query) &&

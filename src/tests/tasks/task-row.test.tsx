@@ -36,7 +36,7 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         evidenceAudioAvailable: true,
         status: "open",
         text: "Send the draft",
-        assignee: { personId: "person-1", name: "Karel Vondra" },
+        assignee: { personId: "person-1", name: "Karel Kratochvíl" },
         assigneeHasEmail: true,
         assigneeHint: null,
         assigneeCheck: false,
@@ -55,6 +55,14 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         canEdit: false,
         canClose: false,
         canUndoMatch: false,
+        own: false,
+        note: null,
+        noteUpdatedAt: null,
+        noteBy: null,
+        following: false,
+        automaticFollow: false,
+        canFollow: false,
+        canMerge: false,
         ...overrides,
     };
 }
@@ -100,14 +108,14 @@ const cases = [
     {
         label: "an assignee with an email",
         overrides: { assigneeHasEmail: true },
-        en: "Assigned to Karel Vondra. Only they, the recording's owner or a curator can mark it done.",
-        cs: "Přiřazeno: Karel Vondra. Hotovo může označit jen přiřazená osoba, vlastník nahrávky nebo kurátor.",
+        en: "Assigned to Karel Kratochvíl. Only they, the recording's owner or a curator can mark it done.",
+        cs: "Přiřazeno: Karel Kratochvíl. Hotovo může označit jen přiřazená osoba, vlastník nahrávky nebo kurátor.",
     },
     {
         label: "an assignee without an email",
         overrides: { assigneeHasEmail: false },
-        en: "Assigned to Karel Vondra, who has no email in the Almanac, so the task is on nobody's list.",
-        cs: "Přiřazeno: Karel Vondra, ale tato osoba nemá v Almanachu e-mail, takže úkol nemá nikdo ve svém seznamu.",
+        en: "Assigned to Karel Kratochvíl, who has no email in the Almanac, so the task is on nobody's list.",
+        cs: "Přiřazeno: Karel Kratochvíl, ale tato osoba nemá v Almanachu e-mail, takže úkol nemá nikdo ve svém seznamu.",
     },
     {
         label: "no assignee",

@@ -437,7 +437,10 @@ export async function searchableMailBatch(
                 attachments: (
                     decryptJsonField<AttachmentMeta[]>(row.attachments) ?? []
                 ).length,
-                url: recordingUrl(row.id, recordingViewFor(caller, row.userId)),
+                url: recordingUrl(
+                    row.id,
+                    recordingViewFor(caller, row.userId, row.id),
+                ),
             },
             language:
                 contents.find((content) => content.itemId === row.id)

@@ -30,6 +30,10 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import {
+    type Invitation,
+    PersonInvitations,
+} from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
@@ -125,6 +129,7 @@ interface WorkstationProps {
     isOrgAccount?: boolean;
     /** The viewer changes the Organization's content (a curator). */
     canCurate?: boolean;
+    initialInvitations?: Invitation[];
 }
 
 /** Recording library, selection, uploads and transcription actions. */
@@ -142,6 +147,7 @@ export function Workstation({
     organizationLibrary = null,
     isOrgAccount = false,
     canCurate = false,
+    initialInvitations = [],
 }: WorkstationProps) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
@@ -298,7 +304,8 @@ export function Workstation({
             }
             if (recording) {
                 params.set("recording", recording.id);
-                if (recording.view === "org") params.set("view", "org");
+                if (recording.view && recording.view !== "private")
+                    params.set("view", recording.view);
             }
             handledLocationQuery.current = params.toString();
             const sameUrl =
@@ -509,7 +516,8 @@ export function Workstation({
                     : (preferred.find((item) => item.id === recordingId) ??
                       fallback.find((item) => item.id === recordingId));
                 setCurrentRecording(linked ?? null);
-                if (linked?.view === "org") params.set("view", "org");
+                if (linked?.view && linked.view !== "private")
+                    params.set("view", linked.view);
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
                 const restoredView = window.history.state?.mobileView;
@@ -704,7 +712,7 @@ export function Workstation({
         : false;
     const selectedTranscriptReadOnly = selectedRecording
         ? !canChangeItem({
-              view: currentIsOrgView ? "org" : "private",
+              view: selectedRecording.view ?? "private",
               isOwn: selectedRecording.isOwn !== false,
               isOrgAccount,
               canCurate,
@@ -1001,7 +1009,11 @@ export function Workstation({
         useTranscribeQueue({ onTranscribeComplete: refresh });
 
     useEffect(() => {
-        if (currentRecording && currentRecording.kind !== "mail") {
+        if (
+            currentRecording &&
+            currentRecording.kind !== "mail" &&
+            currentRecording.view !== "received"
+        ) {
             void observeTranscriptionById(
                 currentRecording.id,
                 currentRecording.view,
@@ -1051,7 +1063,8 @@ export function Workstation({
             retranscribe = false,
             language?: string,
         ) => {
-            if (!currentRecording) return;
+            if (!currentRecording || currentRecording.view === "received")
+                return;
             await transcribeById(
                 currentRecording.id,
                 attributionSource,
@@ -1226,6 +1239,18 @@ export function Workstation({
             parentId: string,
             beforeId?: string | null,
         ) => {
+            const sourceFolder = folderOrganization.folders.find(
+                (folder) => folder.id === folderId,
+            );
+            const destinationFolder = folderOrganization.folders.find(
+                (folder) => folder.id === parentId,
+            );
+            if (
+                sourceFolder?.receivedFolder ||
+                destinationFolder?.receivedFolder ||
+                sourceFolder?.scope !== destinationFolder?.scope
+            )
+                return;
             const previous = folderOrganization;
             setFolderOrganization((current) => {
                 const moved = current.folders.find(
@@ -1281,7 +1306,11 @@ export function Workstation({
             const response = await fetch(`/api/folders/${folderId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId, beforeId, version }),
+                body: JSON.stringify({
+                    parentId,
+                    beforeId,
+                    version,
+                }),
             });
             if (response.status === 409) {
                 setFolderOrganization(previous);
@@ -1521,11 +1550,19 @@ export function Workstation({
                 throw new Error(i18n("Could not update folder assignment"));
             }
             if (assigned) rememberFolder(folderId);
-            // Sharing or unsharing changes the Organization library itself.
             if (
-                folderOrganization.folders.find(
-                    (folder) => folder.id === folderId,
-                )?.scope === "org"
+                folderOrganization.folders.some(
+                    (folder) =>
+                        (folder.id === folderId && folder.scope === "org") ||
+                        (folder.sharedWithPeople &&
+                            (folder.id === folderId ||
+                                previous.some(
+                                    (assignment) =>
+                                        assignment.recordingId ===
+                                            recordingId &&
+                                        assignment.folderId === folder.id,
+                                ))),
+                )
             ) {
                 refresh();
             }
@@ -1585,9 +1622,18 @@ export function Workstation({
             }
             rememberFolder(toFolderId);
             if (
-                folderOrganization.folders.find(
-                    (folder) => folder.id === toFolderId,
-                )?.scope === "org"
+                folderOrganization.folders.some(
+                    (folder) =>
+                        (folder.id === toFolderId && folder.scope === "org") ||
+                        (folder.sharedWithPeople &&
+                            (folder.id === toFolderId ||
+                                previous.some(
+                                    (assignment) =>
+                                        assignment.recordingId ===
+                                            recordingId &&
+                                        assignment.folderId === folder.id,
+                                ))),
+                )
             )
                 refresh();
             toast.success(i18n("Recording moved"));
@@ -1602,7 +1648,7 @@ export function Workstation({
     );
 
     const settingsFolder = folderOrganization.folders.find(
-        (folder) => folder.id === settingsFolderId,
+        (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
     );
     const navigation = useMemo(
         () =>
@@ -1731,6 +1777,10 @@ export function Workstation({
                                 !railCollapsed && "xl:block",
                             )}
                         >
+                            <PersonInvitations
+                                initialInvitations={initialInvitations}
+                                folders={navigationFolders}
+                            />
                             <FolderTree
                                 folders={navigationFolders}
                                 assignments={folderOrganization.assignments}
@@ -1803,13 +1853,23 @@ export function Workstation({
                                 canCurate={canCurate}
                                 onFolderCreated={handleFolderCreated}
                                 onFolderSettings={
-                                    selectedFolder
+                                    selectedFolder &&
+                                    !selectedFolder.receivedFolder
                                         ? () =>
                                               openFolderSettings(selectedFolder)
                                         : undefined
                                 }
                                 header={
                                     <>
+                                        <div className="xl:hidden">
+                                            <PersonInvitations
+                                                initialInvitations={
+                                                    initialInvitations
+                                                }
+                                                folders={navigationFolders}
+                                                notifications={false}
+                                            />
+                                        </div>
                                         <div
                                             className={
                                                 railCollapsed
@@ -2119,7 +2179,11 @@ export function Workstation({
                     const recording = visibleRecordings.find(
                         (candidate) => candidate.id === id,
                     );
-                    if (recording?.kind === "mail") return;
+                    if (
+                        recording?.kind === "mail" ||
+                        recording?.view === "received"
+                    )
+                        return;
                     void transcribeById(id, undefined, recording?.view);
                 }}
             />

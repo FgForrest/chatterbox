@@ -12,7 +12,7 @@ se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z položky `scope`
 odděleného mezerami. Režim `AUTHZ_MODE=local` zachovává původní klientské
 role Keycloaku (`resource_access[MCP_AUDIENCE].roles`).
 
-Server je pouze pro čtení, s výjimkou jedné věci: stav a zadání úkolu.
+Server čte obsah a spravuje úkoly podle stejných oprávnění jako aplikace.
 
 <span id="what-it-exposes" />
 
@@ -28,7 +28,7 @@ nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
 | `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
 | `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
 | `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
-| `tasks:write`      | `update_task` (pouze stav a zadání)                                                            |
+| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                            |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders` a `list_recordings` jsou dostupné spolu s některou z
@@ -58,7 +58,7 @@ Oprávnění se kombinují a některá pole vyžadují dvě:
   vyžaduje místo toho `mail:read`.
 - Úkoly a fakta naučená z pošty se vypisují se samotnými `tasks:read` a
   `knowledge:read`, označené `kind: "mail"` (úkoly) nebo
-  `origin: "mail"` (fakta). Jejich citace, slovní termín a e-mail (název
+  `origin: "mail"` (fakta). Jejich poznámka, citace, slovní termín a e-mail (název
   a odkaz) přicházejí jen s `mail:read` a bez ní vyhledávání nikdy
   nenajde slova e-mailu.
 - Akční položky shrnutí v `get_summary` a v tom, co
@@ -291,7 +291,7 @@ konektorem i kontrolami.
 
 | Token                                                   | Volající                                                 |
 | ------------------------------------------------------- | -------------------------------------------------------- |
-| `sub` uživatele, který se přihlásil do Klepna přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
+| `sub` uživatele, který se přihlásil do Klepna přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho, ty sdílené Organizací a přijaté osobní pozvánky, jak je vidí v seznamu nahrávek. |
 | Chybí takový `sub`, klient je v `MCP_SERVICE_CLIENTS` a token nese označení služby | Servisní účet jednající v datovém kontextu Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. Bez `MCP_SERVICE_CLIENTS` v režimu `local` jakýkoli token s `client_id` (zastaralé). |
 | Cokoli jiného                                           | Odmítnuto s 403 "Sign in to Klepna once first".       |
 
@@ -304,23 +304,26 @@ neobsluhuje, a klient bez svého klíče konektoru dostanou 403
 "Forbidden". Důvod uvádí log aplikace (viz
 [Když se Claude nepřipojí](./claude#when-claude-cannot-connect)).
 
-**Úkoly** kopírují logiku stránky Úkoly:
+**Přijaté položky** jsou dostupné po přijetí pozvánky na vlastní instanci se zobrazenou Organizací. Nástroje pro výpis, čtení a hledání nahrávek, přepisů, shrnutí a pošty je zahrnují při stejných oprávněních nástroje. Odkazy používají `view=received`; výsledky přijatých úkolů obsahují `received_owner_name`. Mluvčí mají prostá jména potvrzená vlastníkem; jeho soukromé osoby, fakta, aliasy a složky zůstávají skryté. Přijaté položky lze filtrovat podle vlastního zařazení příjemce i připojených přijatých složek. Servisní účty ani ostatní kurátoři přístup k osobním sdílením nezískávají.
 
-- Uživatel vidí úkoly u svých nahrávek a e-mailů a u sdílených
-  Organizací ty, které jsou mu přiřazeny. Servisní účet vidí úkoly
-  všech sdílených nahrávek a e-mailů.
-- S `tasks:write` může `update_task` nastavit úkol jako hotový, znovu otevřený nebo
-  zrušený, či změnit jeho zadání. Dokončení a znovuotevření úkolu vyžaduje `can_close`
-  (majitel nahrávky, přiřazený uživatel u sdílené nahrávky nebo Organizace).
-  Zrušení, znovuotevření zrušeného úkolu a přeřazení vyžadují `can_edit`
-  (majitel privátní nahrávky, u sdílené pouze Organizace, tedy servisní účet).
-  U sdílené nahrávky lze úkol přiřadit pouze lidem z Organizace.
-- Každý úkol obsahuje `version`; `update_task` jej vyžaduje a úkol změněný
-  mezitím odpoví svým aktuálním stavem místo úpravy.
-- Návrhy úkolů nelze upravovat: kontrola zůstává v aplikaci. Text úkolu,
-  termín splnění i nové úkoly je možné zadávat pouze v aplikaci.
-- Změna je zaznamenána na uživatele či na účet Organizace (u servisních
-  účtů); přístupový log uvádí klienta.
+**Sdílené složky:** `list_folders` obsahuje přijaté připojené složky v soukromém stromu příjemce, pod jeho zvoleným názvem, s `shared: true` a `read_only: true`. ID připojené složky pošlete jako `folder` nástrojům pro výpis a hledání nahrávek a pošty. Výsledky obsahují pouze aktuální položky vlastníka zařazené přímo ve složce, nikdy obsah podsložek; přímé i zděděné sdílení vracejí každou položku jednou. Původní název sdílené složky se zobrazuje v aplikaci, ostatní názvy složek vlastníka zůstávají skryté. Také vlastní odchozí sdílené složky mají `shared: true`; vlastník je může dál měnit. Odebráním připojení nebo smazáním originálu tento přístup skončí; soukromou složku nelze přesunout ani zařadit do Organizace. Do připojené složky nelze zařadit úkol a vlastní úkoly zařazené ve sdílené složce vidí dál jen jejich autor.
+
+Přiřazené úkoly z přijatých položek se zobrazují ve výpisu a hledání úkolů. S `tasks:write` je může `update_task` dokončit nebo znovu otevřít; nemůže je upravit, zrušit ani přeřadit. Přiřazený příjemce může také nahradit nebo vymazat poznámku. Každý příjemce může sledovat viditelný úkol; po ukončení sdílení se sledovaný úkol skryje a sledování přístup neuděluje. Úkol viditelný pouze přes osobní sdílení nelze sloučit ani jeho řešitelem. Poznámky, citace, slovní termíny a odkazy na zdroj v poště stále vyžadují `mail:read`. Osobní sdílení nic nepřidává do Almanachu ani Učení příjemce.
+
+**Úkoly** používají oprávnění aplikace. Vlastní úkoly vidí výhradně autor, nikdy servisní klient ani kurátor. Úkol položky vyžaduje její aktuální viditelnost; samotné sledování přístup neuděluje.
+
+| Nástroj | Vstup a chování |
+| --- | --- |
+| `list_tasks` | Volitelné `list: mine|followed` a `folder` (ID z `list_folders`); zůstávají filtry stavu, řešitele, nahrávky, termínu a kurzor. Filtr složky zahrnuje podsložky jako stránka Úkoly. V seznamu Moje a společném výpisu vlastní úkoly odpovídají jen soukromým složkám; kořen Soukromé zahrnuje i nezařazené vlastní úkoly. Sledované zachovává filtr podle složek položek. Vrací `folder` (`{id, name, path}` nebo null u vlastních úkolů, null u úkolů položek), `own`, `note`, `note_by`, `note_updated_at`, `following`, `can_merge`, `can_edit`, `can_close` a `version`. |
+| `search_tasks` | Hledá i v poznámce, se stejným skrytím obsahu pošty jako ve výsledku. |
+| `create_task` | `text` (1 až 2 000 znaků), volitelné `due_date` (`YYYY-MM-DD`) a `folder` (ID soukromé podsložky volajícího, nikoli kořene Soukromé). Vytvoří vlastní úkol. Servisnímu klientovi Organizace je odmítnut. |
+| `update_task` | `task`, `version`, volitelné `status`, `assignee`, `text`, `due_date` (null vymaže), `note` (null vymaže), `folder` (jen vlastní úkoly; ID zařadí, null zařazení zruší). Text, termín, složka, řešitel, zrušení a obnovení zrušeného úkolu vyžadují `can_edit`; dokončení, opětovné otevření a nahrazení či vymazání poznámky vyžadují `can_close`. Text i poznámka mají limit 2 000 znaků. Vlastní úkol nelze přeřadit. |
+| `follow_task` | `task`, `follow: true|false`. Opakování nemění výsledek. Funguje pro každý aktuálně viditelný přijatý úkol, není dostupné servisním klientům. |
+| `merge_tasks` | `keep`, `merge`, `keep_version`, `merge_version`, volitelné `confirm_private_to_shared`. Oba úkoly musí být otevřené; právo řešitele vyžaduje přiřazení obou volajícímu. Úkol Organizace vždy zůstane i při opačném požadovaném směru. Připojení soukromého textu a poznámky vyžaduje výslovné potvrzení. |
+
+Sloučení spojí texty i poznámky, ponechá dřívější termín, odkazy i sledující, přesune čekající návrhy a při různých vlastnících předá oznámení. Výsledek přes 2 000 znaků je odmítnut. Všechny nástroje mají anotaci čtení nebo zápisu. `update_task` je označený jako destruktivní, protože nahrazení textu a nahrazení či vymazání poznámky nelze vrátit; `merge_tasks` je také destruktivní a nevratný. Poznámky z pošty jsou bez `mail:read` null a nelze je vyhledat. Návrhy úkolů nadále vyžadují lidskou kontrolu v aplikaci. Změny i ID klienta se auditují.
+
+`list_folders` vrací `id`, `parent_id`, `name`, `kind` a `scope`. Tato ID slouží pro zařazení i filtrování úkolů. Zařazovat lze pouze do podsložek volajícího pod kořenem `kind: private`; kořen samotný je odmítnut (pro nezařazený úkol použijte null): zápis se složkou Organizace, veřejnou složkou nebo složkou jiného uživatele vrátí nenalezeno. Nastavení i vymazání složky u úkolu položky je odmítnuto. Zařazení nikdy nemění viditelnost. Smazání složky nebo přesun mimo Soukromé zruší odkazy vlastních úkolů ve stejné transakci; úkoly zůstanou viditelné jen autorovi. Počty položek složek úkoly nezahrnují.
 
 **Názvy fungují všude, kde id.** `entity`, `person`, `assignee` a
 `recording` přijímají id nebo text. Lidé a věci se hledají podle jména,

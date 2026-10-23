@@ -34,10 +34,19 @@ type Rule =
     | "people"
     | "tasks"
     | "mail"
-    | "session";
+    | "session"
+    | "shares";
 
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "events/route.ts": { GET: "session" },
+    "items/[id]/shares/route.ts": { GET: "shares", POST: "shares" },
+    "shares/route.ts": { GET: "shares" },
+    "folders/[id]/shares/route.ts": { GET: "shares", POST: "shares" },
+    "folder-shares/[id]/route.ts": { PATCH: "shares" },
+    "folder-shares/restore/route.ts": { POST: "shares" },
+    "shares/[id]/route.ts": { PATCH: "shares" },
+    "shares/people/route.ts": { GET: "shares" },
+    "shares/restore/route.ts": { POST: "shares" },
     "recordings/[id]/route.ts": {
         GET: "owner",
         // The title: the owner on the private view, the organization
@@ -147,6 +156,9 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
 const API_ROOT = join(__dirname, "../../app/api");
 const GUARDED_DIRECTORIES = [
     "events",
+    "items/[id]/shares",
+    "shares",
+    "folder-shares",
     "recordings/[id]",
     "jobs",
     "folders",
@@ -191,6 +203,8 @@ describe("recording route classification", () => {
         for (const [file, methods] of Object.entries(CLASSIFIED)) {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
+            if (rules.has("shares"))
+                expect(source, file).toContain("requirePersonShareSession");
             if (rules.has("session")) {
                 expect(source, file).toContain("requireApiSession");
             }

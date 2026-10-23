@@ -214,7 +214,7 @@ function WidgetHeader({
     }
     return (
         <header className="border-b px-4 py-3 sm:px-6">
-            <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
                 {titleNode}
                 {headerAction && <div className="shrink-0">{headerAction}</div>}
             </div>

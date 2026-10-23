@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { env } from "@/lib/env";
+
+vi.mock("@/lib/env", () => ({
+    env: { RATE_LIMIT_CLIENT_IP_HEADER: undefined as string | undefined },
+}));
+beforeEach(() => {
+    env.RATE_LIMIT_CLIENT_IP_HEADER = undefined;
+});
+
 import {
     clientIpFromHeaders,
     ipMatchesAllowlist,
@@ -82,5 +91,34 @@ describe("clientIpFromHeaders", () => {
 
     it("returns null when neither header present", () => {
         expect(clientIpFromHeaders(new Headers())).toBe(null);
+    });
+});
+
+describe("configured admin client IP header", () => {
+    it("uses only the selected header", () => {
+        env.RATE_LIMIT_CLIENT_IP_HEADER = "x-real-ip";
+        expect(
+            clientIpFromHeaders(
+                new Headers({
+                    "cf-connecting-ip": "1.1.1.1",
+                    "x-forwarded-for": "2.2.2.2",
+                    "x-real-ip": "8.8.8.8",
+                }),
+            ),
+        ).toBe("8.8.8.8");
+        expect(
+            clientIpFromHeaders(new Headers({ "x-forwarded-for": "2.2.2.2" })),
+        ).toBeNull();
+    });
+    it("uses the last XFF entry, including failing closed for an empty final entry", () => {
+        env.RATE_LIMIT_CLIENT_IP_HEADER = "x-forwarded-for";
+        expect(
+            clientIpFromHeaders(
+                new Headers({ "x-forwarded-for": "1.1.1.1, 8.8.8.8" }),
+            ),
+        ).toBe("8.8.8.8");
+        expect(
+            clientIpFromHeaders(new Headers({ "x-forwarded-for": "1.1.1.1," })),
+        ).toBeNull();
     });
 });

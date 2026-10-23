@@ -19,7 +19,7 @@ paths:
 
 ## Target UX comparisons
 
-- **Yes:** Plaud's own web app (the thing we're replacing), Linear, Vercel dashboards.
+- **Yes:** Linear, Vercel dashboards.
 - **No:** generic self-host transcription stacks (Whisper + a script). Chatterbox must feel like a
   product, not a pile of utilities.
 
@@ -43,5 +43,7 @@ focus rings, calls to action and progress stay `primary`.
 ## Screenshots
 
 To see a change in a real browser, the disposable E2E stack in `docker-compose.e2e.yml` builds the
-working tree (`docs/DEVELOPMENT.md`, "Isolated Docker E2E Instance"). Starting it is a
-`docker compose up`, so it needs the user's go-ahead like any other.
+working tree (`docs/DEVELOPMENT.md`, "Isolated Docker E2E Instance"). It and the other
+`docker-compose.e2e*.yml` stacks, including the user-guide demo stack, may be started for browser
+checks without asking (`AGENTS.md`, Commands and tests); the real stack still needs the user's
+go-ahead.

@@ -3,18 +3,27 @@
 import {
     ChevronDown,
     ChevronRight,
-    Folder,
     FolderPlus,
     History,
     MoreHorizontal,
     PanelLeftClose,
     Search,
     Settings,
+    UserPlus,
     Users,
     X,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type DragEvent, useEffect, useMemo, useState } from "react";
+import {
+    ReceivedFolderDialog,
+    ReceivedFolderMenu,
+} from "@/components/sharing/folder-sharing";
+import {
+    PersonShareDialog,
+    usePersonSharing,
+} from "@/components/sharing/person-sharing";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -106,6 +115,14 @@ export function FolderTree({
     onCollapse,
 }: FolderTreeProps) {
     const i18n = useExtracted();
+    const sharingEnabled = usePersonSharing();
+    const [sharingFolder, setSharingFolder] = useState<RecordingFolder | null>(
+        null,
+    );
+    const [attachmentEdit, setAttachmentEdit] = useState<{
+        folder: RecordingFolder;
+        action: "rename" | "move";
+    } | null>(null);
     const folderLabel = useFolderLabel();
     const [isMac, setIsMac] = useState(false);
     useEffect(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
@@ -223,7 +240,13 @@ export function FolderTree({
         target: RecordingFolder,
     ): boolean => {
         const dragged = folders.find((folder) => folder.id === draggedId);
-        if (!dragged || dragged.scope !== target.scope) return false;
+        if (
+            !dragged ||
+            dragged.receivedFolder ||
+            target.receivedFolder ||
+            dragged.scope !== target.scope
+        )
+            return false;
         return dragged.scope !== "org" || canCurate;
     };
 
@@ -321,7 +344,24 @@ export function FolderTree({
                     )}
                     <button
                         type="button"
-                        draggable={folder.kind === "custom" && canManage}
+                        draggable={
+                            folder.kind === "custom" &&
+                            canManage &&
+                            !folder.receivedFolder
+                        }
+                        title={
+                            folder.receivedFolder
+                                ? i18n(
+                                      "Shared by {owner} · read-only · originally {name}",
+                                      {
+                                          owner: folder.receivedFolder
+                                              .ownerName,
+                                          name: folder.receivedFolder
+                                              .originalName,
+                                      },
+                                  )
+                                : undefined
+                        }
                         onDragStart={(event) => {
                             setDraggedFolderId(folder.id);
                             event.dataTransfer.setData(
@@ -339,7 +379,10 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (folder.kind === "private") {
+                                if (
+                                    folder.kind === "private" ||
+                                    folder.receivedFolder
+                                ) {
                                     event.dataTransfer.dropEffect = "none";
                                     setRecordingDropFolderId(null);
                                     return;
@@ -398,6 +441,7 @@ export function FolderTree({
                                     );
                                 if (
                                     folder.kind === "private" ||
+                                    folder.receivedFolder ||
                                     recordingDropEffect(
                                         Array.from(event.dataTransfer.types),
                                         folder.scope,
@@ -484,15 +528,13 @@ export function FolderTree({
                         {folder.kind === "public" ? (
                             <Users className="size-4 shrink-0 text-organization" />
                         ) : (
-                            <Folder
-                                className={cn(
-                                    "size-4 shrink-0",
-                                    folder.scope === "org"
-                                        ? "text-organization"
-                                        : "text-primary",
-                                    folder.kind !== "custom" &&
-                                        "fill-primary/10",
-                                )}
+                            <SharedFolderIcon
+                                folder={folder}
+                                className={
+                                    folder.kind !== "custom"
+                                        ? "fill-primary/10"
+                                        : undefined
+                                }
                             />
                         )}
                         <span className="truncate">{folderLabel(folder)}</span>
@@ -521,24 +563,48 @@ export function FolderTree({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            {canCreateSubfolder(
-                                folder,
-                                canCurate,
-                                isOrgAccount,
-                            ) && (
-                                <DropdownMenuItem
-                                    onSelect={() =>
-                                        onSettings(folder, "create")
+                            {folder.receivedFolder ? (
+                                <ReceivedFolderMenu
+                                    folder={folder}
+                                    onEdit={(action) =>
+                                        setAttachmentEdit({ folder, action })
                                     }
-                                >
-                                    <FolderPlus /> {i18n("New subfolder")}
-                                </DropdownMenuItem>
+                                />
+                            ) : (
+                                <>
+                                    {canCreateSubfolder(
+                                        folder,
+                                        canCurate,
+                                        isOrgAccount,
+                                    ) && (
+                                        <DropdownMenuItem
+                                            onSelect={() =>
+                                                onSettings(folder, "create")
+                                            }
+                                        >
+                                            <FolderPlus />{" "}
+                                            {i18n("New subfolder")}
+                                        </DropdownMenuItem>
+                                    )}
+                                    {sharingEnabled &&
+                                        folder.scope === "personal" &&
+                                        folder.kind === "custom" && (
+                                            <DropdownMenuItem
+                                                onSelect={() =>
+                                                    setSharingFolder(folder)
+                                                }
+                                            >
+                                                <UserPlus className="text-person-share" />
+                                                {i18n("Share folder…")}
+                                            </DropdownMenuItem>
+                                        )}
+                                    <DropdownMenuItem
+                                        onSelect={() => onSettings(folder)}
+                                    >
+                                        <Settings /> {i18n("Folder settings")}
+                                    </DropdownMenuItem>
+                                </>
                             )}
-                            <DropdownMenuItem
-                                onSelect={() => onSettings(folder)}
-                            >
-                                <Settings /> {i18n("Folder settings")}
-                            </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
@@ -584,118 +650,154 @@ export function FolderTree({
     };
 
     return (
-        <Card
-            hasNoPadding
-            className="flex h-full min-h-0 flex-col overflow-hidden"
-        >
-            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-                <div className="flex items-center gap-1 border-b p-2">
-                    <div className="relative min-w-0 flex-1">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={query}
-                            onChange={(event) => setQuery(event.target.value)}
-                            placeholder={i18n("Find a folder")}
-                            aria-label={i18n("Search folders")}
-                            className="h-8 pl-8 pr-8 text-xs"
-                        />
-                        {!query && (
-                            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                                {isMac ? "⌘K" : "Ctrl K"}
-                            </kbd>
-                        )}
-                        {query && (
-                            <button
-                                type="button"
-                                onClick={() => setQuery("")}
-                                aria-label={i18n("Clear search")}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                            >
-                                <X className="size-4" />
-                            </button>
+        <>
+            {sharingFolder && (
+                <PersonShareDialog
+                    itemId={sharingFolder.id}
+                    title={sharingFolder.name}
+                    kind="folder"
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setSharingFolder(null);
+                    }}
+                />
+            )}
+            {attachmentEdit?.folder.receivedFolder && (
+                <ReceivedFolderDialog
+                    key={`${attachmentEdit.folder.id}:${attachmentEdit.action}`}
+                    shareId={attachmentEdit.folder.receivedFolder.shareId}
+                    version={attachmentEdit.folder.receivedFolder.shareVersion}
+                    name={attachmentEdit.folder.name}
+                    ownerName={attachmentEdit.folder.receivedFolder.ownerName}
+                    parentId={attachmentEdit.folder.parentId}
+                    action={attachmentEdit.action}
+                    folders={folders}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setAttachmentEdit(null);
+                    }}
+                />
+            )}
+            <Card
+                hasNoPadding
+                className="flex h-full min-h-0 flex-col overflow-hidden"
+            >
+                <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                    <div className="flex items-center gap-1 border-b p-2">
+                        <div className="relative min-w-0 flex-1">
+                            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={query}
+                                onChange={(event) =>
+                                    setQuery(event.target.value)
+                                }
+                                placeholder={i18n("Find a folder")}
+                                aria-label={i18n("Search folders")}
+                                className="h-8 pl-8 pr-8 text-xs"
+                            />
+                            {!query && (
+                                <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                                    {isMac ? "⌘K" : "Ctrl K"}
+                                </kbd>
+                            )}
+                            {query && (
+                                <button
+                                    type="button"
+                                    onClick={() => setQuery("")}
+                                    aria-label={i18n("Clear search")}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                                >
+                                    <X className="size-4" />
+                                </button>
+                            )}
+                        </div>
+                        {onCollapse && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        aria-label={i18n("Hide folders")}
+                                        onClick={onCollapse}
+                                    >
+                                        <PanelLeftClose className="size-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {i18n("Hide folders")}
+                                </TooltipContent>
+                            </Tooltip>
                         )}
                     </div>
-                    {onCollapse && (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={i18n("Hide folders")}
-                                    onClick={onCollapse}
-                                >
-                                    <PanelLeftClose className="size-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {i18n("Hide folders")}
-                            </TooltipContent>
-                        </Tooltip>
-                    )}
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-1">
-                    <Button
-                        variant="ghost"
-                        className="w-full justify-start gap-2 text-sm"
-                        aria-current={
-                            !selectedFolderId ? "location" : undefined
-                        }
-                        onClick={onRecent}
-                    >
-                        <History className="size-4" />
-                        {i18n("Recent")}
-                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                            {recentCount ??
-                                recordings.filter((item) => item.view !== "org")
-                                    .length}
-                        </span>
-                    </Button>
-                    {!query.trim() && recentFolders.length > 0 && (
-                        <div className="border-b pb-2">
-                            <p className="px-2 py-2 text-xs text-muted-foreground">
-                                {i18n("Recently used")}
-                            </p>
-                            {recentFolders.map((folder) => (
-                                <button
-                                    key={folder.id}
-                                    type="button"
-                                    onClick={() => onSelectFolder(folder)}
-                                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent"
-                                >
-                                    {folder.scope === "org" ? (
-                                        <Users className="size-4 text-organization" />
-                                    ) : (
-                                        <Folder className="size-4 text-primary" />
-                                    )}
-                                    <span className="truncate">
-                                        {folderLabel(folder)}
-                                    </span>
-                                    <span className="ml-auto text-xs text-muted-foreground">
-                                        {countByFolder.get(folder.id) ?? 0}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                    {renderLevel(childrenByParent.get(null) ?? [], 0, "roots")}
-                    {onNewFolder && (
+                    <div className="min-h-0 flex-1 overflow-y-auto p-1">
                         <Button
                             variant="ghost"
-                            size="sm"
-                            className="mt-2 w-full justify-start"
-                            onClick={onNewFolder}
+                            className="w-full justify-start gap-2 text-sm"
+                            aria-current={
+                                !selectedFolderId ? "location" : undefined
+                            }
+                            onClick={onRecent}
                         >
-                            <FolderPlus className="size-4" />
-                            {i18n("New folder")}
+                            <History className="size-4" />
+                            {i18n("Recent")}
+                            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                {recentCount ??
+                                    recordings.filter(
+                                        (item) => item.view !== "org",
+                                    ).length}
+                            </span>
                         </Button>
-                    )}
-                    {matchingIds?.size === 0 && (
-                        <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                            {i18n("No folders match your search.")}
-                        </p>
-                    )}
-                </div>
-            </CardContent>
-        </Card>
+                        {!query.trim() && recentFolders.length > 0 && (
+                            <div className="border-b pb-2">
+                                <p className="px-2 py-2 text-xs text-muted-foreground">
+                                    {i18n("Recently used")}
+                                </p>
+                                {recentFolders.map((folder) => (
+                                    <button
+                                        key={folder.id}
+                                        type="button"
+                                        onClick={() => onSelectFolder(folder)}
+                                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent"
+                                    >
+                                        {folder.scope === "org" ? (
+                                            <Users className="size-4 text-organization" />
+                                        ) : (
+                                            <SharedFolderIcon folder={folder} />
+                                        )}
+                                        <span className="truncate">
+                                            {folderLabel(folder)}
+                                        </span>
+                                        <span className="ml-auto text-xs text-muted-foreground">
+                                            {countByFolder.get(folder.id) ?? 0}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        {renderLevel(
+                            childrenByParent.get(null) ?? [],
+                            0,
+                            "roots",
+                        )}
+                        {onNewFolder && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="mt-2 w-full justify-start"
+                                onClick={onNewFolder}
+                            >
+                                <FolderPlus className="size-4" />
+                                {i18n("New folder")}
+                            </Button>
+                        )}
+                        {matchingIds?.size === 0 && (
+                            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                                {i18n("No folders match your search.")}
+                            </p>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+        </>
     );
 }

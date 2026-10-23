@@ -1,15 +1,15 @@
 ---
 title: Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
 date: 2026-10-07
-updated: 2026-10-22 16:00
-status: accepted
+updated: 2026-10-23 07:00
+status: superseded
 kind: feature
 issues: []
 prs: [91, 92, 93]
 areas: [src/lib/tasks, src/components/tasks, src/app/(app)/tasks, src/lib/export, src/db/schema.ts]
 supersedes: []
-superseded-by: []
-relates: [2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-07-backup-scope, 2026-10-19-processing-profiles-and-workflow]
+superseded-by: [2026-10-19-processing-profiles-and-workflow, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-person-to-person-sharing]
+relates: [2026-10-07-backup-scope, 2026-10-22-assignee-task-list]
 ---
 
 # Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
@@ -22,6 +22,16 @@ and on a Tasks page beside the Almanac, with "Mine" and "Tracked" tabs and a bad
 private recording is the owner's alone; it reaches anyone else only when its recording is shared
 into the Organization. A task has one assignee and is open, done or dropped. In backups a task
 follows its recording, never its assignee.
+
+**Superseded in part.** [Processing profiles and workflow](2026-10-19-processing-profiles-and-workflow/README.md)
+changed the task lifetime, the candidate source and who edits tasks on a shared item;
+[tasks accepted automatically](2026-10-21-tasks-accepted-automatically.md) removed the review and
+the share gate, and [owner reviews tasks, sharing ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md)
+restored the review without the gate; with [person-to-person sharing](2026-10-22-person-to-person-sharing.md)
+an accepted receiver reads the tasks on a private item and closes or reopens those assigned to their
+login email, without the item being shared into the Organization. *Consequences & open follow-ups*
+lists the changed rules; the rest of this record (proposals from the summary call, one assignee, the
+three states, backups) still holds.
 
 ## Why
 
@@ -143,6 +153,7 @@ else.
 
 ## Consequences & open follow-ups
 
+- [Assignee task list](2026-10-22-assignee-task-list.md): Own tasks now have no item and are author-only; follows, outcome notes and assignee merges extend the task lifecycle.
 - **Revised by [processing profiles and workflow](2026-10-19-processing-profiles-and-workflow/README.md)
   (2026-10-14):** a task now lives while any of its mentions lives, not with one summary; candidates
   come from the folder scope (40, ranked), not from confirmed speakers (30); on a shared item the
@@ -161,10 +172,13 @@ else.
 - [2026-10-07-backup-scope](2026-10-07-backup-scope.md): the personal versus Organization archive
   rules that `tasksForArchive` follows.
 - [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md):
-  generalized this task model across recordings, mail and folders.
+  generalized this task model across recordings, mail and folders, superseding its lifetime,
+  candidate and shared-edit rules.
 - [2026-10-21-tasks-accepted-automatically](2026-10-21-tasks-accepted-automatically.md) and
-  [2026-10-22-owner-reviews-tasks-sharing-ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md):
+  [2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-person-to-person-sharing](2026-10-22-owner-reviews-tasks-sharing-ungated.md):
   the later changes to who reviews and whether sharing waits.
+- [2026-10-22-person-to-person-sharing](2026-10-22-person-to-person-sharing.md): tasks on a private
+  item reach the people it is shared with, not only the Organization.
 
 ## Timeline
 

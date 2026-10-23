@@ -1,8 +1,21 @@
 "use client";
 
-import { ArrowUpRight, RotateCcw, Trash2, Unlink } from "lucide-react";
+import "./task-row.css";
+
+import {
+    ArrowUpRight,
+    Eye,
+    Lock,
+    Mail,
+    MessageSquare,
+    Mic,
+    RotateCcw,
+    Trash2,
+    Unlink,
+} from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PlayAtButton } from "@/components/playback/play-at-button";
 import {
@@ -10,8 +23,14 @@ import {
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
+import {
+    announceTasksChanged,
+    setTaskFollow,
+    type TaskMergeOptions,
+} from "@/components/tasks/task-api";
 import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
+import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import {
     Tooltip,
@@ -22,6 +41,7 @@ import {
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
 import { formatClock } from "@/lib/topics/timeline";
 import { cn } from "@/lib/utils";
+import type { RecordingFolder } from "@/types/folder";
 
 /**
  * An accepted task as the Tasks page lists it, and its recording too: done
@@ -39,6 +59,8 @@ export function TaskRow({
     onChange,
     onMerge,
     onUndoMatch,
+    onFollow,
+    folders = [],
 }: {
     task: TaskView;
     /** The recording it came from, on the Tasks page. */
@@ -52,16 +74,34 @@ export function TaskRow({
     onChange: TaskRowChange;
     onMerge?: (
         targetTaskId: string,
+        options?: TaskMergeOptions,
     ) => Promise<{ ownerNotified?: boolean } | boolean>;
     onUndoMatch?: () => void;
+    onFollow?: () => void;
+    folders?: RecordingFolder[];
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
+    const [noteOpen, setNoteOpen] = useState(false);
+    const noteInput = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => {
+        if (noteOpen) noteInput.current?.focus();
+    }, [noteOpen]);
+    const [noteDraft, setNoteDraft] = useState(task.note ?? "");
+    const [following, setFollowing] = useState(task.following);
+    useEffect(() => setFollowing(task.following), [task.following]);
+    useEffect(() => setNoteDraft(task.note ?? ""), [task.note]);
+    const own = task.source === "personal";
+    const pageRow = recording !== undefined || evidence !== undefined || own;
     const done = task.status === "done";
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
     let closeReason: string | null = null;
-    if (!task.canClose && !dropped) {
+    if (task.receivedOwnerName && !task.canClose && !dropped) {
+        closeReason = i18n("Only {owner} can edit this task.", {
+            owner: task.receivedOwnerName,
+        });
+    } else if (!task.canClose && !dropped) {
         if (!task.assignee) {
             closeReason = i18n(
                 "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
@@ -100,13 +140,14 @@ export function TaskRow({
                 if (!task.canClose || dropped) return;
                 const status = event.target.checked ? "done" : "open";
                 onChange({ status }, { status });
+                if (status === "done") setNoteOpen(true);
             }}
             aria-label={i18n("Done")}
         />
     );
 
     return (
-        <li className="group flex items-start gap-3 p-3 text-sm">
+        <li className="task-row group flex items-start gap-3 p-3 text-sm">
             {closeReason ? (
                 <TooltipProvider>
                     <Tooltip>
@@ -132,6 +173,7 @@ export function TaskRow({
                 ) : (
                     <p
                         className={cn(
+                            "whitespace-pre-wrap",
                             (done || dropped) &&
                                 "text-muted-foreground line-through",
                         )}
@@ -139,29 +181,109 @@ export function TaskRow({
                         {task.text}
                     </p>
                 )}
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {showAssignee && (
-                        <AssigneePicker
-                            value={task.assignee}
-                            hint={task.assigneeHint}
-                            check={task.assigneeCheck}
-                            speakers={speakers}
-                            organizationOnly={organizationOnly}
-                            disabled={!editable}
-                            onChange={(person) =>
-                                onChange(
-                                    {
-                                        assigneePersonId:
-                                            person?.personId ?? null,
-                                    },
-                                    {
-                                        assignee: person,
-                                        assigneeHint: null,
-                                        assigneeCheck: false,
-                                    },
-                                )
-                            }
-                        />
+                {task.receivedOwnerName && !editable && (
+                    <p className="text-xs text-muted-foreground">
+                        {i18n("Only {owner} can edit this task.", {
+                            owner: task.receivedOwnerName,
+                        })}
+                    </p>
+                )}
+                {pageRow && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        {own ? (
+                            <span>
+                                {i18n("Own task")} ·{" "}
+                                {format.dateTime(new Date(task.createdAt), {
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                })}
+                            </span>
+                        ) : (
+                            <>
+                                {" "}
+                                {evidence && (
+                                    <Link
+                                        href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view !== "private" ? `&view=${evidence.view}` : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                        className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 hover:text-primary"
+                                    >
+                                        {evidence.kind === "mail" ? (
+                                            <Mail className="size-3" />
+                                        ) : (
+                                            <Mic className="size-3" />
+                                        )}
+                                        <ArrowUpRight
+                                            className="mr-1 inline size-3"
+                                            aria-hidden="true"
+                                        />
+                                        <span>{evidence.title}</span>
+                                        {" · "}
+                                        <span>
+                                            {format.dateTime(
+                                                new Date(evidence.startTime),
+                                                {
+                                                    day: "numeric",
+                                                    month: "short",
+                                                    year: "numeric",
+                                                },
+                                            )}
+                                        </span>
+                                    </Link>
+                                )}
+                            </>
+                        )}
+                        {own && task.canEdit && (
+                            <>
+                                <span aria-hidden>·</span>
+                                <TaskFolderPicker
+                                    folders={folders}
+                                    value={task.folder?.id ?? null}
+                                    fallbackName={task.folder?.name}
+                                    row
+                                    onChange={(folder) =>
+                                        onChange(
+                                            { folderId: folder?.id ?? null },
+                                            { folder },
+                                        )
+                                    }
+                                />
+                            </>
+                        )}
+                        {task.automaticFollow && (
+                            <span>{i18n("from your recording")}</span>
+                        )}
+                    </div>
+                )}
+                <div className="task-row-pills flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {own ? (
+                        <span className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1">
+                            <Lock className="size-3" />
+                            {i18n("Only you")}
+                        </span>
+                    ) : (
+                        showAssignee && (
+                            <AssigneePicker
+                                value={task.assignee}
+                                hint={task.assigneeHint}
+                                check={task.assigneeCheck}
+                                speakers={speakers}
+                                organizationOnly={organizationOnly}
+                                disabled={!editable}
+                                onChange={(person) =>
+                                    onChange(
+                                        {
+                                            assigneePersonId:
+                                                person?.personId ?? null,
+                                        },
+                                        {
+                                            assignee: person,
+                                            assigneeHint: null,
+                                            assigneeCheck: false,
+                                        },
+                                    )
+                                }
+                            />
+                        )
                     )}
                     <DueDateField
                         value={task.dueDate}
@@ -171,28 +293,7 @@ export function TaskRow({
                             onChange({ dueDate }, { dueDate })
                         }
                     />
-                    {evidence && (
-                        <>
-                            <Link
-                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.audioAvailable ? `&playFrom=${task.evidenceStartMs}` : ""}`}
-                                className="truncate hover:text-primary hover:underline"
-                            >
-                                <ArrowUpRight
-                                    className="mr-1 inline size-3"
-                                    aria-hidden="true"
-                                />
-                                {evidence.title}
-                            </Link>
-                            <span>
-                                {format.dateTime(new Date(evidence.startTime), {
-                                    day: "numeric",
-                                    month: "short",
-                                    year: "numeric",
-                                })}
-                            </span>
-                        </>
-                    )}
-                    {!evidence &&
+                    {!pageRow &&
                         task.evidenceItemId === currentItemId &&
                         task.evidenceItemKind === "audio" &&
                         task.evidenceStartMs !== null &&
@@ -205,13 +306,14 @@ export function TaskRow({
                             />
                         ) : (
                             <span
-                                className="tabular-nums"
+                                className="rounded-md border px-2 py-1 tabular-nums"
                                 title={task.quote ?? undefined}
                             >
                                 {formatClock(task.evidenceStartMs)}
                             </span>
                         ))}
-                    {!evidence &&
+                    {!pageRow &&
+                        task.evidenceItemId &&
                         (task.evidenceItemId !== currentItemId ||
                             task.evidenceItemKind === "mail") && (
                             <TaskEvidenceLink
@@ -231,53 +333,158 @@ export function TaskRow({
                             {i18n("Dropped")}
                         </span>
                     )}
-                    {recording &&
-                        task.status === "open" &&
-                        task.canEdit &&
-                        onMerge && (
-                            <MergeTaskPicker
-                                itemId={recording.id}
-                                sourceTaskId={task.id}
-                                onMerge={onMerge}
-                            />
+                    <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
+                        {task.canClose && (
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-1 hover:text-foreground"
+                                onClick={() => setNoteOpen(true)}
+                            >
+                                <MessageSquare className="size-3" />
+                                {i18n("Note")}
+                            </button>
                         )}
-                    {task.canUndoMatch && onUndoMatch && (
-                        <button
-                            type="button"
-                            className="inline-flex items-center gap-1 hover:text-foreground"
-                            onClick={onUndoMatch}
-                        >
-                            <Unlink className="size-3" />
-                            {i18n("Undo match")}
-                        </button>
-                    )}
-                    {task.canEdit && (
-                        <button
-                            type="button"
-                            className={cn(
-                                "ml-auto inline-flex items-center gap-1 hover:text-foreground",
-                                !dropped &&
-                                    "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
+                        {(task.canMerge || task.canEdit) &&
+                            task.status === "open" &&
+                            onMerge && (
+                                <MergeTaskPicker
+                                    itemId={task.recordingId}
+                                    sourceTaskId={task.id}
+                                    taskVersion={task.version}
+                                    inlineTrigger
+                                    onMerge={onMerge}
+                                />
                             )}
-                            onClick={() => {
-                                const status = dropped ? "open" : "dropped";
-                                onChange({ status }, { status });
-                            }}
-                        >
-                            {dropped ? (
-                                <>
-                                    <RotateCcw className="size-3" />
-                                    {i18n("Restore")}
-                                </>
-                            ) : (
-                                <>
-                                    <Trash2 className="size-3" />
-                                    {i18n("Drop")}
-                                </>
-                            )}
-                        </button>
-                    )}
+                        {task.canFollow && !own && (
+                            <button
+                                type="button"
+                                aria-pressed={following}
+                                title={
+                                    following
+                                        ? i18n("Stop following")
+                                        : i18n("Follow")
+                                }
+                                className={cn(
+                                    "inline-flex items-center gap-1 hover:text-foreground",
+                                    following && "task-following text-primary",
+                                )}
+                                onClick={() => {
+                                    const next = !following;
+                                    setFollowing(next);
+                                    void setTaskFollow(task.id, next)
+                                        .then(() => {
+                                            announceTasksChanged();
+                                            onFollow?.();
+                                        })
+                                        .catch(() => {
+                                            setFollowing(!next);
+                                            toast.error(
+                                                i18n("Could not save the task"),
+                                            );
+                                        });
+                                }}
+                            >
+                                <Eye className="size-3" />
+                                {following ? i18n("Following") : i18n("Follow")}
+                            </button>
+                        )}
+                        {task.canUndoMatch && onUndoMatch && (
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-1 hover:text-foreground"
+                                onClick={onUndoMatch}
+                            >
+                                <Unlink className="size-3" />
+                                {i18n("Undo match")}
+                            </button>
+                        )}
+                        {task.canEdit && (
+                            <button
+                                type="button"
+                                className="ml-auto inline-flex items-center gap-1 hover:text-foreground"
+                                onClick={() => {
+                                    const status = dropped ? "open" : "dropped";
+                                    onChange({ status }, { status });
+                                }}
+                            >
+                                {dropped ? (
+                                    <>
+                                        <RotateCcw className="size-3" />
+                                        {i18n("Restore")}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="size-3" />
+                                        {i18n("Drop")}
+                                    </>
+                                )}
+                            </button>
+                        )}
+                    </div>
                 </div>
+                {task.note && !noteOpen && (
+                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
+                        <MessageSquare className="mt-1 size-3 shrink-0" />
+                        <div>
+                            <p className="whitespace-pre-wrap">{task.note}</p>
+                            <p className="text-xs text-muted-foreground">
+                                {task.noteBy?.name ?? i18n("Unknown author")}
+                                {task.noteUpdatedAt && (
+                                    <>
+                                        {" "}
+                                        ·{" "}
+                                        {format.dateTime(
+                                            new Date(task.noteUpdatedAt),
+                                            {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            },
+                                        )}
+                                    </>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                )}
+                {noteOpen && task.canClose && (
+                    <div className="space-y-2">
+                        <textarea
+                            ref={noteInput}
+                            aria-label={i18n("Note")}
+                            maxLength={2000}
+                            value={noteDraft}
+                            onChange={(event) =>
+                                setNoteDraft(event.target.value)
+                            }
+                            className="min-h-20 w-full rounded-md border bg-background p-2"
+                        />
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                                {i18n(
+                                    "One note per task. Everyone who sees the task can read it.",
+                                )}
+                            </span>
+                            <button
+                                type="button"
+                                className="ml-auto"
+                                onClick={() => setNoteOpen(false)}
+                            >
+                                {i18n("Skip")}
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground"
+                                onClick={() => {
+                                    const note = noteDraft.trim() || null;
+                                    onChange({ note }, { note });
+                                    setNoteOpen(false);
+                                }}
+                            >
+                                {i18n("Save note")}
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </li>
     );

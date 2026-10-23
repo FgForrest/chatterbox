@@ -1,7 +1,7 @@
 "use client";
 
 import { Command, defaultFilter } from "cmdk";
-import { Folder, Search, Users } from "lucide-react";
+import { Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,8 @@ import {
     ThemeGroup,
 } from "@/components/dashboard/command-palette-parts";
 import { PaletteSearchResults } from "@/components/dashboard/palette-search-results";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
+
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
@@ -350,7 +352,9 @@ export function CommandPalette({
                                                 "org" ? (
                                                     <Users className="size-4 text-organization" />
                                                 ) : (
-                                                    <Folder className="size-4 text-primary" />
+                                                    <SharedFolderIcon
+                                                        folder={entry.folder}
+                                                    />
                                                 )}
                                                 <span className="cmd-body">
                                                     <span className="cmd-title">
