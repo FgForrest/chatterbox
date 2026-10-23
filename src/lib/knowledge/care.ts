@@ -45,6 +45,8 @@ import { shareFingerprint } from "@/lib/knowledge/share-provenance";
 
 type Executor = Pick<typeof db, "select" | "execute">;
 
+const THIN_IDLE_MS = 120 * 86400000;
+
 /** Read a bounded Organization scan in batches, with no per-record database lookups. */
 export async function detectCareProblems(
     scope: string,
@@ -53,7 +55,7 @@ export async function detectCareProblems(
     const [factGroups, correctionGroups, thin] = await Promise.all([
         conflictingCareFacts(scope, executor),
         conflictingCareCorrections(scope, executor),
-        thinCareRecords(scope, new Date(Date.now() - 120 * 86400000), executor),
+        thinCareRecords(scope, new Date(Date.now() - THIN_IDLE_MS), executor),
     ]);
     const factIds = factGroups.flatMap((group) => group.ids);
     const aliasIds = correctionGroups.flatMap((group) => group.ids);
@@ -392,7 +394,7 @@ export async function fixCareProblem(
             const current = (
                 await thinCareRecords(
                     scope,
-                    new Date(Date.now() - 120 * 86400000),
+                    new Date(Date.now() - THIN_IDLE_MS),
                     tx,
                 )
             ).find((row) => row.id === target.id && row.kind === target.kind);
