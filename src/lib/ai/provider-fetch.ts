@@ -9,6 +9,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import {
     createPinnedLookup,
     type PublicAddress,
+    PublicHostnameResolutionError,
     resolvePublicHostname,
 } from "@/lib/net/public-target";
 import { providerMultipartBody, streamChunks } from "./provider-multipart";
@@ -43,7 +44,14 @@ async function resolveProviderTarget(
             throw new Error("Invalid provider URL");
         }
         return { url, addresses: await resolvePublicHostname(url.hostname) };
-    } catch {
+    } catch (error) {
+        if (error instanceof PublicHostnameResolutionError) {
+            throw new AppError(
+                ErrorCode.SERVICE_UNAVAILABLE,
+                "The AI provider host could not be resolved. Please try again later.",
+                503,
+            );
+        }
         throw new AppError(
             ErrorCode.INVALID_INPUT,
             HOSTED_LOCAL_BASE_URL_MESSAGE,
@@ -144,6 +152,7 @@ export const providerFetch: typeof globalThis.fetch = async (input, init) => {
     const send = url.protocol === "https:" ? httpsRequest : httpRequest;
 
     return new Promise<Response>((resolve, reject) => {
+        let incomingResponse: IncomingMessage | undefined;
         const outgoing = send(
             {
                 protocol: url.protocol,
@@ -157,6 +166,7 @@ export const providerFetch: typeof globalThis.fetch = async (input, init) => {
                 agent: false,
             },
             (incoming) => {
+                incomingResponse = incoming;
                 const status = incoming.statusCode ?? 502;
                 if (status >= 300 && status < 400 && status !== 304) {
                     incoming.destroy();
@@ -169,6 +179,15 @@ export const providerFetch: typeof globalThis.fetch = async (input, init) => {
             },
         );
         outgoing.on("error", reject);
+        outgoing.setTimeout(300_000, () => {
+            const error = new AppError(
+                ErrorCode.SERVICE_UNAVAILABLE,
+                "The AI provider connection timed out after 300 seconds of inactivity. Please try again later.",
+                503,
+            );
+            incomingResponse?.destroy(error);
+            outgoing.destroy(error);
+        });
         if (request.body) {
             void pipeline(
                 Readable.from(streamChunks(request.body)),

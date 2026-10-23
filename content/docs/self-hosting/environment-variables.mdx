@@ -54,6 +54,7 @@ header yields an unknown client IP; the app never tries another header.
 With the option unset, rate limits keep the legacy order: `CF-Connecting-IP`,
 `X-Real-IP`, then the first non-empty `X-Forwarded-For` entry. The admin
 allowlist keeps its legacy XFF-first order unless the option is set.
+With `x-forwarded-for`, the last entry is the client only when the trusted proxy is the single hop in front of the app; with several proxies, select a header the last proxy sets, such as `x-real-ip`.
 Existing installations need no changes. To opt in, pass the new variable
 through your app service's `environment:` and set it in `.env`.
 

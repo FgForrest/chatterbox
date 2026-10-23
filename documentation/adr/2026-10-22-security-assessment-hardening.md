@@ -1,7 +1,7 @@
 ---
 title: Hosted providers require public pinned targets, OTP is throttled, admin elevation follows its session, and responses carry security headers
 date: 2026-10-22
-updated: 2026-10-23 01:20
+updated: 2026-10-23 02:33
 status: accepted
 kind: fix
 issues: []
@@ -72,8 +72,10 @@ restrictive CSP; mail HTML was returned as JSON and sanitized into a sandboxed `
 
 **Chosen: Option B in hosted mode only.** Shared hostname, address classification and pinned lookup
 code lives in `src/lib/net/public-target.ts`. Webhook policy, HTTPS requirement, messages and delivery
-semantics stay the same. AI requests use `src/lib/ai/provider-fetch.ts`, including every OpenAI SDK
-client, the models probe, and every native adapter accepting a credential base URL. Gemini's native
+semantics stay the same, except that NAT64 and 6to4 addresses now use their embedded IPv4 address
+for classification and deprecated IPv6 site-local addresses are refused. AI requests use
+`src/lib/ai/provider-fetch.ts`, including every OpenAI SDK client, the models probe, and every native
+adapter accepting a credential base URL. Gemini's native
 adapter uses a fixed vendor endpoint and never reads a credential base URL. Instance embedding,
 Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remain unguarded.
 
@@ -111,9 +113,22 @@ Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remai
 
 - Provider saves and probes await `validateAiBaseUrl`. Hosted checks all DNS answers, rejecting
   private, link-local, metadata, loopback, IPv4-mapped private addresses and local hostname suffixes.
+  NAT64 `64:ff9b::/96` and 6to4 `2002::/16` use their embedded IPv4 address; `fec0::/10` is private.
+- DNS resolution failures carry a distinct error from `resolvePublicHostname` and map to retryable
+  `SERVICE_UNAVAILABLE`/503 for provider requests. Policy refusals remain `INVALID_INPUT`/400.
+  Webhooks keep their existing messages and classification: DNS failures retry, policy refusals do not.
+- `mapErrorToAppError` preserves an `AppError` found in a cause chain, including an OpenAI SDK
+  `APIConnectionError`. Summary and Learn application retries therefore stop on a policy refusal.
+  The SDK retries fetch exceptions unconditionally with its default `maxRetries: 2`: personal
+  credentials can cost three DNS checks but no HTTP calls. Organization credentials and the Learn
+  bridge already set `maxRetries: 0`. Disabling all SDK retries would also remove transient retries.
 - Hosted provider HTTP uses Node HTTP/HTTPS with the shared pinned lookup and no socket reuse.
   Original hostname, Host header and TLS server name remain intact. Redirects are refused.
+  A **300,000 ms idle socket timeout** destroys stalled requests and responses with retryable
+  `SERVICE_UNAVAILABLE`, including when response headers arrived before the stall.
   Self-host delegates directly to native fetch with the original input and options.
+- A private `LEARN_BRIDGE_URL` is self-host only: hosted credentials cannot save that private base
+  URL; a public bridge URL would pass the same hosted provider policy.
 - Hosted multipart bodies use `src/lib/ai/provider-multipart.ts` before constructing `Request`:
   Bun eagerly materializes `FormData` there. The encoder streams file bodies, escapes field and
   file names, normalizes text newlines and computes Content-Length without buffering the upload.
@@ -121,6 +136,7 @@ Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remai
   per 10 minutes** across users. Verify: **10 per user per 10 minutes**. Email syntax is validated
   before Plaud. Bucket keys are HMACed by the existing store. Refusals use `RATE_LIMITED`, 429 and
   `Retry-After` through `AppError`/`apiHandler`. The connect UI already toasts the readable error.
+  The user bucket is consumed first so an already-capped user cannot keep draining a target's bucket.
 - `RATE_LIMIT_CLIENT_IP_HEADER` is optional. With proxy trust enabled, rate limits read only that
   header; the admin allowlist also uses it. Selected XFF uses its **last** entry, including treating
   an empty final entry as missing. No fallback when set. Unset preserves each consumer's previous
@@ -128,7 +144,9 @@ Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remai
 - The admin cookie signs user id, **session row id** and issued-at, parsed with one split. It never
   contains a session token. Another session of the same user requires reauth for pages and is
   refused for API reads and mutations. Old elevation cookies require one new password confirmation.
-- Folder synchronization now awaits the exportable-folder ownership check before enqueueing.
+- Folder synchronization now awaits an ownership-only check before enqueueing, returning 404 for
+  a folder the caller does not own. The organization account can still queue its own Organization
+  folder while the Organization is read-only; export-configuration writability rules do not apply.
   Export creation and listing both return 404 for another user's private folder. Erasure keeps
   its existing awaited access check before every side effect.
 
@@ -153,6 +171,22 @@ Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remai
 | XSS and injection changes | No findings were reported; no targeted change was justified by this review. | Concrete evidence identifies an affected path. |
 
 ## Verification
+
+- Review regression coverage under Node **22.22.2** first reproduced policy refusals as
+  `UPSTREAM_BAD_RESPONSE`/502 through the real SDK in summary and both Learn clients. After cause
+  preservation, `263-provider-policy-errors.test.ts` has **5 tests** verifying permanent 400 refusals and one
+  application attempt, while documenting the SDK's three DNS checks for personal credentials.
+- `provider-fetch.test.ts`: **31 tests**, including **8 new cases** distinguishing DNS failures
+  from private-target refusals through both the transport and the native ElevenLabs adapter.
+- `263-public-target-ipv6.test.ts`: **28 tests** cover NAT64, 6to4 and site-local classification,
+  dotted and hex IPv4 forms, mixed DNS answers, and unchanged webhook failure messages/retryability.
+- `263-provider-idle-timeout.test.ts` uses real local sockets and shortens only the test socket
+  timeout: **3 tests** cover stalls before headers and during plain and gzip response bodies.
+- `org-exports.integration.test.ts`: **5 tests**, including Organization folder synchronization
+  in writable and read-only mode, plus a non-owner member's 404 without a queued job.
+- The focused review run passed **72 tests in 5 files**, with **zero failures or skips**.
+- The post-review affected-test run passed **4,486 tests**, with **87 skipped** and **zero failures**
+  across **409 files** (**400 passed, 9 skipped**) under Node **22.22.2**, in **1,612.09 seconds**.
 
 - `src/tests/regressions/pentest-security-headers.test.ts`: **25 tests** call the proxy directly
   and invoke both mail handlers with mocked authorization/storage. They cover runtime HTTPS versus
@@ -212,6 +246,10 @@ Reacher, OIDC, Keycloak and Mynah endpoints are operator configuration and remai
   OTP throttling affects only the sender and target buckets until the ten-minute window resets.
   A wrong optional IP-header choice changes rate-limit identity and can refuse admin allowlist
   access; correcting or unsetting it restores prior behavior in both modes.
+- A signed-in member can keep one email address at its OTP limit by renewing the cap every window.
+  This is accepted because sign-in is required, the global target bucket protects the victim's
+  inbox from OTP spam, and the connector and token paste still connect without OTP. Consuming the
+  user bucket first prevents an already-capped member from draining another target's allowance.
 
 ## Related work
 

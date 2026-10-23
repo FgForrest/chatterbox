@@ -131,6 +131,26 @@ function filesystemTargetPath(targetPath: string): string {
     }
 }
 
+/** Require a folder owned by the caller, regardless of its tree or writability. */
+export async function assertOwnedFolder(
+    userId: string,
+    folderId: string,
+): Promise<void> {
+    const [folder] = await db
+        .select({ id: recordingFolders.id })
+        .from(recordingFolders)
+        .where(
+            and(
+                eq(recordingFolders.userId, userId),
+                eq(recordingFolders.id, folderId),
+            ),
+        )
+        .limit(1);
+    if (!folder) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
+    }
+}
+
 /**
  * Exports are configured in Private, or by the organization account in the
  * Organization tree, which is its own.

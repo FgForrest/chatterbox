@@ -233,8 +233,12 @@ function attachErrorId(app: AppError): string {
 }
 
 export function mapErrorToAppError(error: unknown): AppError {
-    if (error instanceof AppError) {
-        return error;
+    const seen = new Set<object>();
+    let cause = error;
+    while (cause !== null && typeof cause === "object" && !seen.has(cause)) {
+        if (cause instanceof AppError) return cause;
+        seen.add(cause);
+        cause = "cause" in cause ? cause.cause : undefined;
     }
 
     // Errors from any OpenAI-compatible provider (summary, title, etc.).

@@ -26,6 +26,7 @@ import {
     vi,
 } from "vitest";
 import {
+    asyncJobs,
     folderExportMaterializations,
     recordingFolders,
     transcriptions,
@@ -37,42 +38,45 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv, audioOwners } = vi.hoisted(() => {
-    const ref: { current: Record<PropertyKey, unknown> | null } = {
-        current: null,
-    };
-    const proxy = new Proxy(
-        {},
-        {
-            get: (_target, property: string | symbol) => {
-                const current = ref.current;
-                if (!current) {
-                    throw new Error("test database was not initialized");
-                }
-                const value = current[property];
-                return typeof value === "function"
-                    ? value.bind(current)
-                    : value;
+const { dbProxy, dbRef, mockEnv, audioOwners, sessionState } = vi.hoisted(
+    () => {
+        const ref: { current: Record<PropertyKey, unknown> | null } = {
+            current: null,
+        };
+        const proxy = new Proxy(
+            {},
+            {
+                get: (_target, property: string | symbol) => {
+                    const current = ref.current;
+                    if (!current) {
+                        throw new Error("test database was not initialized");
+                    }
+                    const value = current[property];
+                    return typeof value === "function"
+                        ? value.bind(current)
+                        : value;
+                },
             },
-        },
-    );
-    return {
-        dbProxy: proxy,
-        dbRef: ref,
-        audioOwners: [] as string[],
-        mockEnv: {
-            IS_HOSTED: false,
-            SELF_HOST_MODE: "shared",
-            ORG_ACCOUNT_EMAIL: "org@example.test",
-            ORG_ACCOUNT_PASSWORD: "organization-password",
-            FILESYSTEM_EXPORT_ROOT: "",
-            ENCRYPTION_KEY:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
-            DATABASE_URL: "postgres://unused",
-        },
-    };
-});
+        );
+        return {
+            dbProxy: proxy,
+            dbRef: ref,
+            audioOwners: [] as string[],
+            sessionState: { userId: "" },
+            mockEnv: {
+                IS_HOSTED: false,
+                SELF_HOST_MODE: "shared",
+                ORG_ACCOUNT_EMAIL: "org@example.test",
+                ORG_ACCOUNT_PASSWORD: "organization-password",
+                FILESYSTEM_EXPORT_ROOT: "",
+                ENCRYPTION_KEY:
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+                DATABASE_URL: "postgres://unused",
+            },
+        };
+    },
+);
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
@@ -81,6 +85,9 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/auth-server", () => ({
+    requireApiSession: async () => ({ user: { id: sessionState.userId } }),
+}));
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn(async (ownerId: string) => ({
         downloadStream: vi.fn(async () => {
@@ -90,6 +97,7 @@ vi.mock("@/lib/storage/factory", () => ({
     })),
 }));
 
+import { POST as synchronize } from "@/app/api/folders/[id]/synchronize/route";
 import { encryptText } from "@/lib/encryption/fields";
 import { createFolderExport } from "@/lib/folder-exports/configurations";
 import { materializeFolderExport } from "@/lib/folder-exports/execution";
@@ -137,6 +145,8 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
     }, 30_000);
 
     beforeEach(async () => {
+        mockEnv.ORG_ACCOUNT_PASSWORD = "organization-password";
+        sessionState.userId = "";
         mockEnv.FILESYSTEM_EXPORT_ROOT = mkdtempSync(
             path.join(tmpdir(), "riffado-org-export-"),
         );
@@ -200,6 +210,50 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
         await expect(
             createFolderExport(MEMBER, orgRootId, selection),
         ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it.each([
+        false,
+        true,
+    ])("queues synchronization of the organization's own folder (read-only=%s)", async (readOnly) => {
+        sessionState.userId = orgUserId;
+        if (readOnly) mockEnv.ORG_ACCOUNT_PASSWORD = "";
+        const response = await synchronize(
+            new Request(
+                `https://app.example.com/api/folders/${orgRootId}/synchronize`,
+                { method: "POST" },
+            ),
+            { params: Promise.resolve({ id: orgRootId }) },
+        );
+        expect(response.status).toBe(202);
+        const body = await response.json();
+        expect(body.created).toBe(true);
+        const jobs = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, body.jobId));
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({
+            userId: orgUserId,
+            kind: "folder-export-reconcile",
+            status: "pending",
+            payload: { folderId: orgRootId },
+        });
+    });
+
+    it("returns 404 without queueing when a member synchronizes an Organization folder they do not own", async () => {
+        sessionState.userId = MEMBER;
+        const before = await db().select().from(asyncJobs);
+        const response = await synchronize(
+            new Request(
+                `https://app.example.com/api/folders/${orgRootId}/synchronize`,
+                { method: "POST" },
+            ),
+            { params: Promise.resolve({ id: orgRootId }) },
+        );
+        expect(response.status).toBe(404);
+        expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
+        expect(await db().select().from(asyncJobs)).toEqual(before);
     });
 
     it("writes the shared recordings' Organization view, audio from the owner's storage", async () => {

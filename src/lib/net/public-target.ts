@@ -6,10 +6,20 @@ const BIG_ONE = BigInt(1);
 const BIG_16 = BigInt(16);
 const IPV6_UNIQUE_LOCAL_PREFIX = BigInt(0x7e);
 const IPV6_LINK_LOCAL_PREFIX = BigInt(0x3fa);
+const IPV6_SITE_LOCAL_PREFIX = BigInt(0x3fb);
+const IPV6_NAT64_PREFIX = BigInt("0x64ff9b0000000000000000");
+const IPV6_6TO4_PREFIX = BigInt(0x2002);
 const IPV6_MULTICAST_PREFIX = BigInt(0xff);
 const IPV6_DOCUMENTATION_PREFIX = BigInt(0x20010db8);
 
 export type PublicAddress = { address: string; family: 4 | 6 };
+
+export class PublicHostnameResolutionError extends Error {
+    constructor(label: string) {
+        super(`${label} host could not be resolved`);
+        this.name = "PublicHostnameResolutionError";
+    }
+}
 
 function normalizedHostname(hostname: string): string {
     const lower = hostname.toLowerCase().replace(/\.$/, "");
@@ -89,7 +99,12 @@ function mappedIpv4FromIpv6(address: string): string | null {
 }
 
 function ipv6ToBigInt(address: string): bigint | null {
-    if (address.includes(".")) return null;
+    if (address.includes(".")) {
+        const lastColon = address.lastIndexOf(":");
+        const parts = parseIpv4(address.slice(lastColon + 1));
+        if (!parts) return null;
+        address = `${address.slice(0, lastColon + 1)}${((parts[0] << 8) | parts[1]).toString(16)}:${((parts[2] << 8) | parts[3]).toString(16)}`;
+    }
 
     const parts = address.split("::");
     if (parts.length > 2) return null;
@@ -119,13 +134,27 @@ function ipv6ToBigInt(address: string): bigint | null {
 
 function isPrivateIpv6(address: string): boolean {
     const normalized = address.toLowerCase().split("%", 1)[0];
-    const mappedIpv4 = mappedIpv4FromIpv6(normalized);
-
-    if (mappedIpv4) {
-        return isPrivateIpv4(mappedIpv4);
-    }
     const ip = ipv6ToBigInt(normalized);
     if (ip === null) return true;
+    if (ip >> BigInt(118) === IPV6_SITE_LOCAL_PREFIX) return true;
+
+    const embeddedIpv4 =
+        ip >> BigInt(32) === IPV6_NAT64_PREFIX
+            ? ip & BigInt(0xffffffff)
+            : ip >> BigInt(112) === IPV6_6TO4_PREFIX
+              ? (ip >> BigInt(80)) & BigInt(0xffffffff)
+              : null;
+    if (embeddedIpv4 !== null) {
+        return isPrivateIpv4(
+            [24, 16, 8, 0]
+                .map((shift) =>
+                    Number((embeddedIpv4 >> BigInt(shift)) & BigInt(0xff)),
+                )
+                .join("."),
+        );
+    }
+    const mappedIpv4 = mappedIpv4FromIpv6(normalized);
+    if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
 
     return (
         ip === BIG_ZERO ||
@@ -181,11 +210,11 @@ export async function resolvePublicHostname(
             verbatim: true,
         } as const);
     } catch {
-        throw new Error(`${label} host could not be resolved`);
+        throw new PublicHostnameResolutionError(label);
     }
 
     if (addresses.length === 0) {
-        throw new Error(`${label} host could not be resolved`);
+        throw new PublicHostnameResolutionError(label);
     }
     if (addresses.some((address) => isPrivateIpAddress(address.address))) {
         throw new Error(`${label} must resolve to public IP addresses`);

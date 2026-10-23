@@ -12,12 +12,17 @@ const { lookup, transport } = vi.hoisted(() => ({
 vi.mock("node:dns/promises", () => ({ lookup }));
 vi.mock("node:http", () => ({ request: transport }));
 vi.mock("node:https", () => ({ request: transport }));
-vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: true } }));
+vi.mock("@/lib/env", () => ({
+    env: { IS_HOSTED: true, WHISPER_REQUEST_TIMEOUT_MS: 60_000 },
+}));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
 import { providerFetch } from "@/lib/ai/provider-fetch";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { env } from "@/lib/env";
+import { ErrorCode, mapErrorToAppError } from "@/lib/errors";
+import { isRetryableError } from "@/lib/jobs/retryable";
+import { elevenLabsTranscribe } from "@/lib/transcription/elevenlabs-transcribe";
 
 let status: number;
 let responseBody: Buffer;
@@ -41,22 +46,25 @@ beforeEach(() => {
                 options: RequestOptions,
                 receive: (response: IncomingMessage) => void,
             ) => {
-                const outgoing = new Writable({
-                    write(chunk: Buffer, _encoding, callback) {
-                        sent.push(Buffer.from(chunk));
-                        callback();
-                    },
-                    final(callback) {
-                        const incoming = Object.assign(new PassThrough(), {
-                            statusCode: status,
-                            statusMessage: "OK",
-                            rawHeaders: responseHeaders,
-                        });
-                        receive(incoming as unknown as IncomingMessage);
-                        incoming.end(responseBody);
-                        callback();
-                    },
-                });
+                const outgoing = Object.assign(
+                    new Writable({
+                        write(chunk: Buffer, _encoding, callback) {
+                            sent.push(Buffer.from(chunk));
+                            callback();
+                        },
+                        final(callback) {
+                            const incoming = Object.assign(new PassThrough(), {
+                                statusCode: status,
+                                statusMessage: "OK",
+                                rawHeaders: responseHeaders,
+                            });
+                            receive(incoming as unknown as IncomingMessage);
+                            incoming.end(responseBody);
+                            callback();
+                        },
+                    }),
+                    { setTimeout: vi.fn() },
+                );
                 options.signal?.addEventListener(
                     "abort",
                     () => outgoing.destroy(new Error("aborted")),
@@ -69,6 +77,52 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("hosted provider fetch", () => {
+    const requestPaths = {
+        providerFetch: () => providerFetch("https://api.example.com/v1/models"),
+        elevenLabs: () =>
+            elevenLabsTranscribe({
+                apiKey: "test-key",
+                model: "scribe_v2",
+                file: new File(["audio"], "sample.wav"),
+                baseUrl: "https://api.example.com",
+            }),
+    };
+
+    describe.each(
+        Object.entries(requestPaths),
+    )("%s error classification", (_name, run) => {
+        it.each([
+            "EAI_AGAIN",
+            "ENOTFOUND",
+            "empty answer",
+        ])("retries DNS failures (%s)", async (code) => {
+            if (code === "empty answer") lookup.mockResolvedValue([]);
+            else
+                lookup.mockRejectedValue(
+                    Object.assign(new Error("DNS failed"), { code }),
+                );
+            const error: unknown = await run().catch((error: unknown) => error);
+            expect(mapErrorToAppError(error)).toMatchObject({
+                code: ErrorCode.SERVICE_UNAVAILABLE,
+                statusCode: 503,
+                message: expect.stringContaining("could not be resolved"),
+            });
+            expect(isRetryableError(error)).toBe(true);
+            expect(transport).not.toHaveBeenCalled();
+        });
+
+        it("does not retry private DNS answers", async () => {
+            lookup.mockResolvedValue([{ address: "10.0.0.1", family: 4 }]);
+            const error: unknown = await run().catch((error: unknown) => error);
+            expect(mapErrorToAppError(error)).toMatchObject({
+                code: ErrorCode.INVALID_INPUT,
+                statusCode: 400,
+            });
+            expect(isRetryableError(error)).toBe(false);
+            expect(transport).not.toHaveBeenCalled();
+        });
+    });
+
     it("rechecks DNS at request time after a successful save", async () => {
         await expect(
             validateAiBaseUrl("https://api.example.com/v1", { isHosted: true }),

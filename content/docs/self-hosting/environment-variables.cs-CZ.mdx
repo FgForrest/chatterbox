@@ -58,7 +58,9 @@ Chybějící či prázdné zvolené záhlaví znamená neznámou IP adresu; jin�
 se nezkouší. Bez této volby limity zachovávají původní pořadí:
 `CF-Connecting-IP`, `X-Real-IP`, potom první neprázdnou položku
 `X-Forwarded-For`. Administrace bez této volby zachovává své původní pořadí
-s XFF na prvním místě. Stávající instalace nevyžadují žádnou změnu.
+s XFF na prvním místě.
+U `x-forwarded-for` je poslední položka klientem pouze tehdy, když je důvěryhodná proxy jediným prostředníkem před aplikací; při více proxy zvolte záhlaví, které nastavuje poslední proxy, například `x-real-ip`.
+Stávající instalace nevyžadují žádnou změnu.
 Pro zapnutí předejte novou proměnnou v `environment:` služby aplikace
 a nastavte ji v `.env`.
 
