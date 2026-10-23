@@ -16,7 +16,7 @@ export async function warnPendingRecordingColumnDrop(
     `;
     if (row?.pending) {
         console.warn(
-            "WARNING: This upgrade removes seven unused recordings columns. Titles, timestamps and retention markers live in chatter_items since migration 0096. Take a database dump before upgrading: rollback to an older image requires restoring that dump as well as the image.",
+            "WARNING: this upgrade removes seven unused recordings columns (their data lives in chatter_items since migration 0096). Images older than this release fail on the migrated database: rolling back needs the database dump taken before this upgrade, not only the old image.",
         );
     }
 }

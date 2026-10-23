@@ -139,7 +139,7 @@ describeWithDatabase("#257 deprecated recording column removal", () => {
             await warnPendingRecordingColumnDrop(database.sql);
             expect(warning).toHaveBeenCalledExactlyOnceWith(
                 expect.stringContaining(
-                    "rollback to an older image requires restoring that dump",
+                    "rolling back needs the database dump taken before this upgrade",
                 ),
             );
         } finally {

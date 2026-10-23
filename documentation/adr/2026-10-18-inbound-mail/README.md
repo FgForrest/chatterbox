@@ -148,7 +148,8 @@ SMTP but making mail a second kind of item. The constraints:
   deprecated columns is done in [#257](https://github.com/FgForrest/chatterbox/issues/257)
   with migration `0141_quiet_deadpool.sql`. Rollback in either deployment mode requires the
   pre-upgrade database dump and old image; older images still select the dropped columns.
-  The production consistency check remains a maintainer-run merge gate.
+  Before the drop, a read-only check on a production deployment found every recording with its
+  item and no value held only by the old columns.
 - **Sender identity trusts everyone who can make the sender's domain sign mail as that person:**
   mail delegates (Google Groups included), applications holding the user's send scope,
   domain-wide-delegated service accounts and the domain's administrators. Any of them can write into
