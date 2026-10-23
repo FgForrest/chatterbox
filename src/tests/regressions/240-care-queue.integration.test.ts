@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
 import unzipper from "unzipper";
@@ -1432,8 +1431,7 @@ withDatabase("Care queue with Organization provenance", () => {
             select problem_key from almanac_duplicate_dismissals
             where user_id = 'org' and problem_key = any(array[lpad('50000',64,'0')])`;
         plans.push(dismissalPlan[0]?.["QUERY PLAN"]);
-        const serialized = JSON.stringify(plans, null, 2);
-        await writeFile("/tmp/almanac-care-query-plans.json", serialized);
+        const serialized = JSON.stringify(plans);
         for (const index of [
             "knowledge_facts_scope_current_updated_idx",
             "knowledge_aliases_scope_heard_updated_idx",
@@ -1464,22 +1462,6 @@ withDatabase("Care queue with Organization provenance", () => {
                     Number(row["Actual Loops"]) > 0,
             ),
         ).toBe(false);
-        const candidateIndexes = allNodes.filter(
-            (row) =>
-                typeof row["Index Name"] === "string" &&
-                /scope_(current|heard|live|problem)/.test(
-                    String(row["Index Name"]),
-                ),
-        );
-        console.info(
-            "Care EXPLAIN candidates",
-            candidateIndexes.map((row) => ({
-                index: row["Index Name"],
-                rows: row["Actual Rows"],
-                loops: row["Actual Loops"],
-                removed: row["Rows Removed by Filter"] ?? 0,
-            })),
-        );
         expect(
             allNodes
                 .filter(
