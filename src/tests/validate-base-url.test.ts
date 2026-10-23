@@ -1,145 +1,146 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     HOSTED_LOCAL_BASE_URL_MESSAGE,
     validateAiBaseUrl,
 } from "@/lib/ai/validate-base-url";
 
 vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: true } }));
+const { lookup } = vi.hoisted(() => ({ lookup: vi.fn() }));
+vi.mock("node:dns/promises", () => ({ lookup }));
+
+const privateUrls = [
+    "http://localhost:1234/v1",
+    "http://LOCALHOST/v1",
+    "https://localhost",
+    "http://localhost.:1234/v1",
+    "http://app.localhost/v1",
+    "http://127.0.0.1:11434/v1",
+    "http://127.1.2.3/v1",
+    "http://0.0.0.0:8080/v1",
+    "http://[::1]:1234/v1",
+    "http://[::]:8080/v1",
+    "http://[::ffff:127.0.0.1]:1234/v1",
+    "http://10.0.0.1/v1",
+    "http://172.16.0.1/v1",
+    "http://172.31.255.254/v1",
+    "http://192.168.1.10/v1",
+    "http://169.254.169.254/v1",
+    "http://[fd00:ec2::254]/v1",
+    "http://[fc00::1]/v1",
+    "http://[fe80::1]/v1",
+    "http://[::ffff:10.0.0.1]/v1",
+    "http://[::ffff:192.168.0.1]/v1",
+    "http://[::ffff:a9fe:a9fe]/v1",
+    "http://service.internal/v1",
+    "http://service.internal./v1",
+    "http://service.local/v1",
+    "http://service.lan/v1",
+    "http://service.home.arpa/v1",
+];
 
 describe("validateAiBaseUrl", () => {
-    describe("self-host (isHosted=false)", () => {
-        test("allows empty / nullish (use default)", () => {
-            expect(validateAiBaseUrl("", { isHosted: false }).ok).toBe(true);
-            expect(validateAiBaseUrl(null, { isHosted: false }).ok).toBe(true);
-            expect(validateAiBaseUrl(undefined, { isHosted: false }).ok).toBe(
-                true,
-            );
-        });
+    beforeEach(() => {
+        vi.mocked(lookup).mockReset();
+        vi.mocked(lookup).mockResolvedValue([
+            { address: "8.8.8.8", family: 4 },
+        ]);
+    });
 
-        test("allows localhost-style URLs (Ollama, LM Studio, docker network)", () => {
-            const urls = [
-                "http://localhost:1234/v1",
-                "http://127.0.0.1:11434/v1",
-                "http://0.0.0.0:8080/v1",
-                "http://[::1]:1234/v1",
-                "http://ollama:11434/v1",
-                "https://api.openai.com/v1",
-            ];
-            for (const u of urls) {
-                expect(
-                    validateAiBaseUrl(u, { isHosted: false }),
-                    `self-host should allow ${u}`,
-                ).toEqual({ ok: true });
-            }
-        });
-
-        test("self-host does not even bother to parse — garbage strings pass", () => {
-            // Self-host trusts the operator; the OpenAI SDK will surface
-            // a helpful error at request time. We don't try to second-guess.
-            expect(validateAiBaseUrl("not a url", { isHosted: false }).ok).toBe(
-                true,
+    it.each([
+        null,
+        undefined,
+        "",
+        "   ",
+    ])("allows default endpoint %j in both modes", async (url) => {
+        for (const isHosted of [false, true])
+            await expect(validateAiBaseUrl(url, { isHosted })).resolves.toEqual(
+                { ok: true },
             );
+        expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it.each(privateUrls)("hosted rejects %s", async (url) => {
+        await expect(
+            validateAiBaseUrl(url, { isHosted: true }),
+        ).resolves.toEqual({
+            ok: false,
+            message: HOSTED_LOCAL_BASE_URL_MESSAGE,
+        });
+        expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ...privateUrls,
+        "http://ollama:11434/v1",
+        "not a url",
+    ])("self-host accepts %s without DNS", async (url) => {
+        await expect(
+            validateAiBaseUrl(url, { isHosted: false }),
+        ).resolves.toEqual({ ok: true });
+        expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        "https://api.example.com/v1",
+        "http://localhostfoo.example.com/v1",
+        "http://my-localhost.example.com/v1",
+        "http://[::ffff:8.8.8.8]/v1",
+        "http://128.0.0.1/v1",
+        "http://172.15.0.1/v1",
+        "http://172.32.0.1/v1",
+    ])("hosted accepts public %s", async (url) => {
+        await expect(
+            validateAiBaseUrl(url, { isHosted: true }),
+        ).resolves.toEqual({ ok: true });
+    });
+
+    it.each([
+        "10.0.0.1",
+        "172.20.0.1",
+        "192.168.1.10",
+        "169.254.169.254",
+        "fd00:ec2::254",
+        "fe80::1",
+        "::ffff:192.168.0.1",
+    ])("rejects a public name with a private DNS answer %s", async (address) => {
+        vi.mocked(lookup).mockResolvedValue([
+            { address: "8.8.8.8", family: 4 },
+            { address, family: address.includes(":") ? 6 : 4 },
+        ]);
+        await expect(
+            validateAiBaseUrl("https://api.example.com/v1", { isHosted: true }),
+        ).resolves.toEqual({
+            ok: false,
+            message: HOSTED_LOCAL_BASE_URL_MESSAGE,
         });
     });
 
-    describe("hosted (isHosted=true)", () => {
-        test("allows empty / nullish (falls back to OpenAI default)", () => {
-            expect(validateAiBaseUrl("", { isHosted: true }).ok).toBe(true);
-            expect(validateAiBaseUrl(null, { isHosted: true }).ok).toBe(true);
-            expect(validateAiBaseUrl(undefined, { isHosted: true }).ok).toBe(
-                true,
-            );
-            // Whitespace-only collapses to empty.
-            expect(validateAiBaseUrl("   ", { isHosted: true }).ok).toBe(true);
+    it("rejects unparseable URLs", async () => {
+        await expect(
+            validateAiBaseUrl("not a url", { isHosted: true }),
+        ).resolves.toMatchObject({
+            ok: false,
+            message: expect.stringContaining("valid absolute URL"),
         });
-
-        test("allows public HTTPS provider URLs", () => {
-            const urls = [
-                "https://api.openai.com/v1",
-                "https://api.groq.com/openai/v1",
-                "https://api.together.xyz/v1",
-                "https://openrouter.ai/api/v1",
-                "https://example.com:8443/v1",
-            ];
-            for (const u of urls) {
-                expect(
-                    validateAiBaseUrl(u, { isHosted: true }),
-                    `hosted should allow ${u}`,
-                ).toEqual({ ok: true });
-            }
-        });
-
-        test("rejects loopback hostnames with the user-facing message", () => {
-            const urls = [
-                "http://localhost:1234/v1",
-                "http://LOCALHOST/v1",
-                "https://localhost",
-                // Trailing-dot variant — equivalent to localhost per DNS.
-                "http://localhost.:1234/v1",
-                // RFC 6761: *.localhost is loopback.
-                "http://app.localhost/v1",
-                "http://api.localhost:1234/v1",
-                "http://127.0.0.1:11434/v1",
-                "http://127.1.2.3/v1",
-                "http://0.0.0.0:8080/v1",
-                "http://[::1]:1234/v1",
-                "http://[::]:8080/v1",
-                // IPv4-mapped IPv6 routed at loopback. WHATWG normalizes
-                // hostname to `[::ffff:7f00:1]` etc.
-                "http://[::ffff:127.0.0.1]:1234/v1",
-                "http://[::ffff:127.1.2.3]/v1",
-            ];
-            for (const u of urls) {
-                const res = validateAiBaseUrl(u, { isHosted: true });
-                expect(res.ok, `hosted should reject ${u}`).toBe(false);
-                if (!res.ok) {
-                    expect(res.message).toBe(HOSTED_LOCAL_BASE_URL_MESSAGE);
-                }
-            }
-        });
-
-        test("rejects unparseable URLs with a parse-error message", () => {
-            const res = validateAiBaseUrl("not a url", { isHosted: true });
-            expect(res.ok).toBe(false);
-            if (!res.ok) {
-                expect(res.message).not.toBe(HOSTED_LOCAL_BASE_URL_MESSAGE);
-                expect(res.message).toMatch(/valid absolute URL/i);
-            }
-        });
-
-        test("does not over-block: hostnames that merely contain 'localhost' or v4-mapped non-loopback", () => {
-            // These should pass — they're not loopback.
-            const urls = [
-                "http://localhostfoo.example.com/v1",
-                "http://my-localhost.example.com/v1",
-                // IPv4-mapped IPv6 to a public address — not loopback.
-                "http://[::ffff:8.8.8.8]/v1",
-                // 128.x.x.x is not in 127/8.
-                "http://128.0.0.1/v1",
-            ];
-            for (const u of urls) {
-                expect(
-                    validateAiBaseUrl(u, { isHosted: true }),
-                    `hosted should allow ${u}`,
-                ).toEqual({ ok: true });
-            }
-        });
-
-        test("does NOT block private/container hostnames (out of scope)", () => {
-            // We only block loopback/unspecified. Container DNS like
-            // `ollama` will fail at request time on hosted infra, which
-            // is acceptable — see plan, full SSRF guard is a separate
-            // piece tracked under hosted-egress hardening.
-            expect(
-                validateAiBaseUrl("http://ollama:11434/v1", {
+    });
+    it.each([
+        "file:///etc/passwd",
+        "ftp://example.com",
+        "https://user:secret@example.com/v1",
+    ])("rejects invalid provider URL %s", async (url) => {
+        await expect(
+            validateAiBaseUrl(url, { isHosted: true }),
+        ).resolves.toMatchObject({ ok: false });
+    });
+    it("rejects unresolved and empty DNS answers", async () => {
+        vi.mocked(lookup)
+            .mockRejectedValueOnce(new Error("ENOTFOUND"))
+            .mockResolvedValueOnce([]);
+        for (let i = 0; i < 2; i++)
+            await expect(
+                validateAiBaseUrl("https://missing.example.com/v1", {
                     isHosted: true,
-                }).ok,
-            ).toBe(true);
-            expect(
-                validateAiBaseUrl("http://192.168.1.10/v1", {
-                    isHosted: true,
-                }).ok,
-            ).toBe(true);
-        });
+                }),
+            ).resolves.toMatchObject({ ok: false });
     });
 });

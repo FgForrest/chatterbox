@@ -78,7 +78,7 @@ export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
     }
     const body = parsed.data;
     if (body.baseUrl !== undefined) {
-        const baseUrlCheck = validateAiBaseUrl(body.baseUrl, {
+        const baseUrlCheck = await validateAiBaseUrl(body.baseUrl, {
             isHosted: env.IS_HOSTED,
         });
         if (!baseUrlCheck.ok) {

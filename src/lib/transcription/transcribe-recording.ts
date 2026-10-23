@@ -10,6 +10,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
@@ -882,6 +883,7 @@ async function transcribeRecordingInner(
                 turns = result.turns;
             } else {
                 const openai = new OpenAI({
+                    fetch: providerFetch,
                     apiKey,
                     baseURL: credentials.baseUrl || undefined,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,

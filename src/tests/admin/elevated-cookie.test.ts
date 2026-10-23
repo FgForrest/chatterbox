@@ -21,10 +21,15 @@ describe("elevated cookie", () => {
     });
 
     it("signs and verifies", () => {
-        const cookie = signElevatedCookie("user_abc", 1_700_000_000_000);
+        const cookie = signElevatedCookie(
+            "user_abc",
+            "session_abc",
+            1_700_000_000_000,
+        );
         const p = verifyElevatedCookie(cookie);
         expect(p).not.toBeNull();
         expect(p?.userId).toBe("user_abc");
+        expect(p?.sessionId).toBe("session_abc");
         expect(p?.issuedAt).toBe(1_700_000_000_000);
     });
 
@@ -36,27 +41,49 @@ describe("elevated cookie", () => {
     });
 
     it("rejects tampered MAC", () => {
-        const cookie = signElevatedCookie("user_abc", 1_700_000_000_000);
+        const cookie = signElevatedCookie(
+            "user_abc",
+            "session_abc",
+            1_700_000_000_000,
+        );
         const parts = cookie.split(".");
         // flip a hex char
         const tamperedMac =
-            parts[2][0] === "0"
-                ? `1${parts[2].slice(1)}`
-                : `0${parts[2].slice(1)}`;
-        const tampered = `${parts[0]}.${parts[1]}.${tamperedMac}`;
+            parts[3][0] === "0"
+                ? `1${parts[3].slice(1)}`
+                : `0${parts[3].slice(1)}`;
+        const tampered = `${parts[0]}.${parts[1]}.${parts[2]}.${tamperedMac}`;
         expect(verifyElevatedCookie(tampered)).toBeNull();
     });
 
     it("rejects tampered userId (MAC mismatch)", () => {
-        const cookie = signElevatedCookie("user_abc", 1_700_000_000_000);
+        const cookie = signElevatedCookie(
+            "user_abc",
+            "session_abc",
+            1_700_000_000_000,
+        );
         const parts = cookie.split(".");
-        const tampered = `user_xyz.${parts[1]}.${parts[2]}`;
+        const tampered = `user_xyz.${parts[1]}.${parts[2]}.${parts[3]}`;
         expect(verifyElevatedCookie(tampered)).toBeNull();
+    });
+
+    it("rejects a tampered session row id", () => {
+        const cookie = signElevatedCookie("user_abc", "session_abc");
+        expect(
+            verifyElevatedCookie(cookie.replace("session_abc", "session_xyz")),
+        ).toBeNull();
+    });
+
+    it("rejects the old user-only cookie format", () => {
+        const cookie = signElevatedCookie("user_abc", "session_abc");
+        expect(
+            verifyElevatedCookie(cookie.replace(".session_abc", "")),
+        ).toBeNull();
     });
 
     it("reauth TTL: in-window passes, out-of-window fails", () => {
         const issuedAt = Date.now();
-        const cookie = signElevatedCookie("u", issuedAt);
+        const cookie = signElevatedCookie("u", "session_abc", issuedAt);
         const p = verifyElevatedCookie(cookie);
         if (!p) throw new Error("cookie should verify");
         expect(isWithinReauthTtl(p, issuedAt + 1000)).toBe(true);
@@ -65,7 +92,7 @@ describe("elevated cookie", () => {
 
     it("mutation TTL is tighter than reauth TTL", () => {
         const issuedAt = Date.now();
-        const cookie = signElevatedCookie("u", issuedAt);
+        const cookie = signElevatedCookie("u", "session_abc", issuedAt);
         const p = verifyElevatedCookie(cookie);
         if (!p) throw new Error("cookie should verify");
         // 15 minutes -> mutation expired, reauth still valid

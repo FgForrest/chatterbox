@@ -5,6 +5,7 @@ export const ADMIN_ELEVATED_COOKIE = "riffado_admin_elev";
 
 interface ElevatedPayload {
     userId: string;
+    sessionId: string;
     issuedAt: number;
 }
 
@@ -17,15 +18,19 @@ function secret(): string {
     return s;
 }
 
-function macFor(userId: string, issuedAt: number): string {
+function macFor(userId: string, sessionId: string, issuedAt: number): string {
     return createHmac("sha256", secret())
-        .update(`${userId}.${issuedAt}`)
+        .update(`${userId}.${sessionId}.${issuedAt}`)
         .digest("hex");
 }
 
-export function signElevatedCookie(userId: string, now = Date.now()): string {
-    const mac = macFor(userId, now);
-    return `${userId}.${now}.${mac}`;
+export function signElevatedCookie(
+    userId: string,
+    sessionId: string,
+    now = Date.now(),
+): string {
+    const mac = macFor(userId, sessionId, now);
+    return `${userId}.${sessionId}.${now}.${mac}`;
 }
 
 /** Verify the cookie's structure + HMAC. Expiry is checked separately. */
@@ -34,18 +39,24 @@ export function verifyElevatedCookie(
 ): ElevatedPayload | null {
     if (!raw) return null;
     const parts = raw.split(".");
-    if (parts.length !== 3) return null;
-    const [userId, issuedAtStr, providedMac] = parts;
+    if (parts.length !== 4) return null;
+    const [userId, sessionId, issuedAtStr, providedMac] = parts;
     const issuedAt = Number(issuedAtStr);
-    if (!userId || !Number.isFinite(issuedAt)) return null;
+    if (
+        !userId ||
+        !sessionId ||
+        !Number.isFinite(issuedAt) ||
+        !/^[0-9a-f]{64}$/.test(providedMac)
+    )
+        return null;
 
-    const expectedMac = macFor(userId, issuedAt);
+    const expectedMac = macFor(userId, sessionId, issuedAt);
     const a = Buffer.from(expectedMac, "hex");
     const b = Buffer.from(providedMac, "hex");
     if (a.length !== b.length) return null;
     if (!timingSafeEqual(a, b)) return null;
 
-    return { userId, issuedAt };
+    return { userId, sessionId, issuedAt };
 }
 
 export function isWithinReauthTtl(

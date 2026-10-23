@@ -38,12 +38,25 @@ on production secrets.
 | `RIFFADO_VERSION`                | unset                              | Deprecated for one release. Used only when `CHATTERBOX_VERSION` is unset.                                           |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | When `true`, webhook URLs must be HTTPS and resolve to public IPs. Useful when your instance is exposed to others.  |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | When `true`, trust `X-Forwarded-For` for rate-limit buckets. Only safe behind a reverse proxy that overwrites the header. |
+| `RATE_LIMIT_CLIENT_IP_HEADER` | unset | Read only this header for IP rate limits (requires `RATE_LIMIT_TRUST_PROXY_HEADERS=true`) and the admin IP allowlist. For `x-forwarded-for`, use the last entry. No fallback to another header. |
 | `API_TOKEN_HASH_SECRET`             | falls back to `BETTER_AUTH_SECRET` | At least 32 chars. HMAC key for personal API token hashing. Set independently if you want token-hash rotation without rotating session secrets. |
 
 Setting `RATE_LIMIT_TRUST_PROXY_HEADERS=true` without a proxy that
 overwrites forwarding headers lets clients forge their own IPs and
 defeats rate limiting. If you're not sure your proxy strips/overwrites
 these headers, leave the value unset.
+
+Set `RATE_LIMIT_CLIENT_IP_HEADER=x-real-ip` when your proxy overwrites only
+`X-Real-IP`. Client-supplied `CF-Connecting-IP` and `X-Forwarded-For` then
+have no effect. If you choose `x-forwarded-for`, the app uses its last entry,
+which the trusted proxy must append or overwrite. A missing or empty selected
+header yields an unknown client IP; the app never tries another header.
+With the option unset, rate limits keep the legacy order: `CF-Connecting-IP`,
+`X-Real-IP`, then the first non-empty `X-Forwarded-For` entry. The admin
+allowlist keeps its legacy XFF-first order unless the option is set.
+With `x-forwarded-for`, the last entry is the client only when the trusted proxy is the single hop in front of the app; with several proxies, select a header the last proxy sets, such as `x-real-ip`.
+Existing installations need no changes. To opt in, pass the new variable
+through your app service's `environment:` and set it in `.env`.
 
 To change `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, the production Compose file
 must pass it into the app service. Add

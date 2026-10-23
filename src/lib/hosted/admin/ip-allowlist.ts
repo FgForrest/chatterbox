@@ -1,4 +1,5 @@
-// Fail-closed CIDR allowlist matcher (IPv4 + IPv6, bare-IP = /32 or /128).
+import { env } from "@/lib/env";
+import { configuredClientIp } from "@/lib/net/client-ip";
 
 function ipv4ToInt(ip: string): number | null {
     const parts = ip.split(".");
@@ -149,11 +150,13 @@ export function ipMatchesAllowlist(
 }
 
 /**
- * Client IP from XFF (first entry) or X-Real-IP. Trusts the headers —
- * the operator's proxy MUST replace (not append) inbound XFF. See
- * `warnIfIpAllowlistTrustsXff` startup warning.
+ * Read the selected proxy header, or keep legacy XFF-first precedence.
+ * The proxy must control the selected header; legacy XFF must be replaced.
  */
 export function clientIpFromHeaders(headers: Headers): string | null {
+    if (env.RATE_LIMIT_CLIENT_IP_HEADER) {
+        return configuredClientIp(headers, env.RATE_LIMIT_CLIENT_IP_HEADER);
+    }
     const xff = headers.get("x-forwarded-for");
     if (xff) {
         const first = xff.split(",")[0]?.trim();
@@ -166,6 +169,7 @@ export function clientIpFromHeaders(headers: Headers): string | null {
 
 let warned = false;
 export function warnIfIpAllowlistTrustsXff(allowlist: readonly string[]): void {
+    if (env.RATE_LIMIT_CLIENT_IP_HEADER) return;
     if (warned) return;
     if (allowlist.length === 0) return;
     warned = true;

@@ -1,7 +1,7 @@
 ---
 title: External MCP server in the app, gated by Keycloak client roles from the SSO realm
 date: 2026-10-07
-updated: 2026-10-22 22:30
+updated: 2026-10-23 06:35
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [98]
 areas: [src/app/api/mcp/route.ts, src/lib/mcp, src/app/.well-known/oauth-protected-resource, content/docs/self-hosting/mcp.mdx, e2e/keycloak/riffado-e2e-realm.json]
 supersedes: []
 superseded-by: [2026-10-11-claude-connector-through-sso-realm, 2026-10-14-identity-provider-authorization]
-relates: [2026-10-06-oidc-single-sign-on, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail]
+relates: [2026-10-06-oidc-single-sign-on, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-22-security-assessment-hardening]
 ---
 
 # External MCP server in the app, gated by Keycloak client roles from the SSO realm
@@ -184,6 +184,7 @@ app.
 
 ## Related work
 
+- [Security assessment hardening](2026-10-22-security-assessment-hardening.md): shared client-IP selection and the boundary between operator-configured discovery and user-configured outbound URLs.
 - [2026-10-06-oidc-single-sign-on](2026-10-06-oidc-single-sign-on.md): the realm and the linked
   accounts this server trusts.
 - [2026-10-11-claude-connector-through-sso-realm](2026-10-11-claude-connector-through-sso-realm.md):

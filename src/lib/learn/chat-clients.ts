@@ -9,6 +9,7 @@
 import { OpenAI } from "openai";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import {
     type AiOperation,
     recordChatCompletionUsage,
@@ -64,12 +65,14 @@ export async function learnChatClients(input: {
     }
     const credentials = resolved.credential;
     const openai = new OpenAI({
+        fetch: providerFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
+        fetch: providerFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: 0,

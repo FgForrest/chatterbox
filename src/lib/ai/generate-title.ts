@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -99,6 +100,7 @@ export async function generateTitleFromTranscription(
 
         // Create OpenAI client
         const openai = new OpenAI({
+            fetch: providerFetch,
             apiKey: credentials.apiKey,
             baseURL: credentials.baseUrl || undefined,
             maxRetries: resolved.organizationCredential ? 0 : undefined,

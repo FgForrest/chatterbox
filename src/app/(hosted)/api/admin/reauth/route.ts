@@ -96,7 +96,7 @@ export async function POST(request: Request) {
         );
     }
 
-    const cookie = signElevatedCookie(session.user.id);
+    const cookie = signElevatedCookie(session.user.id, session.session.id);
     const ttlSec = env.ADMIN_REAUTH_TTL_MINUTES * 60;
     const res = NextResponse.json({ ok: true });
     // Path '/' so both /admin and /api/admin receive it. The HMAC over

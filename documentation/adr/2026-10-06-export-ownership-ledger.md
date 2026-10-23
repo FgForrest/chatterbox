@@ -1,7 +1,7 @@
 ---
 title: Folder exports keep a ledger of what they wrote and move it, instead of never deleting anything
 date: 2026-10-06
-updated: 2026-10-22 22:30
+updated: 2026-10-23 06:35
 status: accepted
 kind: fix
 issues: []
@@ -9,7 +9,7 @@ prs: [87]
 areas: [src/lib/folder-exports, src/lib/folder-exports/filesystem-nodes.ts, src/lib/folder-exports/drive-provider.ts, src/db/schema.ts]
 supersedes: [2026-09-28-google-drive-export]
 superseded-by: []
-relates: []
+relates: [2026-10-22-security-assessment-hardening]
 ---
 
 # Folder exports keep a ledger of what they wrote and move it, instead of never deleting anything
@@ -159,6 +159,7 @@ return to "never delete" would need a new record.
 
 ## Related work
 
+- [Security assessment hardening](2026-10-22-security-assessment-hardening.md): synchronization checks folder ownership before enqueueing, in addition to worker scoping.
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): introduced the Drive provider,
   its node map and the trash-own-folders rule that this record widens to own duplicate files, so it
   supersedes that rule.

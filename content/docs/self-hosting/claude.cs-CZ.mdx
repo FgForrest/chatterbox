@@ -198,6 +198,8 @@ Zveřejněte MCP koncový bod, a nic jiného, pro adresy Anthropicu:
 
 S nginx:
 
+Klepna sama posílá `nosniff`, ochranu rámců omezenou na stejný původ, pravidla pro referrer a HSTS (jen pro HTTPS v `APP_URL`), takže je reverzní proxy nemusí přidávat (zdvojené HSTS nevadí).
+
 ```nginx
 # kontext http: jeden společný limit pro veřejný server před ověřením JWT
 limit_req_zone $server_name zone=mcp_public:10m rate=100r/s;
