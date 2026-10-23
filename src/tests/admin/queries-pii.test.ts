@@ -31,7 +31,7 @@ describe("admin queries PII guard", () => {
         "aiEnhancements.keyPoints",
         "plaudConnections.bearerToken",
         "apiCredentials.apiKey",
-        "recordings.filename",
+        "chatterItems.title",
         // Raw SQL aliases for those columns (in case someone bypasses drizzle).
         "bearer_token",
         "api_key",
@@ -39,8 +39,10 @@ describe("admin queries PII guard", () => {
 
     for (const tok of FORBIDDEN_TOKENS) {
         it(`does not reference ${tok}`, () => {
+            // Whole tokens only: `chatterItems.titleEditedAt` is metadata, not the title.
+            const pattern = new RegExp(`\\b${tok.replaceAll(".", "\\.")}\\b`);
             expect(
-                file.includes(tok),
+                pattern.test(file),
                 `src/db/queries/admin.ts references ${tok}; admin must not surface this column`,
             ).toBe(false);
         });
