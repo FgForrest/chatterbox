@@ -15,6 +15,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         parentId?: unknown;
         beforeId?: unknown;
         version?: unknown;
+        endPersonShares?: unknown;
     } | null;
     if (!body) {
         throw new AppError(ErrorCode.INVALID_INPUT, "Invalid request", 400);
@@ -69,6 +70,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             folderId: id,
             parentId: body.parentId,
             beforeId: body.beforeId as string | null | undefined,
+            endPersonShares: body.endPersonShares === true,
             version,
             canCurate,
         });

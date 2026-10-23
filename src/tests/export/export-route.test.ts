@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 // No corrections: transcripts export as they are.
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+    requestAdvance: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/learn/llm-input", () => ({
     confirmedOverlays: vi.fn(async () => new Map()),
 }));

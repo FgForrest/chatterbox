@@ -328,6 +328,61 @@ describe("folder row menu", () => {
         ).toBeTruthy();
     });
 
+    it("confirms that moving a private folder into the Organization ends its person shares", async () => {
+        const fetchMock = vi.fn(async () =>
+            Response.json({
+                folder: {
+                    ...privateFolder,
+                    scope: "org",
+                    parentId: orgFolder.id,
+                },
+            }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        workstation();
+        fireEvent.contextMenu(
+            screen.getByRole("button", { name: "Cedar, 0 recordings" }),
+        );
+        fireEvent.click(
+            screen.getByRole("menuitem", { name: "Folder settings" }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "Destination folder" }),
+            { target: { value: orgFolder.id } },
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
+        expect(await screen.findByRole("alertdialog")).toBeTruthy();
+        expect(
+            screen.getByText(
+                /Person shares of this folder and its subfolders will end/,
+            ),
+        ).toBeTruthy();
+        expect(fetchMock).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        await waitFor(() =>
+            expect(screen.queryByRole("alertdialog")).toBeNull(),
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Move to Organization" }),
+        );
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/folders/cedar",
+                expect.objectContaining({
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        parentId: orgFolder.id,
+                        version: 0,
+                        endPersonShares: true,
+                    }),
+                }),
+            ),
+        );
+    });
+
     it("shares the nested Organization creation rule with the location action", async () => {
         workstation();
         fireEvent.click(

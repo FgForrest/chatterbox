@@ -79,6 +79,9 @@ vi.mock("@/lib/mail/list", () => ({
     loadSharedMailRows: async () => [],
     loadReceivedMailRows: async () => [],
 }));
+vi.mock("@/lib/sharing/folder-shares", () => ({
+    listMyFolderInvitations: async () => [],
+}));
 vi.mock("@/lib/sharing/person-shares", () => ({
     listMyInvitations: async () => [],
 }));

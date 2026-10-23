@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAppChrome } from "@/components/app-chrome-provider";
 import { AppHeader } from "@/components/app-header";
+import { useOptionalConfirm } from "@/components/confirm-dialog";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
@@ -30,7 +31,10 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
-import { PersonInvitations } from "@/components/sharing/person-sharing";
+import {
+    type Invitation,
+    PersonInvitations,
+} from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
@@ -65,7 +69,6 @@ import {
 import type { ChatterSearchHit } from "@/lib/search/types";
 import type { InitialSettings } from "@/lib/settings/initial-settings";
 import { canChangeItem } from "@/lib/sharing/change-permission";
-import type { listMyInvitations } from "@/lib/sharing/person-shares";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { cn } from "@/lib/utils";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
@@ -127,7 +130,7 @@ interface WorkstationProps {
     isOrgAccount?: boolean;
     /** The viewer changes the Organization's content (a curator). */
     canCurate?: boolean;
-    initialInvitations?: Awaited<ReturnType<typeof listMyInvitations>>;
+    initialInvitations?: Invitation[];
 }
 
 /** Recording library, selection, uploads and transcription actions. */
@@ -148,6 +151,7 @@ export function Workstation({
     initialInvitations = [],
 }: WorkstationProps) {
     const i18n = useExtracted();
+    const confirm = useOptionalConfirm();
     const folderLabel = useFolderLabel();
     const shareRefusal = useShareRefusal();
     const { refresh } = useRouter();
@@ -1237,6 +1241,33 @@ export function Workstation({
             parentId: string,
             beforeId?: string | null,
         ) => {
+            const sourceFolder = folderOrganization.folders.find(
+                (folder) => folder.id === folderId,
+            );
+            const destinationFolder = folderOrganization.folders.find(
+                (folder) => folder.id === parentId,
+            );
+            const publishes =
+                sourceFolder?.scope === "personal" &&
+                destinationFolder?.scope === "org";
+            if (
+                sourceFolder?.receivedFolder ||
+                destinationFolder?.receivedFolder
+            )
+                return;
+            if (
+                publishes &&
+                (!confirm ||
+                    !(await confirm({
+                        title: i18n("Move folder into the Organization?"),
+                        description: i18n(
+                            "The Organization will see this folder and its items. Person shares of this folder and its subfolders will end, and recipients' attached folders will disappear.",
+                        ),
+                        confirmLabel: i18n("Move to Organization"),
+                        onConfirm: () => {},
+                    })))
+            )
+                return;
             const previous = folderOrganization;
             setFolderOrganization((current) => {
                 const moved = current.folders.find(
@@ -1292,7 +1323,12 @@ export function Workstation({
             const response = await fetch(`/api/folders/${folderId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId, beforeId, version }),
+                body: JSON.stringify({
+                    parentId,
+                    beforeId,
+                    version,
+                    endPersonShares: publishes,
+                }),
             });
             if (response.status === 409) {
                 setFolderOrganization(previous);
@@ -1320,9 +1356,10 @@ export function Workstation({
                         : folder,
                 ),
             }));
+            if (publishes) refresh();
             toast.success(i18n("Folder moved"));
         },
-        [folderOrganization, i18n, refresh],
+        [folderOrganization, i18n, refresh, confirm],
     );
 
     const handleDeleteFolder = useCallback(

@@ -29,4 +29,16 @@ Your [MCP tools](../self-hosting/mcp) can read accepted items with the same cont
 
 Received items stay out of your backups and folder exports. The owner's archive includes `sharing/people.json`, containing their direct share list without your filing. Share metadata can be restored after importing the owner's content by posting that list and the old-to-new item ID map to `/api/shares/restore`. Existing target accounts are matched by email; active shares become pending invitations. The result reports missing receivers, missing items, inactive entries and existing shares skipped. A general archive importer is not available yet.
 
-Folder sharing follows in a later update.
+## Share a folder
+
+Choose **Share folder…** from a private folder's menu, or open **Folder settings** and use its sharing section. Invite colleagues and manage waiting, accepted, declined and removed invitations as for individual items. A folder shared by you carries a plum outgoing-folder arrow.
+
+Sharing is live and covers only recordings and emails directly in the folder. Subfolders never inherit access. Adding an item shares it with accepted recipients immediately; removing or moving it out stops that access. An item shared both individually and through a folder appears once in Recent, lists, search and MCP.
+
+To accept a folder invitation, choose **Accept and attach…**. **Attach shared folder** asks for **Name in your tree**, prefilled with the owner's folder name, and **Place in**, limited to your private tree with its root allowed. The incoming-folder arrow and tooltip identify the owner and original name. Renaming the original does not change your chosen name; no other owner folder names become visible.
+
+The attachment has no subfolders. Its menu offers **Rename for me**, **Move**, the owner's name and **Remove and end sharing**, with confirmation. It cannot receive your items or move into the Organization. You can select it through the tree, folder search, recently used navigation and the command palette; filing pickers never offer it as a destination.
+
+Moving the original within its owner's private tree keeps sharing. Deleting it ends the invitations and removes receiver attachments. Moving it into the Organization requires confirmation: the Organization will see its contents, and person shares of the moved folders end. Existing export configurations and private processing defaults must be removed before that move. Individual person shares of the items remain.
+
+The owner's backup also carries `sharing/folders.json`. Receiver backups carry neither the received items nor attachment rows. After importing the owner's folders, post the folder share list and old-to-new folder ID map to `/api/folder-shares/restore`. Existing recipients receive pending invitations and choose their attachment again; missing or inactive accounts and unavailable folders are reported as skipped.

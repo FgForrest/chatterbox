@@ -350,14 +350,6 @@ describeWithDatabase("Organization folder permissions", () => {
         await expect(
             moveFolder({
                 userId: MEMBER,
-                folderId: "personal-folder",
-                parentId: "org-destination",
-                canCurate: false,
-            }),
-        ).rejects.toMatchObject({ statusCode: 403 });
-        await expect(
-            moveFolder({
-                userId: MEMBER,
                 folderId: "org-folder",
                 parentId: "personal-destination",
                 canCurate: false,
@@ -366,6 +358,27 @@ describeWithDatabase("Organization folder permissions", () => {
         await expect(
             deleteFolder(MEMBER, "org-folder", { canCurate: false }),
         ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it("allows members to publish their own private folder below an Organization folder", async () => {
+        const moved = await moveFolder({
+            userId: MEMBER,
+            folderId: "personal-folder",
+            parentId: "org-destination",
+            canCurate: false,
+            endPersonShares: true,
+        });
+        expect(moved).toMatchObject({
+            id: "personal-folder",
+            parentId: "org-destination",
+            scope: "org",
+        });
+        expect(
+            await db()
+                .select({ ownerId: recordingFolders.userId })
+                .from(recordingFolders)
+                .where(eq(recordingFolders.id, "personal-folder")),
+        ).toEqual([{ ownerId: ORGANIZATION }]);
     });
 
     it("allows curators to manage the Organization tree", async () => {

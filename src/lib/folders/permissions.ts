@@ -8,8 +8,9 @@ export function canCreateSubfolder(
     isOrgAccount = false,
 ): boolean {
     return (
-        folder.scope !== "org" ||
-        folder.parentId !== null ||
-        canManageOrganization(canCurate, isOrgAccount)
+        !folder.receivedFolder &&
+        (folder.scope !== "org" ||
+            folder.parentId !== null ||
+            canManageOrganization(canCurate, isOrgAccount))
     );
 }

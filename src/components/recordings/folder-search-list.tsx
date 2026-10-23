@@ -1,7 +1,7 @@
 "use client";
 
 import { Command } from "cmdk";
-import { Check, Folder, Plus, Users } from "lucide-react";
+import { Check, Plus, Users } from "lucide-react";
 import { useExtracted } from "next-intl";
 import {
     type ComponentProps,
@@ -12,6 +12,8 @@ import {
     useRef,
     useState,
 } from "react";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
+
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import type { LabelledFolder } from "@/lib/folders/labels";
@@ -176,10 +178,7 @@ export function FolderSearchList({
                                 aria-hidden
                             />
                         ) : (
-                            <Folder
-                                className="size-4 shrink-0 text-primary"
-                                aria-hidden
-                            />
+                            <SharedFolderIcon folder={entry.folder} />
                         )}
                         <span
                             className="min-w-0 flex-1 whitespace-normal [overflow-wrap:anywhere]"

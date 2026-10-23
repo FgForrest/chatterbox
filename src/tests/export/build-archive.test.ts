@@ -10,6 +10,7 @@ const { dbMock, archivedTasks } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/db", () => ({ db: dbMock }));
+vi.mock("@/lib/pipeline/trigger", () => ({ requestAdvanceInTx: vi.fn() }));
 vi.mock("@/lib/tasks/archive", () => ({
     tasksForArchive: vi.fn(async () => archivedTasks),
     taskUpdatesForArchive: vi.fn(async () => new Map()),
@@ -29,6 +30,17 @@ vi.mock("@/db/schema", async (importOriginal) => ({
     recordings: (await importOriginal<typeof Schema>()).recordings,
     chatterItems: (await importOriginal<typeof Schema>()).chatterItems,
     users: { id: "users.id", role: "users.role", email: "users.email" },
+    folderShares: {
+        __table: "folderShares",
+        id: "folderShares.id",
+        userId: "folderShares.userId",
+        receiverUserId: "folderShares.receiverUserId",
+        folderId: "folderShares.folderId",
+        state: "folderShares.state",
+        invitedAt: "folderShares.invitedAt",
+        respondedAt: "folderShares.respondedAt",
+        removedAt: "folderShares.removedAt",
+    },
     itemShares: {
         __table: "itemShares",
         id: "itemShares.id",
@@ -297,6 +309,7 @@ function mockSelectSequence(
     extras: {
         usage?: Row[];
         shares?: Row[];
+        folderShares?: Row[];
         rates?: Row[];
         folderDefaults?: Row[];
         itemChoices?: Row[];
@@ -318,6 +331,7 @@ function mockSelectSequence(
             }
             const processingRows = {
                 itemShares: extras.shares ?? [],
+                folderShares: extras.folderShares ?? [],
                 folderDefaultProfiles: extras.folderDefaults ?? [],
                 itemProcessing: extras.itemChoices ?? [],
                 mailPendingShares: extras.pendingOrganizationPlacements ?? [],
@@ -586,6 +600,52 @@ describe("buildAndUploadExportArchive", () => {
                 entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
             ).personShares,
         ).toEqual({ count: 1, path: "sharing/people.json" });
+    });
+
+    it("carries folder invitations even when the shared folder has no items", async () => {
+        const date = new Date("2026-10-22T10:00:00Z");
+        mockSelectSequence([], {
+            folderShares: [
+                {
+                    folderId: "folder-1",
+                    receiverEmail: "lena@example.com",
+                    state: "accepted",
+                    invitedAt: date,
+                    respondedAt: date,
+                    removedAt: null,
+                },
+            ],
+        });
+        await buildAndUploadExportArchive({
+            scope: { kind: "personal", userId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/folders.zip",
+        });
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries.get("sharing/folders.json")?.buffer.toString("utf-8") ??
+                    "[]",
+            ),
+        ).toEqual([
+            {
+                folderId: "folder-1",
+                receiverEmail: "lena@example.com",
+                state: "accepted",
+                invitedAt: date.toISOString(),
+                respondedAt: date.toISOString(),
+                removedAt: null,
+            },
+        ]);
+        expect(
+            JSON.parse(
+                entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+            ).folderShares,
+        ).toEqual({ count: 1, path: "sharing/folders.json" });
+        expect(
+            [...entries.keys()].some((path) => path.includes("attachments")),
+        ).toBe(false);
     });
 
     it("carries the knowledge base so a restore keeps who was speaking", async () => {

@@ -29,4 +29,16 @@ Vaše [MCP nástroje](../self-hosting/mcp) čtou přijaté položky podle stejn�
 
 Přijaté položky se nezahrnují do vašich záloh ani exportů složek. Archiv vlastníka obsahuje `sharing/people.json` se seznamem jeho přímých sdílení bez vašeho zařazení. Po importu obsahu vlastníka lze metadata sdílení obnovit zasláním tohoto seznamu a mapy původních ID položek na nová do `/api/shares/restore`. Existující účty se hledají podle e-mailu; aktivní sdílení se obnovují jako čekající pozvánky. Výsledek uvádí přeskočené chybějící příjemce, chybějící položky, neaktivní záznamy a existující sdílení. Obecný import celého archivu zatím není k dispozici.
 
-Sdílení složek přijde v další aktualizaci.
+## Sdílení složky
+
+V nabídce soukromé složky zvolte **Sdílet složku…**, případně otevřete **Nastavení složky** a část pro sdílení. Pozvěte kolegy a spravujte čekající, přijaté, odmítnuté a odebrané pozvánky stejně jako u jednotlivých položek. Vaše sdílená složka má švestkovou ikonu složky s odchozí šipkou.
+
+Sdílení je živé a zahrnuje jen nahrávky a e-maily přímo ve složce. Podsložky přístup nikdy nedědí. Přidáním položky ji ihned zpřístupníte přijatým příjemcům; odebráním nebo přesunem jinam tento přístup skončí. Položka sdílená jednotlivě i přes složku se v Nedávných, seznamech, hledání i MCP objeví jednou.
+
+Pozvánku ke složce přijmete volbou **Přijmout a připojit…**. Dialog **Připojit sdílenou složku** nabízí **Název u vás**, předvyplněný názvem složky vlastníka, a **Umístit do**, omezené na váš soukromý strom včetně jeho kořene. Ikona s příchozí šipkou a nápověda uvádějí vlastníka i původní název. Přejmenování originálu váš zvolený název nezmění; jiné názvy složek vlastníka neuvidíte.
+
+Připojená složka nemá podsložky. Její nabídka obsahuje **Přejmenovat u mě**, **Přesunout**, jméno vlastníka a **Odebrat a ukončit sdílení** s potvrzením. Nemůžete do ní vkládat vlastní položky ani ji přesunout do Organizace. Otevřete ji ze stromu, hledání složek, naposledy použitých složek i palety příkazů; výběry pro zařazení ji jako cíl nenabízejí.
+
+Přesun originálu ve vlastním soukromém stromu sdílení zachová. Smazáním skončí pozvánky a příjemcům zmizí připojené složky. Přesun do Organizace vyžaduje potvrzení: Organizace uvidí obsah a osobní sdílení přesouvaných složek skončí. Před přesunem je třeba odstranit nastavené exporty a soukromé výchozí profily zpracování. Samostatná osobní sdílení jednotlivých položek zůstávají.
+
+Záloha vlastníka navíc obsahuje `sharing/folders.json`. Zálohy příjemce neobsahují přijaté položky ani záznamy připojených složek. Po importu složek vlastníka pošlete seznam sdílení a mapu původních ID složek na nová do `/api/folder-shares/restore`. Existující příjemci dostanou čekající pozvánky a připojení si zvolí znovu; chybějící nebo neaktivní účty a nedostupné složky se uvedou jako přeskočené.

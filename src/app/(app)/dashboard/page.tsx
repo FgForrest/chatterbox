@@ -37,6 +37,7 @@ import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { getPlaudConnection } from "@/lib/settings/plaud-connection";
 import { getUserSettings } from "@/lib/settings/user-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
+import { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
 import { listMyInvitations } from "@/lib/sharing/person-shares";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -412,7 +413,10 @@ export default async function DashboardPage() {
                   new Set(),
                   true,
               ),
-              listMyInvitations(session.user.id),
+              Promise.all([
+                  listMyInvitations(session.user.id),
+                  listMyFolderInvitations(session.user.id),
+              ]).then((lists) => lists.flat()),
               db
                   .select({
                       id: itemShares.id,
@@ -432,10 +436,23 @@ export default async function DashboardPage() {
     const receivedByItem = new Map(
         receivedShares.map((share) => [share.itemId, share]),
     );
+    const attachmentIds = new Set(
+        folderOrganization.folders
+            .filter((folder) => folder.receivedFolder)
+            .map((folder) => folder.id),
+    );
+    const receivedFoldersByItem = new Map<string, string[]>();
+    for (const assignment of folderOrganization.assignments) {
+        if (!attachmentIds.has(assignment.folderId)) continue;
+        const ids = receivedFoldersByItem.get(assignment.recordingId) ?? [];
+        ids.push(assignment.folderId);
+        receivedFoldersByItem.set(assignment.recordingId, ids);
+    }
     const receivedRecordings =
         receivedLibrary?.recordings.map((recording) => ({
             ...recording,
             receivedShare: receivedByItem.get(recording.id),
+            receivedFolderIds: receivedFoldersByItem.get(recording.id) ?? [],
         })) ?? [];
     const receivedById = new Map(
         receivedRecordings.map((recording) => [recording.id, recording]),

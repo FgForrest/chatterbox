@@ -13,6 +13,10 @@ import {
     FolderDeletionAddresses,
     FolderMailAddresses,
 } from "@/components/mail/folder-mail-addresses";
+import {
+    PersonShareDialog,
+    usePersonSharing,
+} from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -70,6 +74,7 @@ export function FolderSettingsPanel({
     onReopenHandled?: () => void;
 }) {
     const i18n = useExtracted();
+    const sharingEnabled = usePersonSharing();
     const label = useFolderLabel();
     const confirm = useConfirm();
     const [name, setName] = useState(folder.name);
@@ -187,6 +192,20 @@ export function FolderSettingsPanel({
                             </Button>
                         )}
                     </div>
+                    {sharingEnabled &&
+                        folder.scope === "personal" &&
+                        folder.kind === "custom" && (
+                            <section className="border-t pt-3">
+                                <PersonShareDialog
+                                    itemId={folder.id}
+                                    title={folder.name}
+                                    kind="folder"
+                                    open={open}
+                                    onOpenChange={() => {}}
+                                    inline
+                                />
+                            </section>
+                        )}
                     {mailEnabled && folder.kind === "custom" && (
                         <FolderMailAddresses
                             folderId={folder.id}
@@ -325,8 +344,19 @@ export function FolderSettingsPanel({
                                         {entries
                                             .filter(
                                                 (entry) =>
-                                                    entry.folder.scope ===
-                                                        folder.scope &&
+                                                    !entry.folder
+                                                        .receivedFolder &&
+                                                    (entry.folder.scope ===
+                                                        folder.scope ||
+                                                        (folder.scope ===
+                                                            "personal" &&
+                                                            entry.folder
+                                                                .scope ===
+                                                                "org" &&
+                                                            (canCurate ||
+                                                                entry.folder
+                                                                    .parentId !==
+                                                                    null))) &&
                                                     !subtree.has(
                                                         entry.folder.id,
                                                     ),

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // No corrections: the transcript exports as it is.
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+    requestAdvance: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/tasks/archive", () => ({
     tasksForArchive: vi.fn(async () => new Map()),
 }));

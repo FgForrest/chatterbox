@@ -3,14 +3,24 @@
 import {
     ArrowLeft,
     BookOpen,
-    Folder,
     FolderPlus,
+    MoreHorizontal,
     PanelLeftOpen,
     Users,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useMemo, useState } from "react";
+import {
+    ReceivedFolderDialog,
+    ReceivedFolderMenu,
+} from "@/components/sharing/folder-sharing";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
@@ -69,6 +79,9 @@ export function LibraryLocationHeader({
     const i18n = useExtracted();
     const label = useFolderLabel();
     const { recentFolders } = useLibraryPreferences();
+    const [attachmentEdit, setAttachmentEdit] = useState<
+        "rename" | "move" | null
+    >(null);
     const [allLocation, setAllLocation] = useState<string | null>(null);
     const { folders, assignments } = organization;
     const data = useMemo(
@@ -101,7 +114,7 @@ export function LibraryLocationHeader({
             onDragOver={(event) => {
                 const types = Array.from(event.dataTransfer.types);
                 if (types.includes(RECORDING_DRAG_TYPE)) {
-                    if (item.kind === "private") {
+                    if (item.kind === "private" || item.receivedFolder) {
                         event.dataTransfer.dropEffect = "none";
                         return;
                     }
@@ -112,7 +125,7 @@ export function LibraryLocationHeader({
                 }
             }}
             onDrop={(event) => {
-                if (item.kind === "private") return;
+                if (item.kind === "private" || item.receivedFolder) return;
                 const id = event.dataTransfer.getData(RECORDING_DRAG_TYPE);
                 if (!id) return;
                 const recording =
@@ -148,13 +161,7 @@ export function LibraryLocationHeader({
                 {item.kind === "public" ? (
                     <Users className="size-4 shrink-0 text-organization" />
                 ) : (
-                    <Folder
-                        className={
-                            item.scope === "org"
-                                ? "size-4 shrink-0 text-organization"
-                                : "size-4 shrink-0 text-primary"
-                        }
-                    />
+                    <SharedFolderIcon folder={item} />
                 )}
                 <span className="truncate">{label(item)}</span>
                 {folder && (
@@ -235,7 +242,8 @@ export function LibraryLocationHeader({
                                         <button
                                             type="button"
                                             aria-label={
-                                                item.id === folder.id
+                                                item.id === folder.id &&
+                                                !folder.receivedFolder
                                                     ? i18n(
                                                           "Folder settings for {folder}",
                                                           {
@@ -253,7 +261,8 @@ export function LibraryLocationHeader({
                                             }
                                             className="max-w-44 truncate hover:text-foreground aria-[current=location]:font-semibold aria-[current=location]:text-foreground"
                                             onClick={() =>
-                                                item.id === folder.id
+                                                item.id === folder.id &&
+                                                !folder.receivedFolder
                                                     ? onSettings(folder)
                                                     : onNavigate(item)
                                             }
@@ -265,7 +274,47 @@ export function LibraryLocationHeader({
                             </>
                         )}
                     </nav>
-                    {folder && onKnowledge && (
+                    {folder?.receivedFolder && (
+                        <>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        aria-label={i18n(
+                                            "Folder actions for {folder}",
+                                            { folder: folder.name },
+                                        )}
+                                    >
+                                        <MoreHorizontal className="size-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                    <ReceivedFolderMenu
+                                        folder={folder}
+                                        onEdit={setAttachmentEdit}
+                                    />
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            {attachmentEdit && (
+                                <ReceivedFolderDialog
+                                    key={`${folder.id}:${attachmentEdit}`}
+                                    shareId={folder.receivedFolder.shareId}
+                                    version={folder.receivedFolder.shareVersion}
+                                    name={folder.name}
+                                    ownerName={folder.receivedFolder.ownerName}
+                                    parentId={folder.parentId}
+                                    action={attachmentEdit}
+                                    folders={folders}
+                                    open
+                                    onOpenChange={(open) => {
+                                        if (!open) setAttachmentEdit(null);
+                                    }}
+                                />
+                            )}
+                        </>
+                    )}
+                    {folder && !folder.receivedFolder && onKnowledge && (
                         <Button
                             variant="outline"
                             size="sm"
@@ -331,12 +380,9 @@ export function LibraryLocationHeader({
                                     className="h-6 max-w-full rounded-full px-2 text-xs"
                                     onClick={() => onNavigate(item)}
                                 >
-                                    <Folder
-                                        className={
-                                            item.scope === "org"
-                                                ? "size-3 text-organization"
-                                                : "size-3 text-primary"
-                                        }
+                                    <SharedFolderIcon
+                                        folder={item}
+                                        className="size-3"
                                     />
                                     <span className="truncate">
                                         {label(item)}

@@ -47,7 +47,10 @@ export function FolderCombobox({
     const trigger = useRef<HTMLButtonElement>(null);
     const popup = useRef<HTMLDivElement>(null);
     const expanded = open && !disabled;
-    const selected = entries.find((entry) => entry.folder.id === value);
+    const writableEntries = entries.filter(
+        (entry) => !entry.folder.receivedFolder,
+    );
+    const selected = writableEntries.find((entry) => entry.folder.id === value);
     const selectedPath = selected
         ? joinFolderPath(selected.path, label(selected.folder))
         : undefined;
@@ -222,7 +225,7 @@ export function FolderCombobox({
                         className="z-50 flex flex-col rounded-md border bg-popover p-2 text-popover-foreground shadow-md"
                     >
                         <FolderSearchList
-                            entries={entries}
+                            entries={writableEntries}
                             query={query}
                             onQueryChange={setQuery}
                             showPaths
