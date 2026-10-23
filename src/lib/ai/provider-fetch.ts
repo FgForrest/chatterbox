@@ -120,9 +120,26 @@ function providerResponse(
     return response;
 }
 
-/** Hosted provider transport: resolve every request, pin DNS, and refuse redirects. Self-host uses fetch unchanged. */
+/**
+ * Native fetch with Bun's socket idle timeout (five minutes) switched off,
+ * so a provider that answers only once it is done, such as a long
+ * transcription, is bounded by the caller's signal alone. Node ignores the
+ * option.
+ */
+export const fetchWithoutIdleTimeout: typeof globalThis.fetch = (
+    input,
+    init,
+) => {
+    const options: RequestInit & { timeout: false } = {
+        ...init,
+        timeout: false,
+    };
+    return globalThis.fetch(input, options);
+};
+
+/** Hosted provider transport: resolve every request, pin DNS, and refuse redirects. Self-host uses `fetchWithoutIdleTimeout`. */
 export const providerFetch: typeof globalThis.fetch = async (input, init) => {
-    if (!env.IS_HOSTED) return globalThis.fetch(input, init);
+    if (!env.IS_HOSTED) return fetchWithoutIdleTimeout(input, init);
 
     const { url, addresses } = await resolveProviderTarget(input);
     const callerSignal =
