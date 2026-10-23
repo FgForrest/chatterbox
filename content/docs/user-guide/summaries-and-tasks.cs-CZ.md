@@ -94,7 +94,7 @@ Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné slož
 
 Výběr soukromé složky v seznamu **Moje** zahrne vlastní úkoly zařazené do ní i jejích podsložek. Kořen **Soukromé** obsahuje všechny Vaše vlastní úkoly včetně nezařazených, stejně jako **Všechny složky**. Složka Organizace vlastní úkoly skryje. Smazání složky nebo její přesun mimo soukromý strom zruší zařazení úkolu ve stejné transakci; úkol přežije a zůstane soukromý.
 
-Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F10 nebo dlouhý dotyk otevřou Moje se zaměřeným formulářem. Ctrl+kliknutí a prostřední tlačítko nadále otevřou novou záložku prohlížeče.
+Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F10 nebo dlouhý dotyk otevřou Moje se zaměřeným formulářem. Ctrl+kliknutí a prostřední tlačítko nadále otevřou novou záložku prohlížeče. Pro nabídku prohlížeče podržte při kliknutí pravým tlačítkem Shift, Ctrl, Alt nebo Meta.
 
 ### Poznámky a sledování
 

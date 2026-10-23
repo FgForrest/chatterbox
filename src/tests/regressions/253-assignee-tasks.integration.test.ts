@@ -19,6 +19,7 @@ import { deleteSummaryForRecording } from "@/db/queries/retention";
 import {
     aiEnhancements,
     chatterItems,
+    mailAddresses,
     people,
     recordingFolderAssignments,
     recordingFolders,
@@ -33,6 +34,7 @@ import {
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { localPartHash } from "@/lib/mail/hash";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { TASK_TOOLS } from "@/lib/mcp/tools/tasks";
 import { assertOrgScopeWritable } from "@/lib/org/config";
@@ -101,6 +103,8 @@ vi.mock("@/lib/env", () => ({
         BETTER_AUTH_SECRET: "assignee-tasks-tests",
         DATABASE_URL: "postgres://unused",
         APP_URL: "https://example.test",
+        MAIL_DOMAIN: "mail.example.test",
+        MAIL_ADDRESS_HASH_SECRET: "test-mail-address-hash-secret",
         MCP_SERVICE_CLIENTS: [],
         MCP_ALLOWED_CLIENTS: [],
     },
@@ -199,6 +203,7 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
     });
     beforeEach(async () => {
         vi.mocked(assertOrgScopeWritable).mockReset();
+        await db().delete(mailAddresses);
         await db().delete(users);
         await db()
             .insert(users)
@@ -1110,7 +1115,7 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
             (await list("author", "followed")).map((task) => task.id),
         ).toEqual(following ? [keep.id] : []);
     });
-    it("redacts a merged mail note even when the kept home and newest evidence are audio", async () => {
+    it("masks merged mail text and preserves mail trust metadata when the home and newest evidence are audio", async () => {
         await db()
             .insert(chatterItems)
             .values({
@@ -1139,7 +1144,28 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
                 plaudVersion: "1",
             });
         const keep = await itemTask("audio", "Audio task");
-        const source = await itemTask();
+        const localPart = "inbox.abcdefghij";
+        const address = `${localPart}@mail.example.test`;
+        await db()
+            .insert(mailAddresses)
+            .values({
+                id: "base-mailbox",
+                kind: "mailbox",
+                namespaceUserId: "author",
+                localPart: encryptText("inbox"),
+                localPartHash: localPartHash("inbox"),
+            });
+        await db()
+            .insert(mailAddresses)
+            .values({
+                kind: "secret",
+                baseAddressId: "base-mailbox",
+                namespaceUserId: "author",
+                createdByUserId: "author",
+                localPart: encryptText(localPart),
+                localPartHash: localPartHash(localPart),
+            });
+        const source = await itemTask("shared", `Mail task ${address}`);
         await updateTask(viewer("assignee"), source.id, {
             version: source.version,
             note: "Older mail note sentinel",
@@ -1149,6 +1175,38 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
             (await getVisibleTask(viewer("assignee"), keep.id))?.recording
                 ?.kind,
         ).toBe("audio");
+        for (const mail of [false, true]) {
+            for (const name of ["list_tasks", "search_tasks"]) {
+                const result = await call(
+                    name,
+                    "assignee",
+                    name === "list_tasks"
+                        ? { list: "mine" }
+                        : { query: "Mail task" },
+                    mail,
+                );
+                expect(result.tasks).toEqual([
+                    expect.objectContaining({
+                        id: keep.id,
+                        text: "Audio task\nMail task inbox.••••••••••@mail.example.test",
+                        kind: "mail",
+                        untrusted: true,
+                        ...(mail ? { evidence_provenance: "unverified" } : {}),
+                    }),
+                ]);
+                expect(JSON.stringify(result)).not.toContain(localPart);
+            }
+            expect(
+                (
+                    await call(
+                        "search_tasks",
+                        "assignee",
+                        { query: "abcdefghij" },
+                        mail,
+                    )
+                ).tasks,
+            ).toEqual([]);
+        }
         const withoutMail = await call("list_tasks", "assignee", {
             list: "mine",
         });

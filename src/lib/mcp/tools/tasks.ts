@@ -149,7 +149,7 @@ function mailSourced(task: TaskListItem): boolean {
     return (
         Boolean(task.noteMailSourced) ||
         task.recording?.kind === "mail" ||
-        task.evidence?.kind === "mail"
+        task.evidenceItemKind === "mail"
     );
 }
 
@@ -206,6 +206,9 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
                   ...task,
                   visibleMentionQuotes: mentions,
                   text: mask(task.text),
+                  assignee: task.assignee
+                      ? { ...task.assignee, name: mask(task.assignee.name) }
+                      : null,
                   quote: optional(task.quote),
                   duePhrase: optional(task.duePhrase),
                   assigneeHint: optional(task.assigneeHint),
@@ -221,18 +224,9 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
     });
 }
 
-function toItem(
-    caller: McpCaller,
-    task: TaskListItem,
-    maskMail: Mask = (text) => text,
-): TaskItem {
+function toItem(caller: McpCaller, task: TaskListItem): TaskItem {
     const writes = caller.roles.has("tasks:write");
-    const mail =
-        task.recording?.kind === "mail" || task.evidenceItemKind === "mail";
-    const evidenceMail = task.evidenceItemKind === "mail";
-    const mask: Mask = mail ? maskMail : (text) => text;
-    const quoteMask: Mask =
-        task.evidenceItemKind === "mail" ? maskMail : (text) => text;
+    const mail = mailSourced(task);
     const source = sourceReadable(caller, task);
     const quoteReadable =
         task.evidenceItemKind !== "mail" || mayReadMail(caller);
@@ -247,22 +241,27 @@ function toItem(
             : null;
     return {
         id: task.id,
-        text: mask(task.text),
+        text: task.text,
         status: listedStatus(task.status),
         assignee: task.assignee
-            ? { id: task.assignee.personId, name: mask(task.assignee.name) }
+            ? { id: task.assignee.personId, name: task.assignee.name }
             : null,
-        assignee_hint: task.assigneeHint ? mask(task.assigneeHint) : null,
+        assignee_hint: task.assigneeHint,
         due_date: task.dueDate,
-        due_phrase: source && task.duePhrase ? mask(task.duePhrase) : null,
-        quote: quoteReadable && task.quote ? quoteMask(task.quote) : null,
+        due_phrase: source && task.duePhrase ? task.duePhrase : null,
+        quote: quoteReadable && task.quote ? task.quote : null,
         start_ms: task.evidenceStartMs,
-        kind: task.own ? "personal" : task.evidenceItemKind,
-        ...(evidenceMail
+        kind: mail ? "mail" : task.own ? "personal" : task.evidenceItemKind,
+        ...(mail
             ? {
                   untrusted: true as const,
-                  ...(quoteReadable
-                      ? { evidence_provenance: task.evidenceProvenance }
+                  ...(mayReadMail(caller)
+                      ? {
+                            evidence_provenance:
+                                task.evidenceItemKind === "mail"
+                                    ? task.evidenceProvenance
+                                    : ("unverified" as const),
+                        }
                       : {}),
               }
             : {}),
@@ -271,7 +270,7 @@ function toItem(
         can_close: writes && task.canClose,
         own: task.own,
         folder: task.own ? (task.folder ?? null) : null,
-        note: noteVisible && task.note ? maskMail(task.note) : null,
+        note: noteVisible && task.note ? task.note : null,
         note_by: noteVisible ? task.noteBy : null,
         note_updated_at: noteVisible ? task.noteUpdatedAt : null,
         following: task.following,
@@ -280,7 +279,7 @@ function toItem(
             source && homeUrl && task.recording
                 ? {
                       id: task.recording.id,
-                      title: mask(task.recording.title),
+                      title: task.recording.title,
                       recorded_at: task.recording.startTime,
                       url: homeUrl,
                   }
@@ -293,8 +292,8 @@ async function toItems(
     caller: McpCaller,
     tasks: readonly TaskListItem[],
 ): Promise<TaskItem[]> {
-    const mask = await mailMasker(tasks);
-    return tasks.map((task) => toItem(caller, task, mask));
+    const masked = await maskedMailTasks([...tasks]);
+    return masked.map((task) => toItem(caller, task));
 }
 
 function taskKeyset(task: TaskListItem): string {

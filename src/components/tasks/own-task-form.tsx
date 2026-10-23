@@ -59,7 +59,7 @@ export function OwnTaskForm({
                 <button
                     ref={triggerRef}
                     type="button"
-                    className="flex w-full items-center gap-2 text-left"
+                    className="flex w-full items-center gap-2 text-left aria-disabled:opacity-50"
                     aria-disabled={saving}
                     onClick={() => {
                         if (!saving) onOpenChange(true);

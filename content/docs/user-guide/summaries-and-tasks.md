@@ -94,7 +94,7 @@ The folder pill next to **Only you** optionally files the task in one of your pr
 
 Selecting a private folder in **Mine** includes own tasks filed there or in its subfolders. The **Private** root includes all your own tasks, including unfiled ones, as does **All folders**. An Organization folder hides own tasks. Deleting a folder or moving it outside your private tree clears the task's folder in the same transaction; the task stays private and survives.
 
-Right-click **Tasks** in the navigation, press the context-menu key or Shift+F10 while it is focused, or long press it on touch to open Mine with the form focused. Ctrl-click and middle-click retain normal new-tab behavior.
+Right-click **Tasks** in the navigation, press the context-menu key or Shift+F10 while it is focused, or long press it on touch to open Mine with the form focused. Ctrl-click and middle-click retain normal new-tab behavior. Hold Shift, Ctrl, Alt or Meta while right-clicking to open the browser menu.
 
 ### Notes and follows
 

@@ -76,12 +76,19 @@ export function AppNav({ className }: { className?: string }) {
                             title={
                                 addsTask
                                     ? i18n(
-                                          "Right-click or long press to add an own task",
+                                          "Right-click or long press to add an own task; hold Shift, Ctrl, Alt or Meta while right-clicking for the browser menu",
                                       )
                                     : undefined
                             }
                             onContextMenu={(event) => {
-                                if (!addsTask) return;
+                                if (
+                                    !addsTask ||
+                                    event.shiftKey ||
+                                    event.ctrlKey ||
+                                    event.altKey ||
+                                    event.metaKey
+                                )
+                                    return;
                                 event.preventDefault();
                                 cancelLongPress();
                                 if (

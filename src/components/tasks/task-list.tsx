@@ -100,6 +100,13 @@ export function TaskList({
     const sort = params.get("sort") === "due" ? "due" : "created";
 
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
+    const ownInserts = useRef(
+        new Map<
+            string,
+            { task: TaskListItem; query: string | null; reconciled: boolean }
+        >(),
+    );
+    const loadRequest = useRef(0);
     const folders = useTaskFolderTree();
     const privateFolders = privateTreeFolders(folders);
     const selectedPrivate = privateFolders.find((entry) => entry.id === folder);
@@ -142,6 +149,9 @@ export function TaskList({
         }
         return search.toString();
     }, [tab, state, sort, folder, assignee, due, allOrganization]);
+
+    const currentQuery = useRef(query);
+    currentQuery.current = query;
 
     const loadAssignees = useCallback(async () => {
         if (tab !== "followed") return;
@@ -196,16 +206,33 @@ export function TaskList({
     }, [loadAssignees]);
 
     const load = useCallback(async () => {
+        const request = ++loadRequest.current;
+        const reconciled = [...ownInserts.current]
+            .filter(([, entry]) => entry.reconciled)
+            .map(([id]) => id);
+        const insertedRows = () =>
+            [...ownInserts.current.values()]
+                .filter((entry) => entry.query === query)
+                .map((entry) => entry.task);
         try {
             const response = await fetch(`/api/tasks?${query}`);
             if (!response.ok) throw new Error();
             const body = (await response.json()) as { tasks: TaskListItem[] };
+            if (request !== loadRequest.current) return;
+            for (const id of reconciled) ownInserts.current.delete(id);
+            const inserts = insertedRows();
+            const insertedIds = new Set(inserts.map((task) => task.id));
+            const rows = [
+                ...inserts,
+                ...body.tasks.filter((task) => !insertedIds.has(task.id)),
+            ];
             versions.current = new Map(
-                body.tasks.map((task) => [task.id, task.version]),
+                rows.map((task) => [task.id, task.version]),
             );
-            setTasks(body.tasks);
+            setTasks(rows);
         } catch {
-            setTasks([]);
+            if (request !== loadRequest.current) return;
+            setTasks(insertedRows());
             toast.error(i18n("Could not load your tasks"));
         }
     }, [query, i18n]);
@@ -213,6 +240,9 @@ export function TaskList({
     useEffect(() => {
         setTasks(null);
         void load();
+        return () => {
+            loadRequest.current++;
+        };
     }, [load]);
 
     // Opening the list is seeing what is new.
@@ -539,21 +569,36 @@ export function TaskList({
                             if (!open && addRequest) setParam("add", null);
                         }}
                         onReconciled={(temporaryId, task) => {
+                            const entry = ownInserts.current.get(temporaryId);
+                            if (task && entry)
+                                ownInserts.current.set(temporaryId, {
+                                    ...entry,
+                                    task,
+                                    reconciled: true,
+                                });
+                            else ownInserts.current.delete(temporaryId);
                             versions.current.delete(temporaryId);
                             if (task)
                                 versions.current.set(task.id, task.version);
-                            setTasks(
-                                (current) =>
-                                    current?.flatMap((row) =>
-                                        row.id === temporaryId
-                                            ? task && ownMatchesFolder(task)
-                                                ? [task]
-                                                : []
-                                            : [row],
-                                    ) ?? null,
-                            );
+                            setTasks((current) => {
+                                const remaining = (current ?? []).filter(
+                                    (row) =>
+                                        row.id !== temporaryId &&
+                                        row.id !== task?.id,
+                                );
+                                return task &&
+                                    entry?.query === currentQuery.current &&
+                                    ownMatchesFolder(task)
+                                    ? [task, ...remaining]
+                                    : remaining;
+                            });
                         }}
                         onAdded={(task) => {
+                            ownInserts.current.set(task.id, {
+                                task,
+                                query: ownMatchesFolder(task) ? query : null,
+                                reconciled: false,
+                            });
                             versions.current.set(task.id, task.version);
                             setTasks((current) =>
                                 ownMatchesFolder(task)

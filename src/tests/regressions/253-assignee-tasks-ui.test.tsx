@@ -161,7 +161,12 @@ describe("#253 task desk UI", () => {
         expect(screen.getByRole("checkbox").getAttribute("aria-disabled")).toBe(
             "true",
         );
-        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        const trigger = screen.getByRole("button", { name: "Add task" });
+        expect(trigger.getAttribute("aria-disabled")).toBe("true");
+        expect(trigger.classList.contains("aria-disabled:opacity-50")).toBe(
+            true,
+        );
+        fireEvent.click(trigger);
         expect(screen.queryByRole("textbox", { name: "Task text" })).toBeNull();
         await act(async () =>
             finish(
@@ -196,6 +201,117 @@ describe("#253 task desk UI", () => {
         expect(
             screen.getByRole("textbox", { name: "Task text" }),
         ).toHaveProperty("value", "");
+    });
+    it.each([
+        "load first",
+        "save first",
+        "load includes saved",
+        "load fails",
+        "temporary row cleared",
+        "filter changed",
+    ])("keeps an own task across a deferred initial GET (%s)", async (ordering) => {
+        navigation.params.set("add", "request");
+        const initial = Promise.withResolvers<Response>();
+        const save = Promise.withResolvers<Response>();
+        const fallback = fetchMock.getMockImplementation();
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url.startsWith("/api/tasks?")) return initial.promise;
+            if (url === "/api/tasks" && init?.method === "POST")
+                return save.promise;
+            if (!fallback) throw new Error("Missing fetch mock");
+            return fallback(url, init);
+        });
+        const view = render(<TaskList organization={false} />);
+        fireEvent.change(screen.getByRole("textbox", { name: "Task text" }), {
+            target: { value: "Draft reminder" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        expect(screen.getAllByText("Draft reminder")).toHaveLength(1);
+        const saved = {
+            ...task({
+                id: "saved",
+                text: "Saved reminder",
+                recordingId: null,
+                own: true,
+                source: "personal",
+                version: 8,
+            }),
+            recording: null,
+            evidence: null,
+            visibleMentionQuotes: [],
+        };
+        if (
+            ordering === "temporary row cleared" ||
+            ordering === "filter changed"
+        ) {
+            navigation.params.set("state", "done");
+            view.rerender(<TaskList organization={false} />);
+            if (ordering === "temporary row cleared") {
+                navigation.params.delete("state");
+                view.rerender(<TaskList organization={false} />);
+            }
+            expect(screen.queryByText("Draft reminder")).toBeNull();
+        }
+        const saveFirst = [
+            "save first",
+            "temporary row cleared",
+            "filter changed",
+        ].includes(ordering);
+        if (saveFirst) {
+            await act(async () => save.resolve(Response.json(saved)));
+            if (ordering === "filter changed")
+                expect(screen.queryByText("Saved reminder")).toBeNull();
+            else expect(screen.getAllByText("Saved reminder")).toHaveLength(1);
+        }
+        await act(async () =>
+            initial.resolve(
+                ordering === "load fails"
+                    ? new Response(null, { status: 500 })
+                    : Response.json({
+                          tasks:
+                              ordering === "load includes saved" ? [saved] : [],
+                      }),
+            ),
+        );
+        if (!saveFirst) {
+            expect(screen.getAllByText("Draft reminder")).toHaveLength(1);
+            await act(async () => save.resolve(Response.json(saved)));
+        }
+        expect(screen.queryByText("Draft reminder")).toBeNull();
+        if (ordering === "filter changed")
+            expect(screen.queryByText("Saved reminder")).toBeNull();
+        else expect(screen.getAllByText("Saved reminder")).toHaveLength(1);
+        navigation.params.set("state", "all");
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url.startsWith("/api/tasks?"))
+                return Promise.resolve(Response.json({ tasks: [saved] }));
+            if (!fallback) throw new Error("Missing fetch mock");
+            return fallback(url, init);
+        });
+        view.rerender(<TaskList organization={false} />);
+        await screen.findByText("Saved reminder");
+        expect(screen.getAllByText("Saved reminder")).toHaveLength(1);
+    });
+    it.each([
+        "shiftKey",
+        "ctrlKey",
+        "altKey",
+        "metaKey",
+    ])("keeps the native context menu with %s held", (modifier) => {
+        render(<AppNav />);
+        const link = screen.getByRole("link", { name: "Tasks" });
+        const event = new MouseEvent("contextmenu", {
+            button: 2,
+            bubbles: true,
+            cancelable: true,
+            [modifier]: true,
+        });
+        fireEvent(link, event);
+        expect(event.defaultPrevented).toBe(false);
+        expect(navigation.push).not.toHaveBeenCalled();
+        expect(link.title).toContain("Shift, Ctrl, Alt or Meta");
+        expect(fireEvent.contextMenu(link)).toBe(false);
+        expect(navigation.push).toHaveBeenCalledTimes(1);
     });
     it("removes a failed temporary row, shows the server message and preserves the URL-opened draft", async () => {
         folders = folderTree();
