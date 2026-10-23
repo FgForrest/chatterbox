@@ -103,9 +103,9 @@ export function TaskReviewLink({
                 "[data-task-review-card]",
             ),
         ].find((element) => element.dataset.taskReviewCard === focusTaskId);
-        const input = card?.querySelector<HTMLInputElement>(
-            'input:not([type]), input[type="text"]',
-        );
+        const input = card?.querySelector<
+            HTMLInputElement | HTMLTextAreaElement
+        >('textarea, input:not([type]), input[type="text"]');
         if (!card || !input) return;
         card.scrollIntoView?.({ block: "nearest" });
         input.focus({ preventScroll: true });
@@ -658,14 +658,14 @@ function ProposalRow({
                     />
                     <TaskEvidenceLink
                         evidence={{
-                            itemId: task.evidenceItemId,
+                            itemId: task.evidenceItemId ?? "",
                             itemKind: task.evidenceItemKind,
                             audioAvailable: task.evidenceAudioAvailable,
                             startMs: task.evidenceStartMs,
                             text: task.evidenceText,
                         }}
                         quote={task.quote}
-                        currentItemId={task.recordingId}
+                        currentItemId={task.recordingId ?? undefined}
                         onNavigate={onNavigate}
                     />
                     {task.quote &&

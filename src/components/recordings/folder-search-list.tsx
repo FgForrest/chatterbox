@@ -34,6 +34,7 @@ interface FolderSearchListProps {
     onEscape?: () => void;
     onTab?: () => void;
     listRef?: Ref<HTMLDivElement>;
+    emptyChoiceLabel?: string;
 }
 
 function FolderResults(props: ComponentProps<"div">) {
@@ -60,6 +61,7 @@ export function FolderSearchList({
     onEscape,
     onTab,
     listRef,
+    emptyChoiceLabel,
 }: FolderSearchListProps) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -101,9 +103,10 @@ export function FolderSearchList({
                 .filter((entry) => !assignedIds?.has(entry.folder.id))
                 .map((entry) => `${prefix}:${entry.folder.id}`),
         );
+        if (emptyChoiceLabel) result.unshift("empty");
         if (offerCreate) result.push("create");
         return result;
-    }, [groups, assignedIds, offerCreate]);
+    }, [groups, assignedIds, offerCreate, emptyChoiceLabel]);
     const activeValue = values.includes(active)
         ? active
         : (values.find(
@@ -135,7 +138,8 @@ export function FolderSearchList({
     }, [activeValue, values]);
     const select = useCallback(
         (value: string) => {
-            if (value === "create") onCreate?.(query);
+            if (value === "empty") onSelect("");
+            else if (value === "create") onCreate?.(query);
             else onSelect(folderIdOf(value));
         },
         [onSelect, onCreate, query],
@@ -276,6 +280,21 @@ export function FolderSearchList({
                 className="min-h-0 max-h-[60vh] overflow-y-auto overscroll-contain"
             >
                 <FolderResults aria-activedescendant={activeId}>
+                    {emptyChoiceLabel && (
+                        <Command.Item
+                            forceMount
+                            value="empty"
+                            disabled={disabled}
+                            onSelect={select}
+                            className="flex cursor-default items-center gap-2 rounded px-3 py-2 text-sm data-[selected=true]:bg-accent"
+                        >
+                            <Folder
+                                className="size-4 shrink-0 text-muted-foreground"
+                                aria-hidden
+                            />
+                            {emptyChoiceLabel}
+                        </Command.Item>
+                    )}
                     {rows}
                     {matches.length === 0 && !offerCreate && (
                         <Command.Empty className="px-3 py-2 text-sm text-muted-foreground">

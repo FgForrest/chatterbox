@@ -1,4 +1,12 @@
-import { and, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
+import {
+    and,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    notExists,
+    sql,
+} from "drizzle-orm";
 import type { db } from "@/db";
 import { ANY_TASK_ITEM, taskVisible } from "@/db/queries/task-visibility";
 import {
@@ -678,6 +686,7 @@ export async function dropTasksWithoutSummaryInTx(
                 and(
                     eq(recordingTasks.id, task.id),
                     eq(recordingTasks.userId, task.userId),
+                    isNotNull(recordingTasks.itemId),
                     notExists(
                         tx
                             .select({ id: taskMentions.id })

@@ -1802,9 +1802,12 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 canClose: true,
             });
             expect(
-                (await listTasks(curator, query("tracked"))).map(
-                    (row) => row.id,
-                ),
+                (
+                    await listTasks(curator, {
+                        ...query("tracked"),
+                        organization: true,
+                    })
+                ).map((row) => row.id),
             ).toContain(task.id);
             const edited = await updateTask(curator, task.id, {
                 version: task.version,

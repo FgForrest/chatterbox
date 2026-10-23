@@ -1677,6 +1677,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         if (curates) {
             const tracked = await listTasks(viewer, {
                 tab: "tracked",
+                organization: true,
                 state: "all",
                 folderId: null,
                 due: null,

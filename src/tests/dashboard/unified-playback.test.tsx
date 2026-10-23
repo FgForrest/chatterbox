@@ -48,6 +48,14 @@ const task: TaskView = {
     canEdit: false,
     canClose: false,
     canUndoMatch: false,
+    own: false,
+    note: null,
+    noteUpdatedAt: null,
+    noteBy: null,
+    following: false,
+    automaticFollow: false,
+    canFollow: false,
+    canMerge: false,
 };
 
 afterEach(cleanup);

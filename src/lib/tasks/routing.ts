@@ -106,7 +106,7 @@ interface SourceUpdate {
 
 interface TargetRow {
     taskId: string;
-    itemId: string;
+    itemId: string | null;
     ownerUserId: string;
     status: (typeof recordingTasks.$inferSelect)["status"];
     version: number;
@@ -137,6 +137,7 @@ function routedProposalCondition(viewer: TaskViewer) {
 }
 
 function mayApply(kind: ProposalKind, target: TargetRow): boolean {
+    if (kind === "assignee" && !target.itemId) return false;
     return kind === "done" ? target.canClose : target.canEdit;
 }
 
@@ -149,7 +150,7 @@ async function targetFor(
         .select({
             taskId: recordingTasks.id,
             itemId: recordingTasks.itemId,
-            ownerUserId: chatterItems.userId,
+            ownerUserId: recordingTasks.userId,
             status: recordingTasks.status,
             version: recordingTasks.version,
             statusEffectiveAt: recordingTasks.statusEffectiveAt,
@@ -158,13 +159,13 @@ async function targetFor(
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
             visible: sql<boolean>`${and(
                 isNull(chatterItems.deletedAt),
-                taskVisible(viewer, ANY_TASK_ITEM),
+                taskVisible(viewer, ANY_TASK_ITEM, true),
             )}`,
-            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
-            canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
+            canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM, true)}`,
+            canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM, true)}`,
         })
         .from(recordingTasks)
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(eq(recordingTasks.id, taskId))
         .limit(1);
     return target ?? null;
@@ -632,7 +633,7 @@ export async function settleSourceTaskUpdatesInTx(
                       : ["due", "due_phrase"],
             effectiveAt: statementAt,
         });
-        touched.set(target.itemId, target.ownerUserId);
+        if (target.itemId) touched.set(target.itemId, target.ownerUserId);
         applied += 1;
     }
     return { applied, skipped, acceptedTaskIds, touched };
@@ -799,7 +800,7 @@ export async function listRoutedTaskProposals(
             recordingTasks,
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .leftJoin(
             routedCurrentAssignee,
             eq(routedCurrentAssignee.id, recordingTasks.assigneePersonId),
@@ -834,7 +835,7 @@ export async function listRoutedTaskProposals(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
                 routedProposalCondition(viewer),
                 isNull(chatterItems.deletedAt),
-                taskVisible(viewer, ANY_TASK_ITEM),
+                taskVisible(viewer, ANY_TASK_ITEM, true),
                 isNull(routedSourceItem.deletedAt),
                 or(
                     eq(routedSourceItem.userId, viewer.userId),
@@ -922,7 +923,7 @@ export async function countRoutedTaskProposals(
             recordingTasks,
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .innerJoin(
             routedSourceItem,
             and(
@@ -935,7 +936,7 @@ export async function countRoutedTaskProposals(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
                 routedProposalCondition(viewer),
                 isNull(chatterItems.deletedAt),
-                taskVisible(viewer, ANY_TASK_ITEM),
+                taskVisible(viewer, ANY_TASK_ITEM, true),
                 isNull(routedSourceItem.deletedAt),
                 or(
                     eq(routedSourceItem.userId, viewer.userId),
@@ -946,7 +947,11 @@ export async function countRoutedTaskProposals(
     return row?.count ?? 0;
 }
 
-async function changed(ownerUserId: string, itemId: string): Promise<void> {
+async function changed(
+    ownerUserId: string,
+    itemId: string | null,
+): Promise<void> {
+    if (!itemId) return;
     await notifyIfShared(itemId);
     await refreshExistingRecordingSidecars(ownerUserId, itemId);
     await exportRecordingSidecarsIfEnabled(ownerUserId, itemId, "summary");
@@ -972,7 +977,7 @@ export async function applyRoutedTaskProposal(
             recordingTasks,
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(
             and(
                 eq(taskUpdateProposals.id, proposalId),
@@ -1168,7 +1173,7 @@ export async function rejectRoutedTaskProposal(
             recordingTasks,
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
-        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(
             and(
                 eq(taskUpdateProposals.id, proposalId),

@@ -62,6 +62,14 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         canEdit: true,
         canClose: true,
         canUndoMatch: false,
+        own: false,
+        note: null,
+        noteUpdatedAt: null,
+        noteBy: null,
+        following: false,
+        automaticFollow: false,
+        canFollow: false,
+        canMerge: false,
         ...overrides,
     };
 }

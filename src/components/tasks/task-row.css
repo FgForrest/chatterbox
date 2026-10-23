@@ -1,0 +1,19 @@
+.task-row-pills > :is(button[aria-pressed], a) {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.25rem 0.5rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .task-row .task-row-actions > :not(.task-following),
+    .task-row .task-row-folder-action {
+        opacity: 0;
+        transition: opacity 120ms ease;
+    }
+    .task-row:hover .task-row-actions > *,
+    .task-row:focus-within .task-row-actions > *,
+    .task-row:hover .task-row-folder-action,
+    .task-row:focus-within .task-row-folder-action {
+        opacity: 1;
+    }
+}

@@ -44,7 +44,8 @@ describe("task assignee routes", () => {
         expect(response.status).toBe(200);
         expect(requireTaskViewer).toHaveBeenCalledWith(request);
         expect(listTasks).toHaveBeenCalledWith(viewer, {
-            tab: "tracked",
+            tab: "followed",
+            organization: false,
             state: "done",
             folderId: "folder-1",
             assignee: assignee || null,
@@ -62,7 +63,7 @@ describe("task assignee routes", () => {
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({ assignees });
         expect(requireTaskViewer).toHaveBeenCalledWith(request);
-        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer);
+        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer, false);
     });
 
     it.each([

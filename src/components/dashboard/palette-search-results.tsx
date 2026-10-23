@@ -152,7 +152,12 @@ export function PaletteSearchResults({
                                             )
                                         }
                                         title={hit.text}
-                                        subtitle={hit.recording.title}
+                                        subtitle={
+                                            hit.recording?.title ??
+                                            [i18n("Own task"), hit.folder?.name]
+                                                .filter(Boolean)
+                                                .join(" · ")
+                                        }
                                         accessory={
                                             hit.dueDate
                                                 ? format.dateTime(

@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
-import { requireTaskViewer } from "@/lib/tasks/route-helpers";
+import {
+    enforceTaskWriteRateLimit,
+    invalid,
+    optionalNullableString,
+    readTaskBody,
+    requireTaskViewer,
+} from "@/lib/tasks/route-helpers";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
 import {
+    createPersonalTask,
     listTasks,
     type TaskDueFilter,
     type TaskSort,
@@ -24,7 +31,10 @@ export const GET = apiHandler(async (request) => {
     const state = params.get("state") as TaskStateFilter | null;
     const due = params.get("due");
     const tasks = await listTasks(viewer, {
-        tab: (params.get("tab") === "tracked" ? "tracked" : "mine") as TaskTab,
+        tab: (["tracked", "followed"].includes(params.get("tab") ?? "")
+            ? "followed"
+            : "mine") as TaskTab,
+        organization: params.get("organization") === "true",
         state: state && STATES.has(state) ? state : "open",
         folderId: params.get("folder") || null,
         assignee: params.get("assignee") || null,
@@ -33,4 +43,27 @@ export const GET = apiHandler(async (request) => {
         sort: (params.get("sort") === "due" ? "due" : "created") as TaskSort,
     });
     return NextResponse.json({ tasks });
+});
+
+/** Add an own task for the signed-in person. */
+export const POST = apiHandler(async (request) => {
+    const viewer = await requireTaskViewer(request);
+    await enforceTaskWriteRateLimit(viewer);
+    const body = await readTaskBody(request);
+    if (typeof body.text !== "string")
+        throw invalid("text is required", "text");
+    if (
+        body.dueDate !== undefined &&
+        body.dueDate !== null &&
+        typeof body.dueDate !== "string"
+    )
+        throw invalid("dueDate must be a string or null");
+    return NextResponse.json(
+        await createPersonalTask(viewer, {
+            text: body.text,
+            dueDate: body.dueDate as string | null | undefined,
+            folderId: optionalNullableString(body, "folderId"),
+        }),
+        { status: 201 },
+    );
 });
