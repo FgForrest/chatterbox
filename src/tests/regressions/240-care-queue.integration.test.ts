@@ -1,5 +1,6 @@
+import { writeFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
-import { and, eq } from "drizzle-orm";
+import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
 import unzipper from "unzipper";
 import {
     afterAll,
@@ -17,12 +18,19 @@ import {
     GET as shares,
 } from "@/app/api/knowledge/care/shares/route";
 import {
+    conflictingCareCorrections,
+    conflictingCareFacts,
+    thinCareRecords,
+} from "@/db/queries/almanac-care";
+import * as shareQueries from "@/db/queries/almanac-share";
+import {
     almanacDuplicateDismissals,
     almanacShareChanges,
     almanacShareEvents,
     chatterItems,
     knowledgeAliases,
     knowledgeEntities,
+    knowledgeEntityNotes,
     knowledgeFactEvidence,
     knowledgeFacts,
     knowledgeRelationTypes,
@@ -30,9 +38,14 @@ import {
     learnRuns,
     mailContents,
     mailMessages,
+    mailParticipants,
     people,
+    personEmails,
+    personNotes,
     recordingFolderAssignments,
     recordingFolders,
+    recordingTasks,
+    taskUpdateProposals,
     transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
@@ -49,6 +62,7 @@ import {
 } from "@/lib/knowledge/care";
 import { canOpenCare } from "@/lib/knowledge/care-access";
 import {
+    CARE_RESTORE_MAX_BYTES,
     careArchiveSchema,
     collectCareArchive,
 } from "@/lib/knowledge/care-archive";
@@ -406,6 +420,67 @@ withDatabase("Care queue with Organization provenance", () => {
                 start?.createdAt.getTime() ?? 0,
             );
         });
+    });
+    it("keeps a share's original person and private speaker link after the source item is withdrawn", async () => {
+        const { event, person, transcriptionId } = await speaker();
+        await unshareRecording("member", "audio", { withdraw: true });
+        const result = await undoShareAdditions("curator", event.id);
+        expect(result.kept).toEqual([
+            expect.objectContaining({ reason: "other_source" }),
+        ]);
+        expect(result.removed).toEqual([]);
+        expect(
+            await db().select().from(people).where(eq(people.id, person.id)),
+        ).toHaveLength(1);
+        const [link] = await db()
+            .select()
+            .from(transcriptSpeakers)
+            .where(eq(transcriptSpeakers.transcriptionId, transcriptionId));
+        expect(link?.personId).toBe(person.id);
+    });
+    it("waits for existing recording writers before taking parent locks, preserving their assignment", async () => {
+        const { event, person } = await speaker();
+        const transcript = await audio("other-source");
+        await attributeSpeaker(db(), {
+            userId: "member",
+            transcriptionId: transcript,
+            label: "speaker_0",
+            personId: person.id,
+        });
+        const writer = await database.sql.reserve();
+        const [connection] = await writer`select pg_backend_pid() as pid`;
+        await writer`begin`;
+        await writer`select id from recordings where id = 'other-source' and user_id = 'member' for update`;
+        const undo = undoShareAdditions("curator", event.id);
+        let open = true;
+        try {
+            await expect
+                .poll(async () => {
+                    const [row] = await database.sql`select exists (
+                    select 1 from pg_stat_activity where datname = current_database()
+                    and ${connection?.pid} = any(pg_blocking_pids(pid))
+                ) as waiting`;
+                    return row?.waiting;
+                })
+                .toBe(true);
+            await writer`select id from people where id = ${person.id} and user_id = 'org' for key share nowait`;
+            await writer`insert into recording_tasks (id, user_id, recording_id, status, text, source, assignee_person_id)
+                values ('prior-assignment', 'member', 'other-source', 'open', ${encryptText("Invented task")}, 'manual', ${person.id})`;
+            await writer`commit`;
+            open = false;
+            expect((await undo).kept).toEqual([
+                expect.objectContaining({ reason: "other_source" }),
+            ]);
+            const [task] = await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, "prior-assignment"));
+            expect(task?.assigneePersonId).toBe(person.id);
+        } finally {
+            if (open) await writer`rollback`;
+            writer.release();
+            await undo;
+        }
     });
     it("keeps an edited person", async () => {
         const { event, person } = await speaker();
@@ -817,6 +892,674 @@ withDatabase("Care queue with Organization provenance", () => {
         expect(await openCareProblems("curator")).toEqual([]);
         expect(await db().select().from(people)).toHaveLength(1);
         expect(await db().select().from(knowledgeEntities)).toHaveLength(0);
+    });
+    async function thinTarget(kind: "person" | "entity") {
+        const transcript = await audio();
+        await shareRecording(db(), "audio", "org");
+        const target =
+            kind === "person"
+                ? await createPerson({
+                      userId: "org",
+                      displayName: "Nela Starling",
+                  })
+                : await createEntity("org", {
+                      name: "Velnaro",
+                      typeKey: "term",
+                  });
+        if (kind === "person")
+            await attributeSpeaker(db(), {
+                userId: "member",
+                transcriptionId: transcript,
+                label: "speaker_0",
+                personId: target.id,
+            });
+        else await correction(transcript, target.id, "vel naro", 0);
+        const table = kind === "person" ? people : knowledgeEntities;
+        await db()
+            .update(table)
+            .set({ updatedAt: old })
+            .where(eq(table.id, target.id));
+        await db().update(transcriptSpeakers).set({ updatedAt: old });
+        await db().update(transcriptCorrections).set({ updatedAt: old });
+        const problem = (await detectCareProblems("org")).find(
+            (p) => p.kind === "thin",
+        );
+        if (!problem) throw new Error("missing thin target");
+        return { target, problem, transcript };
+    }
+    it.each(
+        (["person", "entity"] as const).flatMap((kind) =>
+            [
+                "note",
+                "subject fact",
+                "object fact",
+                "alias",
+                "correction",
+                "merge",
+                ...(kind === "person" ? ["email", "task", "proposal"] : []),
+            ].map((dependency) => ({ kind, dependency })),
+        ),
+    )("keeps thin $kind with a member's $dependency, including stale delete requests", async ({
+        kind,
+        dependency,
+    }) => {
+        const { target, problem, transcript } = await thinTarget(kind);
+        if (dependency === "note") {
+            if (kind === "person")
+                await db()
+                    .insert(personNotes)
+                    .values({
+                        userId: "other",
+                        personId: target.id,
+                        notes: encryptText("Private note"),
+                    });
+            else
+                await db()
+                    .insert(knowledgeEntityNotes)
+                    .values({
+                        userId: "other",
+                        entityId: target.id,
+                        notes: encryptText("Private note"),
+                    });
+        } else if (dependency.includes("fact")) {
+            const other = await createEntity("other", {
+                name: "Private project",
+                typeKey: "project",
+            });
+            await db()
+                .insert(knowledgeFacts)
+                .values({
+                    userId: "other",
+                    relationKey: "works_on",
+                    origin: "manual",
+                    ...(dependency === "subject fact"
+                        ? {
+                              subjectPersonId:
+                                  kind === "person" ? target.id : null,
+                              subjectEntityId:
+                                  kind === "entity" ? target.id : null,
+                              subjectKey: `${kind === "person" ? "p" : "e"}:${target.id}`,
+                              objectEntityId: other.id,
+                              objectKey: `e:${other.id}`,
+                          }
+                        : {
+                              subjectEntityId: other.id,
+                              subjectKey: `e:${other.id}`,
+                              objectPersonId:
+                                  kind === "person" ? target.id : null,
+                              objectEntityId:
+                                  kind === "entity" ? target.id : null,
+                              objectKey: `${kind === "person" ? "p" : "e"}:${target.id}`,
+                          }),
+                });
+        } else if (dependency === "alias") {
+            await db()
+                .insert(knowledgeAliases)
+                .values({
+                    userId: "other",
+                    kind: "alias",
+                    text: encryptText("Private nickname"),
+                    textHmac: "private",
+                    personId: kind === "person" ? target.id : null,
+                    entityId: kind === "entity" ? target.id : null,
+                });
+        } else if (dependency === "correction") {
+            await db()
+                .insert(transcriptCorrections)
+                .values({
+                    userId: "other",
+                    transcriptionId: transcript,
+                    transcriptRevision: 0,
+                    turnIndex: 0,
+                    charStart: 4,
+                    charEnd: 5,
+                    heard: encryptText("Private"),
+                    heardHmac: "private",
+                    kind: "link",
+                    targetPersonId: kind === "person" ? target.id : null,
+                    targetEntityId: kind === "entity" ? target.id : null,
+                });
+        } else if (dependency === "email") {
+            await db()
+                .insert(personEmails)
+                .values({
+                    userId: "other",
+                    personId: target.id,
+                    email: encryptText("nela@example.test"),
+                    emailHash: "private",
+                });
+        } else if (dependency === "merge") {
+            const table = kind === "person" ? people : knowledgeEntities;
+            await db()
+                .update(table)
+                .set({ mergedIntoId: target.id })
+                .where(
+                    eq(
+                        table.id,
+                        kind === "person"
+                            ? (
+                                  await createPerson({
+                                      userId: "org",
+                                      displayName: "Nela",
+                                  })
+                              ).id
+                            : (
+                                  await createEntity("org", {
+                                      name: "Old Velnaro",
+                                      typeKey: "term",
+                                  })
+                              ).id,
+                    ),
+                );
+        } else {
+            const task = await insertTask(db(), {
+                userId: "member",
+                recordingId: "audio",
+                assigneePersonId: dependency === "task" ? target.id : null,
+            });
+            if (dependency === "proposal")
+                await db().insert(taskUpdateProposals).values({
+                    userId: "member",
+                    itemId: "audio",
+                    taskId: task,
+                    kind: "assignee",
+                    proposedAssigneePersonId: target.id,
+                });
+        }
+        expect(
+            (await detectCareProblems("org")).filter((p) => p.kind === "thin"),
+        ).toEqual([]);
+        const response = await call(fix, "curator", {
+            key: problem.key,
+            action: "delete",
+        });
+        expect(response.status).toBe(409);
+        const table = kind === "person" ? people : knowledgeEntities;
+        expect(
+            await db().select().from(table).where(eq(table.id, target.id)),
+        ).toHaveLength(1);
+    });
+    it("keeps shared entities with private notes on whole-share and single-addition undo", async () => {
+        const transcript = await audio();
+        const thing = await createEntity("member", {
+            name: "Velnaro",
+            typeKey: "term",
+        });
+        await correction(transcript, thing.id, "vel naro", 0, "member");
+        await share();
+        const [addition] = await db()
+            .select()
+            .from(almanacShareChanges)
+            .where(eq(almanacShareChanges.kind, "entity"));
+        await db()
+            .insert(knowledgeEntityNotes)
+            .values({
+                userId: "other",
+                entityId: thing.id,
+                notes: encryptText("Private note"),
+            });
+        expect(
+            (
+                await undoShareAdditions(
+                    "curator",
+                    addition?.eventId ?? "",
+                    addition?.id,
+                )
+            ).kept,
+        ).toEqual([expect.objectContaining({ reason: "other_source" })]);
+        expect(
+            (await undoShareAdditions("curator", addition?.eventId ?? "")).kept,
+        ).toContainEqual(expect.objectContaining({ reason: "other_source" }));
+        expect(await db().select().from(knowledgeEntityNotes)).toHaveLength(1);
+    });
+    it.each(
+        (["share", "addition", "thin"] as const).flatMap((mode) =>
+            ["assignment", "task insert", "proposal", "mail participant"].map(
+                (writerKind) => ({ mode, writerKind }),
+            ),
+        ),
+    )("blocks a concurrent $writerKind after $mode deletion's dependency check and rejects its FK reference", async ({
+        mode,
+        writerKind,
+    }) => {
+        const shared = mode === "thin" ? null : await speaker();
+        const thin = mode === "thin" ? await thinTarget("person") : null;
+        const person = shared?.person ?? thin?.target;
+        if (!person) throw new Error("missing person");
+        const [addition] = await db()
+            .select()
+            .from(almanacShareChanges)
+            .where(eq(almanacShareChanges.kind, "person"));
+        await audio("other-source");
+        const taskId = await insertTask(db(), {
+            userId: "member",
+            recordingId: "other-source",
+        });
+        await db()
+            .insert(chatterItems)
+            .values({
+                id: "other-mail",
+                userId: "member",
+                kind: "mail",
+                title: encryptText("Invented mail"),
+                occurredAt: new Date(),
+            });
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: "other-mail",
+                userId: "member",
+                rawHash: "other-mail",
+                receivedAt: new Date(),
+                sizeBytes: 1,
+                auth: encryptJsonField({}),
+                senderVerified: true,
+            });
+        const checked = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const original = shareQueries.shareRecordHasOtherSources;
+        const spy = vi
+            .spyOn(shareQueries, "shareRecordHasOtherSources")
+            .mockImplementationOnce(async (...args) => {
+                const used = await original(...args);
+                checked.resolve();
+                await release.promise;
+                return used;
+            });
+        const writer = await database.sql.reserve();
+        const [connection] = await writer`select pg_backend_pid() as pid`;
+        const undo = thin
+            ? fixCareProblem("curator", thin.problem.key, "delete").then(
+                  () => ({ removed: [person.id] }),
+              )
+            : undoShareAdditions(
+                  "curator",
+                  shared?.event.id ?? "",
+                  mode === "addition" ? addition?.id : undefined,
+              );
+        try {
+            await checked.promise;
+            const statement =
+                writerKind === "assignment"
+                    ? writer`update recording_tasks set assignee_person_id = ${person.id} where id = ${taskId} and user_id = 'member'`
+                    : writerKind === "task insert"
+                      ? writer`insert into recording_tasks (id, user_id, recording_id, status, text, source, assignee_person_id)
+                      values ('concurrent-task', 'member', 'other-source', 'open', ${encryptText("Invented task")}, 'manual', ${person.id})`
+                      : writerKind === "proposal"
+                        ? writer`insert into task_update_proposals (id, user_id, recording_id, task_id, kind, proposed_assignee_person_id)
+                        values ('concurrent-proposal', 'member', 'other-source', ${taskId}, 'assignee', ${person.id})`
+                        : writer`insert into mail_participants (id, user_id, item_id, ref, roles, person_id)
+                        values ('concurrent-participant', 'member', 'other-mail', 'p1', '[]', ${person.id})`;
+            const outcome = statement.then(
+                () => "committed",
+                (error: { code: string }) => error.code,
+            );
+            await expect
+                .poll(async () => {
+                    const [row] =
+                        await database.sql`select cardinality(pg_blocking_pids(${connection?.pid})) as blockers`;
+                    return row?.blockers;
+                })
+                .toBeGreaterThan(0);
+            release.resolve();
+            expect((await undo).removed).toHaveLength(1);
+            expect(await outcome).toBe("23503");
+            const [task] = await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, taskId));
+            expect(task?.assigneePersonId).toBeNull();
+        } finally {
+            release.resolve();
+            await undo;
+            writer.release();
+            spy.mockRestore();
+        }
+    });
+    it.each([
+        "speaker",
+        "mail participant",
+    ])("excludes thin people used by a private %s", async (source) => {
+        const { target, problem } = await thinTarget("person");
+        if (source === "speaker") {
+            const transcript = await audio("private-source");
+            await attributeSpeaker(db(), {
+                userId: "member",
+                transcriptionId: transcript,
+                label: "speaker_0",
+                personId: target.id,
+            });
+        } else {
+            await db()
+                .insert(chatterItems)
+                .values({
+                    id: "private-mail",
+                    userId: "member",
+                    kind: "mail",
+                    title: encryptText("Invented private mail"),
+                    occurredAt: new Date(),
+                });
+            await db()
+                .insert(mailMessages)
+                .values({
+                    id: "private-mail",
+                    userId: "member",
+                    rawHash: "private-mail",
+                    receivedAt: new Date(),
+                    sizeBytes: 1,
+                    auth: encryptJsonField({}),
+                    senderVerified: true,
+                });
+            await db()
+                .insert(mailParticipants)
+                .values({
+                    userId: "member",
+                    itemId: "private-mail",
+                    ref: "p1",
+                    roles: ["from"],
+                    personId: target.id,
+                });
+        }
+        expect(
+            (await detectCareProblems("org")).filter((p) => p.kind === "thin"),
+        ).toEqual([]);
+        expect(
+            (await call(fix, "curator", { key: problem.key, action: "delete" }))
+                .status,
+        ).toBe(409);
+        expect(
+            await db().select().from(people).where(eq(people.id, target.id)),
+        ).toHaveLength(1);
+    });
+    it("skips saturated thin usage rather than declaring one sampled item to be the whole history", async () => {
+        const { target, transcript } = await thinTarget("person");
+        await db()
+            .insert(transcriptSpeakers)
+            .values(
+                Array.from({ length: 65 }, (_, i) => ({
+                    userId: "member",
+                    transcriptionId: transcript,
+                    label: `extra_${i}`,
+                    personId: target.id,
+                    source: "user" as const,
+                    status: "confirmed" as const,
+                    updatedAt: old,
+                })),
+            );
+        expect(
+            (await detectCareProblems("org")).filter((p) => p.kind === "thin"),
+        ).toEqual([]);
+    });
+    it("round-trips an exported archive larger than 16 KiB through the real restore route", async () => {
+        const records = await db()
+            .insert(people)
+            .values(
+                Array.from({ length: 32 }, (_, i) => ({
+                    id: `archive-person-${String(i).padStart(7, "0")}`,
+                    userId: "org",
+                    displayName: encryptText(`Invented person ${i}`),
+                })),
+            )
+            .returning();
+        const pairs = records.flatMap((left, i) =>
+            records.slice(i + 1).map((right) => ({
+                userId: "org",
+                kind: "person" as const,
+                leftPersonId: left.id,
+                rightPersonId: right.id,
+            })),
+        );
+        await db().insert(almanacDuplicateDismissals).values(pairs);
+        const archive = await collectCareArchive({
+            kind: "organization",
+            orgUserId: "org",
+        });
+        expect(Buffer.byteLength(JSON.stringify({ archive }))).toBeGreaterThan(
+            16 * 1024,
+        );
+        await db().delete(almanacDuplicateDismissals);
+        const response = await call(restore, "curator", { archive });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ restored: 496, skipped: 0 });
+        expect(
+            await collectCareArchive({
+                kind: "organization",
+                orgUserId: "org",
+            }),
+        ).toEqual(archive);
+    });
+
+    it("accepts one decision at all content caps and rejects oversized restore requests before writing", async () => {
+        const archive = careArchiveSchema.parse({
+            version: 1,
+            provenance: "not-included",
+            duplicates: [],
+            problems: [
+                {
+                    kind: "correction_conflict",
+                    records: Array.from({ length: 2000 }, (_, i) => ({
+                        id: String(i).padStart(64, "x"),
+                        kind: "entity",
+                        name: "\u0000".repeat(200),
+                    })),
+                    relationKey: "r".repeat(64),
+                    heard: "\u0000".repeat(200),
+                    values: Array(2000).fill("\u0000".repeat(500)),
+                    lastAt: old.toISOString(),
+                },
+            ],
+        });
+        const bytes = Buffer.byteLength(JSON.stringify({ archive }));
+        expect(bytes).toBeGreaterThan(8 * 1024 * 1024);
+        expect(bytes).toBeLessThan(CARE_RESTORE_MAX_BYTES);
+        const accepted = await call(restore, "curator", { archive });
+        expect(accepted.status).toBe(200);
+        expect(await accepted.json()).toEqual({ restored: 0, skipped: 1 });
+        const rejected = await restore(
+            new Request("http://localhost/api/knowledge/care/restore", {
+                method: "POST",
+                headers: {
+                    "x-test-user": "curator",
+                    "content-type": "application/json",
+                    "content-length": String(CARE_RESTORE_MAX_BYTES + 1),
+                },
+                body: "{}",
+            }),
+        );
+        expect(rejected.status).toBe(413);
+        expect(await db().select().from(almanacDuplicateDismissals)).toEqual(
+            [],
+        );
+    });
+
+    it("uses bounded indexes with 50,000 heard-as forms, 40,000 facts and 100,000 historical dismissals", async () => {
+        const transcript = await audio();
+        await shareRecording(db(), "audio", "org");
+        const outside = await createEntity("org", {
+            name: "Older term",
+            typeKey: "term",
+        });
+        await db()
+            .update(knowledgeEntities)
+            .set({ createdAt: old })
+            .where(eq(knowledgeEntities.id, outside.id));
+        const c = await correction(transcript, outside.id, "old term", 0);
+        await database.sql`insert into knowledge_entities (id, user_id, type_key, name, name_hmac, updated_at)
+            select 'plan-entity-' || i, 'org', 'term', ${encryptText("Invented term")}, 'plan-name-' || i, '2025-01-01'::timestamp from generate_series(1,3000) i`;
+        await database.sql`insert into people (id, user_id, display_name, updated_at)
+            select 'plan-person-' || i, 'org', ${encryptText("Invented person")}, '2025-01-01'::timestamp from generate_series(1,3000) i`;
+        await database.sql`insert into knowledge_aliases (id, user_id, entity_id, kind, text, text_hmac, correction_id)
+            select 'plan-alias-' || i, 'org', ${outside.id}, 'heard_as', ${encryptText("Invented heard form")}, 'plan-form-' || i, ${c.id}
+            from generate_series(1,50000) i`;
+        await database.sql`insert into knowledge_facts (id, user_id, subject_entity_id, subject_key, relation_key, object_literal, object_key, origin)
+            select 'plan-fact-' || i, 'org', case when i <= 30000 then ${outside.id} else 'plan-entity-3000' end,
+                'e:' || case when i <= 30000 then ${outside.id} else 'plan-entity-3000' end,
+                'means', ${encryptText("Invented meaning")}, 'l:plan-value-' || i, 'manual' from generate_series(1,40000) i`;
+        await database.sql`insert into almanac_duplicate_dismissals (id, user_id, kind, problem_key)
+            select 'plan-dismissal-' || i, 'org', 'thin', lpad(i::text,64,'0') from generate_series(1,100000) i`;
+        await correction(transcript, "plan-entity-1", "thin plan term", 4);
+        await db().update(transcriptCorrections).set({ updatedAt: old });
+        await database.sql`insert into chatter_items (id, user_id, kind, title, occurred_at)
+            select 'plan-item-' || i, 'member', 'audio', ${encryptText("Invented item")}, now() from generate_series(1,10000) i`;
+        await database.sql`insert into recording_folder_assignments (user_id, recording_id, folder_id)
+            select 'member', 'plan-item-' || i, 'org-root' from generate_series(1,10000) i`;
+        await database.sql`vacuum analyze`;
+        const queries: SQLWrapper[] = [];
+        const execute: typeof database.db.execute = (query) => {
+            if (typeof query === "string")
+                throw new Error("expected a bound query");
+            queries.push(query);
+            return database.db.execute(query);
+        };
+        const executor = { execute };
+        await conflictingCareFacts("org", executor);
+        await conflictingCareCorrections("org", executor);
+        const thin = await thinCareRecords(
+            "org",
+            new Date(Date.now() - 120 * 86400000),
+            executor,
+        );
+        expect(thin.some((row) => row.id === "plan-entity-1")).toBe(true);
+        const plans = [];
+        for (const query of queries) {
+            const plan = await db().execute(
+                sql`explain (analyze, buffers, format json) ${query}`,
+            );
+            plans.push(plan[0]?.["QUERY PLAN"]);
+        }
+        const dismissalPlan =
+            await database.sql`explain (analyze, buffers, format json)
+            select problem_key from almanac_duplicate_dismissals
+            where user_id = 'org' and problem_key = any(array[lpad('50000',64,'0')])`;
+        plans.push(dismissalPlan[0]?.["QUERY PLAN"]);
+        const serialized = JSON.stringify(plans, null, 2);
+        await writeFile("/tmp/almanac-care-query-plans.json", serialized);
+        for (const index of [
+            "knowledge_facts_scope_current_updated_idx",
+            "knowledge_aliases_scope_heard_updated_idx",
+            "knowledge_entities_scope_live_created_idx",
+            "people_scope_live_created_idx",
+            "almanac_dismissals_scope_problem_key_idx",
+        ])
+            expect(
+                serialized.includes(index),
+                `missing candidate index ${index}`,
+            ).toBe(true);
+        function nodes(value: unknown): Record<string, unknown>[] {
+            if (Array.isArray(value)) return value.flatMap(nodes);
+            if (!value || typeof value !== "object") return [];
+            const row = value as Record<string, unknown>;
+            return [row, ...Object.values(row).flatMap(nodes)];
+        }
+        const allNodes = nodes(plans);
+        expect(
+            nodes(plans[2]).some(
+                (row) =>
+                    row["Node Type"] === "Seq Scan" &&
+                    [
+                        "knowledge_aliases",
+                        "knowledge_facts",
+                        "almanac_duplicate_dismissals",
+                    ].includes(String(row["Relation Name"])) &&
+                    Number(row["Actual Loops"]) > 0,
+            ),
+        ).toBe(false);
+        const candidateIndexes = allNodes.filter(
+            (row) =>
+                typeof row["Index Name"] === "string" &&
+                /scope_(current|heard|live|problem)/.test(
+                    String(row["Index Name"]),
+                ),
+        );
+        console.info(
+            "Care EXPLAIN candidates",
+            candidateIndexes.map((row) => ({
+                index: row["Index Name"],
+                rows: row["Actual Rows"],
+                loops: row["Actual Loops"],
+                removed: row["Rows Removed by Filter"] ?? 0,
+            })),
+        );
+        expect(
+            allNodes
+                .filter(
+                    (row) =>
+                        row["Relation Name"] === "knowledge_aliases" &&
+                        row["Index Name"] ===
+                            "knowledge_aliases_scope_heard_updated_idx",
+                )
+                .every((row) => Number(row["Actual Rows"]) <= 16000),
+        ).toBe(true);
+        expect(
+            allNodes
+                .filter(
+                    (row) =>
+                        row["Relation Name"] === "knowledge_facts" &&
+                        row["Index Name"] ===
+                            "knowledge_facts_scope_current_updated_idx",
+                )
+                .every((row) => Number(row["Actual Rows"]) <= 32000),
+        ).toBe(true);
+    }, 30000);
+
+    it("refuses correction fixes that would cascade into a member's heard-as form", async () => {
+        const transcript = await audio();
+        await shareRecording(db(), "audio", "org");
+        const first = await createEntity("org", {
+            name: "Velnaro",
+            typeKey: "term",
+        });
+        const second = await createEntity("org", {
+            name: "Nulvaro",
+            typeKey: "term",
+        });
+        await correction(transcript, first.id, "velno", 0);
+        const losing = await correction(transcript, second.id, "velno", 2);
+        await db()
+            .insert(knowledgeAliases)
+            .values({
+                userId: "other",
+                entityId: first.id,
+                kind: "heard_as",
+                text: encryptText("Private heard form"),
+                textHmac: "private-form",
+                correctionId: losing.id,
+            });
+        const problem = (await detectCareProblems("org")).find(
+            (p) => p.kind === "correction_conflict",
+        );
+        await expect(
+            fixCareProblem(
+                "curator",
+                problem?.key ?? "",
+                "keep",
+                `entity:${first.id}`,
+            ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(
+            await db()
+                .select()
+                .from(knowledgeAliases)
+                .where(eq(knowledgeAliases.userId, "other")),
+        ).toHaveLength(1);
+        expect(await db().select().from(transcriptCorrections)).toHaveLength(2);
+    });
+    it("keeps a thin entity if an Organization correction also belongs to an item outside the Organization", async () => {
+        const { target, problem } = await thinTarget("entity");
+        const privateTranscript = await audio("outside-organization");
+        await correction(privateTranscript, target.id, "another form", 0);
+        const response = await call(fix, "curator", {
+            key: problem.key,
+            action: "delete",
+        });
+        expect(response.status).toBe(409);
+        expect(await db().select().from(transcriptCorrections)).toHaveLength(2);
+        expect(
+            await db()
+                .select()
+                .from(knowledgeEntities)
+                .where(eq(knowledgeEntities.id, target.id)),
+        ).toHaveLength(1);
     });
     it("sums duplicates, unreviewed shares and other open problems, and returns curator-only folder flags", async () => {
         const { person } = await speaker();

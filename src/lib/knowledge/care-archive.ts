@@ -5,6 +5,9 @@ import { almanacDuplicateDismissals } from "@/db/schema";
 import { decryptJsonField } from "@/lib/encryption/fields";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
 
+/** Maximum UTF-8 restore request size, including an independently retryable archive chunk and ID map. */
+export const CARE_RESTORE_MAX_BYTES = 32 * 1024 * 1024;
+
 const content = z.object({
     kind: z.enum(["fact_conflict", "correction_conflict", "thin"]),
     records: z

@@ -1589,6 +1589,9 @@ export const people = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("people_scope_live_created_idx")
+            .on(table.userId, table.createdAt.desc().nullsFirst(), table.id)
+            .where(sql`${table.mergedIntoId} is null`),
         // Postgres treats NULLs as distinct, so any number of people per user
         // may have no email at all -- which is the common case for someone
         // named from a transcript rather than a calendar invite.
@@ -1961,6 +1964,9 @@ export const knowledgeEntities = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_entities_scope_live_created_idx")
+            .on(table.userId, table.createdAt.desc().nullsFirst(), table.id)
+            .where(sql`${table.mergedIntoId} is null`),
         // One "Orion" project per scope; tombstones keep their name.
         nameUnique: uniqueIndex("knowledge_entities_owner_type_name_unique")
             .on(table.userId, table.typeKey, table.nameHmac)
@@ -2042,6 +2048,16 @@ export const knowledgeAliases = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_aliases_scope_heard_updated_idx")
+            .on(
+                table.userId,
+                table.updatedAt.desc().nullsFirst(),
+                table.id,
+                table.textHmac,
+                table.personId,
+                table.entityId,
+            )
+            .where(sql`${table.kind} = 'heard_as'`),
         aliasUnique: unique("knowledge_aliases_unique")
             .on(
                 table.userId,
@@ -2052,6 +2068,18 @@ export const knowledgeAliases = pgTable(
                 table.correctionId,
             )
             .nullsNotDistinct(),
+        personScopeIdx: index("knowledge_aliases_person_scope_idx").on(
+            table.personId,
+            table.userId,
+        ),
+        entityScopeIdx: index("knowledge_aliases_entity_scope_idx").on(
+            table.entityId,
+            table.userId,
+        ),
+        correctionScopeIdx: index("knowledge_aliases_correction_scope_idx").on(
+            table.correctionId,
+            table.userId,
+        ),
         personIdx: index("knowledge_aliases_person_id_idx").on(table.personId),
         entityIdx: index("knowledge_aliases_entity_id_idx").on(table.entityId),
         correctionIdx: index("knowledge_aliases_correction_id_idx").on(
@@ -2218,6 +2246,16 @@ export const knowledgeFacts = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_facts_scope_current_updated_idx")
+            .on(
+                table.userId,
+                table.updatedAt.desc().nullsFirst(),
+                table.id,
+                table.subjectKey,
+                table.relationKey,
+                table.objectKey,
+            )
+            .where(sql`${table.replacedByFactId} is null`),
         factUnique: unique("knowledge_facts_unique").on(
             table.userId,
             table.subjectKey,
@@ -4858,6 +4896,10 @@ export const almanacDuplicateDismissals = pgTable(
         scopeIdx: index("almanac_dismissals_scope_idx").on(
             table.userId,
             table.kind,
+        ),
+        problemKeyIdx: index("almanac_dismissals_scope_problem_key_idx").on(
+            table.userId,
+            table.problemKey,
         ),
         pairUnique: unique("almanac_duplicate_dismissals_pair_unique")
             .on(

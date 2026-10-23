@@ -1,7 +1,7 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-23 11:15
+updated: 2026-10-23 12:51
 status: accepted
 kind: feature
 issues: [240]
@@ -106,12 +106,23 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
 - **Fact conflicts:** reuse the existing relation `cardinality: one`; losing current values point at
   the kept fact through `replacedByFactId`, retaining evidence. Correction conflicts use heard-as
   forms; thin records use distinct Organization-visible item mentions, including mail participants.
-- **Deploy surface:** the generated additive migration `0142_big_terrax.sql` adds provenance and
+- **Deploy surface:** the generated additive migration `0142_spicy_inertia.sql` adds provenance and
   extends the existing dismissal table. No environment or compose changes. Hosted and self-host
   without an Organization expose no Care data.
 
 ## Verification
 
+- **PR 3 review fixes:** 38 additional database regressions bring the Care integration file to 68
+  cases. They cover private dependencies on both record kinds, private speaker/mail usage, withdrawn
+  sources, private correction cascades, 12 concurrent FK writes during all Care erasure paths, and
+  existing recording writers finishing before Care takes parent locks. The populated plan test uses
+  50,002 heard-as forms, 40,000 facts, 100,000 historical dismissals and 10,000 unrelated shared items:
+  indexed candidates stop at 32,000 facts, 16,000 forms and 2,000 records per kind; dismissal membership
+  reads one indexed row. A 496-decision archive round-trips through the actual route above 16 KiB;
+  maximum decision content fits the documented 32 MiB chunk limit. Final whole Node 24 suite: 722
+  files / 8,558 tests passed, 12 files / 104 tests skipped, no failures or unhandled errors (1,711.40 s).
+  Final Node 22 selection: four files / 190 tests passed, none skipped. MDX, Biome (1,996 files, no
+  errors or warnings), TypeScript and the ADR index passed.
 - **PR 3:** `src/tests/regressions/240-care-queue.integration.test.ts` adds 30 database-backed
   cases, including every publication path, untouched and protected undo, publication timestamps, reshare receipts,
   private-scope boundaries, detector positives and negatives, dismissals, counts, all new routes,
@@ -166,7 +177,12 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
 - Share undo preserves any addition changed, merged, confirmed elsewhere or referenced by a later
   share. It also keeps records whose deletion would affect private notes, aliases, facts or other
   sources. This can retain more than the visible Organization evidence suggests; it must never
-  cascade into another source to make an undo look complete.
+  cascade into another source to make an undo look complete. Thin deletion applies the same protection.
+  Care holds the Organization lock, then existing recording locks, then parent row locks before
+  dependency checks and erasure;
+  concurrent FK writers wait and fail if the parent was erased. Indexed candidate limits precede
+  joins, dismissal reads use current keys only, and thin detection skips records above 64 uses.
+  Restore accepts independently retryable chunks of at most 32 MiB including the ID map.
 - The archive restore endpoint restores Care decisions after records, facts and usage; a general
   archive-import UI remains separate work. The `prs` list contains the two merged PR numbers;
   the orchestrator adds PR 3's number when opening it.

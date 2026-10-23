@@ -3,7 +3,10 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { requireCareCurator } from "@/lib/knowledge/care-access";
-import { careArchiveSchema } from "@/lib/knowledge/care-archive";
+import {
+    CARE_RESTORE_MAX_BYTES,
+    careArchiveSchema,
+} from "@/lib/knowledge/care-archive";
 import { restoreCareArchive } from "@/lib/knowledge/restore-care";
 import { jsonBody } from "@/lib/knowledge/route-helpers";
 
@@ -17,7 +20,7 @@ export const POST = apiHandler(async (request) => {
                 .record(z.string().max(64), z.string().min(1).max(64))
                 .default({}),
         })
-        .safeParse(await jsonBody(request));
+        .safeParse(await jsonBody(request, CARE_RESTORE_MAX_BYTES));
     if (!body.success)
         throw new AppError(
             ErrorCode.INVALID_INPUT,

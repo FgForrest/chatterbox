@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    lockCareRecords,
     shareRecordHasOtherSources,
     shareRecordWasMerged,
 } from "@/db/queries/almanac-share";
@@ -486,6 +487,12 @@ export async function undoShareAdditions(
                 .filter((r) => r.kind === "fact")
                 .map((r) => r.targetId),
         });
+        await lockCareRecords(
+            tx,
+            scope,
+            changes.filter((r) => r.kind === "person").map((r) => r.targetId),
+            changes.filter((r) => r.kind === "entity").map((r) => r.targetId),
+        );
         const removable = new Map<string, Change>();
         const reasons = new Map<string, KeptReason>();
         for (const change of selected) {
@@ -543,12 +550,7 @@ export async function undoShareAdditions(
             const [dependent] = await tx
                 .select({ id: knowledgeFacts.id })
                 .from(knowledgeFacts)
-                .where(
-                    and(
-                        eq(knowledgeFacts.userId, scope),
-                        eq(knowledgeFacts.replacedByFactId, change.targetId),
-                    ),
-                )
+                .where(eq(knowledgeFacts.replacedByFactId, change.targetId))
                 .limit(1);
             if (dependent) {
                 removable.delete(change.id);

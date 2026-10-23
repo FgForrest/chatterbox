@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     CARE_RECORD_LIMIT,
@@ -6,6 +6,11 @@ import {
     conflictingCareFacts,
     thinCareRecords,
 } from "@/db/queries/almanac-care";
+import {
+    lockCareRecords,
+    shareRecordHasOtherSources,
+    shareRecordWasMerged,
+} from "@/db/queries/almanac-share";
 import {
     almanacDuplicateDismissals,
     knowledgeAliases,
@@ -296,22 +301,17 @@ export async function openCareProblems(
     actorId: string,
 ): Promise<CareProblem[]> {
     const scope = await requireCareCurator(actorId);
-    const [problems, dismissed] = await Promise.all([
-        scan(scope),
-        db
-            .select({ key: almanacDuplicateDismissals.problemKey })
-            .from(almanacDuplicateDismissals)
-            .where(
-                and(
-                    eq(almanacDuplicateDismissals.userId, scope),
-                    inArray(almanacDuplicateDismissals.kind, [
-                        "fact_conflict",
-                        "correction_conflict",
-                        "thin",
-                    ]),
-                ),
+    const problems = await scan(scope);
+    if (!problems.length) return [];
+    const dismissed = await db
+        .select({ key: almanacDuplicateDismissals.problemKey })
+        .from(almanacDuplicateDismissals)
+        .where(
+            and(
+                eq(almanacDuplicateDismissals.userId, scope),
+                sql`${almanacDuplicateDismissals.problemKey} = any(${sql.param(problems.map((problem) => problem.key))}::text[])`,
             ),
-    ]);
+        );
     const keys = new Set(dismissed.map((row) => row.key));
     return problems.filter((problem) => !keys.has(problem.key));
 }
@@ -373,10 +373,59 @@ export async function fixCareProblem(
                 .onConflictDoNothing();
         } else if (problem.kind === "thin" && action === "delete") {
             const target = problem.records[0];
-            if (target?.kind === "person")
+            if (!target)
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "The problem changed; reload",
+                    409,
+                );
+            await lockRecordingsNaming(tx, {
+                personIds: target.kind === "person" ? [target.id] : [],
+                entityIds: target.kind === "entity" ? [target.id] : [],
+            });
+            await lockCareRecords(
+                tx,
+                scope,
+                target.kind === "person" ? [target.id] : [],
+                target.kind === "entity" ? [target.id] : [],
+            );
+            const current = (
+                await thinCareRecords(
+                    scope,
+                    new Date(Date.now() - 120 * 86400000),
+                    tx,
+                )
+            ).find((row) => row.id === target.id && row.kind === target.kind);
+            if (
+                !current ||
+                (await shareRecordWasMerged(
+                    tx,
+                    scope,
+                    target.kind,
+                    target.id,
+                )) ||
+                (await shareRecordHasOtherSources(tx, {
+                    scope,
+                    kind: target.kind,
+                    id: target.id,
+                    itemId: current.item_id,
+                    since: new Date(),
+                    facts: [],
+                    corrections: [],
+                    aliases: [],
+                    emails: [],
+                    allowOrganizationForms: true,
+                }))
+            )
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Record kept: other dependencies",
+                    409,
+                );
+            if (target.kind === "person")
                 for (const s of await deletePersonInTx(tx, actorId, target.id))
                     scopes.add(s);
-            else if (target)
+            else
                 for (const s of await deleteEntityInTx(tx, actorId, target.id))
                     scopes.add(s);
         } else if (problem.kind === "fact_conflict" && action === "keep") {
@@ -439,6 +488,24 @@ export async function fixCareProblem(
             const ids = losing.flatMap((row) =>
                 row.correctionId ? [row.correctionId] : [],
             );
+            if (ids.length) {
+                const [privateAlias] = await tx
+                    .select({ id: knowledgeAliases.id })
+                    .from(knowledgeAliases)
+                    .where(
+                        and(
+                            inArray(knowledgeAliases.correctionId, ids),
+                            ne(knowledgeAliases.userId, scope),
+                        ),
+                    )
+                    .limit(1);
+                if (privateAlias)
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        "Correction kept: other dependencies",
+                        409,
+                    );
+            }
             if (ids.length)
                 await tx
                     .delete(transcriptCorrections)
