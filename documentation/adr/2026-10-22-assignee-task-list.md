@@ -5,7 +5,7 @@ updated: 2026-10-23 09:35
 status: accepted
 kind: feature
 issues: [253]
-prs: [264]
+prs: [264, 272]
 areas: [src/lib/tasks, src/lib/folders, src/components/tasks, src/app/api/tasks, src/lib/mcp/tools/tasks.ts, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: []
