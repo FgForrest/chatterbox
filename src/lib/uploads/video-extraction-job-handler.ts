@@ -146,6 +146,8 @@ function extractAudio(
                 "aac",
                 "-b:a",
                 "128k",
+                "-movflags",
+                "+faststart",
                 "-progress",
                 "pipe:1",
                 "-nostats",

@@ -1,3 +1,4 @@
+import { fetchWithoutIdleTimeout } from "@/lib/ai/provider-fetch";
 import { env } from "@/lib/env";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -143,30 +144,33 @@ export async function geminiTranscribe({
         ? `${TRANSCRIBE_INSTRUCTION} The audio language is ${language}.`
         : TRANSCRIBE_INSTRUCTION;
 
-    const response = await fetch(`${API_BASE}/${resource}:generateContent`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-            contents: [
-                {
-                    role: "user",
-                    parts: [
-                        { text: prompt },
-                        {
-                            inlineData: {
-                                mimeType,
-                                data: audioBuffer.toString("base64"),
+    const response = await fetchWithoutIdleTimeout(
+        `${API_BASE}/${resource}:generateContent`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey,
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: prompt },
+                            {
+                                inlineData: {
+                                    mimeType,
+                                    data: audioBuffer.toString("base64"),
+                                },
                             },
-                        },
-                    ],
-                },
-            ],
-        }),
-        signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
-    });
+                        ],
+                    },
+                ],
+            }),
+            signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
+        },
+    );
 
     if (!response.ok) {
         throw new GeminiTranscribeError(

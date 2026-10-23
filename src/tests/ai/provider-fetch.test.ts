@@ -338,7 +338,7 @@ describe("self-host provider fetch", () => {
         vi.stubGlobal("fetch", fetch);
         const options = { redirect: "follow" as const };
         await expect(providerFetch(url, options)).resolves.toBe(response);
-        expect(fetch).toHaveBeenCalledWith(url, options);
+        expect(fetch).toHaveBeenCalledWith(url, { ...options, timeout: false });
         expect(lookup).not.toHaveBeenCalled();
         expect(transport).not.toHaveBeenCalled();
     });

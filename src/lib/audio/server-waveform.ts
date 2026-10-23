@@ -45,11 +45,6 @@ export async function generateServerWaveform(
     buckets: number,
 ): Promise<number[]> {
     const pcm = await runFfmpeg(input, [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        "pipe:0",
         "-vn",
         "-ac",
         "1",
