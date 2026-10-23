@@ -19,7 +19,7 @@ Claude vidí to, co vidíte Vy v aplikaci Klepna, a nikdy víc:
 
 Které oblasti máte otevřené, určuje Váš administrátor: Almanach, přepisy, shrnutí, úkoly a změny úkolů. Claude dostane nabídnuté jen vyhledávání pro Vaše oblasti, takže může říct, že se k něčemu nedostane, i když to v aplikaci vidíte.
 
-Claude může změnit jedinou věc: s právem měnit úkoly umí úkol označit jako hotový, znovu otevřít, zrušit nebo přiřadit někomu jinému, tam kde by Vám to dovolila stránka Úkoly. Vše ostatní je jen pro čtení. Klepna zaznamenává každé vyhledávání (co se hledalo a kterých nahrávek či záznamů se týkalo), nikdy ne to, na co jste se ptali ani co Claude odpověděl.
+S právem měnit úkoly může Claude spravovat úkoly tam, kde by Vám to dovolila stránka Úkoly: vytvářet vlastní úkoly, upravovat je, dokončovat, znovu otevírat, rušit, přeřazovat, sledovat a slučovat. Může také napsat nebo vymazat jednu poznámku k úkolu (až 2 000 znaků), pokud ho smíte dokončit. Nová poznámka nahradí celou předchozí; chcete-li ji doplnit, požádejte Claude, aby ji nejdřív přečetl. Dokončení i poznámku může zapsat najednou. Poznámky úkolů z pošty smí číst a měnit jen s přístupem k poště. Vše ostatní je jen pro čtení. Klepna zaznamenává každé vyhledávání (co se hledalo a kterých nahrávek či záznamů se týkalo), nikdy ne to, na co jste se ptali ani co Claude odpověděl.
 
 <span id="before-you-connect" />
 
@@ -72,7 +72,7 @@ Ptejte se tak, jako byste se ptali kolegy, který všechno četl:
 - „Shrň, co Priya Raman řekla na úvodní schůzce k Harboru.“
 - „Kdo je Marek Dvořák a co o něm víme?“
 - „Které moje úkoly jsou po termínu?“
-- „Označ úkol o přístupu k Dispatch API jako hotový.“
+- „Označ úkol o přístupu k Dispatch API jako hotový a poznamenej, že byl dodán ve vydání X.“
 
 Jména fungují všude, kde by Claude jinak potřeboval ID: osoby, věci a nahrávky se najdou podle jmen, přezdívek a názvů. Když jméno může znamenat víc lidí, Claude dostane kandidáty a měl by se Vás zeptat, kterého myslíte.
 

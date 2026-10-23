@@ -1,11 +1,11 @@
 ---
 title: Own tasks share the task table, follows stay personal, and assignees merge with explicit disclosure
 date: 2026-10-22
-updated: 2026-10-23 07:00
+updated: 2026-10-23 09:35
 status: accepted
 kind: feature
 issues: [253]
-prs: [264]
+prs: [264, 272]
 areas: [src/lib/tasks, src/lib/folders, src/components/tasks, src/app/api/tasks, src/lib/mcp/tools/tasks.ts, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: []
@@ -100,6 +100,10 @@ Merges are irreversible and retain links, followers, pending proposals and cross
 
 ## Verification
 
+- `src/tests/mcp/task-notes.integration.test.ts`: 21 PostgreSQL cases covering note writes,
+  combinations, atomic refusals, encryption, attribution, mail permissions, search, audit and
+  own-task privacy. MCP tool guards validate the note schema; the Keycloak authorization suite
+  verifies note writes with the existing `tasks:write` scope.
 - `src/tests/regressions/253-assignee-tasks.integration.test.ts`: 48 PostgreSQL tests covering
   privacy, role permissions, follows across withdrawal, notes, limits, merge preview and versions,
   badge, MCP and archive round trips, including ZIP entries.
@@ -114,6 +118,12 @@ Merges are irreversible and retain links, followers, pending proposals and cross
 - Existing task, MCP, search, export and playback tests remain part of the full-suite check.
 
 ## Consequences & open follow-ups
+
+- MCP `update_task` writes notes through the app's `updateTask`, under `tasks:write` and
+  `can_close`. A string replaces the whole note (read first to retain old text); null or an empty
+  string clears it. Combined changes share one version check and transaction. Mail-sourced notes
+  require `mail:read` to replace or clear, including after a merge, just as they do to read.
+  Note writes retain the existing audit entry with caller, task id and outcome, never note text.
 
 - A task no longer necessarily has an item. New joins, filters, exports and deletion code must
   preserve own tasks and their author-only visibility.
