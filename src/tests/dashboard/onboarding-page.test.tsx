@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "@/app/(app)/dashboard/page";
 import {
     aiEnhancements,
+    chatterItems,
     itemShares,
     plaudConnections,
     recordings,
@@ -26,6 +27,7 @@ const {
         connection: { invalidatedAt: null as Date | null },
         organization: false,
         personSharing: false,
+        outgoing: false,
     },
     readiness: vi.fn(),
     capabilities: vi.fn(),
@@ -102,6 +104,7 @@ describe("layout onboarding seed", () => {
         state.completed = true;
         state.organization = false;
         state.personSharing = false;
+        state.outgoing = false;
         settings.mockImplementation(async () => ({
             onboardingCompleted: state.completed,
         }));
@@ -122,40 +125,65 @@ describe("layout onboarding seed", () => {
                             ? [state.connection]
                             : !state.personSharing
                               ? []
-                              : table === itemShares
-                                ? [
-                                      {
-                                          id: "share",
-                                          itemId: "received-audio",
-                                          version: 1,
-                                          filingFolderId: "personal",
-                                      },
-                                  ]
+                              : table === chatterItems
+                                ? state.outgoing
+                                    ? [{ id: "own-audio" }]
+                                    : []
                                 : table === recordings &&
+                                    state.outgoing &&
                                     projection &&
-                                    "ownerName" in projection
+                                    !("ownerName" in projection)
                                   ? [
                                         {
-                                            id: "received-audio",
-                                            userId: "owner",
-                                            filename: "Interview",
-                                            duration: 1000,
-                                            filesize: 10,
+                                            id: "own-audio",
+                                            filename: "Own recording",
                                             startTime: new Date(
                                                 "2026-10-22T10:00:00Z",
                                             ),
-                                            deviceSn: "demo",
-                                            ownerName: "Alex Morgan",
-                                            ownerEmail: "alex@example.com",
+                                            duration: 1000,
+                                            filesize: 10,
+                                            deviceSn: "local",
                                             waveformPeaks: null,
                                             audioReapedAt: null,
                                             transcriptReapedAt: null,
                                             summaryReapedAt: null,
                                         },
                                     ]
-                                  : [];
+                                  : table === itemShares
+                                    ? [
+                                          {
+                                              id: "share",
+                                              itemId: "received-audio",
+                                              version: 1,
+                                              filingFolderId: "personal",
+                                          },
+                                      ]
+                                    : table === recordings &&
+                                        projection &&
+                                        "ownerName" in projection
+                                      ? [
+                                            {
+                                                id: "received-audio",
+                                                userId: "owner",
+                                                filename: "Interview",
+                                                duration: 1000,
+                                                filesize: 10,
+                                                startTime: new Date(
+                                                    "2026-10-22T10:00:00Z",
+                                                ),
+                                                deviceSn: "demo",
+                                                ownerName: "Alex Morgan",
+                                                ownerEmail: "alex@example.com",
+                                                waveformPeaks: null,
+                                                audioReapedAt: null,
+                                                transcriptReapedAt: null,
+                                                summaryReapedAt: null,
+                                            },
+                                        ]
+                                      : [];
                     expect([
                         recordings,
+                        chatterItems,
                         transcriptions,
                         aiEnhancements,
                         plaudConnections,
@@ -252,6 +280,18 @@ describe("layout onboarding seed", () => {
         finishReadiness({ plaud: "connected" });
         finishReview(new Set());
         await Promise.all([layoutConfig, render]);
+    });
+    it("passes outgoing person sharing markers to the owner's rows", async () => {
+        state.personSharing = true;
+        state.outgoing = true;
+        const page = (await DashboardPage()) as ReactElement<{
+            children: ReactElement<{ recordings: Recording[] }>;
+        }>;
+        expect(
+            page.props.children.props.recordings.find(
+                (item) => item.id === "own-audio",
+            ),
+        ).toMatchObject({ sharedWithPeople: true });
     });
     it("keeps the Organization entry and the received copy in separate libraries", async () => {
         state.personSharing = true;

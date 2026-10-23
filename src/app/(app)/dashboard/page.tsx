@@ -3,7 +3,10 @@ import { Workstation } from "@/components/dashboard/workstation";
 import { PersonSharingProvider } from "@/components/sharing/person-sharing";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
-import { receivedItemCondition } from "@/db/queries/item-shares";
+import {
+    listOutgoingSharedItemIds,
+    receivedItemCondition,
+} from "@/db/queries/item-shares";
 import {
     aiEnhancements,
     chatterItems,
@@ -268,6 +271,7 @@ export default async function DashboardPage() {
         folderOrganization,
         orgUserId,
         viewerIsOrgAccount,
+        outgoingItemIds,
     ] = await Promise.all([
         db
             .select({
@@ -337,6 +341,7 @@ export default async function DashboardPage() {
         listFolderOrganization(session.user.id),
         getOrgUserId(),
         isOrgAccount(session.user.id),
+        listOutgoingSharedItemIds(session.user.id),
     ]);
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
@@ -481,8 +486,10 @@ export default async function DashboardPage() {
             <Workstation
                 userId={session.user.id}
                 recordings={[
-                    ...recordingsData,
-                    ...mailRows,
+                    ...[...recordingsData, ...mailRows].map((recording) => ({
+                        ...recording,
+                        sharedWithPeople: outgoingItemIds.has(recording.id),
+                    })),
                     ...receivedRecordings,
                 ]}
                 transcriptions={allTranscriptions}

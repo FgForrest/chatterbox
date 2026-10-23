@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAppChrome } from "@/components/app-chrome-provider";
 import { AppHeader } from "@/components/app-header";
-import { useOptionalConfirm } from "@/components/confirm-dialog";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
@@ -151,7 +150,6 @@ export function Workstation({
     initialInvitations = [],
 }: WorkstationProps) {
     const i18n = useExtracted();
-    const confirm = useOptionalConfirm();
     const folderLabel = useFolderLabel();
     const shareRefusal = useShareRefusal();
     const { refresh } = useRouter();
@@ -1247,25 +1245,10 @@ export function Workstation({
             const destinationFolder = folderOrganization.folders.find(
                 (folder) => folder.id === parentId,
             );
-            const publishes =
-                sourceFolder?.scope === "personal" &&
-                destinationFolder?.scope === "org";
             if (
                 sourceFolder?.receivedFolder ||
-                destinationFolder?.receivedFolder
-            )
-                return;
-            if (
-                publishes &&
-                (!confirm ||
-                    !(await confirm({
-                        title: i18n("Move folder into the Organization?"),
-                        description: i18n(
-                            "The Organization will see this folder and its items. Person shares of this folder and its subfolders will end, and recipients' attached folders will disappear.",
-                        ),
-                        confirmLabel: i18n("Move to Organization"),
-                        onConfirm: () => {},
-                    })))
+                destinationFolder?.receivedFolder ||
+                sourceFolder?.scope !== destinationFolder?.scope
             )
                 return;
             const previous = folderOrganization;
@@ -1327,7 +1310,6 @@ export function Workstation({
                     parentId,
                     beforeId,
                     version,
-                    endPersonShares: publishes,
                 }),
             });
             if (response.status === 409) {
@@ -1356,10 +1338,9 @@ export function Workstation({
                         : folder,
                 ),
             }));
-            if (publishes) refresh();
             toast.success(i18n("Folder moved"));
         },
-        [folderOrganization, i18n, refresh, confirm],
+        [folderOrganization, i18n, refresh],
     );
 
     const handleDeleteFolder = useCallback(
@@ -1569,11 +1550,19 @@ export function Workstation({
                 throw new Error(i18n("Could not update folder assignment"));
             }
             if (assigned) rememberFolder(folderId);
-            // Sharing or unsharing changes the Organization library itself.
             if (
-                folderOrganization.folders.find(
-                    (folder) => folder.id === folderId,
-                )?.scope === "org"
+                folderOrganization.folders.some(
+                    (folder) =>
+                        (folder.id === folderId && folder.scope === "org") ||
+                        (folder.sharedWithPeople &&
+                            (folder.id === folderId ||
+                                previous.some(
+                                    (assignment) =>
+                                        assignment.recordingId ===
+                                            recordingId &&
+                                        assignment.folderId === folder.id,
+                                ))),
+                )
             ) {
                 refresh();
             }
@@ -1633,9 +1622,18 @@ export function Workstation({
             }
             rememberFolder(toFolderId);
             if (
-                folderOrganization.folders.find(
-                    (folder) => folder.id === toFolderId,
-                )?.scope === "org"
+                folderOrganization.folders.some(
+                    (folder) =>
+                        (folder.id === toFolderId && folder.scope === "org") ||
+                        (folder.sharedWithPeople &&
+                            (folder.id === toFolderId ||
+                                previous.some(
+                                    (assignment) =>
+                                        assignment.recordingId ===
+                                            recordingId &&
+                                        assignment.folderId === folder.id,
+                                ))),
+                )
             )
                 refresh();
             toast.success(i18n("Recording moved"));

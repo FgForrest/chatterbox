@@ -502,7 +502,7 @@ export async function notifyFolderSharesChanged(userId: string) {
     );
 }
 
-/** Remove a folder's shares before deletion or Organization publication, in the owner's transaction. */
+/** Remove a folder's shares before deletion, in the owner's transaction. */
 export async function endFolderSharesInTx(
     tx: Tx,
     userId: string,

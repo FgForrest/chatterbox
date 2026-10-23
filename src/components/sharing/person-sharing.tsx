@@ -359,7 +359,7 @@ export function PersonShareDialog({
                 <Lock className="size-4 shrink-0 text-person-share" />
                 {kind === "folder"
                     ? i18n(
-                          "The folder and its items stay yours and private. The Organization will not see them.",
+                          "The folder and its items stay yours. Sharing with people does not share them with the Organization.",
                       )
                     : allowInvite
                       ? i18n(

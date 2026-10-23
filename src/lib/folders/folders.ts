@@ -1,18 +1,14 @@
-import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     asyncJobs,
     chatterItems,
-    folderDefaultProfiles,
     folderExportConfigurations,
-    folderShares,
-    itemShares,
-    receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
-    recordingSessions,
     recordings,
     users,
 } from "@/db/schema";
@@ -799,7 +795,6 @@ export async function moveFolder(input: {
     parentId: string;
     beforeId?: string | null;
     canCurate?: boolean;
-    endPersonShares?: boolean;
     /** The version the caller last saw; a mismatch is a 409. */
     version?: number;
 }): Promise<RecordingFolder> {
@@ -825,14 +820,6 @@ export async function moveFolder(input: {
             );
             if (!destination) throw folderNotFound();
             assertWritable(destination);
-            if (target.scope === "personal" && destination.scope === "org") {
-                if (destination.folder.parentId === null)
-                    assertOrganizationTreeManager(
-                        [destination],
-                        input.canCurate === true,
-                    );
-                return publishPrivateFolderInTx(tx, input, target, destination);
-            }
             assertOrganizationTreeManager(
                 [target, destination],
                 input.canCurate === true,
@@ -972,242 +959,12 @@ export async function moveFolder(input: {
         },
         { isolationLevel: "serializable" },
     );
-    if ("receivers" in moved) {
-        await Promise.all(moved.receivers.map(notifyPersonShareChanged));
-        try {
-            await Promise.all(
-                moved.folderIds.map((id) =>
-                    ensureFolderAddress(id, input.userId),
-                ),
-            );
-        } catch {
-            console.error("[mail] could not assign moved folder addresses");
-        }
-    }
     if (moved.scope === "org") {
         await orgTreeChanged();
     } else {
         await scheduleFolderExportProjection(input.userId);
     }
     return moved.folder;
-}
-
-async function publishPrivateFolderInTx(
-    tx: Tx,
-    input: {
-        userId: string;
-        folderId: string;
-        version?: number;
-        endPersonShares?: boolean;
-    },
-    target: AccessibleFolder,
-    destination: AccessibleFolder,
-) {
-    const [locked] = await tx
-        .select(folderColumns)
-        .from(recordingFolders)
-        .where(
-            and(
-                eq(recordingFolders.id, target.folder.id),
-                eq(recordingFolders.userId, input.userId),
-            ),
-        )
-        .for("update");
-    if (!locked) throw folderNotFound();
-    if (input.version !== undefined && locked.version !== input.version)
-        throw staleFolder();
-    const folders = await listTreeFolders(tx, input.userId);
-    const subtree = [...subtreeIds(folders, locked.id)];
-    await tx
-        .select({ id: recordingFolders.id })
-        .from(recordingFolders)
-        .where(
-            and(
-                eq(recordingFolders.userId, input.userId),
-                inArray(recordingFolders.id, subtree),
-            ),
-        )
-        .orderBy(recordingFolders.id)
-        .for("update");
-    const [share] = await tx
-        .select({ id: folderShares.id })
-        .from(folderShares)
-        .where(
-            and(
-                eq(folderShares.userId, input.userId),
-                inArray(folderShares.folderId, subtree),
-            ),
-        )
-        .limit(1);
-    if (share && !input.endPersonShares)
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            "Moving this folder into the Organization ends its person shares. Confirm this change.",
-            409,
-        );
-    const [configured] = await tx
-        .select({ id: folderExportConfigurations.id })
-        .from(folderExportConfigurations)
-        .where(
-            and(
-                eq(folderExportConfigurations.userId, input.userId),
-                inArray(folderExportConfigurations.folderId, subtree),
-            ),
-        )
-        .limit(1);
-    if (configured)
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "Remove filesystem exports before moving this folder outside Private",
-            400,
-        );
-    const [profile] = await tx
-        .select({ id: folderDefaultProfiles.folderId })
-        .from(folderDefaultProfiles)
-        .innerJoin(
-            recordingFolders,
-            eq(recordingFolders.id, folderDefaultProfiles.folderId),
-        )
-        .where(
-            and(
-                eq(recordingFolders.userId, input.userId),
-                inArray(folderDefaultProfiles.folderId, subtree),
-                isNotNull(folderDefaultProfiles.profileId),
-            ),
-        )
-        .limit(1);
-    if (profile)
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "Remove private processing defaults before moving this folder into the Organization",
-            400,
-        );
-    const placements = await tx
-        .select({ itemId: recordingFolderAssignments.itemId })
-        .from(recordingFolderAssignments)
-        .where(
-            and(
-                eq(recordingFolderAssignments.userId, input.userId),
-                inArray(recordingFolderAssignments.folderId, subtree),
-            ),
-        );
-    const itemIds = [...new Set(placements.map((row) => row.itemId))].sort();
-    const destinationPlacements = itemIds.length
-        ? await tx
-              .select({ itemId: recordingFolderAssignments.itemId })
-              .from(recordingFolderAssignments)
-              .where(
-                  and(
-                      eq(recordingFolderAssignments.userId, input.userId),
-                      eq(
-                          recordingFolderAssignments.folderId,
-                          destination.folder.id,
-                      ),
-                      inArray(recordingFolderAssignments.itemId, itemIds),
-                  ),
-              )
-        : [];
-    const alreadyInDestination = new Set(
-        destinationPlacements.map((row) => row.itemId),
-    );
-    for (const itemId of itemIds) {
-        const problems = await shareItemToOrganizationFolderInTx(tx, {
-            ownerUserId: input.userId,
-            itemId,
-            folderId: destination.folder.id,
-            orgUserId: destination.ownerId,
-        });
-        if (problems.length)
-            throw new AppError(
-                ErrorCode.SHARE_REQUIREMENTS_UNMET,
-                "Finish the review before sharing",
-                409,
-                { problems },
-            );
-    }
-    const receivers = await endFolderSharesInTx(tx, input.userId, subtree);
-    await blockFolderAddressesInTx(tx, subtree);
-    await tx
-        .update(itemShares)
-        .set({
-            filingFolderId: null,
-            version: sql`${itemShares.version} + 1`,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(itemShares.receiverUserId, input.userId),
-                inArray(itemShares.filingFolderId, subtree),
-            ),
-        );
-    await tx
-        .update(recordingSessions)
-        .set({ folderId: null })
-        .where(
-            and(
-                eq(recordingSessions.userId, input.userId),
-                inArray(recordingSessions.folderId, subtree),
-            ),
-        );
-    await tx
-        .update(receivedFolderAttachments)
-        .set({ parentId: null, updatedAt: new Date() })
-        .where(
-            and(
-                eq(receivedFolderAttachments.userId, input.userId),
-                inArray(receivedFolderAttachments.parentId, subtree),
-            ),
-        );
-    await tx
-        .update(recordingFolders)
-        .set({
-            userId: destination.ownerId,
-            version: sql`${recordingFolders.version} + 1`,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordingFolders.userId, input.userId),
-                inArray(recordingFolders.id, subtree),
-            ),
-        );
-    const [moved] = await tx
-        .update(recordingFolders)
-        .set({ parentId: destination.folder.id, sortOrder: 1_000_000 })
-        .where(
-            and(
-                eq(recordingFolders.id, locked.id),
-                eq(recordingFolders.userId, destination.ownerId),
-            ),
-        )
-        .returning(folderColumns);
-    if (!moved) throw folderNotFound();
-    for (const itemId of itemIds) {
-        if (!alreadyInDestination.has(itemId))
-            await tx
-                .delete(recordingFolderAssignments)
-                .where(
-                    and(
-                        eq(recordingFolderAssignments.userId, input.userId),
-                        eq(recordingFolderAssignments.itemId, itemId),
-                        eq(
-                            recordingFolderAssignments.folderId,
-                            destination.folder.id,
-                        ),
-                    ),
-                );
-        await bindPlacementProfileInTx(tx, {
-            itemId,
-            ownerUserId: input.userId,
-            orgUserId: destination.ownerId,
-        });
-    }
-    return {
-        scope: "org" as const,
-        folder: serializeFolder(moved, "org"),
-        receivers,
-        folderIds: subtree,
-    };
 }
 
 /**
@@ -1423,6 +1180,13 @@ export async function pruneRedundantAssignmentsInTx(
         }
     }
     if (redundant.size > 0) {
+        for (const folderId of redundant)
+            await notifyFolderReceiversInTx(
+                tx,
+                treeOwnerId,
+                recordingId,
+                folderId,
+            );
         await tx
             .delete(recordingFolderAssignments)
             .where(
@@ -1687,6 +1451,12 @@ export async function removeRecordingFromFolder(input: {
 
     if (target.scope === "personal") {
         await db.transaction(async (tx) => {
+            await notifyFolderReceiversInTx(
+                tx,
+                input.userId,
+                input.recordingId,
+                input.folderId,
+            );
             await tx
                 .delete(recordingFolderAssignments)
                 .where(
@@ -2108,6 +1878,13 @@ export async function moveRecordingBetweenFolders(input: {
                     folderId: to.folder.id,
                 })
                 .onConflictDoNothing();
+            if (from.scope === "personal")
+                await notifyFolderReceiversInTx(
+                    tx,
+                    existing.userId,
+                    input.recordingId,
+                    from.folder.id,
+                );
             await tx
                 .delete(recordingFolderAssignments)
                 .where(

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -12,6 +12,14 @@ import { PATCH as folderAction } from "@/app/api/folder-shares/[id]/route";
 import { POST as restoreRoute } from "@/app/api/folder-shares/restore/route";
 import { PUT as settingsRoute } from "@/app/api/folders/[id]/default-profiles/route";
 import {
+    GET as exportsGet,
+    POST as exportsPost,
+} from "@/app/api/folders/[id]/exports/route";
+import {
+    GET as addressesGet,
+    PUT as addressesPut,
+} from "@/app/api/folders/[id]/mail-addresses/route";
+import {
     DELETE as deleteRoute,
     PATCH as renameRoute,
 } from "@/app/api/folders/[id]/route";
@@ -19,17 +27,21 @@ import {
     POST as inviteRoute,
     GET as listRoute,
 } from "@/app/api/folders/[id]/shares/route";
+import { POST as synchronizePost } from "@/app/api/folders/[id]/synchronize/route";
 import { POST as createRoute } from "@/app/api/folders/route";
+import { POST as categorizePost } from "@/app/api/recordings/[id]/categorize/route";
 import { GET as readCorrections } from "@/app/api/recordings/[id]/corrections/route";
 import { POST as assignRoute } from "@/app/api/recordings/[id]/folders/route";
 import { GET as readSpeakers } from "@/app/api/recordings/[id]/speakers/route";
 import { GET as invitationsRoute } from "@/app/api/shares/route";
 import {
     isItemReceived,
+    listOutgoingSharedItemIds,
     receivedItemCondition,
 } from "@/db/queries/item-shares";
 import {
     accounts,
+    asyncJobs,
     chatterItems,
     folderShares,
     itemShares,
@@ -58,6 +70,7 @@ import {
     listFolderOrganization,
     listPersonalFolderOrganization,
     moveFolder,
+    moveRecordingBetweenFolders,
     removeRecordingFromFolder,
     renameFolder,
 } from "@/lib/folders/folders";
@@ -70,6 +83,7 @@ import { resolveCaller } from "@/lib/mcp/caller";
 import { mcpItemCondition, recordingViewFor } from "@/lib/mcp/scope";
 import { ALL_TOOLS } from "@/lib/mcp/tools";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { searchApp } from "@/lib/search/app-search";
 import { searchItems } from "@/lib/search/item-search";
 import {
@@ -128,6 +142,7 @@ const { ref, mockEnv, events, email } = vi.hoisted(() => ({
         MCP_AUDIENCE: "chatterbox-mcp",
         KNOWLEDGE_MEMORY_MB: 64,
         MAIL_DOMAIN: "mail.example.com",
+        FILESYSTEM_EXPORT_ROOT: "/tmp/folder-share-exports",
         MAIL_ADDRESS_HASH_SECRET: "m".repeat(40),
         APP_URL: "http://localhost:3000",
         BETTER_AUTH_SECRET: "demo-secret-demo-secret-demo-secret",
@@ -158,7 +173,8 @@ vi.mock("@/lib/notifications/person-share", () => ({
 }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
-vi.mock("@/lib/folder-exports/jobs", () => ({
+vi.mock("@/lib/folder-exports/jobs", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/mcp/rate-limit", () => ({
@@ -641,6 +657,142 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             await listener.unlisten();
         }
     });
+    it("notifies only accepted receivers of the item's direct folder on arrival and placement", async () => {
+        await accept();
+        const [unrelated] = await inviteToFolder("owner", "elsewhere", [
+            "other",
+        ]);
+        await changeFolderShare("other", unrelated.id, {
+            action: "accept",
+            version: 0,
+        });
+        await inviteToFolder("owner", "source", ["curator"]);
+        const notifications: unknown[] = [];
+        const listener = await database.sql.listen(
+            "riffado_personal",
+            (payload) => notifications.push(JSON.parse(payload)),
+        );
+        try {
+            await database.db.transaction(async (tx) => {
+                await requestArrivalInTx(tx, {
+                    itemId: "later",
+                    userId: "owner",
+                    folder: {
+                        folderId: "elsewhere",
+                        ownerId: "owner",
+                        scope: "personal",
+                    },
+                });
+                expect(notifications).toEqual([]);
+            });
+            await vi.waitFor(() =>
+                expect(notifications).toEqual([
+                    { type: "share", userId: "other" },
+                ]),
+            );
+            await addRecordingToFolder({
+                userId: "owner",
+                recordingId: "later",
+                folderId: "source",
+            });
+            await database.db
+                .select({
+                    notify: sql`pg_notify(${"riffado_personal"}, ${'"barrier"'})`,
+                })
+                .from(users)
+                .where(eq(users.id, "owner"));
+            await vi.waitFor(() =>
+                expect(notifications.at(-1)).toBe("barrier"),
+            );
+            expect(notifications.slice(0, -1)).toHaveLength(3);
+            expect(notifications.slice(1, -1)).toEqual(
+                expect.arrayContaining([
+                    { type: "share", userId: "receiver" },
+                    { type: "share", userId: "other" },
+                ]),
+            );
+            notifications.length = 0;
+            await addRecordingToFolder({
+                userId: "owner",
+                recordingId: "nested",
+                folderId: "child",
+            });
+            await database.db
+                .select({
+                    notify: sql`pg_notify(${"riffado_personal"}, ${'"barrier"'})`,
+                })
+                .from(users)
+                .where(eq(users.id, "owner"));
+            await vi.waitFor(() =>
+                expect(notifications.at(-1)).toBe("barrier"),
+            );
+            expect(notifications).toEqual(["barrier"]);
+        } finally {
+            await listener.unlisten();
+        }
+    });
+    it.each([
+        "subfolder",
+        "move",
+        "categorize",
+    ])("refreshes receivers losing direct access on %s without notifying unrelated folders", async (action) => {
+        await accept();
+        const [unrelated] = await inviteToFolder("owner", "elsewhere", [
+            "other",
+        ]);
+        await changeFolderShare("other", unrelated.id, {
+            action: "accept",
+            version: 0,
+        });
+        const notifications: unknown[] = [];
+        const listener = await database.sql.listen(
+            "riffado_personal",
+            (payload) => notifications.push(JSON.parse(payload)),
+        );
+        try {
+            if (action === "subfolder")
+                await addRecordingToFolder({
+                    userId: "owner",
+                    recordingId: "audio",
+                    folderId: "child",
+                });
+            else if (action === "move")
+                await moveRecordingBetweenFolders({
+                    userId: "owner",
+                    recordingId: "audio",
+                    fromFolderId: "source",
+                    toFolderId: "child",
+                });
+            else {
+                const response = await categorizePost(
+                    request(
+                        "recordings/audio/categorize",
+                        "POST",
+                        { folderIds: ["child"], manualOnly: true },
+                        "owner",
+                    ),
+                    context("audio"),
+                );
+                expect(response.status).toBe(200);
+            }
+            await database.db
+                .select({
+                    notify: sql`pg_notify(${"riffado_personal"}, ${'"barrier"'})`,
+                })
+                .from(users)
+                .where(eq(users.id, "owner"));
+            await vi.waitFor(() =>
+                expect(notifications.at(-1)).toBe("barrier"),
+            );
+            expect(notifications).toEqual([
+                { type: "share", userId: "receiver" },
+                "barrier",
+            ]);
+            expect(await visibleIds()).toEqual(["mail"]);
+        } finally {
+            await listener.unlisten();
+        }
+    });
     it("owner deletion ends shares and removes receiver attachments", async () => {
         await accept();
         await deleteFolder("owner", "source");
@@ -665,90 +817,105 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             ),
         ).toBe(true);
     });
-    it("requires confirmation to publish a folder and atomically ends its person shares", async () => {
+    it.each([
+        false,
+        true,
+    ])("refuses private-to-Organization folder moves with curator=%s", async (canCurate) => {
         await accept();
-        for (const id of ["audio", "nested"])
-            await insertTranscript(database.db, id, "owner", {
-                text: "Project planning",
-            });
-        await insertRecording(database.db, {
-            id: "colleague-audio",
-            userId: "other",
-            title: "Colleague recording",
-        });
-        await database.db.insert(recordingFolders).values({
-            id: "colleague-folder",
-            userId: "other",
-            name: encryptText("Colleague folder"),
-            nameHash: "colleague-folder",
-        });
-        const [direct] = await inviteToItem("other", "colleague-audio", [
-            "owner",
-        ]);
-        await changePersonShare("owner", direct.id, {
-            action: "accept",
-            version: 0,
-            folderId: "source",
-        });
-        const [incoming] = await inviteToFolder("other", "colleague-folder", [
-            "owner",
-        ]);
-        await changeFolderShare("owner", incoming.id, {
-            action: "accept",
-            version: 0,
-            name: "My attachment",
-            parentId: "source",
-        });
         await expect(
             moveFolder({
                 userId: "owner",
                 folderId: "source",
                 parentId: "org-folder",
+                canCurate,
             }),
-        ).rejects.toMatchObject({ statusCode: 409 });
+        ).rejects.toMatchObject({ statusCode: canCurate ? 404 : 403 });
         expect(await visibleIds()).toEqual(["audio", "mail"]);
-        await moveFolder({
-            userId: "owner",
-            folderId: "source",
-            parentId: "org-folder",
-            endPersonShares: true,
-        });
-        expect(
-            await database.db
-                .select()
-                .from(folderShares)
-                .where(eq(folderShares.userId, "owner")),
-        ).toEqual([]);
-        expect(
-            await database.db.select().from(receivedFolderAttachments),
-        ).toMatchObject([{ userId: "owner", parentId: null }]);
-        expect(
-            await database.db
-                .select()
-                .from(itemShares)
-                .where(eq(itemShares.receiverUserId, "owner")),
-        ).toMatchObject([
-            {
-                itemId: "colleague-audio",
-                state: "accepted",
-                filingFolderId: null,
-            },
-        ]);
-        expect(
-            await resolveRecordingAccess("receiver", "colleague-audio"),
-        ).toBeNull();
+        expect((await listFolderShares("owner", "source"))[0].state).toBe(
+            "accepted",
+        );
         expect(
             (await listFolderOrganization("owner")).folders.find(
                 (folder) => folder.id === "source",
             )?.scope,
-        ).toBe("org");
-        expect((await resolveRecordingAccess("other", "audio"))?.shared).toBe(
+        ).toBe("personal");
+    });
+    it("excludes attached folders from categorizing the receiver's own recording", async () => {
+        await accept();
+        await insertRecording(database.db, {
+            id: "receiver-audio",
+            userId: "receiver",
+            title: "Own recording",
+        });
+        const panel = await loadPrivateCategorizationPanel(
+            "receiver",
+            "receiver-audio",
+        );
+        const [node] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        expect(panel).not.toBeNull();
+        expect(panel?.folders.some((folder) => folder.id === "my-folder")).toBe(
             true,
         );
-        expect((await resolveRecordingAccess("other", "nested"))?.shared).toBe(
-            true,
+        expect(panel?.folders.some((folder) => folder.id === node.id)).toBe(
+            false,
         );
-        expect(events).toHaveBeenCalledWith("receiver");
+        expect(panel?.selectedFolderIds).not.toContain(node.id);
+    });
+    it("marks direct and folder-shared owner items but excludes subfolder items", async () => {
+        const share = await accept();
+        await inviteToItem("owner", "later", ["receiver"]);
+        expect(await listOutgoingSharedItemIds("owner")).toEqual(
+            new Set(["audio", "mail", "later"]),
+        );
+        expect(await listOutgoingSharedItemIds("receiver")).toEqual(new Set());
+        await addRecordingToFolder({
+            userId: "owner",
+            recordingId: "audio",
+            folderId: "child",
+        });
+        expect(await listOutgoingSharedItemIds("owner")).toEqual(
+            new Set(["mail", "later"]),
+        );
+        expect(await isItemReceived("receiver", "audio")).toBe(false);
+        await changeFolderShare("owner", share.id, {
+            action: "remove",
+            version: 1,
+        });
+        expect(await listOutgoingSharedItemIds("owner")).toEqual(
+            new Set(["later"]),
+        );
+    });
+    it("refuses inconsistent assignment ownership in every folder access predicate", async () => {
+        await accept();
+        await insertRecording(database.db, {
+            id: "foreign",
+            userId: "other",
+            title: "Foreign recording",
+        });
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ userId: "owner", itemId: "foreign", folderId: "source" });
+        expect(await isItemReceived("receiver", "foreign")).toBe(false);
+        const [node] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        const where = await folderCondition("receiver", node.id, {
+            id: chatterItems.id,
+            userId: chatterItems.userId,
+        });
+        expect(
+            await database.db
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(and(eq(chatterItems.id, "foreign"), where)),
+        ).toEqual([]);
+        expect(
+            (await listReceivedFolderOrganization("receiver")).assignments.map(
+                (row) => row.recordingId,
+            ),
+        ).not.toContain("foreign");
     });
     it("does not grant unrelated members, curators, or the Organization any person-share visibility", async () => {
         await accept();
@@ -1191,7 +1358,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
     it.each([
         "audio",
         "mail",
-    ])("skips restoring a folder whose direct %s item is already Organization-visible", async (itemId) => {
+    ])("restores a folder containing Organization-visible %s just like a fresh invitation", async (itemId) => {
         await database.db
             .insert(recordingFolderAssignments)
             .values({ userId: "owner", itemId, folderId: "org-folder" });
@@ -1207,12 +1374,17 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
                 ],
                 new Map([["old", "source"]]),
             ),
-        ).toMatchObject({
-            restored: 0,
-            skipped: [{ reason: "organization_shared" }],
-        });
-        expect(await database.db.select().from(folderShares)).toEqual([]);
-        expect(email).not.toHaveBeenCalled();
+        ).toEqual({ restored: 1, skipped: [] });
+        expect((await listFolderShares("owner", "source"))[0].state).toBe(
+            "pending",
+        );
+        expect(
+            await database.db.select().from(receivedFolderAttachments),
+        ).toEqual([]);
+        await database.db.delete(folderShares);
+        expect(
+            (await inviteToFolder("owner", "source", ["receiver"]))[0].state,
+        ).toBe("pending");
     });
     it("skips restoring an Organization-visible folder", async () => {
         await database.db
@@ -1330,6 +1502,64 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         expect(responses.map((response) => response.status)).toEqual([
             404, 404, 404, 404, 404, 403, 404, 404,
         ]);
+    });
+    it.each([
+        "source",
+        "attachment",
+    ])("refuses receiver exports, synchronization and mail addresses for %s", async (target) => {
+        await accept();
+        const [node] = await database.db
+            .select()
+            .from(receivedFolderAttachments);
+        const id = target === "source" ? "source" : node.id;
+        const ctx = context(id);
+        const responses = [
+            await exportsGet(request(`folders/${id}/exports`, "GET"), ctx),
+            await exportsPost(
+                request(`folders/${id}/exports`, "POST", {
+                    provider: "filesystem",
+                    targetPath: "folder-share-test",
+                    exportAudio: true,
+                    exportTranscript: true,
+                    exportSummary: true,
+                }),
+                ctx,
+            ),
+            await synchronizePost(
+                request(`folders/${id}/synchronize`, "POST"),
+                ctx,
+            ),
+            await addressesGet(
+                request(`folders/${id}/mail-addresses`, "GET"),
+                ctx,
+            ),
+            await addressesGet(
+                request(`folders/${id}/mail-addresses?subtree=1`, "GET"),
+                ctx,
+            ),
+            await addressesPut(
+                request(`folders/${id}/mail-addresses`, "PUT", {
+                    alias: "forged",
+                }),
+                ctx,
+            ),
+        ];
+        expect(responses.map((response) => response.status)).toEqual([
+            404, 400, 404, 404, 404, 404,
+        ]);
+        expect(await database.db.select().from(asyncJobs)).toEqual([]);
+    });
+    it("keeps export synchronization available to the folder owner", async () => {
+        const response = await synchronizePost(
+            request("folders/source/synchronize", "POST", undefined, "owner"),
+            context(),
+        );
+        expect(response.status).toBe(202);
+        expect(
+            await database.db
+                .select({ userId: asyncJobs.userId })
+                .from(asyncJobs),
+        ).toEqual([{ userId: "owner" }]);
     });
     it("refuses normal folder routes for attachment IDs", async () => {
         await accept();

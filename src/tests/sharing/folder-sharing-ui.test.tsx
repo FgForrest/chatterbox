@@ -16,6 +16,7 @@ import { CommandPalette } from "@/components/dashboard/command-palette";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
+import { RecordingRow } from "@/components/dashboard/recording-row";
 import { uploadFolderOptions } from "@/components/dashboard/upload-dialog";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
@@ -234,7 +235,9 @@ describe("folder person sharing UI", () => {
             screen.getByText(/Only items directly in this folder/),
         ).toBeTruthy();
         expect(
-            screen.getByText(/The folder and its items stay yours and private/),
+            screen.getByText(
+                /Sharing with people does not share them with the Organization/,
+            ),
         ).toBeTruthy();
     });
     it("shows receiver names and states in folder settings", async () => {
@@ -624,6 +627,37 @@ describe("folder person sharing UI", () => {
                 "Sdílení se nepodařilo změnit",
             ),
         ).rejects.toThrow("Sdílení se nepodařilo změnit");
+    });
+    it.each([
+        true,
+        false,
+    ])("shows the owner's outgoing item marker only when sharedWithPeople=%s", (sharedWithPeople) => {
+        render(
+            <ConfirmDialogProvider>
+                <PersonSharingProvider value>
+                    <RecordingRow
+                        recording={{
+                            ...recording,
+                            view: "private",
+                            isOwn: true,
+                            sharedWithPeople,
+                        }}
+                        isSelected={false}
+                        inFlight={undefined}
+                        snippet={null}
+                        isCompact={false}
+                        rowPadding="p-2"
+                        dateTimeFormat="relative"
+                        onSelect={vi.fn()}
+                        onDelete={vi.fn()}
+                        registerRef={vi.fn()}
+                    />
+                </PersonSharingProvider>
+            </ConfirmDialogProvider>,
+        );
+        expect(Boolean(screen.queryByLabelText("Shared with people"))).toBe(
+            sharedWithPeople,
+        );
     });
     it("offers no person sharing action when disabled", () => {
         tree(false);

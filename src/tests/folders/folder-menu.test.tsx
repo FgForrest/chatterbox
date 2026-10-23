@@ -13,10 +13,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { Workstation } from "@/components/dashboard/workstation";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+    RECORDING_DRAG_TYPE,
+    RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+    RECORDING_SOURCE_SCOPE_DRAG_TYPES,
+} from "@/lib/folders/drag";
 import type { RecordingFolder } from "@/types/folder";
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: vi.fn() }),
+    useRouter: () => ({ refresh }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
@@ -154,19 +160,35 @@ const props: ComponentProps<typeof Workstation> = {
     },
 };
 
-beforeEach(() => window.history.replaceState({}, "", "/dashboard"));
+beforeEach(() => {
+    refresh.mockClear();
+    window.history.replaceState({}, "", "/dashboard");
+});
 afterEach(async () => {
     cleanup();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
 });
 
-function workstation(canCurate = false, isOrgAccount = false) {
+function workstation(
+    canCurate = false,
+    isOrgAccount = false,
+    sharedWithPeople = false,
+    organization = props.initialFolderOrganization,
+) {
     render(
         <ConfirmDialogProvider>
             <TooltipProvider>
                 <Workstation
                     {...props}
+                    initialFolderOrganization={{
+                        ...organization,
+                        folders: organization.folders.map((folder) =>
+                            folder.id === privateFolder.id
+                                ? { ...folder, sharedWithPeople }
+                                : folder,
+                        ),
+                    }}
                     canCurate={canCurate}
                     isOrgAccount={isOrgAccount}
                 />
@@ -328,18 +350,13 @@ describe("folder row menu", () => {
         ).toBeTruthy();
     });
 
-    it("confirms that moving a private folder into the Organization ends its person shares", async () => {
-        const fetchMock = vi.fn(async () =>
-            Response.json({
-                folder: {
-                    ...privateFolder,
-                    scope: "org",
-                    parentId: orgFolder.id,
-                },
-            }),
-        );
+    it.each([
+        false,
+        true,
+    ])("offers only private destinations for a private folder with curator=%s", (canCurate) => {
+        const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
-        workstation();
+        workstation(canCurate);
         fireEvent.contextMenu(
             screen.getByRole("button", { name: "Cedar, 0 recordings" }),
         );
@@ -347,40 +364,94 @@ describe("folder row menu", () => {
             screen.getByRole("menuitem", { name: "Folder settings" }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-        fireEvent.change(
-            screen.getByRole("combobox", { name: "Destination folder" }),
-            { target: { value: orgFolder.id } },
-        );
-        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-        expect(await screen.findByRole("alertdialog")).toBeTruthy();
+        const destinations = screen.getByRole("combobox", {
+            name: "Destination folder",
+        });
         expect(
-            screen.getByText(
-                /Person shares of this folder and its subfolders will end/,
+            Array.from((destinations as HTMLSelectElement).options).map(
+                (option) => option.value,
             ),
-        ).toBeTruthy();
+        ).toEqual([privateRoot.id]);
         expect(fetchMock).not.toHaveBeenCalled();
-        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-        await waitFor(() =>
-            expect(screen.queryByRole("alertdialog")).toBeNull(),
-        );
-        expect(fetchMock).not.toHaveBeenCalled();
-        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-        fireEvent.click(
-            await screen.findByRole("button", { name: "Move to Organization" }),
+    });
+
+    it.each([
+        false,
+        true,
+    ])("refreshes owner item markers after filing into a folder with sharing=%s", async (sharedWithPeople) => {
+        const fetchMock = vi.fn(async () => Response.json({}));
+        vi.stubGlobal("fetch", fetchMock);
+        workstation(false, false, sharedWithPeople);
+        const transfer = {
+            types: ["application/x-riffado-recording"],
+            getData: (type: string) =>
+                type === "application/x-riffado-recording" ? "audio" : "",
+            setData: vi.fn(),
+        };
+        fireEvent.drop(
+            screen.getByRole("button", { name: "Cedar, 0 recordings" }),
+            { dataTransfer: transfer },
         );
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
-                "/api/folders/cedar",
-                expect.objectContaining({
-                    method: "PATCH",
-                    body: JSON.stringify({
-                        parentId: orgFolder.id,
-                        version: 0,
-                        endPersonShares: true,
-                    }),
-                }),
+                "/api/recordings/audio/folders",
+                expect.objectContaining({ method: "POST" }),
             ),
         );
+        await waitFor(() =>
+            expect(refresh).toHaveBeenCalledTimes(sharedWithPeople ? 1 : 0),
+        );
+    });
+
+    it("refreshes when a move prunes another shared ancestor placement", async () => {
+        const child = {
+            ...privateFolder,
+            id: "child",
+            name: "Branch",
+            parentId: privateFolder.id,
+        };
+        const source = { ...privateFolder, id: "source", name: "Other folder" };
+        window.history.replaceState({}, "", "/dashboard?folder=child");
+        const fetchMock = vi.fn(async () => Response.json({}));
+        vi.stubGlobal("fetch", fetchMock);
+        workstation(false, false, true, {
+            folders: [
+                ...props.initialFolderOrganization.folders,
+                child,
+                source,
+            ],
+            assignments: [
+                { recordingId: "audio", folderId: privateFolder.id },
+                { recordingId: "audio", folderId: source.id },
+            ],
+        });
+        const transfer = {
+            types: [
+                RECORDING_DRAG_TYPE,
+                RECORDING_SOURCE_FOLDER_DRAG_TYPE,
+                RECORDING_SOURCE_SCOPE_DRAG_TYPES.personal,
+            ],
+            getData: (type: string) =>
+                type === RECORDING_DRAG_TYPE
+                    ? "audio"
+                    : type === RECORDING_SOURCE_FOLDER_DRAG_TYPE
+                      ? source.id
+                      : type === RECORDING_SOURCE_SCOPE_DRAG_TYPES.personal
+                        ? "personal"
+                        : "",
+            setData: vi.fn(),
+        };
+        fireEvent.drop(
+            await screen.findByRole("button", { name: "Branch, 0 recordings" }),
+            { dataTransfer: transfer },
+        );
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/audio/folders",
+                expect.objectContaining({ method: "PATCH" }),
+            ),
+        );
+        await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
     });
 
     it("shares the nested Organization creation rule with the location action", async () => {

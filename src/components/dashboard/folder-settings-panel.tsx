@@ -346,17 +346,8 @@ export function FolderSettingsPanel({
                                                 (entry) =>
                                                     !entry.folder
                                                         .receivedFolder &&
-                                                    (entry.folder.scope ===
-                                                        folder.scope ||
-                                                        (folder.scope ===
-                                                            "personal" &&
-                                                            entry.folder
-                                                                .scope ===
-                                                                "org" &&
-                                                            (canCurate ||
-                                                                entry.folder
-                                                                    .parentId !==
-                                                                    null))) &&
+                                                    entry.folder.scope ===
+                                                        folder.scope &&
                                                     !subtree.has(
                                                         entry.folder.id,
                                                     ),

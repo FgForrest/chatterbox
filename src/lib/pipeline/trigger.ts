@@ -61,7 +61,7 @@ export async function requestAdvanceInTx(
             input.reason === "placement" ||
             input.reason === "categorized")
     )
-        await notifyFolderReceiversInTx(tx, input.userId);
+        await notifyFolderReceiversInTx(tx, input.userId, input.itemId);
     return result;
 }
 

@@ -195,7 +195,11 @@ export async function loadPrivateCategorizationPanel(
     const label = (folder: RecordingFolder) =>
         folderDisplayName(folder, labels);
     const folders = folderOrganization.folders
-        .filter((folder) => folder.scope === "personal" || isOrgScopeEnabled())
+        .filter(
+            (folder) =>
+                !folder.receivedFolder &&
+                (folder.scope === "personal" || isOrgScopeEnabled()),
+        )
         .map((folder) => ({
             id: folder.id,
             parentId: folder.parentId,

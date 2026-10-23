@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
+import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
     itemProcessing,
@@ -366,6 +367,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             ({ folderId }) => folderId,
         );
         if (ownedPlacementIds.length > 0) {
+            await notifyFolderReceiversInTx(tx, ownerUserId, itemId);
             await tx
                 .delete(recordingFolderAssignments)
                 .where(

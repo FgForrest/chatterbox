@@ -1,9 +1,10 @@
-import { type AnyColumn, and, eq, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
     folderShares,
     itemShares,
+    receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
     userAccessStates,
@@ -40,14 +41,15 @@ export function receivedItemCondition(
     itemId: AnyColumn = chatterItems.id,
 ) {
     if (!isOrgScopeVisible()) return sql`false`;
-    return sql`(exists (
-        select 1 from ${itemShares}
+    return sql`${itemId} in (
+        select ${itemShares.itemId} from ${itemShares}
         inner join ${users} on ${users.id} = ${itemShares.receiverUserId}
-        where ${itemShares.itemId} = ${itemId}
-          and ${itemShares.receiverUserId} = ${receiverUserId}
+        where ${itemShares.receiverUserId} = ${receiverUserId}
           and ${itemShares.state} = 'accepted'
           and ${activeShareRecipientCondition()}
-    ) or ${receivedThroughFolderCondition(receiverUserId, itemId)})`;
+        union all
+        ${receivedFolderItemIds(receiverUserId)}
+    )`;
 }
 
 /** Whether the caller has an accepted invitation for this item. */
@@ -89,34 +91,91 @@ export function receivedThroughFolderCondition(
     since?: Date,
 ) {
     if (!isOrgScopeVisible()) return sql`false`;
-    return sql`exists (
-        select 1 from ${folderShares}
+    return sql`${itemId} in (${receivedFolderItemIds(receiverUserId, attachmentId, since)})`;
+}
+
+function receivedFolderItemIds(
+    receiverUserId: string,
+    attachmentId?: string,
+    since?: Date,
+) {
+    return sql`select ${recordingFolderAssignments.itemId} from ${folderShares}
         inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
             and ${recordingFolders.userId} = ${folderShares.userId}
         inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
             and ${recordingFolderAssignments.userId} = ${folderShares.userId}
+        inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
+            and ${chatterItems.userId} = ${folderShares.userId}
         inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
-        ${attachmentId ? sql`inner join received_folder_attachments attachment on attachment.share_id = ${folderShares.id} and attachment.user_id = ${receiverUserId}` : sql``}
-        where ${recordingFolderAssignments.itemId} = ${itemId}
-            and ${folderShares.receiverUserId} = ${receiverUserId}
+        ${attachmentId ? sql`inner join ${receivedFolderAttachments} on ${receivedFolderAttachments.shareId} = ${folderShares.id} and ${receivedFolderAttachments.userId} = ${receiverUserId}` : sql``}
+        where ${folderShares.receiverUserId} = ${receiverUserId}
             and ${folderShares.state} = 'accepted'
             and ${recordingFolders.kind} = 'custom'
             and ${activeShareRecipientCondition()}
-            ${attachmentId ? sql`and attachment.id = ${attachmentId}` : sql``}
-            ${since ? sql`and greatest(${folderShares.respondedAt}, ${recordingFolderAssignments.createdAt}) > ${since.toISOString()}::timestamp` : sql``}
+            ${attachmentId ? sql`and ${receivedFolderAttachments.id} = ${attachmentId}` : sql``}
+            ${since ? sql`and greatest(${folderShares.respondedAt}, ${recordingFolderAssignments.createdAt}) > ${since.toISOString()}::timestamp` : sql``}`;
+}
+
+/** Whether an owner's item has a current direct or direct-folder person invitation. */
+export function outgoingItemShareCondition(ownerUserId: string) {
+    if (!isOrgScopeVisible()) return sql<boolean>`false`;
+    return sql<boolean>`${chatterItems.id} in (
+        select ${itemShares.itemId} from ${itemShares}
+        where ${itemShares.userId} = ${ownerUserId}
+            and ${itemShares.state} in ('pending', 'accepted')
+        union all
+        select ${recordingFolderAssignments.itemId} from ${folderShares}
+        inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
+            and ${recordingFolders.userId} = ${folderShares.userId}
+        inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
+            and ${recordingFolderAssignments.userId} = ${folderShares.userId}
+        inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
+            and ${chatterItems.userId} = ${folderShares.userId}
+        where ${folderShares.userId} = ${ownerUserId}
+            and ${folderShares.state} in ('pending', 'accepted')
+            and ${recordingFolders.kind} = 'custom'
     )`;
+}
+
+/** Items with active outgoing invitations, for the owner's library markers. */
+export async function listOutgoingSharedItemIds(ownerUserId: string) {
+    if (!isOrgScopeVisible()) return new Set<string>();
+    const rows = await db
+        .select({ id: chatterItems.id })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.userId, ownerUserId),
+                isNull(chatterItems.deletedAt),
+                outgoingItemShareCondition(ownerUserId),
+            ),
+        );
+    return new Set(rows.map((row) => row.id));
 }
 
 /** Commit a content-free refresh for accepted folder receivers after placement changes. */
 export async function notifyFolderReceiversInTx(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
     ownerUserId: string,
+    itemId: string,
+    folderId?: string,
 ): Promise<void> {
     if (!isOrgScopeVisible()) return;
     await tx.execute(sql`select pg_notify(${"riffado_personal"},
         json_build_object('type', 'share', 'userId', recipients.receiver_user_id)::text)
         from (select distinct ${folderShares.receiverUserId} as receiver_user_id
               from ${folderShares}
+              inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
+                and ${recordingFolderAssignments.userId} = ${ownerUserId}
+              inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
+                and ${recordingFolders.userId} = ${ownerUserId}
+              inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
+                and ${chatterItems.userId} = ${ownerUserId}
+              inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
               where ${folderShares.userId} = ${ownerUserId}
-                and ${folderShares.state} = 'accepted') recipients`);
+                and ${folderShares.state} = 'accepted'
+                and ${recordingFolderAssignments.itemId} = ${itemId}
+                and ${recordingFolders.kind} = 'custom'
+                ${folderId ? sql`and ${folderShares.folderId} = ${folderId}` : sql``}
+                and ${activeShareRecipientCondition()}) recipients`);
 }
