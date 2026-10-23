@@ -851,6 +851,7 @@ async function runLearnJob({
         const roster = await resolveMeetingRoster({
             ownerUserId: run.userId,
             itemId: run.itemId,
+            shared,
             calendarEventId: selectedEventId,
         });
         await db
@@ -984,6 +985,14 @@ async function runLearnJob({
                 ...frame,
                 speakerCandidates,
             });
+            for (const [reason, count] of Object.entries(
+                roster?.dropped ?? {},
+            )) {
+                if (reason === "ambiguousName" || reason === "conflicting") {
+                    validated.dropped[reason] =
+                        (validated.dropped[reason] ?? 0) + count;
+                }
+            }
             const languageItem = learnLanguageCandidate(
                 pass.output.language,
                 transcript.detectedLanguage,

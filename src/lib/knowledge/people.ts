@@ -223,25 +223,62 @@ export async function createPersonInTx(
  * deterministic and could not be compared. Tombstoned losers of a merge are
  * excluded so a stale address never resolves to a row the user has already
  * folded away.
+ * A run can restrict the lookup to its scope and frozen people, include
+ * extra-address hashes, and observe ambiguity instead of picking a row.
  */
 export async function findPersonByEmail(
     userId: string,
     email: string,
+    options?: {
+        scopeUserId: string;
+        personIds: readonly string[];
+        onAmbiguous: () => void;
+    },
 ): Promise<Person | null> {
     if (isInternalMailAddress(email)) return null;
-    const [row] = await db
+    if (options?.personIds.length === 0) return null;
+    const hash = lookupHash(email);
+    const rows = await db
         .select(personColumns)
         .from(people)
         .innerJoin(users, eq(users.id, people.userId))
         .where(
             and(
                 peopleVisibleTo(userId),
-                eq(people.primaryEmailHash, lookupHash(email)),
+                options ? eq(people.userId, options.scopeUserId) : undefined,
+                options
+                    ? inArray(people.id, [...options.personIds])
+                    : undefined,
+                options
+                    ? or(
+                          eq(people.primaryEmailHash, hash),
+                          exists(
+                              db
+                                  .select({ id: personEmails.personId })
+                                  .from(personEmails)
+                                  .where(
+                                      and(
+                                          eq(personEmails.personId, people.id),
+                                          eq(
+                                              personEmails.userId,
+                                              people.userId,
+                                          ),
+                                          eq(personEmails.emailHash, hash),
+                                      ),
+                                  ),
+                          ),
+                      )
+                    : eq(people.primaryEmailHash, hash),
                 isNull(people.mergedIntoId),
             ),
         )
-        .limit(1);
+        .limit(options ? 2 : 1);
 
+    if (rows.length > 1) {
+        options?.onAmbiguous();
+        return null;
+    }
+    const row = rows[0];
     return row ? toPerson(row) : null;
 }
 

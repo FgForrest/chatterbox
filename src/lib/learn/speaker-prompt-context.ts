@@ -40,6 +40,9 @@ export function speakerPromptContext(
     const ids = [
         ...new Set([
             ...(frame.recorderPersonId ? [frame.recorderPersonId] : []),
+            ...(frame.speakerCandidates ?? []).flatMap((attendee) =>
+                attendee.personId ? [attendee.personId] : [],
+            ),
             ...rosterIds,
             ...lookupPersonIds,
         ]),
