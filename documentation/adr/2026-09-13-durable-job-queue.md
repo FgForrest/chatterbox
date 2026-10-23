@@ -1,7 +1,7 @@
 ---
 title: Work that must outlive its process runs from a generic Postgres job table, not inside the request
 date: 2026-09-13
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: infrastructure
 issues: []
@@ -165,10 +165,13 @@ whole recovery model depends on it).
 ## Consequences & open follow-ups
 
 - Every later long-running feature is a handler on this queue; seventeen kinds are registered.
-- **Per-user fairness covers only the pipeline kinds.** `claimDueJobs` skips users who already have a
-  `pipeline.advance` or `pipeline.action` job processing (PR #134); every other kind still claims
-  oldest first, so one user's backlog of summaries or Learn runs can delay everyone else's. The
-  hosted invariant in `AGENTS.md` asks for fair-share claims on every background queue.
+- **Per-user fairness covers only the pipeline kinds, by decision.** `claimDueJobs` skips users who
+  already have a `pipeline.advance` or `pipeline.action` job processing (PR #134); every other kind,
+  summaries and Learn runs included, claims oldest first, so one user's backlog can delay everyone
+  else's. The fairness invariant in `AGENTS.md` asks for fair-share claims on background queues; the
+  maintainer decided on 2026-10-22 that summaries and Learn runs keep claiming oldest first while
+  pipeline jobs keep their per-user claim. Do not add a per-user claim to those kinds without a new
+  decision. Revisit if one user's backlog measurably delays other users' summaries or Learn runs.
 - **Reclaim re-runs from the start:** a multi-pass summary interrupted in its last pass pays for all
   passes again.
 - **The background sync worker claims nothing.** PR #20 found that the architecture doc claimed
@@ -199,3 +202,4 @@ whole recovery model depends on it).
 - **2026-10-07**: partial claim indexes and hourly housekeeping (PR #94).
 - **2026-10-16**: per-user claim for the pipeline kinds (PR #134).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: oldest-first claiming for summaries and Learn runs kept by the maintainer.

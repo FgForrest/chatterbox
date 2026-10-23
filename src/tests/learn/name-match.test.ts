@@ -9,12 +9,12 @@ import {
 
 describe("name matching, as Czech says names", () => {
     it("knows a surname inflected, including one that drops its e", () => {
-        expect(isNameWord("bednarovi", "bednar")).toBe(true);
+        expect(isNameWord("kovarovi", "kovar")).toBe(true);
         expect(isNameWord("hrubcovou", "hrubcova")).toBe(true);
         expect(isNameWord("zeleneho", "zeleny")).toBe(true);
         expect(isNameWord("hajka", "hajek")).toBe(true);
         expect(isNameWord("nemcovi", "nemec")).toBe(true);
-        expect(isNameWord("vondo", "vonda")).toBe(true);
+        expect(isNameWord("krato", "krata")).toBe(true);
     });
 
     it("knows the consonant a Czech ending changes, and only real endings", () => {
@@ -76,13 +76,13 @@ describe("name matching, as Czech says names", () => {
     it("hears more than a first name only in a surname or a real nickname", () => {
         const words = (text: string) => nameTokens(text);
         expect(
-            moreThanFirstName(words("Bednářovi to pošlu"), {
-                name: "Michal Bednář",
+            moreThanFirstName(words("Kovářovi to pošlu"), {
+                name: "Michal Kovář",
             }),
         ).toBe(true);
         expect(
             moreThanFirstName(words("Díky, Michale."), {
-                name: "Michal Bednář",
+                name: "Michal Kovář",
             }),
         ).toBe(false);
         // Titles and initials are not surnames.
@@ -99,9 +99,9 @@ describe("name matching, as Czech says names", () => {
             false,
         );
         expect(
-            moreThanFirstName(words("Jo, Vonďo, pošli"), {
-                name: "Michal Vondra",
-                aliases: ["Vonďa"],
+            moreThanFirstName(words("Jo, Kráťo, pošli"), {
+                name: "Michal Kratochvíl",
+                aliases: ["Kráťa"],
             }),
         ).toBe(true);
         // An adjective is not the surname it looks like: Czech writes
@@ -130,7 +130,7 @@ describe("name matching, as Czech says names", () => {
         expect(heardIsTheName("Tavesi", "Tavesi")).toBe(true);
         expect(heardIsTheName("Mudrcovi", "Mudrc")).toBe(true);
         expect(heardIsTheName("Tavesy", "Tavesi")).toBe(true);
-        expect(heardIsTheName("Vonďa", "Michal Vondra")).toBe(false);
+        expect(heardIsTheName("Kráťa", "Michal Kratochvíl")).toBe(false);
         expect(heardIsTheName("Terra doma", "Terradoma")).toBe(false);
 
         // A misheard surname is corrected, not taken for a first name.
@@ -138,21 +138,21 @@ describe("name matching, as Czech says names", () => {
             false,
         );
         // A one-word record: nothing to tell a first name from.
-        expect(heardIsFirstNameOnly("Bednař", { name: "Bednář" })).toBe(false);
+        expect(heardIsFirstNameOnly("Kovař", { name: "Kovář" })).toBe(false);
         expect(
             moreThanFirstName(nameTokens("Ing. Jan, DiS., tady"), {
                 name: "Ing. Jan Novák, DiS.",
             }),
         ).toBe(false);
-        const michal = { name: "Michal Bednář" };
+        const michal = { name: "Michal Kovář" };
         expect(heardIsFirstNameOnly("Michale", michal)).toBe(true);
         expect(heardIsFirstNameOnly("Michal", michal)).toBe(true);
-        expect(heardIsFirstNameOnly("Michalem Bednářem", michal)).toBe(false);
-        expect(heardIsFirstNameOnly("Bednář", michal)).toBe(false);
+        expect(heardIsFirstNameOnly("Michalem Kovářem", michal)).toBe(false);
+        expect(heardIsFirstNameOnly("Kovář", michal)).toBe(false);
         expect(
-            heardIsFirstNameOnly("Vonďo", {
-                name: "Michal Vondra",
-                aliases: ["Vonďa"],
+            heardIsFirstNameOnly("Kráťo", {
+                name: "Michal Kratochvíl",
+                aliases: ["Kráťa"],
             }),
         ).toBe(false);
         expect(heardIsFirstNameOnly("Honzo", { name: "Jan Novotný" })).toBe(

@@ -1604,7 +1604,7 @@ export async function withdrawRecordingInTx(
 /**
  * Taking a recording out of Organization folders, down to withdrawing it:
  * its owner, or the organization account, which decides what the
- * Organization holds (Johnny, 2026-09-28). Sharing stays the owner's.
+ * Organization holds (maintainer, 2026-09-28). Sharing stays the owner's.
  */
 async function requireMayWithdraw(
     userId: string,

@@ -1,12 +1,12 @@
 ---
 title: AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index
 date: 2026-10-22
-updated: 2026-10-22 19:55
+updated: 2026-10-22 22:30
 status: accepted
 kind: process
 issues: []
 prs: [245]
-areas: [AGENTS.md, CLAUDE.md, .claude/rules, .claude/agents/pr-reviewer.md, documentation/adr, scripts/generate-adr-index.mts, src/tests/adr-index.test.ts]
+areas: [AGENTS.md, CLAUDE.md, BRANCHING.md, .claude/rules, .claude/agents/pr-reviewer.md, documentation/adr, scripts/generate-adr-index.mts, src/tests/adr-index.test.ts, .github/workflows/ci.yml, package.json]
 supersedes: []
 superseded-by: []
 relates: [2026-10-12-calver-releases-from-dev]
@@ -66,12 +66,17 @@ into records. Merged into `dev` on 2026-10-22 as PR #245.
   says.
 - **A new git-ignored `specifications/` folder (declined).** **Rejected because:** it duplicates a
   convention the repository already had.
+- The maintainer confirmed `docs/plans/` on 2026-10-22: an implemented plan has no value of its own,
+  so its lasting content moves into a record or the commit message and the file goes. The local
+  plans of the work up to that day (91 files and a folder of review screenshots) were sorted that
+  way: what no record held moved into the matching records, and the files were deleted.
 
 ### Where sub-threshold reasoning goes
 
 The copied convention sent it to code comments; `AGENTS.md` allows JSDoc on exported APIs only and puts
-rationale in the commit message. `AGENTS.md` was kept; whether one-line constraint comments should be
-allowed is an open question for the maintainer.
+rationale in the commit message. `AGENTS.md` was kept, with one exception the maintainer allowed on
+2026-10-22: a one-line comment at a site may state why that line must stay as it is, when a future
+change could silently break a constraint there. Narrative and strategy comments stay out.
 
 ### The index
 
@@ -79,8 +84,20 @@ allowed is an open question for the maintainer.
   fields, a filename date that disagrees with `date:`, invalid values, and `supersedes`/`relates`
   links not mirrored by the named record; `--check` writes nothing.
 - **A hand-kept table (declined).** **Rejected because:** it rots and cannot enforce two-way links.
-- Index refs render as plain `#n` / `PR #n`; links to the repository URL are opt-in (`--links`),
-  so the generated index carries no repository owner name.
+- Index refs first rendered as plain `#n` / `PR #n`, so the index carried no repository owner name.
+  The maintainer chose clickable links as the default on 2026-10-22: the repository's own GitHub
+  identifiers are exempt from the public-repository rule. `--plain` keeps the plain form; `--links`
+  is gone.
+
+### Partial reversals
+
+- **`relates` plus a note in the older record** (the reconstruction's first reading): superseding a
+  whole record for one changed rule would hide the rules that still hold.
+- **Supersede on any rule change (chosen by the maintainer, 2026-10-22).** A record is marked
+  `superseded` as soon as a later decision changes any of its rules, and a short "Superseded in part"
+  note at its top names the changed rule and says the rest holds. **The `relates` reading lost
+  because:** a reader scanning the index could not tell which records no longer hold as written
+  (inferred). The reconstructed records were converted the same day.
 
 ## Decision
 
@@ -96,7 +113,8 @@ inferred reason marked, and no names, company or production details.
 - Path-scoped rules match paths relative to the checkout that holds them: a session started in the
   main checkout that edits files in another worktree does not load them (noted in `CLAUDE.md`).
 - `scripts/generate-adr-index.mts` runs with `node` 22.18 or later (type stripping), no dependencies;
-  `src/tests/adr-index.test.ts` covers it.
+  `src/tests/adr-index.test.ts` covers it. `pnpm adr:index` and `pnpm adr:index:check` wrap it, and
+  CI's lint job runs `--check`.
 - The PR review persona (`.claude/agents/pr-reviewer.md`) now reads the area rules for the changed
   paths.
 
@@ -104,13 +122,18 @@ inferred reason marked, and no names, company or production details.
 
 Headless Claude Code sessions in the worktree loaded `AGENTS.md` and the `CLAUDE.md` notes at start
 and a rule file only after reading a matching file. Generator: 11 tests in
-`src/tests/adr-index.test.ts`; `--check` passes on the 50 reconstructed records. Biome and `tsc`
-clean. CI (lint, type check, test, build, CodeQL) was green on the merged head.
+`src/tests/adr-index.test.ts` at merge, 12 after the default-links change; `--check` passes on the 50
+reconstructed records. Biome and `tsc` clean. CI (lint, type check, test, build, CodeQL) was green on
+the merged head.
 
 ## Consequences & open follow-ups
 
-- Open for the maintainer: constraint comments; deleting the local `docs/plans/` files once mined; the
-  squash-merge rule versus merge commits in practice; running `--check` in CI.
+- Settled by the maintainer on 2026-10-22: constraint comments allowed; the local `docs/plans/` files
+  mined and deleted; PRs into `dev` are merged with merge commits (squash optional), matching
+  practice; `--check` runs in CI; index refs are links; partial reversals supersede; the sandbox e2e
+  and demo stacks may be started for browser checks without asking; the unused `task` and `triage`
+  labels stay out; the PR template was deleted (the upgrade-steps rule stays in `AGENTS.md`); the
+  hosted invariants, the `riffado/ops` pointer and the Read-tool rule stay as they are.
 - Records for work in flight carry `status: proposed` and empty `prs` until their PRs merge.
 
 ## Related work
@@ -125,3 +148,5 @@ clean. CI (lint, type check, test, build, CodeQL) was green on the merged head.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
 - **2026-10-22**: merged as PR #245, after fixing two generator issues CodeQL flagged (a title ending
   in a backslash broke its table cell; an existence check before each file read was a race).
+- **2026-10-22**: follow-up: the maintainer answered the open questions (see *Consequences*); rules,
+  CI, the generator and the records updated; local plans deleted.

@@ -793,7 +793,7 @@ async function usesOfType(
  *
  * An Organization type reaches further than its count, which stays the
  * Organization's own so the curator never learns how much members know
- * privately (Johnny, 2026-09-28); the confirmation says so in words:
+ * privately (maintainer, 2026-09-28); the confirmation says so in words:
  * - with its entities goes everything anyone knows about them (their
  *   facts, aliases, notes and corrections, in every scope), and so do
  *   members' own entities of it, with what they know about those;
@@ -908,7 +908,7 @@ export async function deleteOwnType(
             }
         }
         // An Organization entity type takes every account's entities of it
-        // (Johnny, 2026-09-29): a member's entity of a type that is gone
+        // (maintainer, 2026-09-29): a member's entity of a type that is gone
         // has nothing to be. Counted as the Organization's own only.
         const entitiesGoing =
             kind === "entity" && organization
@@ -1209,7 +1209,7 @@ export async function typeMergeCount(
  * Merge one of the account's own types (`from`) into another of the same
  * kind, its own or a core one (`into`): whatever used `from` uses `into`,
  * and `from` goes. The curator tidies the types shares adopted this way
- * (Johnny, 2026-09-29).
+ * (maintainer, 2026-09-29).
  *
  * Of a relation type, every account's facts of it move to `into`,
  * combined where they then say the same; those `into` does not take go.
@@ -1760,7 +1760,7 @@ export async function rejectPhrase(
 
 /**
  * The owner's private types a share needs, adopted by the Organization
- * (Johnny, 2026-09-29), so what the share names is published rather than
+ * (maintainer, 2026-09-29), so what the share names is published rather than
  * left private: the entity types of the entities it names, the relation
  * types of the facts it states, and the entity types those relate.
  *
@@ -1773,7 +1773,7 @@ export async function rejectPhrase(
  * curator deleted (`adoptionRefusedAt`) is copied no more: it stays
  * private, with what uses it, until the Organization has a type of its
  * name or of the deleted one's (and, for a relation, of its shape)
- * again, which it then takes (Johnny, 2026-09-29).
+ * again, which it then takes (maintainer, 2026-09-29).
  *
  * Inside the share's transaction, under the Organization-people lock: the
  * owner's type rows first, then the vocabulary's version, as renaming or

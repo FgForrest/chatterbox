@@ -1,15 +1,15 @@
 ---
 title: Claude and Claude Code reach MCP through the SSO realm, with a confidential client and a narrow public entrance
 date: 2026-10-11
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
 prs: [109]
 areas: [src/lib/mcp/ingress.ts, src/lib/mcp/token.ts, src/lib/mcp/metadata.ts, src/lib/mcp/config.ts, src/lib/mcp/rate-limit.ts, content/docs/self-hosting/claude.mdx, e2e/keycloak/riffado-e2e-realm.json, docker-compose.e2e.sso-resource-indicators.yml]
-supersedes: []
+supersedes: [2026-10-07-external-mcp-server]
 superseded-by: []
-relates: [2026-10-07-external-mcp-server]
+relates: []
 ---
 
 # Claude and Claude Code reach MCP through the SSO realm, with a confidential client and a narrow public entrance
@@ -55,7 +55,33 @@ and mints its own tokens.
   itself.
 - **Rejected because:** its only advantage was keeping Keycloak private, and the organization's
   realm turned out to be public already. Revisit if a deployment's Keycloak must stay unreachable
-  from the internet.
+  from the internet, or if MCP is ever wanted in hosted mode, which has no SSO realm to act as the
+  authorization server.
+
+### Variants that keep Keycloak private (declined)
+
+- **A metadata shim:** Chatterbox serves the authorization-server metadata while Keycloak issues
+  codes and tokens. **Rejected because:** Keycloak's authorization response carries its own `iss`,
+  which MCP clients must match against the issuer in the metadata (RFC 9207), and RFC 8414 requires
+  the issuer to equal the URL the metadata came from. The only facade known to work replaces the
+  issuer entirely, which is Option B.
+- **A second, internet-facing Keycloak brokering to the internal realm.** **Rejected because:** role
+  and disable changes would reach the brokering realm only at the person's next interactive login,
+  not on refresh, so rights would go stale for the life of a 30-day offline session. This was
+  believed from how Keycloak brokering works, not verified.
+
+### Reaching an internal Chatterbox without a public entrance (declined)
+
+- **A desktop extension or local MCP server on an employee's machine.** **Rejected because:** Cowork
+  sessions run in Anthropic's cloud, which does not run local MCP servers; an extension would also
+  not serve the web or mobile apps and would depend on one machine being online. Whether a cloud
+  session can call a desktop extension at all was believed, not verified.
+- **A per-user outbound tunnel from a machine on the VPN.** **Rejected because:** it would publish
+  Chatterbox under a hostname nobody controls, one per user, which is wider than one proxy
+  restricted to two paths.
+- **Anthropic's MCP tunnels.** **Rejected because:** they need the Enterprise plan (a research
+  preview at the time), which the organization the connector was built for did not have. Revisit on
+  an Enterprise plan.
 
 ### Option C: Enterprise Managed Auth (ID-JAG) (deferred)
 
@@ -166,7 +192,7 @@ Keycloak does not bind tokens to the MCP server's URL by default.
 ## Related work
 
 - [2026-10-07-external-mcp-server](2026-10-07-external-mcp-server.md): the server this opens to
-  Claude; its per-IP limit was removed here.
+  Claude; its per-IP limit was removed here, so this record supersedes that rule.
 
 ## Timeline
 

@@ -1697,14 +1697,14 @@ export const knowledgeEntityTypes = pgTable(
         // same name: the user's later facts use the shared key.
         adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
         // An Organization type a share made from a member's private one
-        // (Johnny, 2026-09-29): listed first for the curator, until they
+        // (maintainer, 2026-09-29): listed first for the curator, until they
         // keep, rename or merge it.
         adoptedFromShare: boolean("adopted_from_share")
             .notNull()
             .default(false),
         // Set on a member's type when the curator deleted the Organization
-        // type it was adopted as (Johnny, 2026-09-29): a share adopts it no
-        // more, until the Organization has a type of its name, or of the
+        // type it was adopted as (maintainer, 2026-09-29): a share adopts it
+        // no more, until the Organization has a type of its name, or of the
         // deleted one's (`adoptionRefusedAs`, its `labelHmac`), again.
         adoptionRefusedAt: timestamp("adoption_refused_at"),
         adoptionRefusedAs: varchar("adoption_refused_as", { length: 64 }),

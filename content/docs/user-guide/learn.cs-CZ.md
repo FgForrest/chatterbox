@@ -77,7 +77,7 @@ Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učen
 
 ## Důležité vědět
 
-- Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
+- Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Dvořákem“ najde Dvořáka.
 - Mluvčí označený pouze křestním jménem je podle toho označen. Shodné křestní jméno vyžaduje rozlišující důkaz nebo výslovně označený odhad.
 - Zařazení nového záznamu jako toho, který už máte, naučí Klepna nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
 - Profil zpracování může Učení přiřadit vlastního poskytovatele a model, například výkonnější než pro shrnutí. Viz [Zpracování a profily](processing-and-profiles.md).

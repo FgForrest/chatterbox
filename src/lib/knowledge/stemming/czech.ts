@@ -1,8 +1,8 @@
 /**
  * Czech stem variants of a word written without diacritics: every stem the
  * word could have had before its accents were dropped, so a name heard
- * inflected ("Šimákem", "Forestu", "Milane") meets the name as written
- * ("Šimák", "Forest", "Milan") whether either side kept its accents.
+ * inflected ("Dvořákem", "Orionu", "Milane") meets the name as written
+ * ("Dvořák", "Orion", "Milan") whether either side kept its accents.
  *
  * Ported from evitaDB's `CzechVariantStemmer` (FG Forrest, a.s.; see
  * NOTICE): one walk over the ending tables of Lucene's `CzechStemmer`

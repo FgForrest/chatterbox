@@ -1,7 +1,7 @@
 ---
 title: The dashboard's library column browses by location, with a folder rail from 1280 px, walk-in folders below it, and one Organization colour
 date: 2026-10-22
-updated: 2026-10-22 17:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
@@ -55,8 +55,8 @@ while the rest of the app marked the Organization with the red primary.
 |------|----------|-----|--------|
 | 2026-10-21 | Variant C (rail, list, detail) from 1280 px, variant D (walk-in folders) below | C is the only layout that shows folders, the list and the detail together; D handles hundreds of folders and keeps two columns where there is no room for three | Both are rendered from one state and Tailwind shows one per breakpoint, so the first paint does not jump |
 | 2026-10-21 | One location state replaces `libraryMode` and the "Uspořádat" mode | The tree as a hidden mode was the core problem | The URL holds folder and item together; old links with only one of them still work |
-| 2026-10-21 | A folder's list includes its subfolders, each row naming its subfolder | Going through a folder one item after another keeps the location | Default taken by the assistant, not yet confirmed |
-| 2026-10-21 | The folder table goes; its functions move to a folder settings panel | Browsing now happens in the list; the table held settings that had to live somewhere | Only the side-by-side columns view is lost (not yet confirmed) |
+| 2026-10-21 | A folder's list includes its subfolders, each row naming its subfolder | Going through a folder one item after another keeps the location | Default taken by the assistant, confirmed by the maintainer on 2026-10-22 |
+| 2026-10-21 | The folder table goes; its functions move to a folder settings panel | Browsing now happens in the list; the table held settings that had to live somewhere | Only the side-by-side columns view is lost (confirmed by the maintainer on 2026-10-22) |
 | 2026-10-21 | One folder matcher for the picker, the rail filter and ⌘K; "Přidat do složky" becomes a searchable picker | Many Organization folders and duplicate names; the maintainer asked for autocomplete in the detail's picker | Names first, then paths, diacritics ignored; built on cmdk, which the app already shipped |
 | 2026-10-21 | Newcomers with no items of their own and a non-empty Organization open on Organizace, newest item open | Newcomers saw an empty list and a blank detail | A banner offers Sync and Upload; both empty keeps the onboarding empty state |
 | 2026-10-21 | Rail and list fill the viewport under the header and scroll on their own | The column was taller than the detail | From `lg` up; below it the page scrolls as before |
@@ -73,9 +73,9 @@ while the rest of the app marked the Organization with the red primary.
 | B: three recently used folders and "Všechny složky" above the list | Fine for small libraries; with many folders most of the tree is one click away again | Libraries turn out to stay small |
 | C at every width | The detail loses about 230 px and phones would get a third navigation level | Screens below 1280 px stop mattering |
 | A JavaScript screen-width check choosing C or D | The first paint would jump between layouts | Never; CSS breakpoints carry it |
-| Keeping the folder table as a browsing view | The list column took over browsing; its settings moved to the panel | People miss the columns view (the maintainer has not confirmed dropping it) |
-| Pinned folders in "Naposledy použité" | Automatic recently used folders need no setup | People ask for pins (default taken, not confirmed) |
-| Mixing the Organization's newest items into Nedávné | Noisy in a large Organization; they live under Organizace | The maintainer decides otherwise (default taken, not confirmed) |
+| Keeping the folder table as a browsing view | The list column took over browsing; its settings moved to the panel | People miss the columns view (dropping it confirmed by the maintainer on 2026-10-22) |
+| Pinned folders in "Naposledy použité" | Automatic recently used folders need no setup | People ask for pins (confirmed by the maintainer on 2026-10-22) |
+| Mixing the Organization's newest items into Nedávné | Noisy in a large Organization; they live under Organizace | People ask for the Organization's newest items in Nedávné (confirmed by the maintainer on 2026-10-22) |
 | Stock `blue-*`, or the primary red, for Organization marks | Two colours for one meaning, or the same colour for private and Organization | Never |
 | Relative colour syntax (`oklch(from …)`) for the token | Browser support | Supported in every browser the app targets |
 
@@ -121,16 +121,16 @@ while the rest of the app marked the Organization with the red primary.
 
 ## Consequences & open follow-ups
 
-- **Four defaults are not confirmed by the maintainer:** Nedávné shows only the user's own items;
-  recently used folders are automatic with no pins; a folder's list includes its subfolders; the
-  table's side-by-side columns view is dropped. Any of them may still flip.
+- **Four defaults, confirmed by the maintainer on 2026-10-22:** Nedávné shows only the user's own
+  items; recently used folders are automatic with no pins; a folder's list includes its subfolders;
+  the table's side-by-side columns view is dropped. The assistant took them while building.
 - Open question from the maintainer: whether members should be allowed to move colleagues' items
-  between Organization folders. Collaborative filing stays until he decides.
+  between Organization folders. Collaborative filing stays until the maintainer decides.
 - **Every folder list must follow live folder changes.** The filing card loaded its folders once, so a
   folder created in the column while the card was open could not be chosen until a reload (fixed by
   PR #241). The maintainer then asked for the shared folder search to become one reusable autocomplete
   that replaces the folder selects and picks up folders created or changed while it is on the page
-  (PR #242, open).
+  (PR #242, merged on 2026-10-22).
 
 ## Related work
 
@@ -146,3 +146,4 @@ while the rest of the app marked the Organization with the red primary.
   below 1280 px and asked about the folder table; final proposal with a three-PR plan.
 - **2026-10-22**: all phases in one PR, PR #226 merged; real-data test, PR #228 merged; PR #237 merged.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-10-22**: the four defaults confirmed by the maintainer.

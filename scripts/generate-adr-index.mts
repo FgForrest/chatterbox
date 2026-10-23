@@ -518,8 +518,9 @@ export function run(options: {
 }
 
 /**
- * CLI: `node scripts/generate-adr-index.mts [--check] [--links] [--dir <adr folder>]`.
- * Refs render as plain `#n` / `PR #n`; `--links` links them to the repository URL in package.json.
+ * CLI: `node scripts/generate-adr-index.mts [--check] [--plain] [--dir <adr folder>]`.
+ * Refs link to the GitHub repository named in package.json's `repository`; `--plain` renders them as
+ * plain `#n` / `PR #n`.
  */
 export function main(args: string[]): number {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -527,7 +528,7 @@ export function main(args: string[]): number {
         args,
         options: {
             check: { type: "boolean", default: false },
-            links: { type: "boolean", default: false },
+            plain: { type: "boolean", default: false },
             dir: { type: "string" },
         },
         strict: true,
@@ -536,9 +537,9 @@ export function main(args: string[]): number {
     const adrDir = resolve(values.dir ?? join(root, "documentation", "adr"));
     const result = run({
         adrDir,
-        repoUrl: values.links
-            ? repositoryUrl(join(root, "package.json"))
-            : null,
+        repoUrl: values.plain
+            ? null
+            : repositoryUrl(join(root, "package.json")),
         check: values.check,
     });
     const shown = relative(process.cwd(), adrDir) || ".";

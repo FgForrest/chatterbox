@@ -1,10 +1,10 @@
 ---
 title: Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm
 date: 2026-10-22
-updated: 2026-10-22 21:40
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
-issues: []
+issues: [256]
 prs: [250]
 areas: [src/lib/integrations/google, src/lib/learn/auto-learn.ts, src/lib/learn/learn-job.ts, src/lib/learn/validate-speaker-guesses.ts, src/lib/learn/run-fallback.ts, src/lib/learn/run-bridge.ts, src/lib/learn/correction-pass.ts, src/lib/transcription/transcribe-recording.ts]
 supersedes: [2026-10-12-calendar-meet-speaker-candidates]
@@ -19,7 +19,8 @@ roster from the recording owner's Google Calendar and Meet. The model makes a be
 speaker it cannot name from the transcript, choosing among known people and roster names; each
 guess is shown with a question mark and its source (invited, or was in the call) and waits for the
 user to confirm it. Roster names also go to the transcription provider's spelling hints and to the
-correction pass. Matching attendees to Almanac people by e-mail was dropped.
+correction pass. Attendees are matched to Almanac people by name only; matching them by e-mail is
+allowed and tracked in issue #256. Calendar and Meet never apply to mail items.
 
 This supersedes [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md) and reverses two of its rules: that only
 runs started by hand get a roster, and that the model may not infer identity from attendance or
@@ -53,15 +54,15 @@ candidate names as hints, a speaker named only from direct transcript evidence, 
 - **Rejected because:** the maintainer wants the roster on every run and accepts guesses, as long as
   the user confirms each one.
 
-### Option B: match attendees to Almanac people by e-mail (declined)
+### Option B: match attendees to Almanac people by e-mail (allowed, not built yet)
 
 Requesting attendee e-mails would link them exactly to Almanac people by primary e-mail, as tasks
 already do, and settle "two known people share this first name".
 
-- **Rejected because:** the maintainer judged the information "not usable for e-mails"; no further
-  reason was recorded. Likely: outside participants rarely have an e-mail in the Almanac, the same
-  observation that dropped a "person without e-mail" problem type from curator tooling that day
-  (inferred).
+- **Not in PR #250:** a remark in the design discussion, that the information is "not usable for
+  e-mails", was read as ruling e-mail matching out. The maintainer corrected that reading on
+  2026-10-22: the remark meant that Calendar and Meet do not apply to mail items, since a mail has
+  no meeting. E-mail **may** be used to match people; the work is issue #256.
 
 ### Option C: roster on every run, model guesses for confirmation, names to spelling, source shown (chosen)
 
@@ -72,8 +73,8 @@ already do, and settle "two known people share this first name".
 
 ## Decision
 
-**Chosen: Option C** (maintainer, 2026-10-22). Defaults set in the implementation brief and not
-confirmed by him (to be told if he asks):
+**Chosen: Option C** (maintainer, 2026-10-22), with e-mail matching (Option B) to follow in issue
+#256. Defaults set in the implementation brief, confirmed by the maintainer on 2026-10-22:
 
 - **Automatic event choice:** among events with at least one attendee that overlap at least half of
   the recording or half of the event, the one that overlaps the recording most; an ambiguous match
@@ -87,7 +88,11 @@ confirmed by him (to be told if he asks):
 
 - `resolveMeetingRoster` (`src/lib/integrations/google/meeting-roster.ts`) reads only the audio
   owner's Google connection; mail items, missing grants and Google failures give no roster, and a
-  Meet error keeps the Calendar invitees. Calendar and Meet names are deduplicated ignoring case
+  Meet error keeps the Calendar invitees. Mail items never reach it in the first place: a Learn run
+  on a mail branches to its own handler (`runMailLearnJob` in `src/lib/learn/learn-job-handler.ts`)
+  before the roster is read, and transcription and the correction pass exist for recordings only.
+  The resolver's own filter (an `audio` item with a recording row of the owner) is the second guard,
+  pinned by the mail case in `automatic-learn-ignored-calendar.integration.test.ts`. Calendar and Meet names are deduplicated ignoring case
   and diacritics, and Meet attendance counts more than an invitation. No attendee e-mail, event
   title or description leaves the resolver. Event matching filters to eligible events before
   ranking, so an out-of-window event with a larger overlap can neither hide nor veto a clean match.
@@ -145,10 +150,18 @@ Google smoke test was run.
 
 ## Consequences & open follow-ups
 
-- The defaults above need the maintainer's confirmation.
+- The defaults above were confirmed by the maintainer on 2026-10-22.
+- **E-mail matching (issue #256, open):** a roster attendee whose e-mail matches an Almanac person in
+  the run's scope becomes that person, without attendee e-mails reaching prompts, review payloads,
+  logs or exports; conflicts fall back to name matching. A test must pin that Calendar and Meet are
+  never consulted for mail items.
 - Coverage should be re-measured with the Learn evaluation; the last measured coverage was 14 of 70
   speaker labels.
-- The roster has not been checked against a real Google account.
+- The roster has not been checked against a real Google account. In particular, it is unknown
+  whether the Meet REST API returns a conference's participants to an attendee who did not organize
+  it; the 2026-09-13 speaker plan listed this as a smoke test before building, and it was never run.
+  If it does not, Meet attendance reaches Learn only for meetings the recording owner organized; the
+  Calendar invitees still arrive, because a Meet error keeps them.
 
 ## Related work
 
@@ -159,10 +172,12 @@ Google smoke test was run.
 ## Timeline
 
 - **2026-10-22**: Calendar and Meet gaps explained; the maintainer ruled automatic runs must use the
-  roster, the model guesses for confirmation, names go to spelling, the review shows the source, and
-  e-mail matching is out; implementation started.
+  roster, the model guesses for confirmation, names go to spelling, and the review shows the source;
+  a remark about e-mails was read as ruling e-mail matching out; implementation started.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
 - **2026-10-22**: merged as PR #250, after review fixes (only the owner picks a calendar event,
   eligible events ranked first, the 0.49 cap in the review payload, carried speakers kept out of
   guesses, roster proposals inside the 20-record budget, a rejected guess cleared from the speaker
-strip when the review finishes).
+  strip when the review finishes).
+- **2026-10-22**: the maintainer confirmed the defaults and corrected the e-mail reading: Calendar and
+  Meet do not apply to mail items, and e-mail may be used to match people (issue #256).
