@@ -1,7 +1,7 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-10-22 22:00
+updated: 2026-10-23 06:40
 status: accepted
 kind: feature
 issues: []
@@ -126,6 +126,13 @@ Postgres, 2894 passed and 16 skipped (opt-in live tests).
 - Archives are not encrypted and downloads need no re-authentication; whoever holds the account holds
   the archive.
 - Archive restore was out of scope and still does not exist.
+- **Self-host has no backup cooldown and no cap on stored archives (PR #68).** The 24-hour cooldown
+  applies only when `IS_HOSTED` is set: a self-hosted instance pays for its own disk, and the last
+  archive may be exactly the one to replace. Each finished archive stays for 7 days
+  (`EXPORT_ARCHIVE_RETENTION_MS` in `src/db/queries/export-jobs.ts`), so on a shared instance one
+  member can fill the disk by repeating full backups. A review suggested deleting a superseded
+  archive once its replacement succeeds, or capping archives per user by count or bytes; neither was
+  built.
 
 ## Related work
 

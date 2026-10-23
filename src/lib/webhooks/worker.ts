@@ -1,7 +1,6 @@
 import type { IncomingMessage, RequestOptions } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { LookupFunction } from "node:net";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -10,6 +9,7 @@ import {
     reloadClaimedDeliveryForSend,
 } from "@/db/queries/webhook-deliveries";
 import { webhookDeliveries, webhookEndpoints } from "@/db/schema";
+import { createPinnedLookup } from "@/lib/net/public-target";
 import { captureServerException } from "@/lib/posthog-server";
 import {
     createOutboundWebhookPayload,
@@ -28,7 +28,6 @@ import {
 import { formatWebhookSignatureHeader } from "@/lib/webhooks/signature";
 import {
     isWebhookUrlPolicyError,
-    type PublicWebhookAddress,
     type PublicWebhookTarget,
     resolveWebhookUrl,
 } from "@/lib/webhooks/url";
@@ -67,25 +66,6 @@ async function readResponseBody(response: IncomingMessage): Promise<string> {
         response.on("end", () => resolve(body));
         response.on("error", () => resolve(body));
     });
-}
-
-function createPinnedLookup(addresses: PublicWebhookAddress[]): LookupFunction {
-    return (_hostname, options, callback) => {
-        if (options.all) {
-            callback(null, addresses);
-            return;
-        }
-
-        const family =
-            options.family === 4 || options.family === 6
-                ? options.family
-                : null;
-        const selected =
-            (family
-                ? addresses.find((address) => address.family === family)
-                : undefined) ?? addresses[0];
-        callback(null, selected.address, selected.family);
-    };
 }
 
 async function postWebhookRequest(

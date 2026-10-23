@@ -2,7 +2,7 @@
  * Matching a name as it was spoken or written against the names, aliases
  * and heard-as forms a scope knows. Pure; a caller that knows the language
  * passes its stemmer (`WordStemmer`), so a name heard inflected meets the
- * name as written ("Šimákem", "Šimák"). Nicknames and addressing stay
+ * name as written ("Dvořákem", "Dvořák"). Nicknames and addressing stay
  * the model's to judge: this only finds candidates, each with the reason
  * it matched.
  */

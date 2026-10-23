@@ -5,6 +5,10 @@ import { assertNotOrgAccount } from "@/lib/org/config";
 import { isPlaudWorkspaceToken, plaudVerifyOtp } from "@/lib/plaud/auth";
 import { persistPlaudConnection } from "@/lib/plaud/persist-connection";
 import { isValidPlaudApiUrl } from "@/lib/plaud/servers";
+import {
+    assertRateLimitAllowed,
+    consumeRateLimitBucket,
+} from "@/lib/rate-limit";
 
 /**
  * POST /api/plaud/auth/verify
@@ -23,6 +27,13 @@ import { isValidPlaudApiUrl } from "@/lib/plaud/servers";
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
     await assertNotOrgAccount(session.user.id);
+
+    assertRateLimitAllowed(
+        await consumeRateLimitBucket(
+            `plaud:otp:verify:user:${session.user.id}`,
+            { limit: 10, windowMs: 10 * 60_000 },
+        ),
+    );
 
     const { code, otpToken, apiBase, email } = await request.json();
 

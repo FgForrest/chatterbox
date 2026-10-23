@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
     resolveStepProvider: vi.fn(),
 }));
 
+vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
+
 vi.mock("@/lib/recordings/read-language", () => ({
     readConfirmedLanguage: mocks.confirmedLanguage,
 }));

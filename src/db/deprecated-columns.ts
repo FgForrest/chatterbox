@@ -40,13 +40,13 @@ export const DEPRECATED_COLUMNS: readonly DeprecatedColumn[] = [
         column,
         why: `Moved to ${now} (migration 0096 copied it); frozen since, kept to recover from a bad copy.`,
         dropAfter: "2026-11-15",
-        issue: null,
+        issue: 257,
     })),
     {
         table: "recordings",
         column: "unshared_at",
         why: "Timed a grace period that no longer exists; never read or written since 2026-09-28.",
         dropAfter: "2026-11-15",
-        issue: null,
+        issue: 257,
     },
 ];

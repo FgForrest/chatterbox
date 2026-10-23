@@ -1,15 +1,15 @@
 ---
 title: Speakers are identified from names and calendar rosters, never from voiceprints
 date: 2026-09-14
-updated: 2026-10-22 21:10
-status: accepted
+updated: 2026-10-22 22:30
+status: superseded
 kind: feature
 issues: []
 prs: [25]
 areas: [src/lib/knowledge/attribution.ts, src/lib/knowledge/people.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/integrations/google]
 supersedes: []
-superseded-by: []
-relates: [2026-09-30-learn, 2026-10-12-calendar-meet-speaker-candidates, 2026-09-28-google-drive-export, 2026-10-22-calendar-speaker-guesses-in-automatic-runs]
+superseded-by: [2026-09-30-learn]
+relates: [2026-10-12-calendar-meet-speaker-candidates, 2026-09-28-google-drive-export, 2026-10-22-calendar-speaker-guesses-in-automatic-runs]
 ---
 
 # Speakers are identified from names and calendar rosters, never from voiceprints
@@ -20,6 +20,11 @@ later by Learn), and the attendee roster of the matching Google Calendar event o
 Voice samples, speaker embeddings, voice enrollment and provider voiceprint identifiers are
 permanently out of scope. PR #25 shipped the first two phases of the speaker knowledge base under
 this rule: timed turns from every diarizing provider, a `people` table, and manual attribution.
+
+**Superseded in part** by [Learn](2026-09-30-learn/README.md), for one rule only: PR #25 kept
+organization and project names in plaintext so SQL could search them, and Learn encrypts every
+knowledge-base name. The no-biometrics rule, the roster as the identity source and everything else
+here still hold.
 
 ## Why
 
@@ -100,6 +105,11 @@ Drive export's choice, see its record).
   format.
 - **Only confirmed attributions project.** A machine guess never reaches a summary, an export or the
   API.
+- **Names are never written into stored summaries.** A summary made before a speaker was named keeps
+  the label it quoted. The 2026-09-13 plan rejected rewriting that label to the confirmed name inside
+  the stored summary: summaries mention labels in running prose, so a blind substitution is fragile.
+  To get names into a summary, it must be generated after the names settle; Learn's review hold does
+  this for automatic runs.
 - **Personal data of third parties is encrypted.** Person names, emails and notes go through the
   field encryption; the email also has an HMAC shadow column for lookups and uniqueness
   (`src/lib/knowledge/lookup-hash.ts`).
@@ -124,13 +134,23 @@ Drive export's choice, see its record).
 - **The 2026-09-13 encryption split did not last.** PR #25 kept organization and project names
   plaintext so SQL could search them; Learn reversed that and encrypts every knowledge-base name
   (see its record).
-- The plan's later phases were replaced: its context, shortlist and attribution phases by Learn,
-  its Google connection by the Drive export and the Calendar/Meet work.
+- The plan's later phases were replaced. Its context, shortlist, attribution and fact-extraction
+  phases became Learn; its entity pages and review queue became the Almanac and the Learn review; its
+  Google connection became the Drive export's general connection. Two parts were declined: a
+  periodic Calendar sync storing events and attendee e-mails, and adopting Meet transcript entries as
+  named turns; the reasons are in the Calendar/Meet record (Options A and B).
+- **Hosted users on Mynah get no turns.** The included hosted transcription returns only text and
+  language (`transcribeViaMynah` in `src/lib/hosted/transcription/mynah.ts`), so speaker naming, like
+  topics, needs a diarizing provider of the user's own. The 2026-09-13 plan considered adding
+  diarization to the Mynah service or hiding the People section when no turns exist. Neither was
+  built: Mynah exists only on hosted, which this fork does not operate, so it is a known upstream
+  gap.
 
 ## Related work
 
 - [2026-09-30-learn](2026-09-30-learn/README.md): restates the boundary (no voice samples,
-  embeddings, provider identifiers, style or accent) and builds speaker suggestions on it.
+  embeddings, provider identifiers, style or accent) and builds speaker suggestions on it; it
+  supersedes this record's plaintext knowledge-base names.
 - [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md):
   implements the roster this record chose as the identity source.
 - [2026-09-28-google-drive-export](2026-09-28-google-drive-export.md): the Google connection the

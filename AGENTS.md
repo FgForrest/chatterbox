@@ -1,6 +1,6 @@
 # Chatterbox: agent guidelines
 
-Chatterbox (Czech name: Klepna) is an AGPL-3.0 companion app for AI voice recorders, based on upstream [Riffado](https://github.com/riffado/riffado). It syncs recordings (the Plaud Note family today, plus browser meeting recordings and uploads), transcribes and summarizes them through pluggable AI providers, receives mail, and keeps an Organization knowledge base (the Almanac) that AI clients read over MCP. Stack: Next.js 16 App Router, TypeScript, Drizzle on Postgres, vitest, Biome, next-intl (`en`, `cs-CZ`).
+Chatterbox (Czech name: Klepna) is an AGPL-3.0 companion app for AI voice recorders, based on upstream [Riffado](https://github.com/riffado/riffado). It syncs recordings (the Plaud Note family today, plus browser meeting recordings and uploads), transcribes and summarizes them through pluggable AI providers, receives mail, and keeps an Organization knowledge base (the Almanac) that AI clients read over MCP. In practice it is a place where a team shares its communication, internal and external: recordings, mail, transcripts, summaries, tasks, and an Almanac of the people and things they involve. Stack: Next.js 16 App Router, TypeScript, Drizzle on Postgres, vitest, Biome, next-intl (`en`, `cs-CZ`).
 
 This file is the entry point for every coding agent. Area rules live in `.claude/rules/`: before you edit files in an area, read the rule file the [area table](#area-rules) names for it. Claude Code loads them by itself; other agents must open them.
 
@@ -40,19 +40,19 @@ Marketing surfaces (landing page copy, README feature sections) are exempt from 
 - Always ask before removing functionality or code that appears to be intentional.
 - Refactor freely and do not preserve backward compatibility on internal code unless the user explicitly asks. Internal code APIs are not a contract; only the deploy surface and the hosted surface are (see [Don't break existing deployments](#dont-break-existing-deployments)), and those are sacred.
 - No generic arrow functions (`<T,>(x) =>`) in `.tsx`: the next-intl extraction loader in `pnpm build` rewrites them into JSX, and only CI's Build job fails. Use a generic `function`.
-- JSDoc on exported APIs only. No narrative or strategy comments in source. Design rationale goes in the commit message, and into a decision record when it clears the bar below.
+- JSDoc on exported APIs only. No narrative or strategy comments in source. Design rationale goes in the commit message, and into a decision record when it clears the bar below. One exception: a one-line comment at a site may state why that line must stay as it is, when a future change could silently break a constraint there (a lock order, a literal a partial index depends on, a deliberate omission).
 
 ## Decision records and plans
 
 - **Before starting work**, search `documentation/adr/` for the area (`rg -l "<path or term>" documentation/adr/`) and read the *Consequences & open follow-ups* of every hit. Reversing a recorded decision takes a new record that supersedes it.
-- **When work finishes**, write a record only if all three hold: there was a genuine fork, the reasoning outlives the change, and nothing cheaper (commit message, JSDoc) carries it. The default is no record. If it clears the bar, read `.claude/rules/adr.md`, copy `documentation/adr/TEMPLATE.md`, and regenerate the index with `node scripts/generate-adr-index.mts` in the same commit (`--check` validates without writing).
-- Plans and TODOs that need to survive a session belong in GitHub Issues, not in code comments or `plans/*.md`. In-flight working notes (design drafts, briefs, review outputs) may live in `docs/plans/`, which `.gitignore` excludes: never commit them, never treat them as evidence of what shipped, and delete them when the work finalizes, after anything of lasting value has moved into a record or the commit message (`.claude/rules/adr.md`, "Plans").
+- **When work finishes**, write a record only if all three hold: there was a genuine fork, the reasoning outlives the change, and nothing cheaper (commit message, JSDoc) carries it. The default is no record. If it clears the bar, read `.claude/rules/adr.md`, copy `documentation/adr/TEMPLATE.md`, and regenerate the index with `node scripts/generate-adr-index.mts` (`pnpm adr:index`) in the same commit; `--check` (`pnpm adr:index:check`) validates without writing and runs in CI. A later decision that changes even one rule of a record supersedes it.
+- Plans and TODOs that need to survive a session belong in GitHub Issues, not in code comments or `plans/*.md`. In-flight working notes (design drafts, briefs, review outputs) live only in `docs/plans/`, which `.gitignore` excludes: never commit them, never treat them as evidence of what shipped, and delete them when the work finalizes. Before deleting, move what has lasting value (the whys, rejected options, measurements) into a record or the commit message; an implemented plan has no value of its own (`.claude/rules/adr.md`, "Plans").
 
 ## Commands and tests
 
 - After code changes (not docs): `pnpm format-and-lint:fix && pnpm type-check`. Fix all errors and warnings before committing. Without pnpm on `PATH`, call the binaries in `./node_modules/.bin/` (`biome check . --write`, `tsc --noEmit`, `vitest`).
 - When running check/typecheck/test commands, capture the full output: do not pipe through `| tail`, `| head`, or otherwise truncate. Hidden errors are the whole problem these commands are supposed to surface.
-- **NEVER run without user instruction:** `pnpm dev`, `pnpm build`, `pnpm db:migrate`, `pnpm db:generate`, `docker compose up`, any release command.
+- **NEVER run without user instruction:** `pnpm dev`, `pnpm build`, `pnpm db:migrate`, `pnpm db:generate`, `docker compose up`, any release command. One exception: the disposable sandbox e2e and demo stacks (`docker-compose.e2e*.yml`, alone or with `docs/user-guide/demo/docker-compose.demo.yml`) may be started for browser checks without asking. `docker compose up` of the real stack (`docker-compose.yml`, with or without `docker-compose.dev.yml`) stays forbidden without an instruction.
 - Tests: `pnpm test` (vitest, from the repository root). Database integration tests (`*.integration.test.ts`) run when `TEST_DATABASE_URL` points at a Postgres, which must be localhost unless `ALLOW_REMOTE_TEST_DATABASE_URL=true`; CI runs them against Postgres 16. Keycloak tests (`*.keycloak.integration.test.ts`) also need `KEYCLOAK_TEST_ISSUER`, and CI has no Keycloak: run them yourself when you touch SSO, MCP or authorization code. The live Plaud test is opt-in (`.claude/rules/plaud-and-sync.md`).
 - If you create or modify a test file, run it and iterate until it passes.
 - Before pushing, run the tests your change reaches, not the whole suite: `pnpm vitest run --changed origin/dev` (or `pnpm vitest related <changed files> --run`), plus the integration tests of the area you touched. CI runs the whole suite on every push; a PR is not ready until its Test job is green, and a red Test job is yours to fix. Run the whole suite locally when a change reaches tests outside the import graph: `src/db/schema.ts` and migrations, `messages/*.json`, shared test helpers and fixtures, or `vitest.config.ts`.
@@ -76,7 +76,7 @@ Multiple agents may work on the same worktree simultaneously (subagents, paralle
 - ALWAYS use `git add <specific-file-paths>` listing only files you modified.
 - It is always fine to include matching `src/db/migrations/*.sql` and `src/db/migrations/meta/*` files alongside the `src/db/schema.ts` change that produced them: they are generated artifacts of your edit, not other agents' work.
 - ALWAYS include `fixes #<number>` or `closes #<number>` in the commit message when there is a related issue or PR; GitHub closes it when the commit reaches `dev`, the default branch.
-- Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `perf:`, `docs:` (Conventional-Commits-ish). Squash-merge scoped features into `dev`. Regular-merge long-lived branches where per-commit history matters.
+- Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `perf:`, `docs:` (Conventional-Commits-ish). PRs into `dev` are merged with a merge commit, which keeps the branch's commits; squashing is optional.
 
 ### Forbidden Git operations
 
@@ -137,7 +137,7 @@ Ask: *"If this goes wrong, how many users notice, and how fast can they recover?
 - **Export parity is non-negotiable.** Full backup (one-archive export → restore elsewhere) is the proof users can leave. Every recording, transcript, summary must round-trip. Do not ship features that can't be backed up.
 - **Never claim compliance we don't own.** HIPAA, SOC2, attorney-client privilege: the claim belongs to the user's AI provider and their self-host setup, not to Chatterbox.
 - **Multi-process safe.** No in-memory locks as the only correctness mechanism. Background workers (started in-process from `src/instrumentation.ts`) claim work at the DB level (`SELECT … FOR UPDATE SKIP LOCKED`, see `src/db/queries/async-jobs.ts`) or move to a dedicated process. In-memory `running` flags are advisory only.
-- **Multi-tenant safe and fair.** One user's data, quota, retries, or failures must not affect another user's experience. Background queues (webhook delivery, transcription, sync) use per-user concurrency caps or fair-share claim queries so one slow or abusive user cannot starve others.
+- **Multi-tenant safe and fair.** One user's data, quota, retries, or failures must not affect another user's experience. Background queues (webhook delivery, transcription, sync) use per-user concurrency caps or fair-share claim queries so one slow or abusive user cannot starve others. Exception by decision: summary and Learn jobs claim oldest first while pipeline jobs claim per user (`documentation/adr/2026-09-13-durable-job-queue.md`); do not change that without a new decision.
 
 ## Product principles
 

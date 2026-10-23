@@ -1,15 +1,15 @@
 ---
 title: Learn gets a cold start; it proposes the people and things it hears, and the Almanac is editable by hand
 date: 2026-10-01
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
 prs: [72]
 areas: [src/app/(app)/almanac, src/app/api/knowledge, src/lib/learn/validate-new-records.ts, src/lib/learn/review.ts, src/lib/knowledge/vocabulary-core.ts, src/lib/knowledge/facts.ts, src/components/almanac]
-supersedes: []
+supersedes: [2026-09-30-learn]
 superseded-by: []
-relates: [2026-09-30-learn, 2026-10-01-name-matching-across-word-forms, 2026-10-21-curators-manage-organization-almanac]
+relates: [2026-10-01-name-matching-across-word-forms, 2026-10-21-curators-manage-organization-almanac]
 ---
 
 # Learn gets a cold start; it proposes the people and things it hears, and the Almanac is editable by hand
@@ -129,7 +129,8 @@ editing covers the rest. The follow-on choices:
 
 ## Related work
 
-- [2026-09-30-learn](2026-09-30-learn/README.md): the Learn design this fixes the cold start of.
+- [2026-09-30-learn](2026-09-30-learn/README.md): the Learn design this fixes the cold start of; it
+  supersedes Learn's `LEARN_AUTO` operator flag.
 - [2026-10-01-name-matching-across-word-forms](2026-10-01-name-matching-across-word-forms.md): Block 4 of
   the same PR, which lifted the fallback's precision on known records.
 - [2026-10-21-curators-manage-organization-almanac](2026-10-21-curators-manage-organization-almanac.md):

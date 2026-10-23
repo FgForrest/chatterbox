@@ -183,6 +183,8 @@ Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 
 With nginx:
 
+Chatterbox sends `nosniff`, same-origin framing protection, a referrer policy and HSTS (only for HTTPS `APP_URL`) itself, so the reverse proxy need not add them (duplicated HSTS is harmless).
+
 ```nginx
 # http context: one coarse budget for this public server, before JWT verification
 limit_req_zone $server_name zone=mcp_public:10m rate=100r/s;

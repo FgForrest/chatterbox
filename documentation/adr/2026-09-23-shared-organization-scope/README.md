@@ -1,15 +1,15 @@
 ---
 title: Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
 date: 2026-09-23
-updated: 2026-10-22 22:00
-status: accepted
+updated: 2026-10-23 06:40
+status: superseded
 kind: feature
 issues: []
 prs: [53]
 areas: [src/lib/sharing, src/lib/org, src/lib/folders/folders.ts, src/lib/knowledge/people.ts, src/db/queries/retention.ts, src/db/queries/events.ts, src/app/api/events/route.ts, src/lib/folder-exports, content/docs/self-hosting/organization.mdx]
 supersedes: []
-superseded-by: []
-relates: [2026-10-22-person-to-person-sharing, 2026-09-30-shared-recording-edited-by-organization, 2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-21-curators-manage-organization-almanac, 2026-10-19-processing-profiles-and-workflow, 2026-10-14-identity-provider-authorization, 2026-10-19-provider-defaults-and-no-fallback]
+superseded-by: [2026-09-30-shared-recording-edited-by-organization, 2026-10-14-identity-provider-authorization, 2026-10-19-processing-profiles-and-workflow, 2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-curators-manage-organization-almanac]
+relates: [2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-22-person-to-person-sharing]
 ---
 
 # Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
@@ -20,7 +20,8 @@ shares a recording by filing it into that tree; nothing is copied. Colleagues re
 it, attribute speakers to Organization people, and see changes live. PR #53 built all three phases
 (shared tree and view, Organization knowledge base, Organization retention and exports) in one
 merge. Several of its rules were changed within a month; the *Later changes* list below says which,
-and points to the records that carry them.
+and points to the records that carry them. **Superseded in part:** those records supersede this one
+for the rules they changed; the rest still holds.
 
 ## Why
 
@@ -138,8 +139,9 @@ the client localizes the folder conflict (409) only.
   Members create subfolders inside existing Organization folders and file items into them; creating
   top-level Organization folders, renaming, moving, reordering and deleting them (and changing a
   folder's mail address) is curator-only, enforced by the server (403) where it had been hidden in
-  the UI only. The maintainer chose this over "curators only" and "any member"; no reason was
-  recorded.
+  the UI only. The maintainer chose this over "curators only" and "any member": a new subfolder
+  helps members share information together, while restructuring existing folders (moving, renaming,
+  deleting) confuses everyone, so it is left to curators, who do it carefully.
 - **2026-10-17:** Organization default providers: members use Organization providers for work no
   profile pins, and the Organization pays (record [2026-10-19-provider-defaults-and-no-fallback](../2026-10-19-provider-defaults-and-no-fallback.md)).
 - **2026-10-21, PR #222:** curators manage existing Organization Almanac entries
@@ -150,7 +152,6 @@ the client localizes the folder conflict (409) only.
 ## Related work
 
 - [Person-to-person sharing](../2026-10-22-person-to-person-sharing.md): adds accepted receivers without publishing items or knowledge to the Organization; receiver archives still exclude those items.
-
 - [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md): replaced the two-view model with one set of
   rows and changed the retention rule.
 - [2026-09-30-learn](../2026-09-30-learn/README.md): the Learn work that forced that change and made speakers shared.

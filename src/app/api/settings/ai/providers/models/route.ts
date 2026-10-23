@@ -17,6 +17,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { findPreset } from "@/lib/ai/provider-presets";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSession } from "@/lib/auth-server";
@@ -62,10 +63,9 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
-    // Same hosted-mode loopback guard the credential routes apply, so the
-    // hosted app process can't be tricked into probing internal endpoints
-    // via a crafted baseUrl.
-    const urlCheck = validateAiBaseUrl(baseUrl, { isHosted: env.IS_HOSTED });
+    const urlCheck = await validateAiBaseUrl(baseUrl, {
+        isHosted: env.IS_HOSTED,
+    });
     if (!urlCheck.ok) {
         throw new AppError(ErrorCode.INVALID_INPUT, urlCheck.message, 400, {
             field: "baseUrl",
@@ -100,7 +100,7 @@ async function fetchOpenRouterAudioModels(
 
     let response: Response;
     try {
-        response = await fetch(url, {
+        response = await providerFetch(url, {
             headers: { Authorization: `Bearer ${apiKey}` },
             signal: controller.signal,
             // Model catalog is fetched on demand; never cache between
@@ -109,6 +109,7 @@ async function fetchOpenRouterAudioModels(
             cache: "no-store",
         });
     } catch (err) {
+        if (err instanceof AppError) throw err;
         if ((err as Error).name === "AbortError") {
             throw new AppError(
                 ErrorCode.AI_PROVIDER_API_ERROR,

@@ -47,6 +47,9 @@ jobs:
       - name: Run Biome lint & format check
         run: pnpm format-and-lint
 
+      - name: Check the ADR index and records
+        run: node scripts/generate-adr-index.mts --check
+
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest

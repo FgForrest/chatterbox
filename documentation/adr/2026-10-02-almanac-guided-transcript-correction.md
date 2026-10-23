@@ -1,15 +1,15 @@
 ---
 title: The Almanac corrects transcripts twice; ranked key terms go to the transcription provider, and an agent pass after Learn fixes what is left
 date: 2026-10-02
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
 prs: [80, 81, 83]
 areas: [src/lib/transcription/almanac-terms.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/learn/correction-pass.ts, src/lib/learn/correction-pass-job.ts, src/lib/learn/correction-pass-queue.ts, src/lib/profiles/settings.ts]
-supersedes: []
+supersedes: [2026-09-30-learn]
 superseded-by: []
-relates: [2026-09-30-learn, 2026-09-13-native-transcription-adapters, 2026-10-19-processing-profiles-and-workflow]
+relates: [2026-09-13-native-transcription-adapters, 2026-10-19-processing-profiles-and-workflow]
 ---
 
 # The Almanac corrects transcripts twice; ranked key terms go to the transcription provider, and an agent pass after Learn fixes what is left
@@ -136,7 +136,8 @@ to review.
 ## Related work
 
 - [2026-09-30-learn](2026-09-30-learn/README.md): the 2026-09-27 ruling on the knowledge base's width,
-  the corrections overlay and the hold this pass extends.
+  the corrections overlay and the hold this pass extends; key terms supersede, in part, its rejection
+  of sending knowledge to the transcription provider.
 - [2026-09-13-native-transcription-adapters](2026-09-13-native-transcription-adapters.md): the native
   ElevenLabs and Speechmatics adapters that now carry the key terms.
 - [2026-10-19-processing-profiles-and-workflow](2026-10-19-processing-profiles-and-workflow/README.md): the correction-pass setting later moved into the processing profile.

@@ -1,3 +1,4 @@
+import { providerFetch } from "@/lib/ai/provider-fetch";
 import { env } from "@/lib/env";
 import {
     renderTurnsAsText,
@@ -232,7 +233,7 @@ export async function speechmaticsTranscribe({
         buildSpeechmaticsConfig({ modelId, diarize, language, vocabulary }),
     );
 
-    const created = await fetch(`${base}/jobs`, {
+    const created = await providerFetch(`${base}/jobs`, {
         method: "POST",
         headers: auth,
         body: form,
@@ -254,7 +255,7 @@ export async function speechmaticsTranscribe({
 
     await waitForJob({ base, jobId, auth, deadline, pollIntervalMs });
 
-    const transcriptResponse = await fetch(
+    const transcriptResponse = await providerFetch(
         `${base}/jobs/${encodeURIComponent(jobId)}/transcript?format=json-v2`,
         { headers: auth, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
@@ -317,7 +318,7 @@ async function waitForJob({
     const url = `${base}/jobs/${encodeURIComponent(jobId)}`;
 
     while (true) {
-        const response = await fetch(url, {
+        const response = await providerFetch(url, {
             headers: auth,
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
@@ -367,7 +368,7 @@ async function deleteJob({
     auth: Record<string, string>;
 }): Promise<void> {
     try {
-        await fetch(`${base}/jobs/${encodeURIComponent(jobId)}`, {
+        await providerFetch(`${base}/jobs/${encodeURIComponent(jobId)}`, {
             method: "DELETE",
             headers: auth,
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

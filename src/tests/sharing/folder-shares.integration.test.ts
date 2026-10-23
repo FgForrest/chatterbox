@@ -1545,7 +1545,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             ),
         ];
         expect(responses.map((response) => response.status)).toEqual([
-            404, 400, 404, 404, 404, 404,
+            404, 404, 404, 404, 404, 404,
         ]);
         expect(await database.db.select().from(asyncJobs)).toEqual([]);
     });

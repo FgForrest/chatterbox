@@ -61,7 +61,7 @@ vi.mock("@/db", () => ({
 vi.mock("@/lib/knowledge/people", () => ({
     getPerson: async () => ({
         id: "person",
-        displayName: "Karel Vondra",
+        displayName: "Karel Kratochvíl",
         primaryEmail: null,
         notes: null,
         mergedIntoId: null,

@@ -7,6 +7,8 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 
+vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
+
 vi.mock("@/lib/ai/usage-cost", () => ({
     recordChatCompletionUsage: vi.fn().mockResolvedValue(undefined),
 }));

@@ -1,7 +1,7 @@
 ---
 title: Self-host sign-in through one OpenID Connect provider, password login switched off
 date: 2026-10-06
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: accepted
 kind: feature
 issues: []
@@ -92,8 +92,12 @@ email-domain allowlist, or pre-existing accounts only.
 
 - RP-initiated logout at the provider's `end_session_endpoint` was the recommended option, so that
   the next sign-in asks for credentials again.
-  - **Rejected because:** the maintainer chose to end only the Chatterbox session; the provider's
-    session is shared with the organization's other applications on the realm (inferred).
+  - **Rejected because:** the maintainer chose to end only the Chatterbox session. The
+    maintainer's security concern is the other direction: when the identity provider signs a user
+    out, Chatterbox must end its own session as soon as it learns of it. In this mode it learns
+    through the fixed 24-hour session lifetime below; `AUTHZ_MODE=idp` later added re-verification
+    that refuses a session once the provider stops renewing it
+    ([2026-10-14-identity-provider-authorization](2026-10-14-identity-provider-authorization.md)).
 
 ### Deprovisioning: fixed 24-hour SSO sessions (chosen)
 

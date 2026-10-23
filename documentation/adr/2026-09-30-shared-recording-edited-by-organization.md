@@ -1,15 +1,15 @@
 ---
 title: A shared recording is one set of rows that the Organization edits; the owner reads, withdraws or erases it
 date: 2026-09-30
-updated: 2026-10-22 16:00
+updated: 2026-10-22 22:30
 status: superseded
 kind: feature
 issues: []
 prs: [69]
 areas: [src/lib/sharing/writer-rule.ts, src/lib/sharing/writer.ts, src/lib/folders/folders.ts, src/db/queries/retention.ts, src/db/migrations/0066_merge_org_rows.sql, src/components/recordings/withdraw-retention-warning.tsx]
-supersedes: []
+supersedes: [2026-09-23-shared-organization-scope]
 superseded-by: [2026-10-22-owner-edits-shared-recording]
-relates: [2026-09-30-learn, 2026-09-23-shared-organization-scope]
+relates: [2026-09-30-learn]
 ---
 
 # A shared recording is one set of rows that the Organization edits; the owner reads, withdraws or erases it
@@ -151,7 +151,7 @@ people after withdrawal; other members stay read-only.
 
 ## Related work
 
-- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the two-view model and the retention rule this replaced.
+- [2026-09-23-shared-organization-scope](2026-09-23-shared-organization-scope/README.md): the two-view model and the retention rule this replaced; supersedes those rules.
 - [2026-09-30-learn](2026-09-30-learn/README.md): the Learn work whose evidence model needed one transcript per shared recording.
 - [2026-10-22-owner-edits-shared-recording](2026-10-22-owner-edits-shared-recording.md): gives the owner edit rights back.
 

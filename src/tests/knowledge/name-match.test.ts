@@ -92,7 +92,7 @@ describe("matchNames in a language", () => {
         stem: (word) => stemVariants(word, "cs"),
     };
     const candidates = [
-        { id: "simak", names: ["Jan Šimák"] },
+        { id: "dvorak", names: ["Jan Dvořák"] },
         { id: "milan", names: ["Milan Petrák"] },
         { id: "summit", names: ["North Summitt"] },
         { id: "shoptet", names: ["Shoptet"] },
@@ -102,8 +102,8 @@ describe("matchNames in a language", () => {
     const first = (query: string) => matchNames(query, candidates, czech)[0];
 
     it("meets a name heard inflected, by its stems", () => {
-        expect(first("Šimákem")).toMatchObject({
-            id: "simak",
+        expect(first("Dvořákem")).toMatchObject({
+            id: "dvorak",
             reason: "stem",
         });
         expect(first("Milane")).toMatchObject({ id: "milan", reason: "stem" });

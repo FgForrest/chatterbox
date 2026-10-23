@@ -7,7 +7,21 @@ import {
     recordings,
 } from "@/db/schema";
 
-/** A caller's identity and visibility for task queries. */
+/**
+ * Who may do what with a task (maintainer, 2026-10-07; person shares 2026-10-22):
+ *
+ * | action                   | private recording | shared with people                  | shared recording                          |
+ * |--------------------------|-------------------|-------------------------------------|-------------------------------------------|
+ * | edit, add, drop, review  | owner             | owner                               | home owner, curator                        |
+ * | done, reopen             | owner             | owner, assignee among receivers     | home owner, assignee, curator              |
+ * | see                      | owner             | owner, receivers; list: assignee    | everyone; list: owner, assignee, curator   |
+ *
+ * A task on a private recording reaches nobody but its owner and the people
+ * it is shared with, even when it names someone else: tasks travel only
+ * through the Organization or a person share. While a recording is also in
+ * the Organization, the Organization rules win. The assignee is a user when
+ * their person's email is that user's login email.
+ */
 export interface TaskViewer {
     userId: string;
     /** `lookupHash` of the viewer's login email. */
