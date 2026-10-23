@@ -1,5 +1,5 @@
 {
-  "id": "5c1f9820-4eca-41ad-b989-764dc067948a",
+  "id": "d6c53457-2617-4542-b065-faa20cd88b6c",
   "prevId": "e85d1bdf-7ffc-47d1-9188-9c54269ab6cd",
   "version": "7",
   "dialect": "postgresql",
@@ -1134,15 +1134,9 @@
         },
         "kind": {
           "name": "kind",
-          "type": "varchar(32)",
+          "type": "varchar(8)",
           "primaryKey": false,
           "notNull": true
-        },
-        "problem_key": {
-          "name": "problem_key",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
         },
         "left_person_id": {
           "name": "left_person_id",
@@ -1183,27 +1177,6 @@
         }
       },
       "indexes": {
-        "almanac_dismissals_scope_idx": {
-          "name": "almanac_dismissals_scope_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "almanac_duplicate_dismissals_left_person_idx": {
           "name": "almanac_duplicate_dismissals_left_person_idx",
           "columns": [
@@ -1356,8 +1329,7 @@
             "left_person_id",
             "right_person_id",
             "left_entity_id",
-            "right_entity_id",
-            "problem_key"
+            "right_entity_id"
           ]
         }
       },
@@ -1365,349 +1337,9 @@
       "checkConstraints": {
         "almanac_duplicate_dismissals_pair_check": {
           "name": "almanac_duplicate_dismissals_pair_check",
-          "value": "\n            (\"almanac_duplicate_dismissals\".\"kind\" = 'person' and \"almanac_duplicate_dismissals\".\"left_person_id\" is not null and \"almanac_duplicate_dismissals\".\"right_person_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_person_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_person_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_entity_id\" is null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is null)\n            or (\"almanac_duplicate_dismissals\".\"kind\" = 'entity' and \"almanac_duplicate_dismissals\".\"left_entity_id\" is not null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_entity_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_entity_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_person_id\" is null and \"almanac_duplicate_dismissals\".\"right_person_id\" is null)\n            or (\"almanac_duplicate_dismissals\".\"kind\" in ('fact_conflict', 'correction_conflict', 'thin') and \"almanac_duplicate_dismissals\".\"problem_key\" is not null\n                and num_nonnulls(\"almanac_duplicate_dismissals\".\"left_person_id\", \"almanac_duplicate_dismissals\".\"right_person_id\", \"almanac_duplicate_dismissals\".\"left_entity_id\", \"almanac_duplicate_dismissals\".\"right_entity_id\") = 0)\n        "
+          "value": "\n            (\"almanac_duplicate_dismissals\".\"kind\" = 'person' and \"almanac_duplicate_dismissals\".\"left_person_id\" is not null and \"almanac_duplicate_dismissals\".\"right_person_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_person_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_person_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_entity_id\" is null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is null)\n            or (\"almanac_duplicate_dismissals\".\"kind\" = 'entity' and \"almanac_duplicate_dismissals\".\"left_entity_id\" is not null and \"almanac_duplicate_dismissals\".\"right_entity_id\" is not null\n                and \"almanac_duplicate_dismissals\".\"left_entity_id\" collate \"C\" < \"almanac_duplicate_dismissals\".\"right_entity_id\" collate \"C\" and \"almanac_duplicate_dismissals\".\"left_person_id\" is null and \"almanac_duplicate_dismissals\".\"right_person_id\" is null)\n        "
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.almanac_share_changes": {
-      "name": "almanac_share_changes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "record_person_id": {
-          "name": "record_person_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "record_entity_id": {
-          "name": "record_entity_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "added": {
-          "name": "added",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by_user_id": {
-          "name": "removed_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kept_reason": {
-          "name": "kept_reason",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "almanac_share_changes_target_idx": {
-          "name": "almanac_share_changes_target_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "target_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "almanac_share_changes_event_scope_idx": {
-          "name": "almanac_share_changes_event_scope_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "almanac_share_changes_user_id_users_id_fk": {
-          "name": "almanac_share_changes_user_id_users_id_fk",
-          "tableFrom": "almanac_share_changes",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "almanac_share_changes_event_id_almanac_share_events_id_fk": {
-          "name": "almanac_share_changes_event_id_almanac_share_events_id_fk",
-          "tableFrom": "almanac_share_changes",
-          "tableTo": "almanac_share_events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "almanac_share_changes_removed_by_user_id_users_id_fk": {
-          "name": "almanac_share_changes_removed_by_user_id_users_id_fk",
-          "tableFrom": "almanac_share_changes",
-          "tableTo": "users",
-          "columnsFrom": [
-            "removed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "almanac_share_changes_event_target_unique": {
-          "name": "almanac_share_changes_event_target_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "event_id",
-            "kind",
-            "target_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.almanac_share_events": {
-      "name": "almanac_share_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "shared_by_user_id": {
-          "name": "shared_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "reviewed_at": {
-          "name": "reviewed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviewed_by_user_id": {
-          "name": "reviewed_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "undone_at": {
-          "name": "undone_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "undone_by_user_id": {
-          "name": "undone_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "almanac_share_events_scope_time_idx": {
-          "name": "almanac_share_events_scope_time_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "almanac_share_events_user_id_users_id_fk": {
-          "name": "almanac_share_events_user_id_users_id_fk",
-          "tableFrom": "almanac_share_events",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "almanac_share_events_item_id_chatter_items_id_fk": {
-          "name": "almanac_share_events_item_id_chatter_items_id_fk",
-          "tableFrom": "almanac_share_events",
-          "tableTo": "chatter_items",
-          "columnsFrom": [
-            "item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "almanac_share_events_shared_by_user_id_users_id_fk": {
-          "name": "almanac_share_events_shared_by_user_id_users_id_fk",
-          "tableFrom": "almanac_share_events",
-          "tableTo": "users",
-          "columnsFrom": [
-            "shared_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "almanac_share_events_reviewed_by_user_id_users_id_fk": {
-          "name": "almanac_share_events_reviewed_by_user_id_users_id_fk",
-          "tableFrom": "almanac_share_events",
-          "tableTo": "users",
-          "columnsFrom": [
-            "reviewed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "almanac_share_events_undone_by_user_id_users_id_fk": {
-          "name": "almanac_share_events_undone_by_user_id_users_id_fk",
-          "tableFrom": "almanac_share_events",
-          "tableTo": "users",
-          "columnsFrom": [
-            "undone_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.api_credentials": {
@@ -12345,23 +11977,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "filename": {
-          "name": "filename",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "duration": {
           "name": "duration",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "start_time": {
-          "name": "start_time",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "end_time": {
           "name": "end_time",
@@ -12454,44 +12074,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "summary_due_at": {
-          "name": "summary_due_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "audio_reaped_at": {
           "name": "audio_reaped_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
-        "transcript_reaped_at": {
-          "name": "transcript_reaped_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "summary_reaped_at": {
-          "name": "summary_reaped_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "remote_retention_claimed_at": {
           "name": "remote_retention_claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "unshared_at": {
-          "name": "unshared_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "title_edited_at": {
-          "name": "title_edited_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
@@ -12512,27 +12102,6 @@
         }
       },
       "indexes": {
-        "recordings_user_id_start_time_idx": {
-          "name": "recordings_user_id_start_time_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "start_time",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "recordings_user_id_updated_at_live_idx": {
           "name": "recordings_user_id_updated_at_live_idx",
           "columns": [

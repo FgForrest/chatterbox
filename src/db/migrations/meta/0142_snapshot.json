@@ -1,6 +1,6 @@
 {
-  "id": "56f9f890-0673-4532-ae98-dc467c5e7d00",
-  "prevId": "5c1f9820-4eca-41ad-b989-764dc067948a",
+  "id": "7eb1c75d-ffd1-424e-be5b-ff5ebf2aff71",
+  "prevId": "d6c53457-2617-4542-b065-faa20cd88b6c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12351,23 +12351,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "filename": {
-          "name": "filename",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "duration": {
           "name": "duration",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "start_time": {
-          "name": "start_time",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "end_time": {
           "name": "end_time",
@@ -12460,44 +12448,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "summary_due_at": {
-          "name": "summary_due_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "audio_reaped_at": {
           "name": "audio_reaped_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
-        "transcript_reaped_at": {
-          "name": "transcript_reaped_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "summary_reaped_at": {
-          "name": "summary_reaped_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "remote_retention_claimed_at": {
           "name": "remote_retention_claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "unshared_at": {
-          "name": "unshared_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "title_edited_at": {
-          "name": "title_edited_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
@@ -12518,27 +12476,6 @@
         }
       },
       "indexes": {
-        "recordings_user_id_start_time_idx": {
-          "name": "recordings_user_id_start_time_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "start_time",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "recordings_user_id_updated_at_live_idx": {
           "name": "recordings_user_id_updated_at_live_idx",
           "columns": [

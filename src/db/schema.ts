@@ -751,12 +751,7 @@ export const recordings = pgTable(
         deviceSn: varchar("device_sn", { length: 255 }).notNull(),
         // Unique ID from Plaud API, scoped per Riffado user.
         plaudFileId: varchar("plaud_file_id", { length: 255 }).notNull(),
-        // Deprecated (now `chatter_items.title`), see
-        // src/db/deprecated-columns.ts.
-        deprecatedFilename: text("filename"),
         duration: integer("duration").notNull(), // milliseconds
-        // Deprecated (now `chatter_items.occurred_at`).
-        deprecatedStartTime: timestamp("start_time"),
         endTime: timestamp("end_time").notNull(),
         filesize: integer("filesize").notNull(), // bytes
         fileMd5: varchar("file_md5", { length: 32 }).notNull(),
@@ -788,8 +783,6 @@ export const recordings = pgTable(
         // from storage at delete time; this row is retained only as a marker
         // keyed by plaudFileId. See issue #56.
         deletedAt: timestamp("deleted_at"),
-        // Deprecated (now `chatter_items.summary_due_at`).
-        deprecatedSummaryDueAt: timestamp("summary_due_at"),
         // Retention marker of the audio (the transcript's and summary's are
         // on `chatter_items`). Set by the retention sweep
         // (src/lib/retention/worker.ts) when it removes one kind of data
@@ -805,27 +798,14 @@ export const recordings = pgTable(
         // legitimately comes back -- a Plaud version bump re-downloads the
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
-        // Deprecated (now `chatter_items.content_reaped_at` and
-        // `summary_reaped_at`).
-        deprecatedTranscriptReapedAt: timestamp("transcript_reaped_at"),
-        deprecatedSummaryReapedAt: timestamp("summary_reaped_at"),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.
         remoteRetentionClaimedAt: timestamp("remote_retention_claimed_at"),
-        // Deprecated, see src/db/deprecated-columns.ts.
-        deprecatedUnsharedAt: timestamp("unshared_at"),
-        // Deprecated (now `chatter_items.title_edited_at`).
-        deprecatedTitleEditedAt: timestamp("title_edited_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        // Every lookup by user alone; goes with the deprecated start time.
-        userStartTimeIdx: index("recordings_user_id_start_time_idx").on(
-            table.userId,
-            table.deprecatedStartTime,
-        ),
         // The recording belongs to an `audio` item of the same owner.
         itemUserFk: foreignKey({
             name: "recordings_item_user_fk",

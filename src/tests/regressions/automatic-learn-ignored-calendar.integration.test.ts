@@ -858,9 +858,10 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
         expect(listUrl.searchParams.get("fields")).toContain(
             "hangoutLink,conferenceData",
         );
-        expect(listUrl.searchParams.get("fields")).not.toMatch(
-            /email|description/,
+        expect(listUrl.searchParams.get("fields")).toContain(
+            "displayName,email",
         );
+        expect(listUrl.searchParams.get("fields")).not.toContain("description");
     });
 
     it.each([

@@ -18,7 +18,7 @@
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { userAccessStates, users } from "@/db/schema";
+import { recordingTasks, userAccessStates, users } from "@/db/schema";
 import { adminPath } from "@/lib/identity/providers/keycloak/http";
 import { keycloakLogin } from "@/tests/authz/keycloak-login";
 import {
@@ -125,6 +125,7 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 
 import { POST } from "@/app/api/mcp/route";
 import { auth } from "@/lib/auth";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { ensureRootFolders } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -293,6 +294,71 @@ describeWithKeycloak("MCP with identity-provider authorization", () => {
         expect(await response.json()).toEqual({
             error: "Sign in to Chatterbox once first",
         });
+    });
+
+    it("writes a note only with the existing tasks:write permission scope", async () => {
+        const ann = await userId("ann");
+        const [task] = await db()
+            .insert(recordingTasks)
+            .values({
+                userId: ann,
+                source: "personal",
+                status: "open",
+                text: encryptText("Private reminder"),
+            })
+            .returning({ id: recordingTasks.id });
+        if (!task) throw new Error("missing task");
+        const args = {
+            task: task.id,
+            version: 0,
+            note: "Shipped in release X",
+        };
+        const denied = await callTool(
+            await testerToken("ann"),
+            "update_task",
+            args,
+        );
+        expect(denied.status).toBe(403);
+        expect(denied.headers.get("WWW-Authenticate")).toContain(
+            'error="insufficient_scope", scope="tasks:write"',
+        );
+
+        const { http } = realm.admin;
+        const [client] = await http.get<{ id: string }[]>(adminPath`/clients`, {
+            clientId: "mcp-tester",
+        });
+        const scopes =
+            await http.get<{ id: string; name: string }[]>(
+                adminPath`/client-scopes`,
+            );
+        const write = scopes.find((scope) => scope.name === "tasks:write");
+        if (!client || !write) throw new Error("missing task write scope");
+        const path = adminPath`/clients/${client.id}/optional-client-scopes/${write.id}`;
+        await http.put(path);
+        try {
+            const token = await testerToken("ann", "openid tasks:write");
+            const response = await callTool(token, "update_task", args);
+            expect(response.status).toBe(200);
+            const body = await response.json();
+            expect(body.result).toMatchObject({
+                structuredContent: {
+                    task: {
+                        note: args.note,
+                        note_by: { id: ann },
+                        note_updated_at: expect.any(String),
+                        version: 1,
+                    },
+                },
+            });
+            const [stored] = await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, task.id));
+            expect(decryptText(stored?.note ?? "")).toBe(args.note);
+            expect(stored?.noteUpdatedByUserId).toBe(ann);
+        } finally {
+            await http.delete(path);
+        }
     });
 
     it("serves the marked service client with the Organization's shared data only", async () => {

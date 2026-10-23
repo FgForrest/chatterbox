@@ -106,9 +106,9 @@ As merged in #247 (PR 1) and #244 (PR 2), and extended by PR 3:
 - **Fact conflicts:** reuse the existing relation `cardinality: one`; losing current values point at
   the kept fact through `replacedByFactId`, retaining evidence. Correction conflicts use heard-as
   forms; thin records use distinct Organization-visible item mentions, including mail participants.
-- **Deploy surface:** generated additive migrations `0141_melted_doctor_faustus.sql` and
-  `0142_long_mercury.sql` add provenance and extend the existing dismissal table. No environment or
-  compose changes. Hosted and self-host without an Organization expose no Care data.
+- **Deploy surface:** the generated additive migration `0142_big_terrax.sql` adds provenance and
+  extends the existing dismissal table. No environment or compose changes. Hosted and self-host
+  without an Organization expose no Care data.
 
 ## Verification
 

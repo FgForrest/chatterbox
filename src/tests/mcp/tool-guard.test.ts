@@ -69,4 +69,25 @@ describe("the MCP tool registry", () => {
             name === "merge_tasks" || name === "update_task",
         );
     });
+
+    it("offers an optional replacement note under the existing task write role", () => {
+        const tool = ALL_TOOLS.find((tool) => tool.name === "update_task");
+        if (!tool) throw new Error("missing update_task");
+        const schema = z.object(tool.input(everything));
+        const base = { task: "task-id", version: 0 };
+        for (const note of [undefined, null, "", "Outcome", "n".repeat(2000)]) {
+            expect(schema.safeParse({ ...base, note }).success).toBe(true);
+        }
+        for (const note of [42, false, {}, "n".repeat(2001)]) {
+            expect(schema.safeParse({ ...base, note }).success).toBe(false);
+        }
+        expect(schema.parse({ ...base, note: "  Outcome\n" }).note).toBe(
+            "Outcome",
+        );
+        const json = z.toJSONSchema(schema, { io: "input" });
+        expect(json.properties?.note).toMatchObject({
+            description: expect.stringContaining("Read the task first"),
+        });
+        expect(json.required).not.toContain("note");
+    });
 });

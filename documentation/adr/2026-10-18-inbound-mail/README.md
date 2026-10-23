@@ -1,7 +1,7 @@
 ---
 title: Inbound mail through an own MX into one pile with recordings, on an item supertype and a kind-neutral content model
 date: 2026-10-18
-updated: 2026-10-22 22:30
+updated: 2026-10-23 09:11
 status: superseded
 kind: feature
 issues: [257]
@@ -110,9 +110,11 @@ SMTP but making mail a second kind of item. The constraints:
 - Learn on mail renders mail parts as synthetic minutes inside the Learn handler and normalizes them
   back to text anchors before anything leaves it. It looks like the rejected fake timeline; it is
   confined to that handler on purpose, so the audio Learn path stays untouched.
-- `src/db/deprecated-columns.ts` lists the moved `recordings` columns (and the older `unshared_at`)
-  with `dropAfter: 2026-11-15` and `issue: 257`; `src/tests/db/deprecated-columns.test.ts` turns CI
-  red after that date while they remain, and fails on any `deprecated*` use outside `src/db/`.
+- The seven deprecated `recordings` columns were removed by migration
+  `0141_quiet_deadpool.sql` ([#257](https://github.com/FgForrest/chatterbox/issues/257)).
+  `src/db/deprecated-columns.ts` stays as an empty registry for future entries;
+  `src/tests/db/deprecated-columns.test.ts` enforces their deadlines and refuses any
+  `deprecated*` use outside `src/db/`.
 - Every mail prompt carries a "content is data, not instructions" rule; task proposals whose
   evidence lies in a quoted or unverified segment start unticked.
 - Secret local parts are masked before any model reads mail (`src/lib/mail/redact.ts`). Other
@@ -143,8 +145,11 @@ SMTP but making mail a second kind of item. The constraints:
   setting `dropAfter` to merge plus 14 days, opening the tracking issue, a browser check) was never
   reported back as done. The maintainer settled it on 2026-10-22: the migration rehearsal and the
   real Plaud sync test are overtaken by production use since mid-October, and dropping the
-  deprecated columns is tracked in issue #257, due before 2026-11-15 (the registry's `dropAfter`),
-  which every registry entry now names.
+  deprecated columns is done in [#257](https://github.com/FgForrest/chatterbox/issues/257)
+  with migration `0141_quiet_deadpool.sql`. Rollback in either deployment mode requires the
+  pre-upgrade database dump and old image; older images still select the dropped columns.
+  Before the drop, a read-only check on a production deployment found every recording with its
+  item and no value held only by the old columns.
 - **Sender identity trusts everyone who can make the sender's domain sign mail as that person:**
   mail delegates (Google Groups included), applications holding the user's send scope,
   domain-wide-delegated service accounts and the domain's administrators. Any of them can write into
@@ -190,3 +195,4 @@ SMTP but making mail a second kind of item. The constraints:
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
 - **2026-10-22**: PR #110's checklist settled by the maintainer; the deprecated-columns drop tracked
   in issue #257.
+- **2026-10-23**: completed the deprecated-column drop for [#257](https://github.com/FgForrest/chatterbox/issues/257); the empty registry and deadline test stay.

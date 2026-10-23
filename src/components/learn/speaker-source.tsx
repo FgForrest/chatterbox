@@ -15,7 +15,12 @@ export function useSpeakerSource() {
                   : context.guess
                     ? ""
                     : i18n("Named in the transcript");
-        return [origin, context.guess ? i18n("Guess") : "", context.reason]
+        return [
+            origin,
+            context.guess?.matchedByEmail ? i18n("Matched by e-mail") : "",
+            context.guess ? i18n("Guess") : "",
+            context.reason,
+        ]
             .filter(Boolean)
             .join(" · ");
     };

@@ -286,6 +286,7 @@ async function runPass({
         const roster = await resolveMeetingRoster({
             ownerUserId: pass.userId,
             itemId: pass.recordingId,
+            shared,
             calendarEventId:
                 ((learnRun.view === "private" &&
                     learnRun.actorUserId === pass.userId) ||

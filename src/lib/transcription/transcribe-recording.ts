@@ -675,6 +675,7 @@ async function transcribeRecordingInner(
             const roster = await resolveMeetingRoster({
                 ownerUserId: ctx.ownerUserId,
                 itemId: recordingId,
+                shared: orgView,
             });
             const unavailable = (error: unknown) =>
                 console.error(

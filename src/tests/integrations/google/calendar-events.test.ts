@@ -31,6 +31,33 @@ beforeEach(() => {
 });
 
 describe("Calendar event candidates", () => {
+    it.each([
+        undefined,
+        42,
+    ])("keeps an address for matching without a usable display name (%s)", async (displayName) => {
+        const events = await listCalendarEventsForRecording({
+            userId: "owner",
+            start,
+            end,
+            fetchImpl: vi.fn(async () =>
+                Response.json({
+                    items: [
+                        {
+                            id: "meeting",
+                            start: { dateTime: start.toISOString() },
+                            end: { dateTime: end.toISOString() },
+                            attendees: [
+                                { displayName, email: "alex@example.com" },
+                            ],
+                        },
+                    ],
+                }),
+            ),
+        });
+        expect(events[0]?.attendees).toEqual([
+            { name: "", email: "alex@example.com" },
+        ]);
+    });
     it("does not contact Google without the separate Calendar grant", async () => {
         connection.status.mockResolvedValue({
             subject: "google-user",
@@ -97,13 +124,14 @@ describe("Calendar event candidates", () => {
                 title: "Team meeting",
                 start: "2026-10-07T09:45:00.000Z",
                 end: "2026-10-07T11:15:00.000Z",
-                attendees: [{ name: "Alex" }],
+                attendees: [{ name: "Alex", email: "alex@example.com" }],
             },
         ]);
         const [url, init] = fetchImpl.mock.calls[0] as unknown as [
             URL,
             RequestInit,
         ];
+        expect(url.searchParams.get("fields")).toContain("displayName,email");
         expect(url.pathname).toBe("/calendar/v3/calendars/primary/events");
         expect(url.searchParams.get("timeMin")).toBe(
             "2026-10-07T09:30:00.000Z",

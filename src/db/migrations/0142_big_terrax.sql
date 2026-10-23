@@ -30,6 +30,7 @@ ALTER TABLE "almanac_duplicate_dismissals" DROP CONSTRAINT "almanac_duplicate_di
 ALTER TABLE "almanac_duplicate_dismissals" DROP CONSTRAINT "almanac_duplicate_dismissals_pair_check";--> statement-breakpoint
 ALTER TABLE "almanac_duplicate_dismissals" ALTER COLUMN "kind" SET DATA TYPE varchar(32);--> statement-breakpoint
 ALTER TABLE "almanac_duplicate_dismissals" ADD COLUMN "problem_key" varchar(64);--> statement-breakpoint
+ALTER TABLE "almanac_duplicate_dismissals" ADD COLUMN "problem_data" jsonb;--> statement-breakpoint
 ALTER TABLE "almanac_share_changes" ADD CONSTRAINT "almanac_share_changes_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "almanac_share_changes" ADD CONSTRAINT "almanac_share_changes_event_id_almanac_share_events_id_fk" FOREIGN KEY ("event_id") REFERENCES "public"."almanac_share_events"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "almanac_share_changes" ADD CONSTRAINT "almanac_share_changes_removed_by_user_id_users_id_fk" FOREIGN KEY ("removed_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
