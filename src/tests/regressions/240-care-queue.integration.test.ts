@@ -1578,6 +1578,82 @@ withDatabase("Care queue with Organization provenance", () => {
         });
         expect(await openCareProblems("curator")).toEqual([]);
     });
+    it("restores decisions through a non-identity id map and skips mappings that do not resolve", async () => {
+        const { problem } = await conflict();
+        await fixCareProblem("curator", problem.key, "dismiss");
+        const exported = await collectCareArchive({
+            kind: "organization",
+            orgUserId: "org",
+        });
+        if (!exported) throw new Error("missing archive");
+        await db().delete(almanacDuplicateDismissals);
+        const [left, right] = await db()
+            .insert(people)
+            .values(
+                ["Nela Starling", "Nela Starlingová"].map((name) => ({
+                    userId: "org",
+                    displayName: encryptText(name),
+                })),
+            )
+            .returning({ id: people.id });
+        if (!left || !right) throw new Error("missing people");
+        const oldId = (id: string) => `old-${id}`;
+        const archive = {
+            ...exported,
+            duplicates: [
+                {
+                    kind: "person" as const,
+                    left: "old-left",
+                    right: "old-right",
+                },
+                {
+                    kind: "person" as const,
+                    left: "old-left",
+                    right: "old-gone",
+                },
+            ],
+            problems: [
+                ...exported.problems.map((saved) => ({
+                    ...saved,
+                    records: saved.records.map((record) => ({
+                        ...record,
+                        id: oldId(record.id),
+                    })),
+                })),
+                ...exported.problems.map((saved) => ({
+                    ...saved,
+                    records: saved.records.map((record) => ({
+                        ...record,
+                        id: "old-unmapped",
+                    })),
+                })),
+            ],
+        };
+        const idMap: Record<string, string> = {
+            "old-left": left.id,
+            "old-right": right.id,
+            "old-gone": "missing-record",
+            ...Object.fromEntries(
+                exported.problems.flatMap((saved) =>
+                    saved.records.map((record) => [
+                        oldId(record.id),
+                        record.id,
+                    ]),
+                ),
+            ),
+        };
+        const response = await call(restore, "curator", { archive, idMap });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ restored: 2, skipped: 2 });
+        const [pair] = await db()
+            .select()
+            .from(almanacDuplicateDismissals)
+            .where(eq(almanacDuplicateDismissals.kind, "person"));
+        expect([pair?.leftPersonId, pair?.rightPersonId]).toEqual(
+            [left.id, right.id].sort(),
+        );
+        expect(await openCareProblems("curator")).toEqual([]);
+    });
     it.each([
         ["list", list, undefined],
         ["fix", fix, { key: "a".repeat(64), action: "dismiss" }],
