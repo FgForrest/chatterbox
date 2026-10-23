@@ -2,7 +2,7 @@ export type OrgClientEvent =
     | { type: "tree" }
     | { type: "recording"; recordingId: string };
 
-export type ClientEvent = OrgClientEvent | { type: "mail" };
+export type ClientEvent = OrgClientEvent | { type: "mail" } | { type: "share" };
 
 /** Parse only the public invalidation frame shapes. */
 export function parseClientEvent(data: string): ClientEvent | null {
@@ -14,7 +14,9 @@ export function parseClientEvent(data: string): ClientEvent | null {
         if ("type" in value) {
             if (
                 keys.length === 1 &&
-                (value.type === "tree" || value.type === "mail")
+                (value.type === "tree" ||
+                    value.type === "mail" ||
+                    value.type === "share")
             ) {
                 return { type: value.type };
             }

@@ -14,7 +14,8 @@ export function useOrgEvents(
     useEffect(() => {
         if (!enabled) return;
         return subscribeEvents((event) => {
-            if (event.type !== "mail") onEventRef.current(event);
+            if (event.type !== "mail" && event.type !== "share")
+                onEventRef.current(event);
         });
     }, [enabled]);
 }

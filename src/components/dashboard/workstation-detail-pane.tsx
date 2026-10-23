@@ -18,6 +18,7 @@ import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { openWidget } from "@/components/pipeline/workflow-widget";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
+import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -231,7 +232,9 @@ export function WorkstationDetailPane({
                                 // Erasing and deleting are the owner's, on their
                                 // own view; a shared recording leaves the
                                 // Organization first.
-                                currentRecording.view === "org" ? undefined : (
+                                currentRecording.view === "org" ||
+                                currentRecording.view ===
+                                    "received" ? undefined : (
                                     <EraseRecordingMenu
                                         recording={currentRecording}
                                         shared={recordingShared}
@@ -241,54 +244,62 @@ export function WorkstationDetailPane({
                                 )
                             }
                         />
-                        <ItemWorkflow
-                            itemId={currentRecording.id}
-                            kind="audio"
-                            folders={folders}
-                            folderAssignments={folderAssignments}
-                            onSelectFolder={onSelectFolder}
-                            onAddToFolder={onAddToFolder}
-                            onRemoveFromFolder={onRemoveFromFolder}
-                            isOwn={currentRecording.isOwn !== false}
-                            canWithdraw={
-                                currentRecording.isOwn !== false ||
-                                (currentRecording.view === "org" &&
-                                    transcriptReadOnly === false)
-                            }
-                            view={
-                                currentRecording.view === "org"
-                                    ? "org"
-                                    : "private"
-                            }
-                            onMoveBetweenFolders={onMoveBetweenFolders}
-                            onChanged={onArtifactsChanged}
-                            onFolderCreated={onFolderCreated}
-                            canCurate={canCurate}
-                            onTranscribe={(retranscribe) =>
-                                onTranscribe(undefined, retranscribe)
-                            }
-                            onLearn={() =>
-                                openWidget(
-                                    `recording-learn-review-${currentRecording.id}`,
-                                )
-                            }
-                            onSummary={() =>
-                                openWidget(
-                                    `recording-summary-${currentRecording.id}`,
-                                )
-                            }
-                            onReviewLearn={() =>
-                                openWidget(
-                                    `recording-learn-review-${currentRecording.id}`,
-                                )
-                            }
-                            onReviewTasks={() =>
-                                openWidget(
-                                    `recording-task-review-${currentRecording.id}`,
-                                )
-                            }
-                            onProcessingChange={handleProcessingChange}
-                        />
+                        {currentRecording.view === "received" ? (
+                            <ReceivedItemBanner
+                                recording={currentRecording}
+                                folders={folders}
+                                shared={recordingShared}
+                            />
+                        ) : (
+                            <ItemWorkflow
+                                itemId={currentRecording.id}
+                                kind="audio"
+                                folders={folders}
+                                folderAssignments={folderAssignments}
+                                onSelectFolder={onSelectFolder}
+                                onAddToFolder={onAddToFolder}
+                                onRemoveFromFolder={onRemoveFromFolder}
+                                isOwn={currentRecording.isOwn !== false}
+                                canWithdraw={
+                                    currentRecording.isOwn !== false ||
+                                    (currentRecording.view === "org" &&
+                                        transcriptReadOnly === false)
+                                }
+                                view={
+                                    currentRecording.view === "org"
+                                        ? "org"
+                                        : "private"
+                                }
+                                onMoveBetweenFolders={onMoveBetweenFolders}
+                                onChanged={onArtifactsChanged}
+                                onFolderCreated={onFolderCreated}
+                                canCurate={canCurate}
+                                onTranscribe={(retranscribe) =>
+                                    onTranscribe(undefined, retranscribe)
+                                }
+                                onLearn={() =>
+                                    openWidget(
+                                        `recording-learn-review-${currentRecording.id}`,
+                                    )
+                                }
+                                onSummary={() =>
+                                    openWidget(
+                                        `recording-summary-${currentRecording.id}`,
+                                    )
+                                }
+                                onReviewLearn={() =>
+                                    openWidget(
+                                        `recording-learn-review-${currentRecording.id}`,
+                                    )
+                                }
+                                onReviewTasks={() =>
+                                    openWidget(
+                                        `recording-task-review-${currentRecording.id}`,
+                                    )
+                                }
+                                onProcessingChange={handleProcessingChange}
+                            />
+                        )}
                         {audioAvailable && (
                             <RecordingPlayer
                                 ref={playerRef}

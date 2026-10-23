@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     publish: vi.fn(),
     enabled: true,
     org: "org" as string | null,
+    sharing: true,
     orgListeners: new Set<(event: OrgEvent) => void>(),
     payload: null as ((payload: string) => void) | null,
     session: vi.fn(),
@@ -14,7 +15,10 @@ vi.mock("@/db", () => ({ sqlClient: { listen: mocks.listen } }));
 vi.mock("@/db/queries/events", () => ({ publishEvent: mocks.publish }));
 vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => mocks.enabled }));
 vi.mock("@/lib/auth-server", () => ({ requireApiSession: mocks.session }));
-vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => mocks.org }));
+vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: async () => mocks.org,
+    isOrgScopeVisible: () => mocks.sharing,
+}));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 vi.mock("@/lib/org/events", () => ({
     subscribeOrgEvents: (listener: (event: OrgEvent) => void) => {
@@ -27,6 +31,7 @@ import { GET } from "@/app/api/events/route";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     notifyMailAccepted,
+    notifyPersonShareChanged,
     parsePersonalEvent,
     subscribePersonalEvents,
 } from "@/lib/events/personal";
@@ -38,6 +43,7 @@ const unsubscribes: (() => void)[] = [];
 beforeEach(() => {
     vi.useFakeTimers();
     mocks.enabled = true;
+    mocks.sharing = true;
     mocks.org = "org";
     mocks.publish.mockReset().mockResolvedValue(undefined);
     mocks.listen.mockImplementation(
@@ -108,6 +114,29 @@ describe("event parsing", () => {
 });
 
 describe("personal subscriptions", () => {
+    it("publishes receiver-only share events with mail disabled", async () => {
+        mocks.enabled = false;
+        const a = vi.fn();
+        const b = vi.fn();
+        unsubscribes.push(
+            subscribePersonalEvents("a", a),
+            subscribePersonalEvents("b", b),
+        );
+        await notifyPersonShareChanged("a");
+        expect(mocks.publish).toHaveBeenCalledWith("riffado_personal", {
+            type: "share",
+            userId: "a",
+        });
+        mocks.payload?.('{"type":"share","userId":"a"}');
+        expect(a).toHaveBeenCalledWith({ type: "share", userId: "a" });
+        expect(b).not.toHaveBeenCalled();
+        expect(parseClientEvent('{"type":"share"}')).toEqual({ type: "share" });
+        expect(parseClientEvent('{"type":"share","userId":"a"}')).toBeNull();
+        mocks.sharing = false;
+        mocks.publish.mockClear();
+        await notifyPersonShareChanged("a");
+        expect(mocks.publish).not.toHaveBeenCalled();
+    });
     it("filters two viewers in one process and unsubscribes", () => {
         const a = vi.fn();
         const b = vi.fn();

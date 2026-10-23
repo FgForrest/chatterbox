@@ -196,7 +196,7 @@ const listMail = defineTool({
                     ).length,
                     url: recordingUrl(
                         row.id,
-                        recordingViewFor(caller, row.userId),
+                        recordingViewFor(caller, row.userId, row.id),
                     ),
                 };
             }),
@@ -334,7 +334,10 @@ const getMail = defineTool({
                       },
                   }
                 : {}),
-            url: recordingUrl(item.id, recordingViewFor(caller, item.userId)),
+            url: recordingUrl(
+                item.id,
+                recordingViewFor(caller, item.userId, item.id),
+            ),
         };
     },
 });

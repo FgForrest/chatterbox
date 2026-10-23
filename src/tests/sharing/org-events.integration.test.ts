@@ -47,7 +47,10 @@ vi.mock("@/lib/auth-server", () => ({
         user: { id: request.headers.get("test-user") },
     }),
 }));
-vi.mock("@/lib/org/config", () => ({ getOrgUserId: async () => "org" }));
+vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: async () => "org",
+    isOrgScopeVisible: () => true,
+}));
 vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => false }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 

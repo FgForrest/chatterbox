@@ -16,7 +16,15 @@ import {
     it,
     vi,
 } from "vitest";
-import { accounts, users } from "@/db/schema";
+import {
+    accounts,
+    chatterItems,
+    itemShares,
+    recordingFolderAssignments,
+    recordingFolders,
+    users,
+} from "@/db/schema";
+import { encryptText } from "@/lib/encryption/fields";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -71,6 +79,7 @@ vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import { resolveCaller } from "@/lib/mcp/caller";
+import { recordingViewFor } from "@/lib/mcp/scope";
 import type { McpTokenClaims } from "@/lib/mcp/token";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -153,6 +162,7 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
                 subject: "alice-sub",
                 clientId: "claude",
                 roles: new Set(["knowledge:read"]),
+                receivedItemIds: new Set(),
                 orgUserId,
             },
         });
@@ -163,6 +173,42 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
         await expect(
             resolveCaller(claims("alice-sub", ["admin"])),
         ).resolves.toEqual({ ok: false, reason: "no-roles" });
+    });
+
+    it("loads only accepted invitations for a linked user's received view", async () => {
+        await db()
+            .insert(chatterItems)
+            .values(
+                ["accepted", "pending"].map((state) => ({
+                    id: `received-${state}`,
+                    userId: BOB,
+                    kind: "mail" as const,
+                    title: encryptText("Project mail"),
+                    occurredAt: new Date(),
+                })),
+            );
+        await db()
+            .insert(itemShares)
+            .values([
+                {
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    itemId: "received-accepted",
+                    state: "accepted",
+                },
+                {
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    itemId: "received-pending",
+                    state: "pending",
+                },
+            ]);
+        expect(
+            await resolveCaller(claims("alice-sub", ["mail:read"])),
+        ).toMatchObject({
+            ok: true,
+            caller: { receivedItemIds: new Set(["received-accepted"]) },
+        });
     });
 
     it("links only through the SSO provider", async () => {
@@ -328,5 +374,77 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
         await expect(
             resolveCaller(claims("org-sub", ["knowledge:read"])),
         ).resolves.toEqual({ ok: false, reason: "no-account" });
+    });
+    it("uses Organization views for accepted shares while shared and resumes received views after withdrawal", async () => {
+        if (!orgUserId) throw new Error("Organization account missing");
+        await db()
+            .insert(chatterItems)
+            .values({
+                id: "shared-mail",
+                userId: BOB,
+                kind: "mail",
+                title: encryptText("Project mail"),
+                occurredAt: new Date(),
+            });
+        await db().insert(itemShares).values({
+            itemId: "shared-mail",
+            userId: BOB,
+            receiverUserId: ALICE,
+            state: "accepted",
+        });
+        await db()
+            .insert(recordingFolders)
+            .values({
+                id: "shared-folder",
+                userId: orgUserId,
+                name: encryptText("Shared"),
+                nameHash: "shared",
+            });
+        const view = async () => {
+            const result = await resolveCaller(
+                claims("alice-sub", ["mail:read"]),
+            );
+            if (!result.ok) throw new Error(result.reason);
+            return recordingViewFor(result.caller, BOB, "shared-mail");
+        };
+        expect(await view()).toBe("received");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "shared-mail",
+            userId: BOB,
+            folderId: "shared-folder",
+        });
+        expect(await view()).toBe("org");
+        await db()
+            .delete(recordingFolderAssignments)
+            .where(eq(recordingFolderAssignments.itemId, "shared-mail"));
+        expect(await view()).toBe("received");
+    });
+
+    it("loads the full accepted-share set for view resolution beyond a list page", async () => {
+        const ids = Array.from({ length: 105 }, (_, index) => `mail-${index}`);
+        await db()
+            .insert(chatterItems)
+            .values(
+                ids.map((id) => ({
+                    id,
+                    userId: BOB,
+                    kind: "mail" as const,
+                    title: encryptText("Mail"),
+                    occurredAt: new Date(),
+                })),
+            );
+        await db()
+            .insert(itemShares)
+            .values(
+                ids.map((itemId) => ({
+                    itemId,
+                    userId: BOB,
+                    receiverUserId: ALICE,
+                    state: "accepted" as const,
+                })),
+            );
+        const result = await resolveCaller(claims("alice-sub", ["mail:read"]));
+        if (!result.ok) throw new Error(result.reason);
+        expect(result.caller.receivedItemIds).toEqual(new Set(ids));
     });
 });

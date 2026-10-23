@@ -24,20 +24,27 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         requestedRecordingView(request),
         { kinds: ["mail"] },
     );
-    const processingRequest = loadPrivateItemProcessing(
-        access.ownerUserId,
-        id,
-        session.user.id,
-        localeFromAcceptLanguage(request.headers.get("accept-language")),
-        access.view,
-    );
+    const processingRequest =
+        access.view === "received"
+            ? Promise.resolve(null)
+            : loadPrivateItemProcessing(
+                  access.ownerUserId,
+                  id,
+                  session.user.id,
+                  localeFromAcceptLanguage(
+                      request.headers.get("accept-language"),
+                  ),
+                  access.view,
+              );
     if (new URL(request.url).searchParams.get("processing") === "1")
         return NextResponse.json(
             { processing: await processingRequest },
             noStore,
         );
     const [detail, processing] = await Promise.all([
-        loadMailDetail(session.user.id, id),
+        access.view === "private"
+            ? loadMailDetail(session.user.id, id)
+            : loadMailDetail(session.user.id, id, access.view),
         processingRequest,
     ]);
     if (!detail) {

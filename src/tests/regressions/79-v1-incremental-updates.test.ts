@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as sessionActor from "@/tests/helpers/session-actor";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/lib/profiles/resolve", () => ({
@@ -54,11 +55,16 @@ vi.mock("@/lib/auth", () => ({
     },
 }));
 
-vi.mock("@/lib/auth-server", () => ({
-    requireApiSession: vi.fn().mockResolvedValue({
-        user: { id: "user-79" },
-    }),
-}));
+vi.mock("@/lib/auth-server", async () => {
+    const { withSessionActor } = await vi.importActual<typeof sessionActor>(
+        "@/tests/helpers/session-actor",
+    );
+    return withSessionActor({
+        requireApiSession: vi
+            .fn()
+            .mockResolvedValue({ user: { id: "user-79" } }),
+    });
+});
 
 vi.mock("@/lib/encryption", () => ({
     decrypt: vi.fn().mockReturnValue("fake-api-key"),

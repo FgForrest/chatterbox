@@ -10,6 +10,7 @@ import {
     type SQL,
 } from "drizzle-orm";
 import { db } from "@/db";
+import { receivedItemCondition } from "@/db/queries/item-shares";
 import {
     aiEnhancements,
     type ChatterItemKind,
@@ -369,7 +370,13 @@ export async function searchItems({
         }
         scope = sharedItemCondition(orgUserId, chatterItems.id);
     } else {
-        scope = eq(chatterItems.userId, viewerUserId);
+        scope =
+            view === "received"
+                ? receivedItemCondition(viewerUserId)
+                : (or(
+                      eq(chatterItems.userId, viewerUserId),
+                      receivedItemCondition(viewerUserId),
+                  ) as SQL);
     }
     const found: ItemSearchHit[] = [];
     const scan = await boundedScan({

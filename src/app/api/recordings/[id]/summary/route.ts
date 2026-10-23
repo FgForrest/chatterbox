@@ -150,7 +150,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         ? await resolveSelectedProfile({
               profileId,
               actorUserId: userId,
-              view,
+              view: access.view,
           })
         : null;
     if (profileId && !selectedProfile) {
@@ -428,21 +428,25 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             and(
                 eq(itemProcessing.itemId, id),
                 eq(itemProcessing.userId, access.ownerUserId),
-                eq(itemProcessing.view, view),
+                eq(itemProcessing.view, view === "received" ? "private" : view),
             ),
         )
         .limit(1);
-    const itemProfileId = processing?.profileId ?? null;
+    const itemProfileId =
+        view === "received" ? null : (processing?.profileId ?? null);
 
     // Reported alongside the summary so a page opened while a summary is
     // being generated -- in another tab, by an automatic run, or by a worker
     // that picked the job back up after a restart -- can show that and
     // reattach, instead of an empty panel that gives no sign anything is
     // happening.
-    const activeSummary = await getActiveJob(
-        SUMMARY_JOB_KIND,
-        recordingJobSubject(id, view),
-    );
+    const activeSummary =
+        view === "received"
+            ? null
+            : await getActiveJob(
+                  SUMMARY_JOB_KIND,
+                  recordingJobSubject(id, view),
+              );
     const pipelineDriver =
         !activeSummary && view === "private" && source === "riffado"
             ? await getActiveJob(
@@ -575,7 +579,7 @@ async function summaryUsesOlderContent(
 
 // DELETE - Remove summary
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
 
     const { id } = await (context as IdContext).params;
     const source = requestedSummarySource(request);
@@ -584,7 +588,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         kinds: ALL_ITEM_KINDS,
     });
 
-    assertMayChange(access, session.user.id);
+    const curates = view === "org" && (await actsForOrganization(actor));
+    assertMayChange(access, session.user.id, curates);
     const ownerUserId = access.ownerUserId;
     const isMail = access.kind === "mail";
 
@@ -620,6 +625,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             ownerUserId,
             actorUserId: session.user.id,
             orgUserId: access.orgUserId,
+            actsForOrganization: curates,
         });
         if (refusal) throw writerRefusalError(refusal);
 

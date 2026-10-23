@@ -282,7 +282,7 @@ connector and the checks.
 
 | Token                                                   | Caller                                                                 |
 | ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `sub` of a person who signed in to Chatterbox through SSO | That user. Almanac: their own and the Organization's. Recordings: their own and the Organization-shared ones, as their recordings list shows them. |
+| `sub` of a person who signed in to Chatterbox through SSO | That user. Almanac: their own and the Organization's. Recordings: their own, Organization-shared ones, and accepted person shares, as their recordings list shows them. |
 | No such `sub`, a client in `MCP_SERVICE_CLIENTS` and the service marker | A service account, acting in the Organization's data context. Almanac: the Organization's only. Recordings: Organization-shared only. Without `MCP_SERVICE_CLIENTS` in `local` mode, any token carrying `client_id` (deprecated). |
 | Anything else                                           | Refused with 403 "Sign in to Chatterbox once first".                  |
 
@@ -294,6 +294,10 @@ account while the Organization is off, a client the public entrance does
 not serve, and a client without its connector key get 403 "Forbidden".
 The app log names the reason (see
 [When Claude cannot connect](./claude#when-claude-cannot-connect)).
+
+**Received items** become readable after the invitation is accepted, on self-host instances showing the Organization scope. Recording, transcript, summary and mail list/get/search tools include them under the same tool permissions. Links use `view=received`. Speaker names are the owner's confirmed names as plain text; the owner's private people, facts, aliases and folders stay hidden. Only the receiver's own filing folder can filter received items. Service callers and unrelated curators gain no access to person shares.
+
+Received tasks assigned to the caller appear in task list/search. With `tasks:write`, `update_task` may close or reopen those tasks; it cannot edit, drop or reassign them. Mail quotes, due phrases and source links still require `mail:read`. Person sharing never adds content to the receiver's Almanac or Learn.
 
 **Tasks** follow the Tasks page:
 

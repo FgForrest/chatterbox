@@ -67,10 +67,13 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, view);
     const source = requestedTopicSource(request);
 
-    const topicsJob = await getActiveJob(
-        TOPICS_JOB_KIND,
-        recordingJobSubject(id, view),
-    );
+    const topicsJob =
+        view === "received"
+            ? null
+            : await getActiveJob(
+                  TOPICS_JOB_KIND,
+                  recordingJobSubject(id, view),
+              );
     const matchingTopicsJob =
         topicsJob && topicsJob.payload.source === source ? topicsJob : null;
     const pipelineDriver =

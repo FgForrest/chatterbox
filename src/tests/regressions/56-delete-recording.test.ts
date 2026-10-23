@@ -323,6 +323,7 @@ import {
     aiEnhancements,
     asyncJobs,
     chatterItems,
+    itemShares,
     learnDismissals,
     recordings as recordingsTable,
     recordingTaskRejections,
@@ -390,7 +391,9 @@ describe("DELETE /api/recordings/[id]", () => {
                                     ? "task_update_proposals"
                                     : t === chatterItems
                                       ? "chatter_items"
-                                      : "unknown";
+                                      : t === itemShares
+                                        ? "item_shares"
+                                        : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -636,7 +639,7 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(12);
+        expect(txCalls).toHaveLength(13);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
         // Learn dismissals → webhook redaction → recording → its item.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
@@ -652,6 +655,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:webhook_deliveries",
             "update:recordings",
             "update:chatter_items",
+            "delete:item_shares",
         ]);
         const webhookUpdate = txSets.find(
             (entry) => entry.table === "webhook_deliveries",
@@ -729,6 +733,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:webhook_deliveries",
             "update:recordings",
             "update:chatter_items",
+            "delete:item_shares",
         ]);
         expect(emitEvent).toHaveBeenCalledWith(
             "recording.deleted",

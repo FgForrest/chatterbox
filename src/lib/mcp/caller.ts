@@ -1,12 +1,17 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, not, or } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, users } from "@/db/schema";
+import { accounts, itemShares, users } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
 import { env } from "@/lib/env";
 import { getClaimsProvider, isIdpAuthorization } from "@/lib/identity/factory";
 import type { McpRole } from "@/lib/mcp/roles";
 import type { McpTokenClaims } from "@/lib/mcp/token";
-import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import {
+    getOrgUserId,
+    isOrgScopeEnabled,
+    isOrgScopeVisible,
+} from "@/lib/org/config";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
 interface CallerBase {
@@ -18,6 +23,7 @@ interface CallerBase {
     roles: Set<McpRole>;
     /** The Organization account, when the instance shows the Organization. */
     orgUserId: string | null;
+    receivedItemIds?: ReadonlySet<string>;
 }
 
 /**
@@ -143,6 +149,32 @@ export async function resolveCaller(
                 userId: linked.id,
                 email: linked.email,
                 orgUserId,
+                receivedItemIds: isOrgScopeVisible()
+                    ? new Set(
+                          (
+                              await db
+                                  .select({ itemId: itemShares.itemId })
+                                  .from(itemShares)
+                                  .where(
+                                      and(
+                                          eq(
+                                              itemShares.receiverUserId,
+                                              linked.id,
+                                          ),
+                                          eq(itemShares.state, "accepted"),
+                                          orgUserId
+                                              ? not(
+                                                    sharedItemCondition(
+                                                        orgUserId,
+                                                        itemShares.itemId,
+                                                    ),
+                                                )
+                                              : undefined,
+                                      ),
+                                  )
+                          ).map((row) => row.itemId),
+                      )
+                    : new Set(),
             },
         };
     }

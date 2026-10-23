@@ -231,7 +231,10 @@ const searchSummaries = defineTool({
                 id: row.id,
                 title: decryptText(row.filename),
                 recorded_at: row.startTime.toISOString(),
-                url: recordingUrl(row.id, recordingViewFor(caller, row.userId)),
+                url: recordingUrl(
+                    row.id,
+                    recordingViewFor(caller, row.userId, row.id),
+                ),
             },
             snippets: found,
         }));
