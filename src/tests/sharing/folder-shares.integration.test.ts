@@ -20,21 +20,27 @@ import {
     GET as listRoute,
 } from "@/app/api/folders/[id]/shares/route";
 import { POST as createRoute } from "@/app/api/folders/route";
+import { GET as readCorrections } from "@/app/api/recordings/[id]/corrections/route";
 import { POST as assignRoute } from "@/app/api/recordings/[id]/folders/route";
+import { GET as readSpeakers } from "@/app/api/recordings/[id]/speakers/route";
 import { GET as invitationsRoute } from "@/app/api/shares/route";
 import {
     isItemReceived,
     receivedItemCondition,
 } from "@/db/queries/item-shares";
 import {
+    accounts,
     chatterItems,
     folderShares,
     itemShares,
+    knowledgeEntities,
+    mailAddresses,
     mailMessages,
     people,
     receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
+    transcriptCorrections,
     userAccessStates,
     users,
 } from "@/db/schema";
@@ -55,27 +61,40 @@ import {
     removeRecordingFromFolder,
     renameFolder,
 } from "@/lib/folders/folders";
+import * as knowledgeLoader from "@/lib/knowledge/knowledge-loader";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { resolveMailAccess } from "@/lib/mail/access";
+import { localPartHash } from "@/lib/mail/hash";
 import { loadReceivedMailRows } from "@/lib/mail/list";
-import { mcpItemCondition } from "@/lib/mcp/scope";
+import { resolveCaller } from "@/lib/mcp/caller";
+import { mcpItemCondition, recordingViewFor } from "@/lib/mcp/scope";
 import { ALL_TOOLS } from "@/lib/mcp/tools";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { searchApp } from "@/lib/search/app-search";
 import { searchItems } from "@/lib/search/item-search";
-import { resolveRecordingAccess } from "@/lib/sharing/access";
+import {
+    requireRecordingView,
+    resolveRecordingAccess,
+} from "@/lib/sharing/access";
 import {
     changeFolderShare,
     inviteToFolder,
     listFolderShares,
     listMyFolderInvitations,
+    listReceivedFolderOrganization,
 } from "@/lib/sharing/folder-shares";
-import { changePersonShare, inviteToItem } from "@/lib/sharing/person-shares";
+import {
+    changePersonShare,
+    findShareRecipients,
+    inviteToItem,
+} from "@/lib/sharing/person-shares";
 import { restoreArchivedFolderShares } from "@/lib/sharing/restore-folder-shares";
+import { assertMayChange } from "@/lib/sharing/writer";
 import { taskViewer } from "@/lib/tasks/access";
 import {
     addTask,
     countNewTasks,
+    listRecordingTasks,
     listTasks,
     markTasksSeen,
     updateTask,
@@ -87,6 +106,7 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 import {
+    attributeSpeaker,
     insertRecording,
     insertTranscript,
     serviceCaller,
@@ -103,6 +123,9 @@ const { ref, mockEnv, events, email } = vi.hoisted(() => ({
         ORG_ACCOUNT_EMAIL: "organization@example.com",
         ORG_ACCOUNT_PASSWORD: "demo-password",
         AUTHZ_MODE: "local",
+        MCP_ALLOWED_CLIENTS: [],
+        MCP_SERVICE_CLIENTS: [],
+        MCP_AUDIENCE: "chatterbox-mcp",
         KNOWLEDGE_MEMORY_MB: 64,
         MAIL_DOMAIN: "mail.example.com",
         MAIL_ADDRESS_HASH_SECRET: "m".repeat(40),
@@ -181,6 +204,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         mockEnv.AUTHZ_MODE = "local";
         events.mockClear();
         email.mockClear();
+        await database.db.delete(mailAddresses);
         await database.db.delete(users);
         await database.db.insert(users).values([
             { id: "owner", email: "alex@example.com", name: "Alex Morgan" },
@@ -772,6 +796,496 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             source: "verifier",
         });
         await expect(invite()).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it.each([
+        "suspended",
+        "disabled",
+        "missing",
+        "not-granted",
+        "unverified",
+        "deleted",
+    ])("removes %s recipients from folder lookup, invitations, access and restore", async (state) => {
+        const accepted = await accept();
+        await inviteToFolder("owner", "child", ["receiver"]);
+        if (state === "suspended") {
+            await database.db
+                .update(users)
+                .set({ suspendedAt: new Date() })
+                .where(eq(users.id, "receiver"));
+        } else if (state === "deleted") {
+            await database.db.delete(users).where(eq(users.id, "receiver"));
+        } else {
+            mockEnv.AUTHZ_MODE = "idp";
+            if (state !== "unverified") {
+                await database.db.insert(userAccessStates).values({
+                    userId: "receiver",
+                    issuer: "https://identity.example.com",
+                    subject: "demo-receiver",
+                    status:
+                        state === "not-granted"
+                            ? "active"
+                            : (state as "disabled" | "missing"),
+                    capabilities: state === "not-granted" ? [] : ["use"],
+                    verifiedAt: new Date(),
+                    source: "access-change",
+                });
+            }
+        }
+        expect(await findShareRecipients("owner", "Lena")).toEqual([]);
+        expect(await listMyFolderInvitations("receiver")).toEqual([]);
+        expect(await listReceivedFolderOrganization("receiver")).toEqual({
+            folders: [],
+            assignments: [],
+        });
+        expect(await visibleIds()).toEqual([]);
+        expect(await resolveRecordingAccess("receiver", "audio")).toBeNull();
+        expect(await resolveMailAccess("receiver", "mail")).toBeNull();
+        expect(await loadReceivedMailRows("receiver")).toEqual([]);
+        await expect(
+            changeFolderShare("receiver", accepted.id, {
+                action: "rename",
+                version: 1,
+                name: "Inactive rename",
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            inviteToFolder("owner", "elsewhere", ["receiver"]),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(
+            await restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", "elsewhere"]]),
+            ),
+        ).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "receiver_missing" }],
+        });
+    });
+    it("keeps active identity-provider folder recipients invitable and readable", async () => {
+        mockEnv.AUTHZ_MODE = "idp";
+        await database.db.insert(userAccessStates).values({
+            userId: "receiver",
+            issuer: "https://identity.example.com",
+            subject: "demo-receiver",
+            capabilities: ["use"],
+            verifiedAt: new Date(),
+            source: "login",
+        });
+        const pending = await invite();
+        expect(await listMyFolderInvitations("receiver")).toHaveLength(1);
+        await changeFolderShare("receiver", pending.id, {
+            action: "accept",
+            version: 0,
+        });
+        expect(await visibleIds()).toEqual(["audio", "mail"]);
+        expect(
+            (await listReceivedFolderOrganization("receiver")).assignments,
+        ).toHaveLength(2);
+        expect(
+            await restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", "elsewhere"]]),
+            ),
+        ).toEqual({ restored: 1, skipped: [] });
+    });
+    it.each([
+        ["receiver", "audio"],
+        ["curator", "audio"],
+        ["receiver", "mail"],
+        ["curator", "mail"],
+    ])("keeps %s Organization content and task rights for folder item %s", async (userId, itemId) => {
+        const curates = userId === "curator";
+        const owner = await taskViewer(
+            { id: "owner", email: "alex@example.com" },
+            localActor("owner"),
+        );
+        const task = await addTask(owner, itemId, {
+            text: "Check the route",
+            status: "open",
+        });
+        const [share] = await inviteToFolder("owner", "source", [userId]);
+        const publish = () =>
+            database.db.insert(recordingFolderAssignments).values({
+                userId: "owner",
+                itemId,
+                folderId: "org-folder",
+            });
+        await publish();
+        const before = await requireRecordingView(userId, itemId, "org", {
+            kinds: ["audio", "mail"],
+        });
+        expect(before).toMatchObject({
+            role: "member",
+            shared: true,
+            received: false,
+        });
+        await changeFolderShare(userId, share.id, {
+            action: "accept",
+            version: 0,
+            name: "My folder",
+        });
+        const access = await requireRecordingView(userId, itemId, "org", {
+            kinds: ["audio", "mail"],
+        });
+        expect(access).toMatchObject({
+            role: before.role,
+            shared: true,
+            received: true,
+        });
+        if (curates)
+            expect(() =>
+                assertMayChange(access, userId, curates),
+            ).not.toThrow();
+        else expect(() => assertMayChange(access, userId, curates)).toThrow();
+        const received = await requireRecordingView(
+            userId,
+            itemId,
+            "received",
+            { kinds: ["audio", "mail"] },
+        );
+        expect(() => assertMayChange(received, userId, curates)).toThrow(
+            "Received items are read-only",
+        );
+        if (itemId === "mail")
+            expect(await resolveMailAccess(userId, itemId)).toMatchObject({
+                role: "member",
+            });
+        const viewer = await taskViewer(
+            {
+                id: userId,
+                email: curates ? "sam@example.com" : "lena@example.com",
+            },
+            localActor(userId),
+        );
+        const listed = await listRecordingTasks(viewer, itemId);
+        expect(listed?.tasks.find((row) => row.id === task.id)).toMatchObject({
+            canEdit: curates,
+            canClose: curates,
+        });
+        if (curates) {
+            const edited = await updateTask(viewer, task.id, {
+                version: task.version,
+                text: "Updated by curator",
+            });
+            await updateTask(viewer, task.id, {
+                version: edited.version,
+                status: "done",
+            });
+        } else {
+            await expect(
+                updateTask(viewer, task.id, {
+                    version: task.version,
+                    text: "Forbidden edit",
+                }),
+            ).rejects.toMatchObject({ statusCode: 403 });
+        }
+        await database.db
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, itemId),
+                    eq(recordingFolderAssignments.folderId, "org-folder"),
+                ),
+            );
+        const withdrawn = await requireRecordingView(
+            userId,
+            itemId,
+            "received",
+            { kinds: ["audio", "mail"] },
+        );
+        expect(withdrawn).toMatchObject({
+            role: "receiver",
+            shared: false,
+            received: true,
+        });
+        expect(() => assertMayChange(withdrawn, userId, curates)).toThrow(
+            "Received items are read-only",
+        );
+        expect((await listFolderShares("owner", "source"))[0].state).toBe(
+            "accepted",
+        );
+        expect(
+            (await listRecordingTasks(viewer, itemId))?.tasks.find(
+                (row) => row.id === task.id,
+            ),
+        ).toMatchObject({ canEdit: false, canClose: false });
+        if (itemId === "mail")
+            expect(await resolveMailAccess(userId, itemId)).toMatchObject({
+                role: "receiver",
+            });
+    });
+    it("keeps folder speaker reads plain and correction meanings outside private Almanac names", async () => {
+        await accept();
+        const transcriptionId = await insertTranscript(
+            database.db,
+            "audio",
+            "owner",
+            { text: "Project body" },
+        );
+        await database.db.insert(people).values({
+            id: "private-speaker",
+            userId: "owner",
+            displayName: encryptText("Priya Raman"),
+            notes: encryptText("Private speaker notes"),
+        });
+        await attributeSpeaker(database.db, {
+            userId: "owner",
+            transcriptionId,
+            label: "speaker_0",
+            personId: "private-speaker",
+        });
+        await database.db.insert(knowledgeEntities).values({
+            id: "private-project",
+            userId: "owner",
+            typeKey: "project",
+            name: encryptText("Confidential acquisition"),
+            nameHmac: "private-project",
+            description: encryptText("Private project notes"),
+        });
+        await database.db.insert(transcriptCorrections).values([
+            {
+                id: "linked",
+                userId: "owner",
+                transcriptionId,
+                transcriptRevision: 0,
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 7,
+                heard: encryptText("Project"),
+                heardHmac: "project",
+                kind: "link",
+                targetEntityId: "private-project",
+            },
+            {
+                id: "corrected",
+                userId: "owner",
+                transcriptionId,
+                transcriptRevision: 0,
+                turnIndex: 0,
+                charStart: 8,
+                charEnd: 12,
+                heard: encryptText("body"),
+                heardHmac: "body",
+                kind: "correct",
+                targetEntityId: "private-project",
+                replacement: encryptText("plan"),
+            },
+        ]);
+        const knowledge = vi.spyOn(knowledgeLoader, "knowledgeView");
+        try {
+            const corrections = await readCorrections(
+                request("recordings/audio/corrections?view=received", "GET"),
+                context("audio"),
+            );
+            expect(corrections.status).toBe(200);
+            const payload = await corrections.json();
+            expect(payload).toMatchObject({
+                canUndo: false,
+                corrections: [
+                    { id: "linked", meaning: "Project", replacement: null },
+                    { id: "corrected", meaning: "plan", replacement: "plan" },
+                ],
+            });
+            expect(JSON.stringify(payload)).not.toMatch(
+                /Confidential acquisition|private-project|Private project notes/,
+            );
+            expect(knowledge).not.toHaveBeenCalled();
+            for (const shared of [false, true]) {
+                if (shared)
+                    await database.db
+                        .insert(recordingFolderAssignments)
+                        .values({
+                            userId: "owner",
+                            itemId: "audio",
+                            folderId: "org-folder",
+                        });
+                const response = await readSpeakers(
+                    request("recordings/audio/speakers?view=received", "GET"),
+                    context("audio"),
+                );
+                expect(response.status).toBe(200);
+                const speakers = await response.json();
+                expect(speakers.speakers).toMatchObject([
+                    {
+                        personName: "Priya Raman",
+                        personId: null,
+                        confirmedByUserId: null,
+                    },
+                ]);
+                expect(JSON.stringify(speakers)).not.toMatch(
+                    /private-speaker|Private speaker notes/,
+                );
+            }
+        } finally {
+            knowledge.mockRestore();
+        }
+    });
+    it("masks secret mail subjects in the combined invitation list and inherited mail rows", async () => {
+        const localPart = "alex.private-token";
+        await database.db.insert(mailAddresses).values({
+            id: "base-mailbox",
+            localPartHash: localPartHash("alex"),
+            localPart: encryptText("alex"),
+            kind: "mailbox",
+            namespaceUserId: "owner",
+        });
+        await database.db.insert(mailAddresses).values({
+            localPartHash: localPartHash(localPart),
+            localPart: encryptText(localPart),
+            kind: "secret",
+            namespaceUserId: "owner",
+            baseAddressId: "base-mailbox",
+        });
+        const title = `Mail for ${localPart}@mail.example.com`;
+        await database.db
+            .update(chatterItems)
+            .set({ title: encryptText(title) })
+            .where(eq(chatterItems.id, "mail"));
+        await database.db
+            .update(recordingFolders)
+            .set({ name: encryptText(title) })
+            .where(eq(recordingFolders.id, "source"));
+        const share = await invite();
+        await inviteToItem("owner", "mail", ["receiver"]);
+        const pending = await invitationsRoute(request("shares", "GET"));
+        expect(pending.status).toBe(200);
+        const invitations = (await pending.json()).invitations as {
+            kind: string;
+            title: string;
+        }[];
+        expect(invitations.map((row) => row.kind).sort()).toEqual([
+            "folder",
+            "mail",
+        ]);
+        for (const invitation of invitations) {
+            expect(invitation.title).not.toContain("private-token");
+            expect(invitation.title).toContain(
+                "alex.•••••••••••••@mail.example.com",
+            );
+        }
+        await changeFolderShare("receiver", share.id, {
+            action: "accept",
+            version: 0,
+        });
+        const rows = await loadReceivedMailRows("receiver");
+        expect(rows).toHaveLength(1);
+        expect(rows[0].filename).not.toContain("private-token");
+        expect(rows[0].filename).toContain(
+            "alex.•••••••••••••@mail.example.com",
+        );
+    });
+    it.each([
+        "audio",
+        "mail",
+    ])("skips restoring a folder whose direct %s item is already Organization-visible", async (itemId) => {
+        await database.db
+            .insert(recordingFolderAssignments)
+            .values({ userId: "owner", itemId, folderId: "org-folder" });
+        expect(
+            await restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", "source"]]),
+            ),
+        ).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "organization_shared" }],
+        });
+        expect(await database.db.select().from(folderShares)).toEqual([]);
+        expect(email).not.toHaveBeenCalled();
+    });
+    it("skips restoring an Organization-visible folder", async () => {
+        await database.db
+            .update(recordingFolders)
+            .set({ kind: "public" })
+            .where(eq(recordingFolders.id, "source"));
+        expect(
+            await restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "pending",
+                    },
+                ],
+                new Map([["old", "source"]]),
+            ),
+        ).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "organization_shared" }],
+        });
+        expect(await database.db.select().from(folderShares)).toEqual([]);
+    });
+    it("uses Organization MCP views for published folder items and received views after withdrawal", async () => {
+        await accept();
+        await database.db.insert(accounts).values({
+            userId: "receiver",
+            providerId: "oidc",
+            accountId: "receiver-sub",
+        });
+        const caller = async () => {
+            const result = await resolveCaller({
+                sub: "receiver-sub",
+                azp: "demo-client",
+                resource_access: {
+                    "chatterbox-mcp": {
+                        roles: ["transcripts:read", "mail:read"],
+                    },
+                },
+            });
+            if (!result.ok) throw new Error(result.reason);
+            return result.caller;
+        };
+        const privateCaller = await caller();
+        expect(privateCaller.receivedItemIds).toEqual(
+            new Set(["audio", "mail"]),
+        );
+        expect(recordingViewFor(privateCaller, "owner", "audio")).toBe(
+            "received",
+        );
+        await database.db.insert(recordingFolderAssignments).values({
+            userId: "owner",
+            itemId: "audio",
+            folderId: "org-folder",
+        });
+        const sharedCaller = await caller();
+        expect(sharedCaller.receivedItemIds).toEqual(new Set(["mail"]));
+        expect(recordingViewFor(sharedCaller, "owner", "audio")).toBe("org");
+        expect(
+            (await listReceivedFolderOrganization("receiver")).assignments,
+        ).toHaveLength(2);
+        await database.db
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, "audio"),
+                    eq(recordingFolderAssignments.folderId, "org-folder"),
+                ),
+            );
+        expect(recordingViewFor(await caller(), "owner", "audio")).toBe(
+            "received",
+        );
     });
     it("rejects receivers on every owner folder write route", async () => {
         await accept();

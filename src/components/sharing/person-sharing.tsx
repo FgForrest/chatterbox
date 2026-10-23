@@ -318,6 +318,9 @@ export function PersonShareDialog({
                                                               "pending"
                                                               ? "cancel"
                                                               : "remove",
+                                                          i18n(
+                                                              "Could not update sharing",
+                                                          ),
                                                       )
                                                     : changeShare(
                                                           share.id,
@@ -671,6 +674,7 @@ export function PersonInvitations({
                     invitation.id,
                     invitation.version,
                     action,
+                    i18n("Could not update sharing"),
                 );
             else
                 await changeShare(

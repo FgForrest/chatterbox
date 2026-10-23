@@ -18,7 +18,10 @@ import { FolderTree } from "@/components/dashboard/folder-tree";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
 import { uploadFolderOptions } from "@/components/dashboard/upload-dialog";
 import { FolderPicker } from "@/components/recordings/folder-picker";
-import { ReceivedFolderDialog } from "@/components/sharing/folder-sharing";
+import {
+    changeFolderShareRequest,
+    ReceivedFolderDialog,
+} from "@/components/sharing/folder-sharing";
 import {
     PersonInvitations,
     PersonShareDialog,
@@ -595,6 +598,32 @@ describe("folder person sharing UI", () => {
         expect(
             screen.getByRole("button", { name: "Local research, 1 recording" }),
         ).toBeTruthy();
+    });
+    it.each([
+        {
+            response: () => Response.json({}, { status: 500 }),
+            label: "missing",
+        },
+        {
+            response: () => new Response("invalid", { status: 500 }),
+            label: "invalid",
+        },
+        {
+            response: () => Response.json({ error: "" }, { status: 500 }),
+            label: "empty",
+        },
+    ])("uses a localized fallback for $label folder errors", async ({
+        response,
+    }) => {
+        requests.mockResolvedValueOnce(response());
+        await expect(
+            changeFolderShareRequest(
+                "share",
+                1,
+                "remove",
+                "Sdílení se nepodařilo změnit",
+            ),
+        ).rejects.toThrow("Sdílení se nepodařilo změnit");
     });
     it("offers no person sharing action when disabled", () => {
         tree(false);

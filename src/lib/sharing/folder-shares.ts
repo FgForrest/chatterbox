@@ -1,18 +1,21 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    activeShareRecipientCondition,
+    activeShareRecipientExistsCondition,
+} from "@/db/queries/item-shares";
+import {
     chatterItems,
     folderShares,
     receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
-    userAccessStates,
     users,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
-import { isIdpAuthorization } from "@/lib/identity/factory";
+import { secretAddressMasker } from "@/lib/mail/redact";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
 import { isOrgScopeVisible } from "@/lib/org/config";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
@@ -107,19 +110,11 @@ export async function inviteToFolder(
         const receivers = await tx
             .select({ id: users.id })
             .from(users)
-            .leftJoin(userAccessStates, eq(userAccessStates.userId, users.id))
             .where(
                 and(
                     inArray(users.id, ids),
                     ne(users.id, userId),
-                    ne(users.role, "org"),
-                    isNull(users.suspendedAt),
-                    isIdpAuthorization()
-                        ? and(
-                              eq(userAccessStates.status, "active"),
-                              sql`${userAccessStates.capabilities} @> ${JSON.stringify(["use"])}::jsonb`,
-                          )
-                        : undefined,
+                    activeShareRecipientCondition(),
                 ),
             );
         if (receivers.length !== ids.length) throw missing();
@@ -206,13 +201,17 @@ export async function listMyFolderInvitations(userId: string) {
             and(
                 eq(folderShares.receiverUserId, userId),
                 eq(folderShares.state, "pending"),
+                activeShareRecipientExistsCondition(userId),
             ),
         )
         .orderBy(asc(folderShares.invitedAt));
+    const mask = await secretAddressMasker(
+        rows.map((row) => decryptText(row.title)),
+    );
     return rows.map((row) => ({
         ...row,
         kind: "folder" as const,
-        title: decryptText(row.title),
+        title: mask(decryptText(row.title)),
         ownerName: row.ownerName || row.ownerEmail,
     }));
 }
@@ -256,7 +255,10 @@ export async function changeFolderShare(
             eq(folderShares.id, shareId),
             or(
                 eq(folderShares.userId, userId),
-                eq(folderShares.receiverUserId, userId),
+                and(
+                    eq(folderShares.receiverUserId, userId),
+                    activeShareRecipientExistsCondition(userId),
+                ),
             ),
         );
         const [reference] = await tx
@@ -410,6 +412,7 @@ export async function listReceivedFolderOrganization(
             and(
                 eq(receivedFolderAttachments.userId, userId),
                 eq(folderShares.state, "accepted"),
+                activeShareRecipientExistsCondition(userId),
             ),
         );
     const [root] = rows.some((row) => row.attachment.parentId === null)
@@ -473,6 +476,7 @@ export async function listReceivedFolderOrganization(
             and(
                 eq(receivedFolderAttachments.userId, userId),
                 eq(folderShares.state, "accepted"),
+                activeShareRecipientExistsCondition(userId),
                 isNull(chatterItems.deletedAt),
             ),
         );

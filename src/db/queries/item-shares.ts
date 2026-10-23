@@ -27,6 +27,13 @@ export function activeShareRecipientCondition() {
         }`;
 }
 
+/** SQL predicate for an active recipient without joining the caller's outer user table. */
+export function activeShareRecipientExistsCondition(receiverUserId: string) {
+    return sql`exists (select 1 from ${users}
+        where ${users.id} = ${receiverUserId}
+          and ${activeShareRecipientCondition()})`;
+}
+
 /** SQL predicate for accepted person shares, independent of Organization publication. */
 export function receivedItemCondition(
     receiverUserId: string,

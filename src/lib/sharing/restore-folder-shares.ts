@@ -1,15 +1,18 @@
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, exists, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import type { ItemShareState } from "@/db/schema";
 import {
+    chatterItems,
     folderShares,
+    recordingFolderAssignments,
     recordingFolders,
-    userAccessStates,
     users,
 } from "@/db/schema";
-import { isIdpAuthorization } from "@/lib/identity/factory";
+import { getOrgUserId } from "@/lib/org/config";
 import { announceFolderInvitations } from "@/lib/sharing/folder-shares";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 /** Restore active owner folder invitations with fresh receiver consent and explicit skips. */
 export async function restoreArchivedFolderShares(
@@ -22,10 +25,12 @@ export async function restoreArchivedFolderShares(
     folderIds: ReadonlyMap<string, string>,
 ) {
     await requirePersonSharing(userId);
+    const orgUserId = await getOrgUserId();
     const skipped: {
         folderId: string;
         receiverEmail: string;
         reason:
+            | "organization_shared"
             | "inactive"
             | "folder_missing"
             | "receiver_missing"
@@ -51,36 +56,67 @@ export async function restoreArchivedFolderShares(
         }
         const outcome = await db.transaction(async (tx) => {
             const [folder] = await tx
-                .select({ id: recordingFolders.id })
+                .select({
+                    id: recordingFolders.id,
+                    kind: recordingFolders.kind,
+                })
                 .from(recordingFolders)
                 .where(
                     and(
                         eq(recordingFolders.id, folderId),
                         eq(recordingFolders.userId, userId),
-                        eq(recordingFolders.kind, "custom"),
                     ),
                 )
                 .for("update");
             if (!folder) return "folder_missing" as const;
+            if (folder.kind === "public") return "organization_shared" as const;
+            if (folder.kind !== "custom") return "folder_missing" as const;
+            if (orgUserId) {
+                const directItems = and(
+                    eq(chatterItems.userId, userId),
+                    isNull(chatterItems.deletedAt),
+                    exists(
+                        tx
+                            .select({ one: sql`1` })
+                            .from(recordingFolderAssignments)
+                            .where(
+                                and(
+                                    eq(
+                                        recordingFolderAssignments.itemId,
+                                        chatterItems.id,
+                                    ),
+                                    eq(
+                                        recordingFolderAssignments.userId,
+                                        userId,
+                                    ),
+                                    eq(
+                                        recordingFolderAssignments.folderId,
+                                        folderId,
+                                    ),
+                                ),
+                            ),
+                    ),
+                );
+                await tx
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(directItems)
+                    .for("update");
+                const [shared] = await tx
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(and(directItems, sharedItemCondition(orgUserId)))
+                    .limit(1);
+                if (shared) return "organization_shared" as const;
+            }
             const [receiver] = await tx
                 .select({ id: users.id })
                 .from(users)
-                .leftJoin(
-                    userAccessStates,
-                    eq(userAccessStates.userId, users.id),
-                )
                 .where(
                     and(
                         sql`lower(${users.email}) = ${share.receiverEmail.trim().toLowerCase()}`,
                         ne(users.id, userId),
-                        ne(users.role, "org"),
-                        isNull(users.suspendedAt),
-                        isIdpAuthorization()
-                            ? and(
-                                  eq(userAccessStates.status, "active"),
-                                  sql`${userAccessStates.capabilities} @> ${JSON.stringify(["use"])}::jsonb`,
-                              )
-                            : undefined,
+                        activeShareRecipientCondition(),
                     ),
                 )
                 .limit(1);

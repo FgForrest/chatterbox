@@ -17,7 +17,7 @@ import {
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { parseApiError } from "@/lib/api-errors";
 import { matchFolders } from "@/lib/folders/navigation";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -26,6 +26,7 @@ export async function changeFolderShareRequest(
     id: string,
     version: number,
     action: string,
+    fallbackMessage: string,
     values: { name?: string; parentId?: string | null } = {},
 ) {
     const response = await fetch(
@@ -36,10 +37,14 @@ export async function changeFolderShareRequest(
             body: JSON.stringify({ action, version, ...values }),
         },
     );
-    if (!response.ok)
+    if (!response.ok) {
+        const error = await parseApiError(response);
         throw new Error(
-            await getApiErrorMessage(response, "Could not update sharing"),
+            error.code === "UNKNOWN_ERROR"
+                ? fallbackMessage
+                : error.error || fallbackMessage,
         );
+    }
 }
 
 /** One name and private-placement dialog for accepting, renaming and moving an attachment. */
@@ -92,10 +97,13 @@ export function ReceivedFolderDialog({
         if (saving) return;
         setSaving(true);
         try {
-            await changeFolderShareRequest(shareId, version, action, {
-                name: name.trim(),
-                parentId,
-            });
+            await changeFolderShareRequest(
+                shareId,
+                version,
+                action,
+                i18n("Could not update sharing"),
+                { name: name.trim(), parentId },
+            );
             onSaved?.();
             onOpenChange(false);
             refresh();
@@ -227,6 +235,7 @@ export function ReceivedFolderMenu({
                                 share.shareId,
                                 share.shareVersion,
                                 "remove",
+                                i18n("Could not update sharing"),
                             );
                             refresh();
                         },
