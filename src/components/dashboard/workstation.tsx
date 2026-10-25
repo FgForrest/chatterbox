@@ -9,6 +9,10 @@ import { useAppChrome } from "@/components/app-chrome-provider";
 import { AppHeader } from "@/components/app-header";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import {
+    closeCornerNotice,
+    showCornerNotice,
+} from "@/components/dashboard/corner-notice";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
@@ -276,7 +280,7 @@ export function Workstation({
     );
     const closeArrival = useCallback(() => {
         setArrival(null);
-        toast.dismiss("new-item");
+        closeCornerNotice("arrival");
     }, []);
 
     useMailRefresh(mailEnabled);
@@ -851,29 +855,21 @@ export function Workstation({
             !arrival ||
             arrival.id === currentRecording?.id
         ) {
-            toast.dismiss("new-item");
+            closeCornerNotice("arrival");
             return;
         }
-        toast.custom(
-            () => (
-                <ArrivalNotice
-                    recording={arrivalRecording}
-                    more={arrival.more}
-                    dateTimeFormat={initialSettings.dateTimeFormat}
-                    onClose={closeArrival}
-                    onOpen={() => {
-                        selectRecordingByUser(arrivalRecording);
-                        closeArrival();
-                    }}
-                />
-            ),
-            {
-                id: "new-item",
-                duration: Infinity,
-                dismissible: false,
-                className: "w-[var(--width)]",
-            },
-        );
+        showCornerNotice("arrival", () => (
+            <ArrivalNotice
+                recording={arrivalRecording}
+                more={arrival.more}
+                dateTimeFormat={initialSettings.dateTimeFormat}
+                onClose={closeArrival}
+                onOpen={() => {
+                    selectRecordingByUser(arrivalRecording);
+                    closeArrival();
+                }}
+            />
+        ));
     }, [
         arrival,
         arrivalRecording,
@@ -883,12 +879,7 @@ export function Workstation({
         selectRecordingByUser,
     ]);
 
-    useEffect(
-        () => () => {
-            toast.dismiss("new-item");
-        },
-        [],
-    );
+    useEffect(() => () => closeCornerNotice("arrival"), []);
 
     const handleUploadStarted = useCallback(
         ({ uploadId }: { uploadId: string }) => {

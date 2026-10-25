@@ -125,6 +125,7 @@ import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { StorageSection } from "@/components/settings-sections/storage-section";
 import { SyncSection } from "@/components/settings-sections/sync-section";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { deploymentProductName } from "@/lib/deployment-brand";
 import { managedFolderDescription } from "@/lib/folder-exports/drive-provider";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -139,7 +140,7 @@ function BrandWrapper({ children, isHosted, locale }: BrandWrapperProps) {
     return (
         <IntlProvider locale={locale} messages={messagesForLocale(locale)}>
             <ProductNameProvider isHosted={isHosted}>
-                {children}
+                <TooltipProvider>{children}</TooltipProvider>
             </ProductNameProvider>
         </IntlProvider>
     );
