@@ -1,0 +1,122 @@
+---
+title: Příjem pošty
+description: Dejte každému uživateli a každé složce poštovní adresu, aby se přeposlaná pošta zařazovala, shrnovala a učila se z ní jako z nahrávky.
+---
+
+Příjem pošty dá každému, kdo se přihlásí přes jednotné přihlášení, adresu ve
+Vaší poštovní doméně (`jitka@mail.example.com`), každé složce adresu, která
+do ní rovnou zařazuje (`jitka+weekly@`), a každé složce Organizace adresu, na
+kterou mohou psát kolegové (`org-weekly@`). Co přijde, uloží se šifrovaně do
+Klepů vlastníka vedle jeho nahrávek, kde ji profily zpracování shrnou, najdou
+v ní úkoly a spustí Učení. Pro uživatele je určena kapitola
+[Pošta](../user-guide/mail).
+
+Pošta je vypnutá, dokud není nastavena `MAIL_DOMAIN`. Vyžaduje
+[jednotné přihlášení](./sso): adresa patří e-mailové adrese, za kterou se
+zaručil poskytovatel identity.
+
+<span id="how-mail-gets-in" />
+
+## Jak se pošta dostane dovnitř
+
+Služba `mail-receiver` (profil compose `mail`) je SMTP server poštovní domény.
+Přijímá poštu jen pro tuto jednu doménu a jen z odesílacích serverů Googlu
+(`MAIL_ALLOWED_SOURCES`, výchozí `google`), nikdy nepřeposílá dál, neověřuje
+klienty a nic neodesílá. Ověří DKIM, zeptá se aplikace, kteří příjemci by
+zprávu přijali, a předá ji aplikaci přes síť compose. Aplikace DKIM ověří
+znovu a pro každého příjemce uplatní tato pravidla:
+
+| Adresa | Zařadí do | Přijímá od |
+| --- | --- | --- |
+| `jitka@` | Klepy Jitky, nezařazeno | vlastní poštu Jitky podepsanou DKIM její domény |
+| `jitka+weekly@` | složky Jitky | téhož |
+| `org-weekly@` | čeká v Klepech odesílatele na sdílení do složky Organizace | kteréhokoli aktivního uživatele, pokud je adresa v podepsaném Komu nebo Kopie |
+| `jitka.<token>@` (tajná adresa) | tam, kam zařazuje adresa, kterou rozšiřuje | kohokoli; bez odpovídajícího podpisu s označením „odesílatel neověřen“ |
+
+SPF odesílatele nikdy neopravňuje. Každý příjemce domény dostane stejnou
+odpověď bez ohledu na rozhodnutí aplikace, takže odesílatel nemůže zjišťovat,
+které adresy existují. Odmítnutí najde vlastník v záznamu doručení
+(**Nastavení → Pošta → Záznam doručení**). Pošta odeslaná stroji
+(automatické odpovědi, rozesílací seznamy) se uchová, ale nezpracuje.
+
+<span id="setup" />
+
+## Nastavení
+
+1. Vytvořte obě tajemství a přidejte je do `.env` spolu s doménou:
+
+   ```bash
+   echo "MAIL_ADDRESS_HASH_SECRET=$(openssl rand -hex 32)"
+   echo "MAIL_INGEST_SECRET=$(openssl rand -hex 32)"
+   ```
+
+   ```bash
+   MAIL_DOMAIN=mail.example.com
+   MAIL_HOSTNAME=mx.mail.example.com
+   MAIL_TLS_DIR=/etc/chatterbox/mail-tls   # fullchain.pem a privkey.pem
+   ```
+
+2. Ve svém souboru override pro compose zveřejněte port 25. Základní soubor
+   váže přijímač jen na `127.0.0.1:2525`. Na hostiteli bez zdrojového kódu
+   použijte také zveřejněný obraz, který nese stejné značky jako aplikace:
+
+   ```yaml
+   services:
+     mail-receiver:
+       image: ghcr.io/fgforrest/chatterbox-mail-receiver:latest
+       ports: !override
+         - "25:2525"
+   ```
+
+3. Spusťte ho příkazem `docker compose --profile mail up -d`. Týž příkaz
+   znovu vytvoří aplikaci s novými proměnnými.
+
+Všechny proměnné s výchozími hodnotami jsou v
+[Proměnných prostředí](./environment-variables#inbound-mail).
+
+<span id="dns-and-the-mail-system" />
+
+## DNS a poštovní systém
+
+- Záznam `MX` poštovní domény směřující na `MAIL_HOSTNAME`, jeho záznam `A`
+  a certifikát pro tento název (STARTTLS).
+- `TXT` `v=spf1 -all` na poštovní doméně a `_dmarc.<poštovní doména>` s
+  `p=reject`: doména nikdy neodesílá a `sp=none` nadřazené domény by ji
+  nechalo otevřenou podvržení.
+- Google Workspace: automatické přeposílání povolte jen organizační jednotce
+  lidí, kteří Klepnu používají (je to vypínač pro vynášení dat), přidejte
+  pravidlo TLS compliance pro poštovní doménu a použijte 2048bitový klíč DKIM.
+- Firewall: TCP 25 jen na tento hostitel.
+- `/api/internal/` nesmí být dostupné z internetu: přijímač se k aplikaci
+  dostane přes síť compose a veřejná reverzní proxy pod touto cestou na
+  aplikaci nic nesměruje.
+- Před spuštěním: posouzení ochrany osobních údajů pro ukládání a vytěžování
+  pošty třetích osob.
+
+<span id="behind-a-tcp-proxy" />
+
+## Za TCP proxy
+
+Když port 25 běží na jiném hostiteli, který přijímači přeposílá TCP, vidí
+přijímač jen proxy. Nastavte `MAIL_PROXY_PROTOCOL_FROM` na adresy, ze kterých
+se proxy připojují, a nechte proxy posílat hlavičku PROXY protocol v1 (HAProxy
+`send-proxy`, nginx `stream` s `proxy_protocol on;`). STARTTLS zůstává mezi
+koncovými body. Příklad pro HAProxy a úskalí kontrol dostupnosti popisuje
+`mail-receiver/README.md` v repozitáři.
+
+<span id="checks-after-the-first-deployment" />
+
+## Kontroly po prvním nasazení
+
+- Pošlete e-mail na `<vy>@<poštovní doména>` ze svého účtu: objeví se ve
+  Vašich Klepech.
+- Jeden přepošlete, jeden pošlete v kopii, jeden ve skryté kopii: objeví se
+  všechny. Adresa Organizace v kopii: e-mail čeká ve Vašich Klepech na
+  sdílení. Adresa Organizace ve skryté kopii: odmítnuto a uvedeno v záznamu
+  doručení.
+- Filtr Gmailu přeposílající na tajnou adresu: Gmail nejdřív pošle
+  potvrzovací kód, který přijde do Vašich Klepů.
+- E-mail s podvrženým odesílatelem z cizího serveru je odmítnut už při
+  spojení; přes Google je uveden jako odmítnutý v záznamu doručení vlastníka.
+- Podpisy Googlu pokrývají `to` a `cc` (`h=` v `DKIM-Signature`): na tom
+  závisí adresy Organizace.

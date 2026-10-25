@@ -172,7 +172,9 @@ export type LearnOutput = Omit<
 export type LearnNewRecord = LearnOutput["newRecords"][number];
 export type LearnSpeaker = LearnOutput["speakers"][number];
 /** Confidence and non-biometric clues for an unconfirmed identity guess. */
-export type SpeakerGuess = NonNullable<LearnSpeaker["guess"]>;
+export type SpeakerGuess = NonNullable<LearnSpeaker["guess"]> & {
+    matchedByEmail?: true;
+};
 
 /** Provenance and guess metadata displayed with a speaker proposal. */
 export interface SpeakerProposalContext {

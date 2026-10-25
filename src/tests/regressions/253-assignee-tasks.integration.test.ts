@@ -1244,15 +1244,27 @@ describe.skipIf(!url)("#253 assignee task desk", () => {
                 )
             ).tasks,
         ).toHaveLength(1);
-        const replaced = await call("update_task", "assignee", {
-            task: keep.id,
-            version: 1,
-            note: "Replaced mail outcome",
-        });
+        await expect(
+            call("update_task", "assignee", {
+                task: keep.id,
+                version: 1,
+                note: "Refused mail outcome",
+            }),
+        ).rejects.toMatchObject({ outcome: "denied" });
+        const replaced = await call(
+            "update_task",
+            "assignee",
+            {
+                task: keep.id,
+                version: 1,
+                note: "Replaced mail outcome",
+            },
+            true,
+        );
         expect(replaced.task).toMatchObject({
             kind: "mail",
             untrusted: true,
-            note: null,
+            note: "Replaced mail outcome",
             text: "Audio task\nMail task inbox.••••••••••@mail.example.test",
         });
     });

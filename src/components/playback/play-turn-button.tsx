@@ -13,6 +13,11 @@ interface TurnButtonProps {
     nextTurn?: () => PlayAtTarget | null;
     contextTurn?: (() => PlayAtTarget | null) | null;
     label: string;
+    /**
+     * Without audio, the label of a button that only selects the next turn
+     * in the transcript; without it, the button is hidden.
+     */
+    showLabel?: string;
     className?: string;
     disabled?: boolean;
 }
@@ -20,12 +25,16 @@ interface TurnButtonProps {
 function useTurnPlayback({
     nextTurn,
     contextTurn = nextTurn,
+    showLabel,
 }: TurnButtonProps) {
     const play = usePlayAt();
     const toggleTurn = (
         resolve: (() => PlayAtTarget | null) | null | undefined,
     ) => {
-        if (!play.available || !resolve) return false;
+        if (!resolve) return false;
+        if (!play.available) {
+            return showLabel !== undefined && resolve() !== null;
+        }
         if (play.playing) {
             play.toggle();
             return true;
@@ -42,11 +51,13 @@ function TurnButton({
     play,
     nextTurn,
     label,
+    showLabel,
     className,
     disabled,
 }: TurnButtonProps & { play: ReturnType<typeof useTurnPlayback> }) {
     const i18n = useExtracted();
-    if (!play.available || !nextTurn) return null;
+    const shown = play.available ? label : showLabel;
+    if (!nextTurn || shown === undefined) return null;
     return (
         <button
             type="button"
@@ -57,9 +68,9 @@ function TurnButton({
                 className,
                 play.playing && "text-primary",
             )}
-            aria-label={play.playing ? i18n("Pause") : label}
-            title={i18n("Listen")}
-            aria-pressed={play.playing}
+            aria-label={play.playing ? i18n("Pause") : shown}
+            title={play.available ? i18n("Listen") : i18n("Show in transcript")}
+            aria-pressed={play.available ? play.playing : undefined}
             onClick={() => play.toggleTurn(nextTurn)}
             onContextMenu={(event) => {
                 event.stopPropagation();
@@ -79,7 +90,10 @@ export function PlayTurnButton(props: TurnButtonProps) {
     return <TurnButton {...props} play={play} />;
 }
 
-/** A speaker chip whose play button and context menu share the same turn cursor. */
+/**
+ * A speaker chip whose play button and context menu share the same turn
+ * cursor. Without audio, given a `showLabel`, both only select the turn.
+ */
 export function SpeakerTurnChip({
     id,
     speaker,

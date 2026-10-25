@@ -58,6 +58,7 @@ import {
 } from "@/lib/export/archive-scope";
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
+import { collectCareArchive } from "@/lib/knowledge/care-archive";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { collectArchivedMail } from "@/lib/mail/archive";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -381,6 +382,7 @@ export async function buildAndUploadExportArchive(input: {
         facts?: { facts: number; evidence: number };
         learn?: { runs: number; items: number };
         duplicateDismissals?: { count: number; path: string };
+        careDecisions?: { path: string; provenance: "not-included" };
         profiles?: {
             profiles: number;
             revisions: number;
@@ -1015,6 +1017,14 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
+    const care = await collectCareArchive(scope);
+    if (care) {
+        const path = "knowledge/care-decisions.json";
+        archive.append(Buffer.from(JSON.stringify(care, null, 2)), {
+            name: path,
+        });
+        manifest.careDecisions = { path, provenance: "not-included" };
+    }
     if (scope.kind === "organization") {
         const dismissals = await db
             .select()

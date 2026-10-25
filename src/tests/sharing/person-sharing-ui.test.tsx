@@ -128,7 +128,27 @@ const item: Recording = {
 let shares: ReturnType<typeof share>[] = [];
 let requests: ReturnType<typeof vi.fn>;
 
+const invitation = (id: string) => ({
+    id,
+    itemId: "audio",
+    kind: "audio" as const,
+    title: "Interview",
+    ownerName: "Alex Morgan",
+    ownerEmail: "alex@example.com",
+    invitedAt: new Date("2026-10-22T10:00:00Z"),
+    version: 0,
+});
+
+function invitations(initial: ReturnType<typeof invitation>[]) {
+    return render(
+        <PersonSharingProvider value>
+            <PersonInvitations initialInvitations={initial} folders={[]} />
+        </PersonSharingProvider>,
+    );
+}
+
 beforeEach(() => {
+    window.localStorage.clear();
     locale.current = "en";
     shares = [];
     requests = vi.fn(async (input: string, init?: RequestInit) => {
@@ -363,6 +383,97 @@ describe("person sharing controls", () => {
                 screen.queryByRole("button", { name: "Accept and file…" }),
             ).toBeNull(),
         );
+    });
+
+    it("shows no invitations entry while nothing waits and a filled one when something does", () => {
+        const empty = invitations([]);
+        expect(
+            screen.queryByRole("button", { name: /Invitations/ }),
+        ).toBeNull();
+        empty.unmount();
+        invitations([invitation("waiting")]);
+        expect(
+            screen.getByRole("button", { name: "Invitations (1)" }).className,
+        ).toContain("bg-person-share");
+    });
+
+    it("announces invitations waiting on arrival once per browser", () => {
+        const first = invitations([invitation("waiting")]);
+        expect(notices).toHaveBeenCalledOnce();
+        const notice = render(notices.mock.calls[0][0]());
+        expect(within(notice.container).queryByText(/0:00/)).toBeNull();
+        fireEvent.click(
+            within(notice.container).getByRole("button", {
+                name: "Close notice",
+            }),
+        );
+        first.unmount();
+        notice.unmount();
+        notices.mockClear();
+
+        const again = invitations([invitation("waiting")]);
+        expect(notices).not.toHaveBeenCalled();
+        again.unmount();
+        invitations([invitation("waiting"), invitation("newer")]);
+        expect(notices).toHaveBeenCalledOnce();
+    });
+
+    it("polls for invitations while the live connection is down", async () => {
+        vi.useFakeTimers();
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "visible",
+        });
+        try {
+            invitations([]);
+            act(() => vi.mocked(subscribeEvents).mock.calls[0][1]?.("error"));
+            requests.mockResolvedValueOnce(
+                Response.json({ invitations: [invitation("polled")] }),
+            );
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60_000);
+            });
+            expect(requests).toHaveBeenCalledWith("/api/shares");
+            expect(
+                screen.getByRole("button", { name: "Invitations (1)" }),
+            ).toBeTruthy();
+            expect(notices).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("watches for invitations from one instance per page only", async () => {
+        render(
+            <PersonSharingProvider value>
+                <PersonInvitations initialInvitations={[]} folders={[]} />
+                <PersonInvitations
+                    initialInvitations={[]}
+                    folders={[]}
+                    notifications={false}
+                />
+            </PersonSharingProvider>,
+        );
+        expect(subscribeEvents).toHaveBeenCalledOnce();
+        await act(async () => {
+            vi.mocked(subscribeEvents).mock.calls[0][0]({ type: "share" });
+        });
+        expect(
+            requests.mock.calls.filter(([url]) => url === "/api/shares"),
+        ).toHaveLength(1);
+    });
+
+    it("shows Share and Copy link as icon buttons of one size", async () => {
+        header();
+        const shareButton = screen.getByRole("button", { name: "Share" });
+        const copy = screen.getByRole("button", { name: "Copy link" });
+        expect(shareButton.textContent).toBe("");
+        for (const button of [shareButton, copy])
+            expect(button.className).toContain("size-8");
+        fireEvent.focus(shareButton);
+        expect(
+            await screen.findByRole("tooltip", { name: "Share" }),
+        ).toBeTruthy();
     });
 
     it("hides owner controls and private folder context from a receiver", () => {

@@ -1,0 +1,111 @@
+---
+title: Inbound mail
+description: Give every user and folder a mail address, so forwarded mail is filed, summarized and learned from like a recording.
+---
+
+Inbound mail gives every person who signs in through single sign-on an
+address at your mail domain (`jitka@mail.example.com`), every folder an
+address that files straight into it (`jitka+weekly@`), and every
+Organization folder one that colleagues can send to (`org-weekly@`). What
+arrives lands, encrypted, in the owner's Chatter pile beside their
+recordings, where processing profiles summarize it, find tasks and run
+Learn. People read about it in [Mail](../user-guide/mail).
+
+Mail is off until `MAIL_DOMAIN` is set. It needs [single sign-on](./sso):
+an address belongs to an email address the identity provider vouched for.
+
+## How mail gets in
+
+The `mail-receiver` service (compose profile `mail`) is the SMTP server for
+the mail domain. It accepts mail for that one domain, only from Google's
+sending servers (`MAIL_ALLOWED_SOURCES`, default `google`), never relays,
+never authenticates clients and never sends mail. It verifies DKIM, asks the
+app which recipients would accept the message, and hands it to the app over
+the compose network. The app verifies DKIM again and applies the policy for
+each recipient:
+
+| Address | Files into | Accepted from |
+| --- | --- | --- |
+| `jitka@` | Jitka's pile, unfiled | Jitka's own mail, DKIM-signed by her domain |
+| `jitka+weekly@` | Jitka's folder | the same |
+| `org-weekly@` | waits in the sender's pile to be shared into the Organization folder | any active user, when the address is in a signed To or Cc |
+| `jitka.<token>@` (secret address) | what the address it extends files into | anyone, marked "sender not verified" without a matching signature |
+
+SPF never authorizes a sender. Every recipient of the domain gets the same
+answer whatever the app decided, so a sender cannot probe which addresses
+exist. Refusals are listed in the owner's delivery log (**Settings → Mail →
+Delivery log**). Mail sent by machines (auto-replies, mailing lists) is kept
+but not processed.
+
+## Setup
+
+1. Generate the two secrets and add them to `.env` with the domain:
+
+   ```bash
+   echo "MAIL_ADDRESS_HASH_SECRET=$(openssl rand -hex 32)"
+   echo "MAIL_INGEST_SECRET=$(openssl rand -hex 32)"
+   ```
+
+   ```bash
+   MAIL_DOMAIN=mail.example.com
+   MAIL_HOSTNAME=mx.mail.example.com
+   MAIL_TLS_DIR=/etc/chatterbox/mail-tls   # fullchain.pem and privkey.pem
+   ```
+
+2. Publish port 25 in your compose override. The base file binds the
+   receiver to `127.0.0.1:2525` only. On a host without the source, also
+   use the published image, which carries the app's tags:
+
+   ```yaml
+   services:
+     mail-receiver:
+       image: ghcr.io/fgforrest/chatterbox-mail-receiver:latest
+       ports: !override
+         - "25:2525"
+   ```
+
+3. Start it with `docker compose --profile mail up -d`. The same command
+   recreates the app with the new variables.
+
+Every variable, with its default, is in
+[Environment variables](./environment-variables#inbound-mail).
+
+## DNS and the mail system
+
+- An `MX` record of the mail domain pointing at `MAIL_HOSTNAME`, its `A`
+  record, and a certificate for that name (STARTTLS).
+- `TXT` `v=spf1 -all` on the mail domain and `_dmarc.<mail domain>` with
+  `p=reject`: the domain never sends, and a parent domain's `sp=none` would
+  leave it open to spoofing.
+- Google Workspace: allow automatic forwarding only for the organizational
+  unit of the people who use Chatterbox (it is an exfiltration switch), add
+  a TLS compliance rule for the mail domain, and use a 2048-bit DKIM key.
+- Firewall: TCP 25 to this host only.
+- Keep `/api/internal/` off the internet: the receiver reaches the app over
+  the compose network, and the public reverse proxy routes nothing under
+  that path to the app.
+- Before rollout: a data-protection assessment for storing and mining the
+  mail of third parties.
+
+## Behind a TCP proxy
+
+When port 25 lives on another host that forwards TCP to the receiver, the
+receiver sees only the proxy. Set `MAIL_PROXY_PROTOCOL_FROM` to the
+addresses the proxies connect from, and have the proxy send a PROXY protocol
+v1 header (HAProxy `send-proxy`, nginx `stream` with `proxy_protocol on;`).
+STARTTLS stays end to end. `mail-receiver/README.md` in the repository has
+the HAProxy example and the health-check caveats.
+
+## Checks after the first deployment
+
+- Send a mail to `<you>@<mail domain>` from your own account: it appears in
+  your pile.
+- Forward one, Cc one, Bcc one: all appear. Cc an Organization address: it
+  waits in your pile to be shared. Bcc an Organization address: refused and
+  listed in your delivery log.
+- A Gmail filter forwarding to a secret address: Gmail first sends a
+  confirmation code, which lands in your pile.
+- A mail with a forged From from an outside server is refused at connect;
+  through Google, it is listed as refused in the owner's log.
+- Google's signatures cover `to` and `cc` (`h=` in the `DKIM-Signature`):
+  Organization addresses depend on it.

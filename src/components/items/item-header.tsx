@@ -12,11 +12,7 @@ import {
     usePersonSharing,
 } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { itemDetailHref } from "@/lib/item-detail";
 import type { RecordingView } from "@/lib/sharing/view";
 import { cn } from "@/lib/utils";
@@ -182,20 +178,8 @@ export function ItemHeader({
                         onOpenChange={setShareOpen}
                         onCountChange={setShareCount}
                     >
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={i18n("Copy link")}
-                            onClick={() => void copyLink()}
-                        >
-                            <Link className="size-4" />
-                        </Button>
-                    </OwnerSharingActions>
-                ) : (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
+                        <ActionTooltip label={i18n("Copy link")}>
                             <Button
-                                type="button"
                                 variant="ghost"
                                 size="icon-sm"
                                 aria-label={i18n("Copy link")}
@@ -203,11 +187,20 @@ export function ItemHeader({
                             >
                                 <Link className="size-4" />
                             </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                            {i18n("Copy link")}
-                        </TooltipContent>
-                    </Tooltip>
+                        </ActionTooltip>
+                    </OwnerSharingActions>
+                ) : (
+                    <ActionTooltip label={i18n("Copy link")}>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={i18n("Copy link")}
+                            onClick={() => void copyLink()}
+                        >
+                            <Link className="size-4" />
+                        </Button>
+                    </ActionTooltip>
                 )}
                 {action}
             </div>

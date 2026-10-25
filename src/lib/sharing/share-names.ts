@@ -8,8 +8,11 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { promotePersonInTx } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
+import {
+    shareEventInTx,
+    sharePersonInTx,
+} from "@/lib/knowledge/share-provenance";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 import { routeAwaitingShareTaskProposalsInTx } from "@/lib/tasks/routing";
 
@@ -40,6 +43,7 @@ export async function publishSpeakerNamesInTx(
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<{ promoted: number; scopes: Set<string> }> {
+    const event = await shareEventInTx(tx, recordingId, ownerUserId, orgUserId);
     const transcripts = await tx
         .select({
             id: transcriptions.id,
@@ -87,8 +91,9 @@ export async function publishSpeakerNamesInTx(
     for (const row of rows) {
         if (!current.get(row.transcriptionId)?.has(row.label)) {
             dropped.push(row.id);
-        } else if (!row.personId || row.orgPerson) {
-            // Nobody named, or somebody the Organization knows already.
+        } else if (!row.personId) {
+        } else if (row.orgPerson) {
+            await sharePersonInTx(tx, row.personId, orgUserId, event);
         } else if (row.status === "confirmed") {
             toPromote.add(row.personId);
         } else {
@@ -105,7 +110,8 @@ export async function publishSpeakerNamesInTx(
     const scopes = await scopesNamingInTx(tx, { personIds: [...toPromote] });
     let promoted = 0;
     for (const personId of toPromote) {
-        if (await promotePersonInTx(tx, personId, orgUserId)) promoted += 1;
+        if (await sharePersonInTx(tx, personId, orgUserId, event))
+            promoted += 1;
     }
     scopes.add(orgUserId);
     return { promoted, scopes };
@@ -120,8 +126,13 @@ export async function publishSpeakerNamesInTx(
  */
 export async function publishTaskAssigneesInTx(
     tx: Tx,
-    { recordingId, orgUserId }: { recordingId: string; orgUserId: string },
+    {
+        recordingId,
+        ownerUserId,
+        orgUserId,
+    }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<Set<string>> {
+    const event = await shareEventInTx(tx, recordingId, ownerUserId, orgUserId);
     const rows = await tx
         .selectDistinct({ personId: recordingTasks.assigneePersonId })
         .from(recordingTasks)
@@ -129,7 +140,7 @@ export async function publishTaskAssigneesInTx(
         .where(
             and(
                 eq(recordingTasks.itemId, recordingId),
-                sql`not ${orgOwnedCondition(people.userId)}`,
+                eq(recordingTasks.userId, ownerUserId),
             ),
         );
     const proposalRows = await tx
@@ -148,7 +159,7 @@ export async function publishTaskAssigneesInTx(
                     "awaiting_source_review",
                     "awaiting_share",
                 ]),
-                sql`not ${orgOwnedCondition(people.userId)}`,
+                eq(taskUpdateProposals.userId, ownerUserId),
             ),
         );
     // From now on its assignees see these tasks: news for their badge.
@@ -175,7 +186,12 @@ export async function publishTaskAssigneesInTx(
             scopes.add(scope);
         }
         for (const personId of personIds) {
-            const promoted = await promotePersonInTx(tx, personId, orgUserId);
+            const promoted = await sharePersonInTx(
+                tx,
+                personId,
+                orgUserId,
+                event,
+            );
             if (promoted && promoted !== personId) {
                 await tx
                     .update(recordingTasks)

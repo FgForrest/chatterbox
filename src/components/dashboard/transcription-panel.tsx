@@ -507,7 +507,7 @@ export function TranscriptionPanel({
         once = false,
     ): PlayAtTarget | null => {
         const turns = activeTranscript?.turns;
-        if (!turns?.length || !playback) return null;
+        if (!turns?.length) return null;
         const labels = new Set(
             (typeof voices === "string" ? [voices] : voices).map(speakerKey),
         );
@@ -1052,7 +1052,7 @@ export function TranscriptionPanel({
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
                             nextSpeakerTurn={
-                                playback && activeTranscript.turns?.length
+                                activeTranscript.turns?.length
                                     ? nextSpeakerTurn
                                     : undefined
                             }

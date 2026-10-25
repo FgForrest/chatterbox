@@ -58,10 +58,7 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
-import {
-    planEntityPromotionInTx,
-    promoteEntityInTx,
-} from "@/lib/knowledge/entities";
+import { planEntityPromotionInTx } from "@/lib/knowledge/entities";
 import { pruneUnsupportedFactsInTx } from "@/lib/knowledge/fact-evidence";
 import { nodeKey, relationFits } from "@/lib/knowledge/fact-rules";
 import {
@@ -71,11 +68,16 @@ import {
     objectKeyOf,
 } from "@/lib/knowledge/facts";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import {
-    planPersonPromotionInTx,
-    promotePersonInTx,
-} from "@/lib/knowledge/people";
+import { planPersonPromotionInTx } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
+import {
+    recordShareRowsInTx,
+    type ShareEvent,
+    shareEntityInTx,
+    shareEventInTx,
+    sharePersonInTx,
+    shareRowsInTx,
+} from "@/lib/knowledge/share-provenance";
 import {
     adoptTypesForShareInTx,
     dropUnusedAdoptionsInTx,
@@ -129,13 +131,14 @@ async function sharedTargetInTx(
     tx: Tx,
     target: KnowledgeTarget,
     orgUserId: string,
+    event: ShareEvent,
 ): Promise<KnowledgeTarget | null> {
     if ("personId" in target) {
-        const id = await promotePersonInTx(tx, target.personId, orgUserId);
+        const id = await sharePersonInTx(tx, target.personId, orgUserId, event);
         return id ? { personId: id } : null;
     }
     try {
-        const id = await promoteEntityInTx(tx, target.entityId, orgUserId);
+        const id = await shareEntityInTx(tx, target.entityId, orgUserId, event);
         return id ? { entityId: id } : null;
     } catch (error) {
         if (
@@ -187,6 +190,7 @@ export async function publishKnowledgeInTx(
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<PublishedKnowledge> {
+    const event = await shareEventInTx(tx, recordingId, ownerUserId, orgUserId);
     const cancelled = await cancelPrivateLearnAtShareInTx(
         tx,
         recordingId,
@@ -303,6 +307,7 @@ export async function publishKnowledgeInTx(
                   tx,
                   node(correction.targetPersonId, correction.targetEntityId),
                   orgUserId,
+                  event,
               )
             : null;
         // A correction pass's fix is the words put right: it is shared
@@ -320,6 +325,9 @@ export async function publishKnowledgeInTx(
         } else if (target) {
             columns = { targetPersonId: null, targetEntityId: target.entityId };
         }
+        const before = await shareRowsInTx(tx, orgUserId, {
+            correctionId: correction.id,
+        });
         await tx
             .update(transcriptCorrections)
             .set({ userId: orgUserId, ...columns, updatedAt: new Date() })
@@ -333,6 +341,12 @@ export async function publishKnowledgeInTx(
                 updatedAt: new Date(),
             })
             .where(eq(knowledgeAliases.correctionId, correction.id));
+        await recordShareRowsInTx(
+            tx,
+            event,
+            before,
+            await shareRowsInTx(tx, orgUserId, { correctionId: correction.id }),
+        );
         result.corrections++;
     }
 
@@ -340,6 +354,7 @@ export async function publishKnowledgeInTx(
         const shared = await publishFactInTx(tx, fact, {
             ownerUserId,
             orgUserId,
+            event,
             onItem,
             origin: transcriptIds.length > 0 ? "recording" : "mail",
         });
@@ -404,12 +419,14 @@ async function publishFactInTx(
         orgUserId,
         onItem,
         origin,
+        event,
     }: {
         ownerUserId: string;
         orgUserId: string;
         /** `evidenceOnItem` of the item shared. */
         onItem: SQL;
         origin: "recording" | "mail";
+        event: ShareEvent;
     },
 ): Promise<boolean> {
     const relationKey = await sharedRelationKeyInTx(
@@ -473,10 +490,15 @@ async function publishFactInTx(
     }
 
     // Decided: now promote whom it names, and state it there.
-    const sharedSubject = await sharedTargetInTx(tx, subjectNode, orgUserId);
+    const sharedSubject = await sharedTargetInTx(
+        tx,
+        subjectNode,
+        orgUserId,
+        event,
+    );
     const sharedObject: FactObject | null =
         literal === null
-            ? await sharedTargetInTx(tx, objectNode, orgUserId)
+            ? await sharedTargetInTx(tx, objectNode, orgUserId, event)
             : { literal };
     if (!sharedSubject || !sharedObject) {
         throw new AppError(
@@ -485,6 +507,21 @@ async function publishFactInTx(
             409,
         );
     }
+    const [existing] = await tx
+        .select({ id: knowledgeFacts.id })
+        .from(knowledgeFacts)
+        .where(
+            and(
+                eq(knowledgeFacts.userId, orgUserId),
+                eq(knowledgeFacts.subjectKey, nodeKey(sharedSubject)),
+                eq(knowledgeFacts.relationKey, relation.key),
+                eq(knowledgeFacts.objectKey, objectKeyOf(sharedObject)),
+            ),
+        )
+        .limit(1);
+    const before = existing
+        ? await shareRowsInTx(tx, orgUserId, { factId: existing.id })
+        : [];
     const orgFactId = await confirmFactInTx(tx, {
         scopeUserId: orgUserId,
         actorUserId: ownerUserId,
@@ -516,6 +553,12 @@ async function publishFactInTx(
             )
             .onConflictDoNothing();
     }
+    await recordShareRowsInTx(
+        tx,
+        event,
+        before,
+        await shareRowsInTx(tx, orgUserId, { factId: orgFactId }),
+    );
     return true;
 }
 

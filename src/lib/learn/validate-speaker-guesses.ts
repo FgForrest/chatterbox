@@ -72,6 +72,14 @@ export function appendSpeakerGuesses(
         const person = speaker.personId
             ? frame.people.get(speaker.personId)
             : undefined;
+        if (
+            attendee?.personId &&
+            speaker.personId &&
+            attendee.personId !== speaker.personId
+        ) {
+            checks.drop("conflicting");
+            continue;
+        }
         if (speaker.personId ? !person : !attendee) {
             checks.drop("outOfScope");
             continue;
@@ -96,11 +104,16 @@ export function appendSpeakerGuesses(
                 (alias) => attendeeNameKey(alias) === attendeeNameKey(name),
             ),
         );
-        if (!speaker.personId && matches.length > 1) {
+        if (!speaker.personId && !attendee?.personId && matches.length > 1) {
             checks.drop("ambiguousName");
             continue;
         }
-        const personId = speaker.personId ?? matches[0]?.[0] ?? null;
+        const personId =
+            speaker.personId ?? attendee?.personId ?? matches[0]?.[0] ?? null;
+        if (personId && !frame.people.has(personId)) {
+            checks.drop("outOfScope");
+            continue;
+        }
         const nameKey = attendeeNameKey(name);
         if (
             personId &&
@@ -128,9 +141,12 @@ export function appendSpeakerGuesses(
         ]);
         if (checks.dismissed(fingerprint)) continue;
         const rosterMatches = (frame.speakerCandidates ?? []).filter((one) =>
-            [name, ...(person?.aliases ?? [])].some(
-                (alias) => attendeeNameKey(one.name) === attendeeNameKey(alias),
-            ),
+            one.personId
+                ? one.personId === personId
+                : [name, ...(person?.aliases ?? [])].some(
+                      (alias) =>
+                          attendeeNameKey(one.name) === attendeeNameKey(alias),
+                  ),
         );
         const source =
             (
@@ -140,6 +156,9 @@ export function appendSpeakerGuesses(
             )?.source ?? "transcript";
         const metadataForRoster = {
             ...metadata,
+            ...(rosterMatches.some((one) => one.matchedByEmail)
+                ? { matchedByEmail: true as const }
+                : {}),
             confidence: Math.min(0.49, metadata.confidence),
             clues: metadata.clues.filter((clue) => {
                 if (clue === "meet") {

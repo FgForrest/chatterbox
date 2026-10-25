@@ -223,25 +223,62 @@ export async function createPersonInTx(
  * deterministic and could not be compared. Tombstoned losers of a merge are
  * excluded so a stale address never resolves to a row the user has already
  * folded away.
+ * A run can restrict the lookup to its scope and frozen people, include
+ * extra-address hashes, and observe ambiguity instead of picking a row.
  */
 export async function findPersonByEmail(
     userId: string,
     email: string,
+    options?: {
+        scopeUserId: string;
+        personIds: readonly string[];
+        onAmbiguous: () => void;
+    },
 ): Promise<Person | null> {
     if (isInternalMailAddress(email)) return null;
-    const [row] = await db
+    if (options?.personIds.length === 0) return null;
+    const hash = lookupHash(email);
+    const rows = await db
         .select(personColumns)
         .from(people)
         .innerJoin(users, eq(users.id, people.userId))
         .where(
             and(
                 peopleVisibleTo(userId),
-                eq(people.primaryEmailHash, lookupHash(email)),
+                options ? eq(people.userId, options.scopeUserId) : undefined,
+                options
+                    ? inArray(people.id, [...options.personIds])
+                    : undefined,
+                options
+                    ? or(
+                          eq(people.primaryEmailHash, hash),
+                          exists(
+                              db
+                                  .select({ id: personEmails.personId })
+                                  .from(personEmails)
+                                  .where(
+                                      and(
+                                          eq(personEmails.personId, people.id),
+                                          eq(
+                                              personEmails.userId,
+                                              people.userId,
+                                          ),
+                                          eq(personEmails.emailHash, hash),
+                                      ),
+                                  ),
+                          ),
+                      )
+                    : eq(people.primaryEmailHash, hash),
                 isNull(people.mergedIntoId),
             ),
         )
-        .limit(1);
+        .limit(options ? 2 : 1);
 
+    if (rows.length > 1) {
+        options?.onAmbiguous();
+        return null;
+    }
+    const row = rows[0];
     return row ? toPerson(row) : null;
 }
 
@@ -778,43 +815,49 @@ export async function deletePerson(
     personId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        // Before anything is read: a share may be promoting this person,
-        // and the private record it read would be the Organization's by
-        // the time it is deleted.
-        await lockOrgPeople(tx);
-        const row = await requireManageable(tx, actorId, personId);
-        // Read before the delete: it takes everyone's aliases, notes, facts
-        // and corrections naming this person or their tombstones.
-        const doomed = await tx
-            .select({ id: people.id })
-            .from(people)
-            .where(
-                or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
-            );
-        await lockRecordingsNaming(tx, {
-            personIds: doomed.map((person) => person.id),
-        });
-        const scopes = await scopesNamingInTx(tx, {
-            personIds: doomed.map((person) => person.id),
-        });
-        if (row.ownerRole === "org") {
-            await tx
-                .update(transcriptSpeakers)
-                .set({ personId: null, updatedAt: new Date() })
-                .where(eq(transcriptSpeakers.personId, personId));
-        }
-        // Before the cascade would: facts naming them as the value of a
-        // chain leave it whole.
-        await deleteFactsNamingInTx(tx, {
-            personIds: doomed.map((person) => person.id),
-        });
-        await tx
-            .delete(people)
-            .where(
-                or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
-            );
+        const scopes = await deletePersonInTx(tx, actorId, personId);
         await bumpScopeInTx(tx, scopes);
     });
+}
+
+/** Existing erasure path inside a caller's transaction; returns scopes to bump last. */
+export async function deletePersonInTx(
+    tx: Tx,
+    actorId: string,
+    personId: string,
+): Promise<Set<string>> {
+    // Before anything is read: a share may be promoting this person,
+    // and the private record it read would be the Organization's by
+    // the time it is deleted.
+    await lockOrgPeople(tx);
+    const row = await requireManageable(tx, actorId, personId);
+    // Read before the delete: it takes everyone's aliases, notes, facts
+    // and corrections naming this person or their tombstones.
+    const doomed = await tx
+        .select({ id: people.id })
+        .from(people)
+        .where(or(eq(people.id, personId), eq(people.mergedIntoId, personId)));
+    await lockRecordingsNaming(tx, {
+        personIds: doomed.map((person) => person.id),
+    });
+    const scopes = await scopesNamingInTx(tx, {
+        personIds: doomed.map((person) => person.id),
+    });
+    if (row.ownerRole === "org") {
+        await tx
+            .update(transcriptSpeakers)
+            .set({ personId: null, updatedAt: new Date() })
+            .where(eq(transcriptSpeakers.personId, personId));
+    }
+    // Before the cascade would: facts naming them as the value of a
+    // chain leave it whole.
+    await deleteFactsNamingInTx(tx, {
+        personIds: doomed.map((person) => person.id),
+    });
+    await tx
+        .delete(people)
+        .where(or(eq(people.id, personId), eq(people.mergedIntoId, personId)));
+    return scopes;
 }
 
 /**

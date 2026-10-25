@@ -1,6 +1,6 @@
 ---
-title: Google Drive export
-description: Let users export folders into Google Drive, through a Google Cloud project of your own Workspace.
+title: Google Drive, Calendar and Meet
+description: Let users export folders into Google Drive and suggest speakers from Calendar and Meet, through a Google Cloud project of your own Workspace.
 ---
 
 A folder export can write into Google Drive instead of the server's
@@ -69,6 +69,33 @@ GOOGLE_WORKSPACE_DOMAINS=example.com
 
 Restart Chatterbox. **Settings → Google Account** now offers to connect an
 account, and the folder export dialog offers **Add Google Drive export**.
+
+<span id="calendar-and-meet" />
+
+## Calendar and Meet
+
+The same OAuth client lets people connect Google Calendar and Google Meet,
+so that [Learn](../user-guide/learn#calendar-meet-and-speaker-guesses) can
+suggest a recording's speakers from the meeting's invitees and attendees, and
+transcription can spell their names. It needs only `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET` and `APP_URL`; the Picker key and the project number
+are for Drive.
+
+In the same Google Cloud project:
+
+1. **APIs & Services → Library**: enable **Google Calendar API** and
+   **Google Meet REST API**.
+2. On the consent screen, under **Data access**, add
+   `https://www.googleapis.com/auth/calendar.events.readonly` and
+   `https://www.googleapis.com/auth/meetings.space.readonly`.
+
+People connect Calendar and Meet in the first-run wizard or with **Connect
+Calendar and Meet** in **Settings → Google Account**. Chatterbox asks for
+these scopes only then, in addition to any it already has. Access is read-only:
+Chatterbox reads events on the person's primary calendar around a
+recording's time and, with Meet access, who joined the call. Attendee e-mail
+addresses only match people already in the Almanac and are never sent to an
+AI provider. Mail items never consult Calendar or Meet.
 
 ## Exporting the Organization tree to a shared drive
 

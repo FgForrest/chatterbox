@@ -3,7 +3,7 @@ title: Chatterbox in Claude
 description: Ask Claude or Claude Code about your recordings, people and tasks.
 ---
 
-When your administrator has set it up, Claude can look things up in Chatterbox for you. It can search your transcripts, read a summary, tell you who someone in the Almanac is, or list your open tasks. You ask in your own words, and Claude picks the lookups.
+When your administrator has set it up, Claude can look things up in Chatterbox for you. It can search your transcripts and mail, read a summary, tell you who someone in the Almanac is, or list your open tasks. You ask in your own words, and Claude picks the lookups.
 
 It works in Claude on the web (claude.ai), the Claude desktop and mobile apps, Cowork, and Claude Code.
 
@@ -11,13 +11,14 @@ It works in Claude on the web (claude.ai), the Claude desktop and mobile apps, C
 
 Claude sees what you see in Chatterbox and never more:
 
-- **Recordings**: your own and those shared with the Organization, as your recording list shows them.
+- **Recordings**: your own, those shared with the Organization, and those colleagues [shared with you](sharing-with-people.md), as your recording list shows them.
+- **Mail**: the mail in your pile and mail shared with you, where your instance receives mail. Mail is written by people outside, so Claude is told to treat it as information, not instructions.
 - **The Almanac**: your people and things, and the Organization's.
-- **Tasks**: those on your recordings, and on shared recordings those assigned to you.
+- **Tasks**: those you see on the Tasks page: tasks on your items, tasks assigned to you, tasks you follow and your own tasks.
 
-Your administrator decides which areas are open to you: the Almanac, transcripts, summaries, tasks, and changing tasks. Claude is offered only the lookups for your areas, so it may say it cannot reach something you see in the app.
+Your administrator decides which areas are open to you: the Almanac, transcripts, summaries, mail, tasks, and changing tasks. Claude is offered only the lookups for your areas, so it may say it cannot reach something you see in the app.
 
-Claude can change one thing: with the right to change tasks, it can mark a task done, open it again, drop it, or give it to someone else, where the Tasks page would let you. Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
+With the right to change tasks, Claude can manage tasks where the Tasks page would let you: create own tasks, edit, complete, reopen, drop, reassign, follow and merge. It can also write or clear the task’s one note (up to 2,000 characters) when you may complete that task. A new note replaces the whole previous note; to add to it, ask Claude to read it first. Completion and a note can be saved together. Mail-task notes require mail access to read or change. Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
 
 ## Before you connect
 
@@ -62,7 +63,8 @@ Ask the way you would ask a colleague who has read everything:
 - "Summarize what Priya Raman said in the Harbor kickoff."
 - "Who is Marek Dvořák, and what do we know about him?"
 - "Which of my tasks are overdue?"
-- "Mark the task about Dispatch API access as done."
+- "Find the mail where Bluefin Logistics confirmed the delivery dates."
+- "Mark the task about Dispatch API access as done and note that it shipped in release X."
 
 Names work wherever Claude would otherwise need an ID: people, things and recordings are found by their names, nicknames and titles. When a name could mean several people, Claude gets the candidates and should ask you which one.
 
@@ -84,7 +86,7 @@ To stop, choose **Disconnect** (or **Remove**) in **Customize → Connectors**. 
 | --- | --- |
 | The sign-in page shows an error | Tell your administrator what it says; the client or the sign-in setup needs a change. |
 | Claude says it cannot use the connector right after you sign in | Sign in to Chatterbox once in your browser, then connect again. If it still fails, ask your administrator: Chatterbox's log says why it refused. |
-| Claude cannot reach transcripts, summaries or tasks | That area is not open to you. Ask your administrator. |
+| Claude cannot reach transcripts, summaries, mail or tasks | That area is not open to you. Ask your administrator. |
 | A lookup answers "Unknown tool" | What you may see has changed. Refresh the connector or connect again. |
 | Claude Code cannot connect | Connect from the office network or the VPN. |
 

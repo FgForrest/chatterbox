@@ -17,6 +17,8 @@ Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, pří
 
 Je-li Organizace povolena, noví členové sledují její výchozí profily a začínají bez osobních profilů. Členové mohou profily Organizace používat na soukromé položky a duplikovat je do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
 
+<span id="ai-providers" />
+
 ## Poskytovatelé AI
 
 ![Poskytovatelé AI](images/settings-providers.png)
@@ -94,8 +96,11 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 - **Upozornění**: oznámení v prohlížeči, e-mailem nebo přes Bark na nové nahrávky.
 - **Úložiště**: zabrané místo a [Automatické mazání starých dat](exports-backups-retention.md#deleting-old-data-automatically).
 - **Export/záloha**: [exporty a zálohy](exports-backups-retention.md#backups).
+- **Pošta** (pokud Vaše instance přijímá poštu): Vaše adresy, tajné adresy a záznam doručení. Viz [Pošta](mail.md).
+- **Nahrávání schůzek**: instalace rozšíření prohlížeče z Internetového obchodu Chrome a jeho propojení, nebo vytvoření klíče pro ruční propojení. Viz [Nahrávání schůzek](../guides/meeting-recorder.mdx).
 - **API klíče** a **Webhooky**: propojení Klepny s dalšími nástroji.
-- **Google účet**: propojení Google účtu používaného pro [exporty na Google Drive](exports-backups-retention.md#to-google-drive).
+- **Google účet**: propojení Google účtu používaného pro [exporty na Google Drive](exports-backups-retention.md#to-google-drive) a pro Kalendář a Meet.
+- **Přístupy** (pro ty, kdo spravují přístup, při přístupu od poskytovatele identity): kdo smí Klepnu používat, spravovat Organizaci nebo spravovat přístup. Viz [Pro administrátory](administrators.md#access-from-the-identity-provider).
 
 Přístup ke Kalendáři a Meet je volitelný a pouze pro čtení. Po připojení používá každý ruční i automatický běh Učení nad zvukem účastníky schůzky vlastníka pro návrhy mluvčích s **?**. Podporovaní poskytovatelé přepisu a následná oprava používají jejich jména pro správný pravopis. Návrhy potvrzujete Vy; nezaškrtnuté odhady zůstávají nepotvrzené. Kontrola ukazuje pozvání, účast v Meet, důkaz v přepisu nebo odhad s vysvětlením. Nepoužívají se e-maily účastníků ani hlasová data.
 

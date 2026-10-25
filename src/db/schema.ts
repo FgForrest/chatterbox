@@ -751,12 +751,7 @@ export const recordings = pgTable(
         deviceSn: varchar("device_sn", { length: 255 }).notNull(),
         // Unique ID from Plaud API, scoped per Riffado user.
         plaudFileId: varchar("plaud_file_id", { length: 255 }).notNull(),
-        // Deprecated (now `chatter_items.title`), see
-        // src/db/deprecated-columns.ts.
-        deprecatedFilename: text("filename"),
         duration: integer("duration").notNull(), // milliseconds
-        // Deprecated (now `chatter_items.occurred_at`).
-        deprecatedStartTime: timestamp("start_time"),
         endTime: timestamp("end_time").notNull(),
         filesize: integer("filesize").notNull(), // bytes
         fileMd5: varchar("file_md5", { length: 32 }).notNull(),
@@ -788,8 +783,6 @@ export const recordings = pgTable(
         // from storage at delete time; this row is retained only as a marker
         // keyed by plaudFileId. See issue #56.
         deletedAt: timestamp("deleted_at"),
-        // Deprecated (now `chatter_items.summary_due_at`).
-        deprecatedSummaryDueAt: timestamp("summary_due_at"),
         // Retention marker of the audio (the transcript's and summary's are
         // on `chatter_items`). Set by the retention sweep
         // (src/lib/retention/worker.ts) when it removes one kind of data
@@ -805,27 +798,14 @@ export const recordings = pgTable(
         // legitimately comes back -- a Plaud version bump re-downloads the
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
-        // Deprecated (now `chatter_items.content_reaped_at` and
-        // `summary_reaped_at`).
-        deprecatedTranscriptReapedAt: timestamp("transcript_reaped_at"),
-        deprecatedSummaryReapedAt: timestamp("summary_reaped_at"),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.
         remoteRetentionClaimedAt: timestamp("remote_retention_claimed_at"),
-        // Deprecated, see src/db/deprecated-columns.ts.
-        deprecatedUnsharedAt: timestamp("unshared_at"),
-        // Deprecated (now `chatter_items.title_edited_at`).
-        deprecatedTitleEditedAt: timestamp("title_edited_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        // Every lookup by user alone; goes with the deprecated start time.
-        userStartTimeIdx: index("recordings_user_id_start_time_idx").on(
-            table.userId,
-            table.deprecatedStartTime,
-        ),
         // The recording belongs to an `audio` item of the same owner.
         itemUserFk: foreignKey({
             name: "recordings_item_user_fk",
@@ -1609,6 +1589,9 @@ export const people = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("people_scope_live_created_idx")
+            .on(table.userId, table.createdAt.desc().nullsFirst(), table.id)
+            .where(sql`${table.mergedIntoId} is null`),
         // Postgres treats NULLs as distinct, so any number of people per user
         // may have no email at all -- which is the common case for someone
         // named from a transcript rather than a calendar invite.
@@ -1981,6 +1964,9 @@ export const knowledgeEntities = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_entities_scope_live_created_idx")
+            .on(table.userId, table.createdAt.desc().nullsFirst(), table.id)
+            .where(sql`${table.mergedIntoId} is null`),
         // One "Orion" project per scope; tombstones keep their name.
         nameUnique: uniqueIndex("knowledge_entities_owner_type_name_unique")
             .on(table.userId, table.typeKey, table.nameHmac)
@@ -2062,6 +2048,16 @@ export const knowledgeAliases = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_aliases_scope_heard_updated_idx")
+            .on(
+                table.userId,
+                table.updatedAt.desc().nullsFirst(),
+                table.id,
+                table.textHmac,
+                table.personId,
+                table.entityId,
+            )
+            .where(sql`${table.kind} = 'heard_as'`),
         aliasUnique: unique("knowledge_aliases_unique")
             .on(
                 table.userId,
@@ -2072,6 +2068,18 @@ export const knowledgeAliases = pgTable(
                 table.correctionId,
             )
             .nullsNotDistinct(),
+        personScopeIdx: index("knowledge_aliases_person_scope_idx").on(
+            table.personId,
+            table.userId,
+        ),
+        entityScopeIdx: index("knowledge_aliases_entity_scope_idx").on(
+            table.entityId,
+            table.userId,
+        ),
+        correctionScopeIdx: index("knowledge_aliases_correction_scope_idx").on(
+            table.correctionId,
+            table.userId,
+        ),
         personIdx: index("knowledge_aliases_person_id_idx").on(table.personId),
         entityIdx: index("knowledge_aliases_entity_id_idx").on(table.entityId),
         correctionIdx: index("knowledge_aliases_correction_id_idx").on(
@@ -2238,6 +2246,16 @@ export const knowledgeFacts = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        careNewestIdx: index("knowledge_facts_scope_current_updated_idx")
+            .on(
+                table.userId,
+                table.updatedAt.desc().nullsFirst(),
+                table.id,
+                table.subjectKey,
+                table.relationKey,
+                table.objectKey,
+            )
+            .where(sql`${table.replacedByFactId} is null`),
         factUnique: unique("knowledge_facts_unique").on(
             table.userId,
             table.subjectKey,
@@ -4843,9 +4861,17 @@ export const almanacDuplicateDismissals = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
-        kind: varchar("kind", { length: 8 })
-            .$type<"person" | "entity">()
+        kind: varchar("kind", { length: 32 })
+            .$type<
+                | "person"
+                | "entity"
+                | "fact_conflict"
+                | "correction_conflict"
+                | "thin"
+            >()
             .notNull(),
+        problemKey: varchar("problem_key", { length: 64 }),
+        problemData: jsonb("problem_data"),
         leftPersonId: text("left_person_id").references(() => people.id, {
             onDelete: "cascade",
         }),
@@ -4867,6 +4893,14 @@ export const almanacDuplicateDismissals = pgTable(
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
+        scopeIdx: index("almanac_dismissals_scope_idx").on(
+            table.userId,
+            table.kind,
+        ),
+        problemKeyIdx: index("almanac_dismissals_scope_problem_key_idx").on(
+            table.userId,
+            table.problemKey,
+        ),
         pairUnique: unique("almanac_duplicate_dismissals_pair_unique")
             .on(
                 table.userId,
@@ -4875,6 +4909,7 @@ export const almanacDuplicateDismissals = pgTable(
                 table.rightPersonId,
                 table.leftEntityId,
                 table.rightEntityId,
+                table.problemKey,
             )
             .nullsNotDistinct(),
         leftPersonIdx: index("almanac_duplicate_dismissals_left_person_idx").on(
@@ -4896,7 +4931,97 @@ export const almanacDuplicateDismissals = pgTable(
                 and ${table.leftPersonId} collate "C" < ${table.rightPersonId} collate "C" and ${table.leftEntityId} is null and ${table.rightEntityId} is null)
             or (${table.kind} = 'entity' and ${table.leftEntityId} is not null and ${table.rightEntityId} is not null
                 and ${table.leftEntityId} collate "C" < ${table.rightEntityId} collate "C" and ${table.leftPersonId} is null and ${table.rightPersonId} is null)
+            or (${table.kind} in ('fact_conflict', 'correction_conflict', 'thin') and ${table.problemKey} is not null
+                and num_nonnulls(${table.leftPersonId}, ${table.rightPersonId}, ${table.leftEntityId}, ${table.rightEntityId}) = 0)
         `,
+        ),
+    }),
+);
+
+export const almanacShareEvents = pgTable(
+    "almanac_share_events",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        itemId: text("item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        sharedByUserId: text("shared_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        reviewedAt: timestamp("reviewed_at"),
+        reviewedByUserId: text("reviewed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        undoneAt: timestamp("undone_at"),
+        undoneByUserId: text("undone_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+    },
+    (table) => ({
+        scopeTimeIdx: index("almanac_share_events_scope_time_idx").on(
+            table.userId,
+            table.createdAt,
+        ),
+    }),
+);
+
+export type AlmanacAdditionKind =
+    | "person"
+    | "entity"
+    | "fact"
+    | "correction"
+    | "alias"
+    | "email";
+
+export const almanacShareChanges = pgTable(
+    "almanac_share_changes",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        eventId: text("event_id")
+            .notNull()
+            .references(() => almanacShareEvents.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 16 })
+            .$type<AlmanacAdditionKind>()
+            .notNull(),
+        targetId: text("target_id").notNull(),
+        recordPersonId: text("record_person_id"),
+        recordEntityId: text("record_entity_id"),
+        added: boolean("added").notNull(),
+        fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+        removedAt: timestamp("removed_at"),
+        removedByUserId: text("removed_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        keptReason: varchar("kept_reason", { length: 32 }).$type<
+            "changed" | "merged" | "later_share" | "other_source" | "gone"
+        >(),
+    },
+    (table) => ({
+        targetUnique: unique("almanac_share_changes_event_target_unique").on(
+            table.eventId,
+            table.kind,
+            table.targetId,
+        ),
+        targetIdx: index("almanac_share_changes_target_idx").on(
+            table.userId,
+            table.kind,
+            table.targetId,
+        ),
+        eventScopeIdx: index("almanac_share_changes_event_scope_idx").on(
+            table.userId,
+            table.eventId,
         ),
     }),
 );

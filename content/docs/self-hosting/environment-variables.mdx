@@ -39,7 +39,7 @@ on production secrets.
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | When `true`, webhook URLs must be HTTPS and resolve to public IPs. Useful when your instance is exposed to others.  |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | When `true`, trust `X-Forwarded-For` for rate-limit buckets. Only safe behind a reverse proxy that overwrites the header. |
 | `RATE_LIMIT_CLIENT_IP_HEADER` | unset | Read only this header for IP rate limits (requires `RATE_LIMIT_TRUST_PROXY_HEADERS=true`) and the admin IP allowlist. For `x-forwarded-for`, use the last entry. No fallback to another header. |
-| `API_TOKEN_HASH_SECRET`             | falls back to `BETTER_AUTH_SECRET` | At least 32 chars. HMAC key for personal API token hashing. Set independently if you want token-hash rotation without rotating session secrets. |
+| `API_TOKEN_HASH_SECRET`             | falls back to `BETTER_AUTH_SECRET` | At least 32 chars. HMAC key for personal API token hashing and stored lookup hashes. Set independently if you want token-hash rotation without rotating session secrets. Docker Compose does not pass it: setting it on an existing install invalidates every API key, recorder key and stored lookup hash, so add it under the app's `environment:` only on a new install. |
 
 Setting `RATE_LIMIT_TRUST_PROXY_HEADERS=true` without a proxy that
 overwrites forwarding headers lets clients forge their own IPs and
@@ -58,11 +58,10 @@ With `x-forwarded-for`, the last entry is the client only when the trusted proxy
 Existing installations need no changes. To opt in, pass the new variable
 through your app service's `environment:` and set it in `.env`.
 
-To change `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, the production Compose file
-must pass it into the app service. Add
-`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: ${ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:-}`
-under that service's `environment:` and set the value in `.env`. An empty or
-missing value keeps the default of 60.
+The bundled `docker-compose.yml` passes every variable on this page into the
+app, except `API_TOKEN_HASH_SECRET` and the build-time ones. A Compose file
+of your own passes only what its `environment:` lists, so copy new entries
+from the release's file when you upgrade.
 
 ## Storage
 
@@ -75,7 +74,7 @@ missing value keeps the default of 60.
 | `S3_REGION`             | —           | Region (`auto` on R2).                                              |
 | `S3_ACCESS_KEY_ID`      | —           |                                                                     |
 | `S3_SECRET_ACCESS_KEY`  | —           |                                                                     |
-| `BACKUP_STORAGE_PATH`   | —           | Filesystem path for backup archives. Unset, they go beside the recordings. |
+| `BACKUP_STORAGE_PATH`   | —           | Filesystem path for backup archives. Unset, they go beside the recordings. With the bundled Compose file it is a host path, mounted at `/backups` in the container. |
 
 See [S3-compatible storage](./storage-s3) for per-provider
 config templates.
@@ -88,12 +87,32 @@ Point it at separate storage (an external disk, a NAS mount) and
 archives go there instead, whatever backend the recordings use. It is
 always a local filesystem path, including on S3-backed instances: a
 backup you cannot read without the app running is not much of a backup.
+Archives made before you set it stay where they were and can no longer be
+downloaded; they expire within seven days.
+
+## Sync and processing limits
+
+All optional; the defaults suit most installs.
+
+| Variable                           | Default      | Effect |
+| ---------------------------------- | ------------ | ------ |
+| `BACKGROUND_SYNC_ENABLED`          | `true`       | The server syncs recorder accounts on its own schedule, with no browser open. `false` syncs only when the app is open or when something calls `POST /api/plaud/sync`. |
+| `BACKGROUND_SYNC_INTERVAL_MS`      | `300000`     | How often the background sync runs (60000 to 3600000). A user synced in the last four minutes is skipped either way. |
+| `PLAUD_SYNC_RATE_LIMIT_PER_MINUTE` | `10`         | Sync requests one user may make per minute (1 to 600). |
+| `WEBSHARE_API_KEY`                 | —            | Routes requests to the recorder's cloud through Webshare proxies, for hosts whose address cannot reach it directly. |
+| `PLAUD_PROXY_SCOPE`                | `all`        | `all` also proxies audio downloads; `api-only` saves proxy bandwidth. Inert without `WEBSHARE_API_KEY`. |
+| `VIDEO_UPLOAD_MAX_BYTES`           | `4294967296` | Largest video upload (4 GiB). Only the extracted audio is kept. Audio uploads stay capped at 500 MB. |
+| `WHISPER_MAX_BYTES`                | `25165824`   | OpenAI-style transcription inputs above this size are re-encoded to mono Opus. At most the provider's 25 MiB limit. |
+| `WHISPER_COMPRESS_BITRATE_KBPS`    | `12`         | Starting bitrate of that re-encoding; it goes lower when needed. |
+| `WHISPER_REQUEST_TIMEOUT_MS`       | `3600000`    | Timeout of one transcription request (60 minutes). |
+| `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | `60`         | Automatic summaries, topics and Learn runs one user may start per hour (1 to 600). Manual runs are not limited. |
 
 ## Google integration (Drive export)
 
 Self-host only; ignored when `IS_HOSTED=true`. With the first four set,
 users can connect a Google account and export folders to Google Drive.
-See [Google Drive export](./google-drive) for the Google Cloud setup.
+Calendar and Meet need only the client id and secret. See
+[Google Drive, Calendar and Meet](./google-drive) for the Google Cloud setup.
 
 | Variable                      | Default | Effect                                                                                      |
 | ----------------------------- | ------- | ------------------------------------------------------------------------------------------- |
@@ -168,6 +187,49 @@ Self-host only; ignored when `IS_HOSTED=true`. All optional.
 | `LEARN_MCP_URL`        | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                    |
 | `LEARN_BRIDGE_URL`     | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
 | `KNOWLEDGE_MEMORY_MB`  | `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.       |
+
+## Inbound mail
+
+Off unless `MAIL_DOMAIN` is set. Needs [single sign-on](#single-sign-on-openid-connect)
+and both secrets; the server refuses to start without them. See
+[Inbound mail](./mail).
+
+Read by the app:
+
+| Variable                       | Default | Effect |
+| ------------------------------ | ------- | ------ |
+| `MAIL_DOMAIN`                  | —       | The domain addresses are given out at, for example `chatterbox.example.com`. |
+| `MAIL_ADDRESS_HASH_SECRET`     | —       | At least 32 characters (`openssl rand -hex 32`). Keys the lookup of addresses. |
+| `MAIL_INGEST_SECRET`           | —       | At least 32 characters. Bearer token the receiver hands messages over with. Set the same value for the receiver. |
+| `MAIL_ORG_NICKNAME`            | `org`   | Prefix of Organization folder addresses (`org-weekly@`). 1 to 20 letters or digits. |
+| `MAIL_FORMER_ORG_NICKNAMES`    | —       | Comma-separated earlier nicknames, kept reserved so nobody else is given them. |
+| `MAIL_MAX_SIGNATURE_AGE_HOURS` | `72`    | How old a message's DKIM signature may be when it arrives. |
+| `MAIL_DAILY_LIMIT`             | `500`   | Messages one owner's addresses accept per day. |
+| `MAIL_MAX_MESSAGE_MB`          | `36`    | Largest accepted message, attachments included. Set the same value for the receiver. |
+| `MAIL_INACTIVE_DAYS`           | `180`   | Days without a single sign-on sign-in after which a person's addresses pause, until their next sign-in. |
+
+Read by the `mail-receiver` service (compose profile `mail`):
+
+| Variable                   | Default      | Effect |
+| -------------------------- | ------------ | ------ |
+| `MAIL_HOSTNAME`            | —            | The `MX` host name, also the name on the TLS certificate. |
+| `MAIL_TLS_DIR`             | `./mail-tls` | Directory holding `fullchain.pem` and `privkey.pem`, mounted read-only. |
+| `MAIL_ALLOWED_SOURCES`     | `google`     | Who may connect. `google` is the ranges of Google's sending servers, refreshed every six hours. |
+| `MAIL_PROXY_PROTOCOL_FROM` | —            | Comma-separated addresses of TCP proxies whose PROXY protocol v1 header names the client. Plain IP addresses only. |
+
+## Meeting Recorder
+
+Defaults the server pushes to connected [Meeting Recorder](../guides/meeting-recorder)
+extensions. All optional; unset, nothing records with one click until a
+person opts in.
+
+| Variable                            | Default | Effect |
+| ----------------------------------- | ------- | ------ |
+| `RECORDER_AUTO_RECORD_PLATFORMS`    | —       | Comma-separated platforms that record with one click, or `all`: `google-meet`, `zoom`, `teams`, `webex`, `slack-huddle`, `whereby`, `jitsi`. |
+| `RECORDER_AUTO_STOP_QUIET_SECONDS`  | `180`   | Seconds of silence before a one-click recording stops itself (30 to 3600). |
+| `RECORDER_NOTICE_TEXT`              | —       | Recording policy the extension shows once before one-click recording is turned on. |
+| `RECORDER_LOCK_DEFAULTS`            | `false` | When `true`, people cannot switch a platform the server set to one click off. |
+| `NEXT_PUBLIC_RECORDER_EXTENSION_ID` | the published extension | Chrome extension id the app pairs with, for an extension you build yourself. Read when the app is built, so it takes effect only in an image you build with it set. |
 
 ## SMTP (email notifications)
 

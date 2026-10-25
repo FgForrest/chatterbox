@@ -32,6 +32,12 @@ export function ArrivalNotice({
     const mail = recording.kind === "mail";
     const Icon = invitation ? UserPlus : mail ? Mail : Mic;
     const title = recording.filename || (mail ? i18n("(no subject)") : "");
+    let detail: string | null = null;
+    if (folderInvitation) detail = i18n("Read-only shared folder");
+    else if (!invitation)
+        detail = mail
+            ? (recording.mail?.from ?? i18n("Unknown sender"))
+            : formatDurationMs(recording.duration);
     return (
         <div className="grid w-full grid-cols-[34px_minmax(0,1fr)] items-start gap-3 rounded-lg border bg-popover p-3 pl-3.5 text-popover-foreground shadow-lg">
             <span
@@ -92,12 +98,7 @@ export function ArrivalNotice({
                 </div>
                 <div className="mt-1 flex min-w-0 items-center justify-between gap-2.5">
                     <div className="truncate text-xs text-muted-foreground tabular-nums">
-                        {folderInvitation
-                            ? i18n("Read-only shared folder")
-                            : mail
-                              ? (recording.mail?.from ?? i18n("Unknown sender"))
-                              : formatDurationMs(recording.duration)}
-                        {" · "}
+                        {detail !== null && `${detail} · `}
                         {formatDateTime(
                             recording.startTime,
                             dateTimeFormat,

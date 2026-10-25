@@ -321,9 +321,11 @@ describe("mail detail layout", () => {
                 .getByRole("link", { name: "Download the message" })
                 .closest("header")?.textContent,
         ).toContain("Message");
-        expect(
-            screen.getByRole("button", { name: "Erase mail artifacts" }),
-        ).toBeTruthy();
+        const erase = screen.getByRole("button", {
+            name: "Erase mail artifacts",
+        });
+        expect(erase.textContent).toBe("");
+        expect(erase.className).toContain("size-8");
         expect(
             screen.getByRole("button", { name: "Rename {name}" }),
         ).toBeTruthy();

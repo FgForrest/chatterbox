@@ -4,7 +4,7 @@
 
 **Chatterbox based on [Riffado](https://github.com/riffado/riffado).**
 
-**Open-source AI transcription companion for voice recorders.**
+**Open-source AI companion for voice recorders, meetings and mail.**
 
 *Bring your own AI provider, own your transcripts, and host your own data.*
 
@@ -19,7 +19,7 @@
 
 > Klepna is the Czech name; Chatterbox is the English name. This project is based on [Riffado](https://github.com/riffado/riffado), which was previously called OpenPlaud. [Read the original rebrand note &rarr;](https://riffado.com/rebrand)
 
-Chatterbox is an open-source companion app for AI voice recorders. It syncs your recordings from the manufacturer's cloud, transcribes them with any OpenAI-compatible API (or in the browser, for free), and stores everything on infrastructure you control. **Currently supports the Plaud Note family — Note, Note Pro, and NotePin. More device support on the way.** AGPL-3.0.
+Chatterbox is an open-source companion app for AI voice recorders and the conversations around them. It syncs your recordings from the manufacturer's cloud, records meetings held in the browser, takes the mail you forward to it, transcribes and summarizes everything with the AI provider you choose (or in the browser, for free), and stores it on infrastructure you control. A team shares what it wants to share, and an Almanac of the people and things it talks about grows from every review. **Currently supports the Plaud Note family (Note, Note Pro and NotePin). More device support on the way.** AGPL-3.0.
 
 ## Features
 
@@ -39,37 +39,54 @@ This repository builds on Riffado with features for people who work with their r
 
 ![A recording with named speakers, topics and Learn's proposals](content/docs/user-guide/images/dashboard.png)
 
+**More ways in**
+
+- **Meeting Recorder for Chrome.** A browser extension (Chrome, Edge, Brave, Vivaldi) records Google Meet, Teams, Zoom and other web meetings: your microphone plus the meeting tab. It offers to record when a meeting starts, uploads as it records so a dropped connection loses seconds, and files the recording into the folder you pick, which you can change mid-meeting. Published in the Chrome Web Store and set up from **Settings → Meeting Recorder** in three steps.
+- **Mail.** Every user gets an address, and every folder one that files straight into it. Forward a mail or put the address in Cc: it is summarized, searched, mined for tasks and facts like a recording, and can be shared. Senders are verified by their DKIM signature; secret addresses accept automatic forwarding from Gmail filters.
+- **Video uploads.** Upload a meeting video; Chatterbox keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
+
+**Processing you control**
+
+- **File first, then process.** A new recording or mail waits until you put it in a folder, so no paid AI step runs on something you did not mean to process. The folder chooses how it is processed.
+- **Processing profiles.** A recipe per kind of item: provider and model for each step, language, summary instructions, multi-pass, and which steps run by themselves. Folders choose their default; the Organization can supply defaults for everyone.
+- **One workflow strip** under each item shows every step, whose turn it is, and the one action expected from you.
+
 **Transcripts you can work with**
 
-- **Named speakers.** Put a name to each voice once and it shows in the transcript, the summary and every export. Names carry over when a recording is transcribed again, and a right-click plays a speaker's next turn.
-- **Topics.** Long recordings split into titled chapters you can jump between. Lectures and monologues read in paragraphs.
+- **Named speakers.** Put a name to each voice once and it shows in the transcript, the summary and every export. Names carry over when a recording is transcribed again, and the play button on a speaker chip plays that speaker's next turn.
+- **Speaker suggestions from Calendar and Meet.** With Google Calendar connected, the meeting's invitees and Meet attendees become speaker suggestions, matched to Almanac people by e-mail, each with its source and reason. Nothing is named until you confirm it, and no voice data is used.
+- **Topics.** Long recordings split into titled chapters, with a chapter bar to jump between them. Lectures and monologues read in paragraphs.
 - **Play from the transcript.** Click a sentence to hear it. The transcript follows the player, and scrolling the transcript moves the player.
-- **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people and projects so they spell them right.
-- **Video uploads.** Upload a meeting video; Chatterbox keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
+- **Confirmed language.** Confirm a recording's language once; summaries, titles, topics and Learn follow it.
+- **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people, projects and meeting attendees so they spell them right.
 
 **Summaries and tasks**
 
-- **Editable templates** for summaries, titles and topics, built-in ones included, with a default and an auto-summary choice.
+- **Meeting minutes by default**, in Markdown, from instructions you can edit in each profile.
 - **Multi-pass summaries** that run the prompt several times and merge the results, with live progress and a badge saying how many passes made it.
-- **Tasks.** A summary proposes the action items it heard, with who and by when. Review them in one dialog, then follow them on the **Tasks** page: yours under **Mine**, everyone else's under **Tracked**.
+- **Tasks across recordings and mail.** A summary proposes who agreed to do what and by when. A task collects every later mention in its folders, with the quote and the audio behind it, and a new mention can update its deadline, close it or hand it over once you review it.
+- **The Tasks page.** Tasks assigned to you under **Mine**, the ones you follow under **Followed**, private tasks of your own, one note per task, and merging duplicates.
 
 **Knowledge that grows**
 
-- **The Almanac.** The people and things your recordings mention (clients, projects, products, terms, places) with nicknames and facts. Import a list to start.
-- **Learn.** Reads a transcript against the Almanac and proposes speaker names, corrections of misheard names, new people and things, and facts. Nothing changes until you review it. Corrections sit beside the original text and can always be undone; summaries, search and exports read the corrected text. Optionally automatic, with a second pass that fixes other misheard words.
+- **The Almanac.** The people and things your recordings and mail mention (clients, projects, products, terms, places) with nicknames and facts. Import a list to start. Each folder shows the knowledge it feeds to transcription and Learn.
+- **Learn.** Reads a transcript or a mail against the Almanac and proposes speaker names, corrections of misheard names, new people and things, and facts, in the reviewer's language. Nothing changes until you review it. Corrections sit beside the original text and can always be undone; summaries, search and exports read the corrected text. Optionally automatic, with a second pass that fixes other misheard words.
+- **Curator tools.** A **Care** queue finds possible duplicates, conflicting facts, corrections pointing two ways and thin records in the Organization Almanac, and lists what each share added, so a curator can review it or undo it.
 
 **For teams**
 
-- **The Organization.** A shared folder tree next to each user's private one. Share a recording by filing it there; only recordings with every speaker named and every review finished can be shared. Speakers become shared people, curated by one organization account.
-- **Single sign-on** with any OpenID Connect provider, and registration that can stay closed.
-- **Ask Claude about your recordings.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, the Almanac and tasks. People sign in through your Keycloak, and their roles there decide what each one can reach.
+- **The Organization.** A shared folder tree next to each user's private one. File an item there and it is shared once its transcript and speakers are ready; what the owner confirmed in a finished Learn review becomes shared knowledge. The owner and the curators keep editing the one shared version.
+- **Sharing with people.** Share a private recording, mail or folder with individual colleagues, who accept it and file it in their own tree, without publishing it to the Organization.
+- **Organization AI providers and profiles.** Shared keys every member can use without setup, with usage and estimated cost per member and an hourly limit per member.
+- **Single sign-on** with any OpenID Connect provider, registration that can stay closed, and optionally access from Keycloak groups: who may use the app, who curates the Organization and who manages access, switched from **Settings → Access**.
+- **Ask Claude about your recordings and mail.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, mail, the Almanac and tasks, and manage tasks. People sign in through your Keycloak, and their roles there decide what each one can reach.
 
 **Your data, your way**
 
-- **Folders**, nested, with drag and drop. A recording can live in several.
+- **Folders**, nested, with drag and drop, a folder rail, recently used folders and accent-insensitive search. An item can live in several.
 - **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Chatterbox did not write is touched.
 - **Scheduled backups**, kept apart for each user and for the Organization.
-- **Automatic deletion** of old audio, transcripts, summaries or recorder originals, each on its own schedule, and erasing any one part of a recording by hand.
+- **Automatic deletion** of old audio, transcripts, summaries, recorder originals and mail, each on its own schedule, and erasing any one part of an item by hand.
 
 **Knowing what AI costs**
 
@@ -85,7 +102,7 @@ Setting these up on a self-hosted instance: [For administrators](content/docs/us
 
 ## Quick start
 
-You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionally) an OpenAI-compatible API key.
+You need Docker. A Plaud account at [plaud.ai](https://plaud.ai) and an OpenAI-compatible API key are optional: you can upload files or record meetings instead, and transcribe in the browser.
 
 Every release attaches `docker-compose.yml` and `env.example`.
 
@@ -104,7 +121,7 @@ docker compose up -d
 
 Releases are numbered `YYYY.N` (2026.1, 2026.2, ...); the `latest` image tag is the newest release.
 
-Open <http://localhost:3000/register> and create your account. The onboarding wizard handles Plaud connection, AI providers, storage, and sync preferences.
+Open <http://localhost:3000/register> and create your account. The onboarding wizard connects your Plaud account and AI providers, and, where the instance offers them, Google Calendar, the Meeting Recorder, mail and Claude.
 
 **Upgrade:** `docker compose pull && docker compose up -d`. Migrations run on container start.
 
@@ -125,13 +142,14 @@ If you signed up to Plaud with **Continue with Google** or **Continue with Apple
 The **[user guide](content/docs/user-guide/index.md)** in this repository covers every screen, including the extended features. Pages specific to this repository:
 
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
-- [The Organization](content/docs/self-hosting/organization.mdx)
+- [The Organization](content/docs/self-hosting/organization.mdx); for users: [The Organization](content/docs/user-guide/organization.md) and [Sharing with people](content/docs/user-guide/sharing-with-people.md)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
+- [Inbound mail](content/docs/self-hosting/mail.mdx); for users: [Mail](content/docs/user-guide/mail.md)
 - [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Chatterbox in Claude](content/docs/user-guide/claude.md)
-- [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
+- [Google Drive exports, Calendar and Meet](content/docs/self-hosting/google-drive.mdx)
 - [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
-- [Meeting recorder (meetrec)](cmd/meetrec/README.md)
-- [Chrome meeting recorder extension and its privacy policy](extensions/recorder/README.md)
+- [Meeting Recorder for Chrome](content/docs/guides/meeting-recorder.mdx), its [extension README and privacy policy](extensions/recorder/README.md)
+- [Meeting recorder for Linux (meetrec)](cmd/meetrec/README.md)
 
 Every instance also serves these pages at `/docs`. Direct links in this repository:
 

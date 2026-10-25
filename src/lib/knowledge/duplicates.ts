@@ -15,6 +15,7 @@ import {
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { requireCareCurator } from "@/lib/knowledge/care-access";
 import {
     MAX_DUPLICATE_PAGE_SIZE,
     MAX_DUPLICATE_RECORDS,
@@ -28,7 +29,7 @@ import {
 } from "@/lib/knowledge/duplicate-score";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
-import { getOrgUserId } from "@/lib/org/config";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 
 export { MAX_DUPLICATE_PAGE_SIZE, MAX_DUPLICATE_RECORDS };
 
@@ -50,11 +51,13 @@ export async function requireDuplicateCurator(
     actorId: string,
 ): Promise<string> {
     if (!(await userCuratesOrganizationNow(actorId))) {
-        throw new AppError(
-            ErrorCode.FORBIDDEN,
-            "Only an Organization curator can curate duplicates",
-            403,
-        );
+        const organization = await getOrgUserId();
+        if (actorId !== organization || !isOrgScopeEnabled())
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Only an Organization curator can curate duplicates",
+                403,
+            );
     }
     const scope = await getOrgUserId();
     if (!scope)
@@ -459,4 +462,29 @@ export async function dismissDuplicate(
             })
             .onConflictDoNothing();
     });
+}
+
+/** All open pairs from the same bounded cached scans used by the duplicate queue. */
+export async function careDuplicateCandidates(
+    actorId: string,
+): Promise<DuplicateCandidate[]> {
+    const scope = await requireCareCurator(actorId);
+    const result: DuplicateCandidate[] = [];
+    for (const kind of ["person", "entity"] as const) {
+        const scan = await scanKind(scope, kind);
+        const dismissed = new Set(
+            (await duplicateDismissals(scope, kind)).map((pair) =>
+                duplicatePairKey(pair.left, pair.right),
+            ),
+        );
+        result.push(
+            ...scan.candidates.filter(
+                (pair) =>
+                    !dismissed.has(
+                        duplicatePairKey(pair.left.id, pair.right.id),
+                    ),
+            ),
+        );
+    }
+    return result;
 }

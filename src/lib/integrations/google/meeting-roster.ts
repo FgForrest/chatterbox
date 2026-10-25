@@ -2,21 +2,31 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings } from "@/db/schema";
+import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import type { LearnSpeakerCandidate } from "@/lib/learn/run-fallback";
+import { sharingOrgUserId } from "@/lib/sharing/writer";
 import {
     type CalendarEventCandidate,
     listCalendarEventsForRecording,
 } from "./calendar-events";
+import {
+    matchRosterPeople,
+    type RosterAttendeeInput,
+} from "./match-roster-people";
 import { getMeetSpeakerCandidates } from "./meet-speaker-candidates";
 import { attendeeNameKey } from "./meeting-roster-names";
 
 /** A named invitee or participant, without contact or biometric data. */
-export type MeetingAttendee = LearnSpeakerCandidate;
+export type MeetingAttendee = LearnSpeakerCandidate & {
+    personId?: string;
+    matchedByEmail?: true;
+};
 
 /** The selected event and its deduplicated Calendar and Meet names. */
 export interface MeetingRoster {
     eventId: string;
     attendees: MeetingAttendee[];
+    dropped?: Partial<Record<"ambiguousName" | "conflicting", number>>;
 }
 
 /** Selects an explicit event or a sufficiently overlapping, unambiguous event. */
@@ -70,6 +80,7 @@ export function selectMeetingEvent(
 export async function resolveMeetingRoster(input: {
     ownerUserId: string;
     itemId: string;
+    shared?: boolean;
     calendarEventId?: string;
     fetchImpl?: typeof fetch;
 }): Promise<MeetingRoster | null> {
@@ -113,26 +124,87 @@ export async function resolveMeetingRoster(input: {
             },
             fetchImpl: input.fetchImpl,
         });
-        const names = new Map<string, MeetingAttendee>();
-        for (const attendee of [
-            ...event.attendees.map(({ name }) => ({
+        const names = new Map<string, RosterAttendeeInput>();
+        const attendees: RosterAttendeeInput[] = [
+            ...event.attendees.map(({ name, email }) => ({
                 name,
                 source: "calendar" as const,
+                emails: email ? [email] : [],
             })),
             ...joined,
-        ]) {
-            const key = attendeeNameKey(attendee.name);
+        ];
+        for (const attendee of attendees) {
+            const key =
+                attendeeNameKey(attendee.name) ||
+                (attendee.emails?.[0]
+                    ? `email:${attendee.emails[0].toLowerCase()}`
+                    : "");
             const previous = names.get(key);
             if (key)
                 names.set(
                     key,
                     attendee.source === "meet" &&
                         (previous?.source === "calendar" || previous?.invited)
-                        ? { ...attendee, invited: true }
-                        : attendee,
+                        ? {
+                              ...attendee,
+                              invited: true,
+                              emails: [
+                                  ...(previous?.emails ?? []),
+                                  ...(attendee.emails ?? []),
+                              ],
+                          }
+                        : {
+                              ...attendee,
+                              emails: [
+                                  ...(previous?.emails ?? []),
+                                  ...(attendee.emails ?? []),
+                              ],
+                          },
                 );
         }
-        return { eventId: event.id, attendees: [...names.values()] };
+        const raw = [...names.values()];
+        if (!raw.some((attendee) => attendee.emails?.length)) {
+            return {
+                eventId: event.id,
+                attendees: raw.map(({ name, source, invited }) => ({
+                    name,
+                    source,
+                    ...(invited ? { invited } : {}),
+                })),
+            };
+        }
+        const shared = input.shared === true;
+        const view = await knowledgeView({
+            kind: "recording",
+            ownerUserId: input.ownerUserId,
+            shared,
+        });
+        const people = new Map(
+            view.items.flatMap((item) =>
+                item.kind === "person"
+                    ? [
+                          [
+                              item.id,
+                              {
+                                  name: item.name,
+                                  aliases: item.names
+                                      .filter((name) => name.kind === "alias")
+                                      .map((name) => name.text),
+                              },
+                          ] as const,
+                      ]
+                    : [],
+            ),
+        );
+        const matched = await matchRosterPeople({
+            ownerUserId: input.ownerUserId,
+            scopeUserId: shared
+                ? ((await sharingOrgUserId()) ?? input.ownerUserId)
+                : input.ownerUserId,
+            people,
+            attendees: raw,
+        });
+        return { eventId: event.id, ...matched };
     } catch {
         return null;
     }

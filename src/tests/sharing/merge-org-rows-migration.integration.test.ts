@@ -7,7 +7,7 @@
  * create scratch databases on.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -22,6 +22,7 @@ import {
     users,
 } from "@/db/schema";
 import { insertRecordings } from "@/tests/integration/items";
+import { migrationsThrough } from "@/tests/integration/migrations";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -41,6 +42,7 @@ const ORG = "user-org";
 
 describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
+    let historicalMigrations = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -48,14 +50,19 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
     }
 
     beforeAll(async () => {
+        // Migration 0066 needs the legacy columns removed after 0140.
+        historicalMigrations = migrationsThrough(140);
         database = await createMigratedTestDatabase(
             testDatabaseUrl ?? "",
             "merge_org_rows",
+            historicalMigrations,
         );
     }, 120_000);
 
     afterAll(async () => {
         await database?.dispose();
+        if (historicalMigrations)
+            rmSync(historicalMigrations, { recursive: true, force: true });
     }, 30_000);
 
     async function recording(id: string) {

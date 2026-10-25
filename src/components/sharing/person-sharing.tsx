@@ -1,13 +1,6 @@
 "use client";
 
-import {
-    FolderInput,
-    FolderOutput,
-    Inbox,
-    Link,
-    Lock,
-    UserPlus,
-} from "lucide-react";
+import { FolderInput, Inbox, Link, Lock, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import {
@@ -21,6 +14,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
+import {
+    closeCornerNotice,
+    showCornerNotice,
+} from "@/components/dashboard/corner-notice";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
     changeFolderShareRequest,
@@ -39,6 +36,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
 import type { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
@@ -461,45 +459,42 @@ export function OwnerSharingActions({
     );
     return (
         <>
-            {shared &&
-                shares !== null &&
-                shares.length > 0 &&
-                active.length === 0 && (
+            {(!shared ||
+                (shares !== null &&
+                    shares.length > 0 &&
+                    active.length === 0)) && (
+                <ActionTooltip
+                    label={shared ? i18n("Manage sharing") : i18n("Share")}
+                >
                     <Button
                         variant="ghost"
-                        size="sm"
-                        className="text-person-share"
+                        size="icon-sm"
+                        className="text-person-share hover:text-person-share"
+                        aria-label={
+                            shared ? i18n("Manage sharing") : i18n("Share")
+                        }
                         onClick={() => setDialogOpen(true)}
                     >
-                        <FolderOutput className="size-4" />
-                        {i18n("Manage sharing")}
+                        <UserPlus className="size-4" />
                     </Button>
-                )}
-            {!shared && (
-                <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-person-share"
-                    onClick={() => setDialogOpen(true)}
-                >
-                    <UserPlus className="size-4" />
-                    {i18n("Share")}
-                </Button>
+                </ActionTooltip>
             )}
             {shared ? (
                 children
             ) : (
                 <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-                    <PopoverTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={i18n("Copy link")}
-                            onClick={() => void load()}
-                        >
-                            <Link className="size-4" />
-                        </Button>
-                    </PopoverTrigger>
+                    <ActionTooltip label={i18n("Copy link")}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={i18n("Copy link")}
+                                onClick={() => void load()}
+                            >
+                                <Link className="size-4" />
+                            </Button>
+                        </PopoverTrigger>
+                    </ActionTooltip>
                     <PopoverContent
                         title={i18n("Link access")}
                         className="w-80 space-y-3"
@@ -577,7 +572,39 @@ export function OwnerSharingActions({
     );
 }
 
-/** Invitation count, waiting list, folder acceptance and arrival notice. */
+const INVITATION_NOTICES_SEEN_KEY = "chatterbox.invitation-notices-seen";
+const INVITATION_FALLBACK_INTERVAL_MS = 60_000;
+const INVITATION_CONNECTED_INTERVAL_MS = 5 * 60_000;
+
+/** Invitations whose notice this browser has already shown and closed. */
+function invitationNoticesSeen(): Set<string> {
+    try {
+        const ids: unknown = JSON.parse(
+            window.localStorage.getItem(INVITATION_NOTICES_SEEN_KEY) ?? "[]",
+        );
+        return new Set(
+            Array.isArray(ids)
+                ? ids.filter((id): id is string => typeof id === "string")
+                : [],
+        );
+    } catch {
+        return new Set();
+    }
+}
+
+function markInvitationNoticesSeen(invitations: Invitation[]) {
+    try {
+        window.localStorage.setItem(
+            INVITATION_NOTICES_SEEN_KEY,
+            JSON.stringify(invitations.map((item) => item.id)),
+        );
+    } catch {}
+}
+
+/**
+ * Invitation count, waiting list, folder acceptance and arrival notice.
+ * Only the instance with notifications watches for new invitations; others follow the page refresh it triggers.
+ */
 export function PersonInvitations({
     initialInvitations,
     folders,
@@ -605,60 +632,104 @@ export function PersonInvitations({
     useEffect(() => {
         setInvitations(initialInvitations);
     }, [initialInvitations]);
+    const openList = useCallback((list: Invitation[]) => {
+        markInvitationNoticesSeen(list);
+        closeCornerNotice("invitation");
+        setOpen(true);
+    }, []);
+    const notify = useCallback(
+        (list: Invitation[], newest: Invitation) =>
+            showCornerNotice("invitation", () => (
+                <ArrivalNotice
+                    recording={{
+                        id: newest.itemId,
+                        kind: newest.kind === "folder" ? "audio" : newest.kind,
+                        filename: newest.title,
+                        startTime: String(newest.invitedAt),
+                        duration: 0,
+                        filesize: 0,
+                        deviceSn: "",
+                        ownerName: newest.ownerName,
+                    }}
+                    invitation
+                    folderInvitation={newest.kind === "folder"}
+                    more={list.length - 1}
+                    dateTimeFormat="relative"
+                    onOpen={() => openList(list)}
+                    onClose={() => {
+                        markInvitationNoticesSeen(list);
+                        closeCornerNotice("invitation");
+                    }}
+                />
+            )),
+        [openList],
+    );
     useEffect(() => {
-        if (!enabled) return;
-        return subscribeEvents((event) => {
-            if (event.type !== "share") return;
-            void fetch("/api/shares")
-                .then(async (response) => {
-                    if (!response.ok) return;
-                    const data = (await response.json()) as {
-                        invitations: Invitation[];
-                    };
-                    const latest = data.invitations
-                        .filter((item) => !known.current.has(item.id))
-                        .at(-1);
-                    known.current = new Set(
-                        data.invitations.map((item) => item.id),
-                    );
-                    setInvitations(data.invitations);
-                    if (latest && notifications)
-                        toast.custom(
-                            () => (
-                                <ArrivalNotice
-                                    recording={{
-                                        id: latest.itemId,
-                                        kind:
-                                            latest.kind === "folder"
-                                                ? "audio"
-                                                : latest.kind,
-                                        filename: latest.title,
-                                        startTime: String(latest.invitedAt),
-                                        duration: 0,
-                                        filesize: 0,
-                                        deviceSn: "",
-                                        ownerName: latest.ownerName,
-                                    }}
-                                    invitation
-                                    folderInvitation={latest.kind === "folder"}
-                                    more={data.invitations.length - 1}
-                                    dateTimeFormat="relative"
-                                    onOpen={() => {
-                                        setOpen(true);
-                                        toast.dismiss("share-invitation");
-                                    }}
-                                    onClose={() =>
-                                        toast.dismiss("share-invitation")
-                                    }
-                                />
-                            ),
-                            { id: "share-invitation", duration: Infinity },
-                        );
-                    if (notifications) refresh();
-                })
-                .catch(() => {});
-        });
-    }, [enabled, refresh, notifications]);
+        if (!enabled || !notifications) return;
+        const seen = invitationNoticesSeen();
+        const newest = initialInvitations
+            .filter((item) => !seen.has(item.id))
+            .at(-1);
+        if (newest) notify(initialInvitations, newest);
+    }, [enabled, notifications, initialInvitations, notify]);
+    useEffect(() => {
+        if (!enabled || !notifications) return;
+        return () => closeCornerNotice("invitation");
+    }, [enabled, notifications]);
+    useEffect(() => {
+        if (!enabled || !notifications) return;
+        let active = true;
+        let pollTimer: ReturnType<typeof setInterval> | undefined;
+        let pollInterval = 0;
+        const check = async (pushed: boolean) => {
+            try {
+                const response = await fetch("/api/shares");
+                if (!response.ok || !active) return;
+                const data = (await response.json()) as {
+                    invitations: Invitation[];
+                };
+                if (!active) return;
+                const arrived = data.invitations.filter(
+                    (item) => !known.current.has(item.id),
+                );
+                const changed =
+                    arrived.length > 0 ||
+                    data.invitations.length !== known.current.size;
+                known.current = new Set(
+                    data.invitations.map((item) => item.id),
+                );
+                setInvitations(data.invitations);
+                const newest = arrived.at(-1);
+                if (newest) notify(data.invitations, newest);
+                if (pushed || changed) refresh();
+            } catch {}
+        };
+        const poll = () => {
+            if (document.visibilityState === "visible") void check(false);
+        };
+        const unsubscribe = subscribeEvents(
+            (event) => {
+                if (event.type === "share") void check(true);
+            },
+            (state) => {
+                const interval =
+                    state === "open"
+                        ? INVITATION_CONNECTED_INTERVAL_MS
+                        : INVITATION_FALLBACK_INTERVAL_MS;
+                if (interval === pollInterval) return;
+                pollInterval = interval;
+                clearInterval(pollTimer);
+                pollTimer = setInterval(poll, interval);
+            },
+        );
+        document.addEventListener("visibilitychange", poll);
+        return () => {
+            active = false;
+            unsubscribe();
+            clearInterval(pollTimer);
+            document.removeEventListener("visibilitychange", poll);
+        };
+    }, [enabled, notifications, notify, refresh]);
     const respond = async (
         invitation: Invitation,
         action: "accept" | "decline",
@@ -699,20 +770,21 @@ export function PersonInvitations({
     if (!enabled) return null;
     return (
         <>
-            <Button
-                variant="ghost"
-                className="w-full justify-start gap-2 text-person-share"
-                aria-label={i18n("Invitations ({count})", {
-                    count: String(invitations.length),
-                })}
-                onClick={() => setOpen(true)}
-            >
-                <Inbox className="size-4" />
-                <span>{i18n("Invitations")}</span>
-                <span className="ml-auto rounded-full bg-person-share px-2 text-xs text-white">
-                    {invitations.length}
-                </span>
-            </Button>
+            {(invitations.length > 0 || open) && (
+                <Button
+                    className="w-full justify-start gap-2 bg-person-share text-background hover:bg-person-share/90"
+                    aria-label={i18n("Invitations ({count})", {
+                        count: String(invitations.length),
+                    })}
+                    onClick={() => openList(invitations)}
+                >
+                    <Inbox className="size-4" />
+                    <span>{i18n("Invitations")}</span>
+                    <span className="ml-auto rounded-full bg-background px-2 text-xs font-semibold tabular-nums text-person-share">
+                        {invitations.length}
+                    </span>
+                </Button>
+            )}
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent>
                     <DialogTitle>{i18n("Invitations")}</DialogTitle>

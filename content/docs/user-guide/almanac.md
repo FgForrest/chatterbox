@@ -68,9 +68,24 @@ Organization curators use **Almanac → Care → Possible duplicates** to find t
 
 Scans check the newest 2,000 live records per kind and their closest matches. Duplicates involving an older record outside this cap are not suggested, even when the other record is new. Reviewing or dismissing pairs does not move the scan past this cap. A notice identifies a limited scan. Shared items and open tasks are shown in the comparison; colleagues' private items remain private.
 
+## Care: sharing and other problems
+
+The **Care** badge counts open duplicate pairs, unreviewed share groups and the other open problems. Scans are cached for up to five minutes and checked against changes to the Organization Almanac. Other problem scans check at most 2,000 newest records of each kind, 32,000 current facts and 16,000 heard-as forms. Problems outside these bounds may be absent. Thin detection checks a bounded sample and skips records with more than 64 uses.
+
+- **New from sharing** groups the last 14 days of additions by item, sharer and time. Only the item's current Organization view is shown; a withdrawn item's private title is hidden. **Review record** opens an addition's record; **Mark reviewed** removes the group from the badge. **Delete addition** and **Undo all additions from this share** remove untouched additions. Undo leaves the item shared. Edited or merged records, later confirmations, later share use and dependencies from other sources are kept, with reasons. Retrying undo returns the same outcome. Shares made before this upgrade have no provenance.
+- **Conflicting facts** finds two current values of a relation that allows one value. Choose **Keep** next to the correct value. The others move to history with their evidence. **Dismiss** remembers this exact problem for the Organization.
+- **Corrections pointing two ways** finds a heard-as form targeting different Organization records. Keep the correct target to remove corrections to the others, or dismiss.
+- **Thin records** have exactly one item mention, no facts in either direction and no use or edit in 120 days. **Delete** keeps the record if deletion could touch private knowledge or another source. Records with private dependencies, assigned tasks or merge history are excluded; **Keep** dismisses the problem. Missing e-mail is never a problem type.
+
+A dismissed problem returns if its underlying data changes. Organization archives include curator dismissals in `knowledge/care-decisions.json`; an importer restores them after the records, facts and usage, matching their content and remapping IDs. Share provenance and share undo history are not included. After restoration, imported knowledge remains, but old shares cannot be undone through Care.
+
+Restore requests to `/api/knowledge/care/restore` accept at most 32 MiB of UTF-8 JSON, including `archive` and `idMap`. For larger archives, split `duplicates` and `problems` into subsets, each wrapped as a version 1 archive with `provenance: "not-included"`, and send them sequentially. Include only the ID mappings needed by each subset. A single decision at the schema limits fits within this bound. Each request commits independently; retries are idempotent, and response counts apply to that request. A 413 response commits nothing: split that subset and retry.
+
 ## Folder knowledge
 
 Open a folder on the dashboard and choose **Knowledge** beside its name. Everyone who can see the folder can read this view. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
+
+Curators also see open-problem flags on Organization records, corrections and facts. Expand a flag to apply the same fixes as in Care, directly in the folder. Other viewers keep the read-only view.
 
 **What the models receive** reuses the processing pipeline:
 

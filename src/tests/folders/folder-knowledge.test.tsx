@@ -153,7 +153,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         onSelect,
     }: ComponentProps<typeof RecordingListType>) => (
         <section aria-label="Item list">
-            {header}
+            {header?.(recordings.length)}
             {navigationContent}
             {recordings.map((recording) => (
                 <button

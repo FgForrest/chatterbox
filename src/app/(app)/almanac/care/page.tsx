@@ -2,14 +2,14 @@ import { notFound } from "next/navigation";
 import { getExtracted } from "next-intl/server";
 import { CareQueue } from "@/components/almanac/care-queue";
 import { requireAuth } from "@/lib/auth-server";
-import { userCuratesOrganizationNow } from "@/lib/authz/curator";
+import { canOpenCare } from "@/lib/knowledge/care-access";
 import { listDuplicateCandidates } from "@/lib/knowledge/duplicates";
 
 export const dynamic = "force-dynamic";
 
 export default async function CarePage() {
     const session = await requireAuth();
-    if (!(await userCuratesOrganizationNow(session.user.id))) notFound();
+    if (!(await canOpenCare(session.user.id))) notFound();
     const [initial, i18n] = await Promise.all([
         listDuplicateCandidates(session.user.id, { kind: "person" }),
         getExtracted(),
