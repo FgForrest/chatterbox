@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import type { CommandPalette as CommandPaletteComponent } from "@/components/dashboard/command-palette";
 import type { FolderSettingsPanel as FolderSettingsPanelComponent } from "@/components/dashboard/folder-settings-panel";
+import type { LibraryLocationHeader as LibraryLocationHeaderComponent } from "@/components/dashboard/library-location-header";
 import type { RecordingListHandle } from "@/components/dashboard/recording-list";
 import type { Workstation as WorkstationComponent } from "@/components/dashboard/workstation";
 import type { UploadCompletionAction } from "@/hooks/use-upload-queue";
@@ -148,19 +149,17 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         locationKey,
         inFlightActions,
         emptyState,
-        onFolderSettings,
     }: {
         ref?: Ref<RecordingListHandle>;
         recordings: Recording[];
         currentRecording: Recording | null;
         onSelect: (recording: Recording) => void;
         onDelete: (recording: Recording) => Promise<void>;
-        header?: React.ReactNode;
+        header?: (shownCount: number) => React.ReactNode;
         navigationContent?: React.ReactNode;
         locationKey: string;
         inFlightActions: Map<string, "transcribing" | "summarizing">;
         emptyState?: React.ReactNode;
-        onFolderSettings?: () => void;
     }) => {
         useImperativeHandle(ref, () => ({
             next: () =>
@@ -193,12 +192,7 @@ vi.mock("@/components/dashboard/recording-list", () => ({
                 <span data-testid="list-actions">
                     {JSON.stringify([...inFlightActions])}
                 </span>
-                {onFolderSettings && (
-                    <button type="button" onClick={onFolderSettings}>
-                        Toolbar folder settings
-                    </button>
-                )}
-                {header}
+                {header?.(recordings.length)}
                 {navigationContent}
                 {recordings.map((recording) => (
                     <div key={recording.id}>
@@ -271,7 +265,18 @@ vi.mock("@/components/dashboard/folder-tree", () => ({
     ),
 }));
 vi.mock("@/components/dashboard/library-location-header", () => ({
-    LibraryLocationHeader: () => null,
+    LibraryLocationHeader: ({
+        variant,
+        part,
+        folder,
+        shownCount,
+        onSettings,
+    }: ComponentProps<typeof LibraryLocationHeaderComponent>) =>
+        variant === "rail" && part === "header" && folder ? (
+            <button type="button" onClick={() => onSettings(folder)}>
+                {`Header settings, ${shownCount} shown`}
+            </button>
+        ) : null,
 }));
 vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
     WorkstationDetailPane: ({
@@ -1540,34 +1545,12 @@ describe("Workstation folder locations", () => {
             ],
         },
     };
-    it("offers folder settings for an own folder but not for a received attachment", () => {
-        const attachment = {
-            ...personalChildFolder,
-            id: "attached",
-            name: "Shared research",
-            receivedFolder: {
-                shareId: "share",
-                shareVersion: 1,
-                ownerName: "Alex Morgan",
-                originalName: "Research",
-            },
-        };
-        const props = {
-            ...folderProps,
-            initialFolderOrganization: {
-                folders: [rootFolder, personalChildFolder, attachment],
-                assignments: [],
-            },
-        };
-        const settings = { name: "Toolbar folder settings" };
-        window.history.replaceState({}, "", "/dashboard?folder=attached");
-        render(<Workstation {...props} />);
-        expect(screen.getByTestId("location").textContent).toBe("attached");
-        expect(screen.queryByRole("button", settings)).toBeNull();
-        cleanup();
+    it("gives the location header the shown count and opens its folder's settings", () => {
         window.history.replaceState({}, "", "/dashboard?folder=personal-child");
-        render(<Workstation {...props} />);
-        fireEvent.click(screen.getByRole("button", settings));
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Header settings, 2 shown" }),
+        );
         expect(mocks.settingsProps?.folder.id).toBe("personal-child");
     });
     it.each([

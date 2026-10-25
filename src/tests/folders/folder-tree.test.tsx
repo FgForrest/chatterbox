@@ -405,7 +405,6 @@ describe("folder navigation", () => {
                 onQueryChange={vi.fn()}
                 onEnterSelectFirst={vi.fn()}
                 searchRef={{ current: null }}
-                filteredCount={2}
                 channelCounts={{ audio: 2, mail: 0 }}
                 sortOrder="newest"
                 onSortOrderChange={vi.fn()}

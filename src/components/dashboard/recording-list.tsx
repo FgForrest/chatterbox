@@ -64,9 +64,9 @@ interface RecordingListProps {
     initialKindFilter?: KindFilter;
     initialChunkSize: number;
     locationKey?: string;
-    header?: React.ReactNode;
+    /** The location header, given how many items the list shows. */
+    header?: (shownCount: number) => React.ReactNode;
     navigationContent?: React.ReactNode;
-    onFolderSettings?: () => void;
     canCurate?: boolean;
     isOrgAccount?: boolean;
     onFolderCreated?: (folder: RecordingFolder) => void;
@@ -144,7 +144,6 @@ export function RecordingList({
     locationKey = "recent",
     header,
     navigationContent,
-    onFolderSettings,
     canCurate,
     isOrgAccount = false,
     onFolderCreated,
@@ -533,17 +532,14 @@ export function RecordingList({
             className="flex h-full min-h-0 flex-col overflow-hidden"
         >
             <div className="shrink-0">
-                {header}
+                {header?.(filtered.length)}
                 <RecordingListToolbar
-                    includesSubfolders={!!folder}
-                    onFolderSettings={onFolderSettings}
                     query={query}
                     onQueryChange={setQuery}
                     onEnterSelectFirst={() => {
                         if (filtered.length > 0) onSelect(filtered[0]);
                     }}
                     searchRef={searchRef}
-                    filteredCount={filtered.length}
                     channelCounts={channelCounts}
                     sortOrder={sortOrder}
                     onSortOrderChange={setSortOrderPersisted}

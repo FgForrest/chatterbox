@@ -23,7 +23,9 @@ vi.mock("next-intl", () => ({
             if (message === "{count, plural, one {# item} other {# items}}") {
                 return count === 1 ? "1 item" : `${count} items`;
             }
-            return message.replace("{count}", String(values?.count ?? ""));
+            return message
+                .replace("{count}", String(values?.count ?? ""))
+                .replace("{state}", String(values?.state ?? ""));
         },
     useLocale: () => "en",
 }));
@@ -87,11 +89,13 @@ function renderList({
             initialSortOrder="newest"
             initialKindFilter="all"
             initialChunkSize={50}
+            header={(shown) => <p>{`Header count ${shown}`}</p>}
         />,
     );
 }
 
-function openMenu(name = "All · Newest") {
+function openMenu(state = "All · Newest") {
+    const name = `Filter and sort: ${state}`;
     fireEvent.pointerDown(screen.getByRole("button", { name }), {
         button: 0,
         ctrlKey: false,
@@ -108,15 +112,33 @@ afterEach(() => {
 });
 
 describe("Chatter list toolbar", () => {
-    it("shows one item count and names the channel and sort state", () => {
+    it("hands the count to the header and names the state on an icon-only menu", () => {
         vi.stubGlobal("fetch", vi.fn());
         renderList();
 
-        expect(screen.getByText("2 items")).toBeTruthy();
-        expect(screen.queryByText(/2 of 2 2/)).toBeNull();
-        expect(
-            screen.getByRole("button", { name: "All · Newest" }),
-        ).toBeTruthy();
+        expect(screen.getByText("Header count 2")).toBeTruthy();
+        expect(screen.queryByText(/items/)).toBeNull();
+        const menu = screen.getByRole("button", {
+            name: "Filter and sort: All · Newest",
+        });
+        expect(menu.textContent).toBe("");
+        expect(menu.title).toBe("Filter and sort: All · Newest");
+    });
+
+    it("labels the menu with what it filters out", () => {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({})));
+        renderList();
+        openMenu();
+        fireEvent.click(
+            screen.getByRole("menuitemcheckbox", { name: "Recordings1" }),
+        );
+        fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+        const menu = screen.getByRole("button", {
+            name: "Filter and sort: Mail · Newest",
+        });
+        expect(menu.textContent).toBe("Mail");
+        expect(screen.getByText("Header count 1")).toBeTruthy();
     });
 
     it("keeps one channel selected and persists each valid change", async () => {
@@ -129,7 +151,9 @@ describe("Chatter list toolbar", () => {
             screen.getByRole("menuitemcheckbox", { name: "Mail1" }),
         );
         expect(
-            screen.getByRole("menu", { name: "Recordings · Newest" }),
+            screen.getByRole("menu", {
+                name: "Filter and sort: Recordings · Newest",
+            }),
         ).toBeTruthy();
         expect(
             screen
@@ -139,7 +163,7 @@ describe("Chatter list toolbar", () => {
         fireEvent.click(
             screen.getByRole("menuitemcheckbox", { name: "Recordings1" }),
         );
-        expect(screen.getByText("1 item")).toBeTruthy();
+        expect(screen.getByText("Header count 1")).toBeTruthy();
 
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
@@ -204,7 +228,9 @@ describe("Chatter list toolbar", () => {
         openMenu();
         fireEvent.click(screen.getByRole("menuitemradio", { name: "Name" }));
 
-        expect(screen.getByRole("button", { name: "All · Name" })).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Filter and sort: All · Name" }),
+        ).toBeTruthy();
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/settings/user",

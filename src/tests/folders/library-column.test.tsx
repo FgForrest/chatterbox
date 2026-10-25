@@ -591,12 +591,15 @@ describe("walk-in navigation", () => {
 });
 
 describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
-    it("marks the same current location and navigates each breadcrumb", () => {
+    it("marks the same current location and opens its settings", () => {
         render(
             <LibraryLocationHeader
                 {...headerProps}
                 folder={nested}
                 variant={variant}
+                part="header"
+                shownCount={3}
+                onKnowledge={vi.fn()}
             />,
         );
         const nav = screen.getByRole("navigation", { name: "Folder path" });
@@ -604,11 +607,90 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
             name: "Folder settings for Nested",
         });
         expect(current.getAttribute("aria-current")).toBe("location");
-        fireEvent.click(within(nav).getByRole("button", { name: "Private" }));
-        expect(headerProps.onNavigate).toHaveBeenCalledWith(root);
         fireEvent.click(current);
         expect(headerProps.onSettings).toHaveBeenCalledWith(nested);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Folder settings" }),
+        );
+        expect(headerProps.onSettings).toHaveBeenCalledTimes(2);
+        expect(
+            screen.getByRole("button", { name: "Knowledge" }).textContent,
+        ).toBe("");
+        expect(screen.getByText("3 items, including subfolders")).toBeTruthy();
     });
+
+    it("hides the count of an empty list", () => {
+        render(
+            <LibraryLocationHeader
+                {...headerProps}
+                folder={nested}
+                variant={variant}
+                part="header"
+                shownCount={0}
+            />,
+        );
+        expect(screen.queryByText(/including subfolders/)).toBeNull();
+    });
+});
+
+it("shows the breadcrumb without the rail and only the folder beside it", () => {
+    const walk = render(
+        <LibraryLocationHeader
+            {...headerProps}
+            folder={nested}
+            variant="walk"
+            part="header"
+        />,
+    );
+    const walkPath = screen.getByRole("navigation", { name: "Folder path" });
+    fireEvent.click(within(walkPath).getByRole("button", { name: "Private" }));
+    expect(headerProps.onNavigate).toHaveBeenCalledWith(root);
+    walk.unmount();
+
+    render(
+        <LibraryLocationHeader
+            {...headerProps}
+            folder={nested}
+            variant="rail"
+            part="header"
+        />,
+    );
+    const railPath = screen.getByRole("navigation", { name: "Folder path" });
+    expect(within(railPath).getAllByRole("button")).toHaveLength(1);
+    expect(railPath.title).toBe("Private › Folder 0 › Nested");
+});
+
+it("offers no folder settings for a received folder", () => {
+    const received: RecordingFolder = {
+        ...nested,
+        id: "received",
+        name: "Shared research",
+        receivedFolder: {
+            shareId: "share",
+            shareVersion: 1,
+            ownerName: "Alex Morgan",
+            originalName: "Research",
+        },
+    };
+    render(
+        <LibraryLocationHeader
+            {...headerProps}
+            organization={{ folders: [...folders, received], assignments }}
+            folder={received}
+            variant="rail"
+            part="header"
+            onKnowledge={vi.fn()}
+        />,
+    );
+    expect(
+        screen.queryByRole("button", { name: "Folder settings" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Knowledge" })).toBeNull();
+    expect(
+        screen.getByRole("button", {
+            name: "Folder actions for Shared research",
+        }),
+    ).toBeTruthy();
 });
 
 describe("library item list", () => {
@@ -715,7 +797,7 @@ describe("library item list", () => {
                     initialDateTimeFormat="relative"
                     initialSortOrder="newest"
                     initialChunkSize={2}
-                    header={<span>Location header</span>}
+                    header={(shown) => <span>Location header {shown}</span>}
                     navigationContent={<span>Folder tiles</span>}
                 />
             </ConfirmDialogProvider>,
@@ -724,7 +806,7 @@ describe("library item list", () => {
         const scroller = document.querySelector(
             "[data-library-scroll]",
         ) as HTMLElement;
-        expect(scroller.contains(screen.getByText("Location header"))).toBe(
+        expect(scroller.contains(screen.getByText("Location header 12"))).toBe(
             false,
         );
         expect(
