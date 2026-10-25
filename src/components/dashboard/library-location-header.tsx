@@ -21,6 +21,7 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
@@ -211,18 +212,20 @@ export function LibraryLocationHeader({
             {part !== "tiles" && (
                 <div className="flex items-center gap-1">
                     {variant === "walk" && folder && (
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={i18n("Back to parent folder")}
-                            onClick={() =>
-                                onNavigate(
-                                    byId.get(folder.parentId ?? "") ?? null,
-                                )
-                            }
-                        >
-                            <ArrowLeft className="size-4" />
-                        </Button>
+                        <ActionTooltip label={i18n("Back to parent folder")}>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={i18n("Back to parent folder")}
+                                onClick={() =>
+                                    onNavigate(
+                                        byId.get(folder.parentId ?? "") ?? null,
+                                    )
+                                }
+                            >
+                                <ArrowLeft className="size-4" />
+                            </Button>
+                        </ActionTooltip>
                     )}
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                         <nav
@@ -312,18 +315,24 @@ export function LibraryLocationHeader({
                     {folder?.receivedFolder && (
                         <>
                             <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={i18n(
-                                            "Folder actions for {folder}",
-                                            { folder: folder.name },
-                                        )}
-                                    >
-                                        <MoreHorizontal className="size-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
+                                <ActionTooltip
+                                    label={i18n("Folder actions for {folder}", {
+                                        folder: folder.name,
+                                    })}
+                                >
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            aria-label={i18n(
+                                                "Folder actions for {folder}",
+                                                { folder: folder.name },
+                                            )}
+                                        >
+                                            <MoreHorizontal className="size-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                </ActionTooltip>
                                 <DropdownMenuContent>
                                     <ReceivedFolderMenu
                                         folder={folder}
@@ -350,44 +359,48 @@ export function LibraryLocationHeader({
                         </>
                     )}
                     {folder && !folder.receivedFolder && onKnowledge && (
-                        <Button
-                            variant="outline"
-                            size="icon-sm"
-                            aria-pressed={knowledgeOpen}
-                            aria-label={i18n("Knowledge")}
-                            title={i18n("Knowledge")}
-                            className={
-                                folder.scope === "org"
-                                    ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
-                                    : "shrink-0"
-                            }
-                            onClick={() => onKnowledge(folder)}
-                        >
-                            <BookOpen className="size-4" />
-                        </Button>
+                        <ActionTooltip label={i18n("Knowledge")}>
+                            <Button
+                                variant="outline"
+                                size="icon-sm"
+                                aria-pressed={knowledgeOpen}
+                                aria-label={i18n("Knowledge")}
+                                className={
+                                    folder.scope === "org"
+                                        ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
+                                        : "shrink-0"
+                                }
+                                onClick={() => onKnowledge(folder)}
+                            >
+                                <BookOpen className="size-4" />
+                            </Button>
+                        </ActionTooltip>
                     )}
                     {folder && !folder.receivedFolder && (
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="shrink-0"
-                            aria-label={i18n("Folder settings")}
-                            title={i18n("Folder settings")}
-                            onClick={() => onSettings(folder)}
-                        >
-                            <MoreHorizontal className="size-4" />
-                        </Button>
+                        <ActionTooltip label={i18n("Folder settings")}>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0"
+                                aria-label={i18n("Folder settings")}
+                                onClick={() => onSettings(folder)}
+                            >
+                                <MoreHorizontal className="size-4" />
+                            </Button>
+                        </ActionTooltip>
                     )}
                     {variant === "walk" && onShowRail && (
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="hidden xl:inline-flex"
-                            aria-label={i18n("Show folders")}
-                            onClick={onShowRail}
-                        >
-                            <PanelLeftOpen className="size-4" />
-                        </Button>
+                        <ActionTooltip label={i18n("Show folders")}>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="hidden xl:inline-flex"
+                                aria-label={i18n("Show folders")}
+                                onClick={onShowRail}
+                            >
+                                <PanelLeftOpen className="size-4" />
+                            </Button>
+                        </ActionTooltip>
                     )}
                 </div>
             )}

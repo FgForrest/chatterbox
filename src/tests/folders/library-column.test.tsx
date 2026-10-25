@@ -631,6 +631,34 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
         );
         expect(screen.queryByText(/including subfolders/)).toBeNull();
     });
+
+    it("names each icon action in a tooltip on focus", async () => {
+        render(
+            <LibraryLocationHeader
+                {...headerProps}
+                folder={nested}
+                variant={variant}
+                part="header"
+                onKnowledge={vi.fn()}
+                onShowRail={vi.fn()}
+            />,
+        );
+        const names =
+            variant === "walk"
+                ? [
+                      "Back to parent folder",
+                      "Knowledge",
+                      "Folder settings",
+                      "Show folders",
+                  ]
+                : ["Knowledge", "Folder settings"];
+        for (const name of names) {
+            const button = screen.getByRole("button", { name });
+            expect(button.title).toBe("");
+            fireEvent.focus(button);
+            expect(await screen.findByRole("tooltip", { name })).toBeTruthy();
+        }
+    });
 });
 
 it("shows the breadcrumb without the rail and only the folder beside it", () => {

@@ -104,6 +104,14 @@ function openMenu(state = "All · Newest") {
 
 beforeEach(() => {
     vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
 });
 
 afterEach(() => {
@@ -112,7 +120,7 @@ afterEach(() => {
 });
 
 describe("Chatter list toolbar", () => {
-    it("hands the count to the header and names the state on an icon-only menu", () => {
+    it("hands the count to the header and names the state on an icon-only menu", async () => {
         vi.stubGlobal("fetch", vi.fn());
         renderList();
 
@@ -122,7 +130,12 @@ describe("Chatter list toolbar", () => {
             name: "Filter and sort: All · Newest",
         });
         expect(menu.textContent).toBe("");
-        expect(menu.title).toBe("Filter and sort: All · Newest");
+        fireEvent.focus(menu);
+        expect(
+            await screen.findByRole("tooltip", {
+                name: "Filter and sort: All · Newest",
+            }),
+        ).toBeTruthy();
     });
 
     it("labels the menu with what it filters out", () => {

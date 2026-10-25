@@ -15,6 +15,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ActionTooltip } from "@/components/ui/tooltip";
 
 export type SortOrder = "newest" | "oldest" | "name" | "duration" | "size";
 
@@ -176,28 +177,29 @@ export function RecordingListToolbar({
                 )}
             </div>
             <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <Button
-                        variant={
-                            activeFilters.length > 0 ? "secondary" : "ghost"
-                        }
-                        size={activeFilters.length > 0 ? "sm" : "icon-sm"}
-                        className={
-                            activeFilters.length > 0
-                                ? "h-9 max-w-36 shrink-0 px-2 text-xs"
-                                : "size-9 shrink-0 text-muted-foreground"
-                        }
-                        aria-label={menuLabel}
-                        title={menuLabel}
-                    >
-                        <ListFilter className="size-4" />
-                        {activeFilters.length > 0 && (
-                            <span className="truncate">
-                                {activeFilters.join(" · ")}
-                            </span>
-                        )}
-                    </Button>
-                </DropdownMenuTrigger>
+                <ActionTooltip label={menuLabel}>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant={
+                                activeFilters.length > 0 ? "secondary" : "ghost"
+                            }
+                            size={activeFilters.length > 0 ? "sm" : "icon-sm"}
+                            className={
+                                activeFilters.length > 0
+                                    ? "h-9 max-w-36 shrink-0 px-2 text-xs"
+                                    : "size-9 shrink-0 text-muted-foreground"
+                            }
+                            aria-label={menuLabel}
+                        >
+                            <ListFilter className="size-4" />
+                            {activeFilters.length > 0 && (
+                                <span className="truncate">
+                                    {activeFilters.join(" · ")}
+                                </span>
+                            )}
+                        </Button>
+                    </DropdownMenuTrigger>
+                </ActionTooltip>
                 <DropdownMenuContent align="end" className="min-w-64">
                     {(showChannelChoice || showReviewChoice) && (
                         <>
