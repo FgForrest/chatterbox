@@ -631,6 +631,34 @@ describe.each(["rail", "walk"] as const)("%s location header", (variant) => {
         );
         expect(screen.queryByText(/including subfolders/)).toBeNull();
     });
+
+    it("names each icon action in a tooltip on focus", async () => {
+        render(
+            <LibraryLocationHeader
+                {...headerProps}
+                folder={nested}
+                variant={variant}
+                part="header"
+                onKnowledge={vi.fn()}
+                onShowRail={vi.fn()}
+            />,
+        );
+        const names =
+            variant === "walk"
+                ? [
+                      "Back to parent folder",
+                      "Knowledge",
+                      "Folder settings",
+                      "Show folders",
+                  ]
+                : ["Knowledge", "Folder settings"];
+        for (const name of names) {
+            const button = screen.getByRole("button", { name });
+            expect(button.title).toBe("");
+            fireEvent.focus(button);
+            expect(await screen.findByRole("tooltip", { name })).toBeTruthy();
+        }
+    });
 });
 
 it("shows the breadcrumb without the rail and only the folder beside it", () => {
@@ -660,7 +688,7 @@ it("shows the breadcrumb without the rail and only the folder beside it", () => 
     expect(railPath.title).toBe("Private › Folder 0 › Nested");
 });
 
-it("offers no folder settings for a received folder", () => {
+it("offers no folder settings for a received folder", async () => {
     const received: RecordingFolder = {
         ...nested,
         id: "received",
@@ -686,8 +714,13 @@ it("offers no folder settings for a received folder", () => {
         screen.queryByRole("button", { name: "Folder settings" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Knowledge" })).toBeNull();
-    expect(
+    fireEvent.focus(
         screen.getByRole("button", {
+            name: "Folder actions for Shared research",
+        }),
+    );
+    expect(
+        await screen.findByRole("tooltip", {
             name: "Folder actions for Shared research",
         }),
     ).toBeTruthy();
