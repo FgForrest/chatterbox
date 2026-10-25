@@ -601,7 +601,10 @@ function markInvitationNoticesSeen(invitations: Invitation[]) {
     } catch {}
 }
 
-/** Invitation count, waiting list, folder acceptance and arrival notice. */
+/**
+ * Invitation count, waiting list, folder acceptance and arrival notice.
+ * Only the instance with notifications watches for new invitations; others follow the page refresh it triggers.
+ */
 export function PersonInvitations({
     initialInvitations,
     folders,
@@ -674,7 +677,7 @@ export function PersonInvitations({
         return () => closeCornerNotice("invitation");
     }, [enabled, notifications]);
     useEffect(() => {
-        if (!enabled) return;
+        if (!enabled || !notifications) return;
         let active = true;
         let pollTimer: ReturnType<typeof setInterval> | undefined;
         let pollInterval = 0;
@@ -697,8 +700,8 @@ export function PersonInvitations({
                 );
                 setInvitations(data.invitations);
                 const newest = arrived.at(-1);
-                if (newest && notifications) notify(data.invitations, newest);
-                if (notifications && (pushed || changed)) refresh();
+                if (newest) notify(data.invitations, newest);
+                if (pushed || changed) refresh();
             } catch {}
         };
         const poll = () => {

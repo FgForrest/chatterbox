@@ -443,6 +443,26 @@ describe("person sharing controls", () => {
         }
     });
 
+    it("watches for invitations from one instance per page only", async () => {
+        render(
+            <PersonSharingProvider value>
+                <PersonInvitations initialInvitations={[]} folders={[]} />
+                <PersonInvitations
+                    initialInvitations={[]}
+                    folders={[]}
+                    notifications={false}
+                />
+            </PersonSharingProvider>,
+        );
+        expect(subscribeEvents).toHaveBeenCalledOnce();
+        await act(async () => {
+            vi.mocked(subscribeEvents).mock.calls[0][0]({ type: "share" });
+        });
+        expect(
+            requests.mock.calls.filter(([url]) => url === "/api/shares"),
+        ).toHaveLength(1);
+    });
+
     it("shows Share and Copy link as icon buttons of one size", async () => {
         header();
         const shareButton = screen.getByRole("button", { name: "Share" });
