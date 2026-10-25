@@ -96,6 +96,27 @@ services:
       MAIL_DAILY_LIMIT: ${MAIL_DAILY_LIMIT:-}
       MAIL_MAX_MESSAGE_MB: ${MAIL_MAX_MESSAGE_MB:-}
       MAIL_INACTIVE_DAYS: ${MAIL_INACTIVE_DAYS:-}
+      # Meeting Recorder defaults pushed to connected extensions (optional)
+      RECORDER_AUTO_RECORD_PLATFORMS: ${RECORDER_AUTO_RECORD_PLATFORMS:-}
+      RECORDER_AUTO_STOP_QUIET_SECONDS: ${RECORDER_AUTO_STOP_QUIET_SECONDS:-180}
+      RECORDER_NOTICE_TEXT: ${RECORDER_NOTICE_TEXT:-}
+      RECORDER_LOCK_DEFAULTS: ${RECORDER_LOCK_DEFAULTS:-}
+
+      # Operations (optional; see docs/self-hosting/environment-variables)
+      DISABLE_UPDATE_CHECK: ${DISABLE_UPDATE_CHECK:-}
+      WEBHOOKS_REQUIRE_PUBLIC_TARGETS: ${WEBHOOKS_REQUIRE_PUBLIC_TARGETS:-}
+      BACKGROUND_SYNC_ENABLED: ${BACKGROUND_SYNC_ENABLED:-}
+      BACKGROUND_SYNC_INTERVAL_MS: ${BACKGROUND_SYNC_INTERVAL_MS:-300000}
+      PLAUD_SYNC_RATE_LIMIT_PER_MINUTE: ${PLAUD_SYNC_RATE_LIMIT_PER_MINUTE:-10}
+      WEBSHARE_API_KEY: ${WEBSHARE_API_KEY:-}
+      PLAUD_PROXY_SCOPE: ${PLAUD_PROXY_SCOPE:-all}
+      VIDEO_UPLOAD_MAX_BYTES: ${VIDEO_UPLOAD_MAX_BYTES:-4294967296}
+      WHISPER_MAX_BYTES: ${WHISPER_MAX_BYTES:-25165824}
+      WHISPER_COMPRESS_BITRATE_KBPS: ${WHISPER_COMPRESS_BITRATE_KBPS:-12}
+      WHISPER_REQUEST_TIMEOUT_MS: ${WHISPER_REQUEST_TIMEOUT_MS:-3600000}
+      AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: ${AUTO_SUMMARY_RATE_LIMIT_PER_HOUR:-60}
+      # API_TOKEN_HASH_SECRET is deliberately not passed: setting it on an
+      # existing install invalidates every stored token and lookup hash.
 
       # Encryption
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -111,6 +132,9 @@ services:
       # Folder export destinations are always resolved beneath this fixed
       # container boundary. Operators choose only the host-side bind path.
       FILESYSTEM_EXPORT_ROOT: /exports
+      # Backup archives. Unset, they are written beside the recordings. An
+      # absolute host path is mounted at the same path in the container.
+      BACKUP_STORAGE_PATH: ${BACKUP_STORAGE_PATH:-}
       # Google Drive export (optional; see docs/self-hosting/google-drive)
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -143,6 +167,8 @@ services:
       - audio:/app/audio
       - storage:/app/storage
       - ${FILESYSTEM_EXPORT_HOST_PATH:-./exports}:/exports
+      # The `backups` volume only stands in while BACKUP_STORAGE_PATH is unset.
+      - ${BACKUP_STORAGE_PATH:-backups}:${BACKUP_STORAGE_PATH:-/app/backups}
     depends_on:
       db:
         condition: service_healthy
@@ -297,6 +323,8 @@ volumes:
   agent_creds:
     driver: local
   storage:
+    driver: local
+  backups:
     driver: local
   embeddings:
     driver: local

@@ -43,7 +43,7 @@ nezávisel na produkčních tajemstvích.
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro rozdělování limitů počtu požadavků. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
 | `RATE_LIMIT_CLIENT_IP_HEADER` | nenastaveno | Pro limity podle IP (vyžaduje `RATE_LIMIT_TRUST_PROXY_HEADERS=true`) a seznam povolených IP administrace čte pouze toto záhlaví. U `x-forwarded-for` bere poslední položku. Jiné záhlaví jako náhradu nezkouší. |
-| `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace tajného klíče relací. |
+| `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů a uložených vyhledávacích hashů. Nastavte samostatně pro rotaci hashů tokenů bez rotace tajného klíče relací. Docker Compose ji nepředává: nastavení na existující instalaci zneplatní všechny API klíče, klíče pro nahrávání a uložené vyhledávací hashe, proto ji do `environment:` aplikace přidejte jen u nové instalace. |
 
 Nastavení `RATE_LIMIT_TRUST_PROXY_HEADERS=true` bez proxy,
 která přepisuje přeposílací záhlaví, umožní klientům falšovat vlastní IP adresy
@@ -64,10 +64,10 @@ Stávající instalace nevyžadují žádnou změnu.
 Pro zapnutí předejte novou proměnnou v `environment:` služby aplikace
 a nastavte ji v `.env`.
 
-Chcete-li změnit `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, musí jej produkční
-soubor Compose předat službě aplikace. Do jejího bloku `environment:` přidejte
-`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: ${ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:-}`
-a nastavte hodnotu v `.env`. Prázdná nebo chybějící hodnota zachová výchozích 60.
+Přiložený `docker-compose.yml` předává aplikaci všechny proměnné z této
+stránky kromě `API_TOKEN_HASH_SECRET` a těch, které se čtou při sestavení.
+Vlastní soubor Compose předává jen to, co uvádí jeho `environment:`, proto při
+aktualizaci zkopírujte nové položky ze souboru z vydání.
 
 <span id="storage" />
 
@@ -82,7 +82,7 @@ a nastavte hodnotu v `.env`. Prázdná nebo chybějící hodnota zachová výcho
 | `S3_REGION`             | —           | Region (`auto` na R2).                                            |
 | `S3_ACCESS_KEY_ID`      | —           |                                                                   |
 | `S3_SECRET_ACCESS_KEY`  | —           |                                                                   |
-| `BACKUP_STORAGE_PATH`   | —           | Cesta v systému pro archivy záloh. Pokud není, ukládají se vedle nahrávek. |
+| `BACKUP_STORAGE_PATH`   | —           | Absolutní cesta v systému pro archivy záloh. Pokud není, ukládají se vedle nahrávek. Přiložený soubor Compose připojí cestu hostitele na stejnou cestu v kontejneru. |
 
 Viz [S3-kompatibilní úložiště](./storage-s3) pro šablony konfigurací jednotlivých poskytovatelů.
 
@@ -93,6 +93,27 @@ tak zhruba zdvojnásobí a záloha sdílí disk s originálem. Nastavte na samos
 úložiště (externí disk, NAS), a archivy půjdou tam bez ohledu na systém úložiště nahrávek.
 Vždy se uvádí lokální systémová cesta, včetně případů, kdy instance běží na S3: záloha,
 kterou nelze bez běžící aplikace přečíst, není opravdu záloha.
+Archivy vytvořené před jejím nastavením zůstanou na původním místě a už je
+nelze stáhnout; do sedmi dnů vyprší.
+
+<span id="sync-and-processing-limits" />
+
+## Synchronizace a limity zpracování
+
+Vše volitelné; výchozí hodnoty vyhovují většině instalací.
+
+| Proměnná                           | Výchozí      | Efekt |
+| ---------------------------------- | ------------ | ----- |
+| `BACKGROUND_SYNC_ENABLED`          | `true`       | Server synchronizuje účty diktafonů podle vlastního plánu i bez otevřeného prohlížeče. `false` synchronizuje jen při otevřené aplikaci nebo když něco zavolá `POST /api/plaud/sync`. |
+| `BACKGROUND_SYNC_INTERVAL_MS`      | `300000`     | Jak často běží synchronizace na pozadí (60000 až 3600000). Uživatel synchronizovaný v posledních čtyřech minutách se vždy přeskočí. |
+| `PLAUD_SYNC_RATE_LIMIT_PER_MINUTE` | `10`         | Kolik požadavků na synchronizaci smí jeden uživatel poslat za minutu (1 až 600). |
+| `WEBSHARE_API_KEY`                 | —            | Směruje požadavky do cloudu diktafonu přes proxy Webshare, pro hostitele, jejichž adresa se tam přímo nedostane. |
+| `PLAUD_PROXY_SCOPE`                | `all`        | `all` posílá přes proxy i stahování zvuku; `api-only` šetří data proxy. Bez `WEBSHARE_API_KEY` nemá vliv. |
+| `VIDEO_UPLOAD_MAX_BYTES`           | `4294967296` | Největší nahrávané video (4 GiB). Uchová se jen oddělený zvuk. Zvukové soubory zůstávají omezené na 500 MB. |
+| `WHISPER_MAX_BYTES`                | `25165824`   | Vstupy přepisu ve stylu OpenAI nad tuto velikost se překódují do mono Opus. Nejvýše limit poskytovatele 25 MiB. |
+| `WHISPER_COMPRESS_BITRATE_KBPS`    | `12`         | Počáteční datový tok tohoto překódování; podle potřeby klesá. |
+| `WHISPER_REQUEST_TIMEOUT_MS`       | `3600000`    | Časový limit jednoho požadavku na přepis (60 minut). |
+| `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | `60`         | Kolik automatických shrnutí, témat a běhů Učení smí jeden uživatel spustit za hodinu (1 až 600). Ruční spuštění se neomezuje. |
 
 <span id="google-integration-drive-export" />
 
@@ -230,12 +251,7 @@ Vše volitelné; bez nastavení se nic nenahrává jedním kliknutím, dokud si 
 | `RECORDER_AUTO_STOP_QUIET_SECONDS`  | `180`   | Po kolika sekundách ticha se nahrávání jedním kliknutím samo zastaví (30 až 3600). |
 | `RECORDER_NOTICE_TEXT`              | —       | Pravidla nahrávání, která rozšíření jednou zobrazí před zapnutím nahrávání jedním kliknutím. |
 | `RECORDER_LOCK_DEFAULTS`            | `false` | Při `true` nelze vypnout platformu, kterou server nastavil na nahrávání jedním kliknutím. |
-| `NEXT_PUBLIC_RECORDER_EXTENSION_ID` | zveřejněné rozšíření | ID rozšíření Chrome, se kterým se aplikace propojuje. Nastavte jen pro rozšíření, které si sestavujete sami. |
-
-Produkční soubor Compose tyto proměnné službě aplikace zatím nepředává.
-Chcete-li některou použít, přidejte ji do bloku `environment:` služby aplikace,
-například `RECORDER_AUTO_RECORD_PLATFORMS: ${RECORDER_AUTO_RECORD_PLATFORMS:-}`,
-a hodnotu nastavte v `.env`.
+| `NEXT_PUBLIC_RECORDER_EXTENSION_ID` | zveřejněné rozšíření | ID rozšíření Chrome, se kterým se aplikace propojuje, pro rozšíření, které si sestavujete sami. Čte se při sestavení aplikace, takže platí jen v obrazu, který s ní sami sestavíte. |
 
 <span id="smtp-email-notifications" />
 
