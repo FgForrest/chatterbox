@@ -1,7 +1,6 @@
 "use client";
 
 import {
-    ChevronDown,
     CloudOff,
     FileAudio,
     FileText,
@@ -37,6 +36,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { Recording } from "@/types/recording";
 
@@ -346,28 +346,27 @@ export function ItemEraseMenu({
     return (
         <>
             <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <Button
-                        variant="outline"
-                        className="h-11 gap-2.5 rounded-lg px-4 text-muted-foreground hover:text-destructive"
-                        disabled={working}
-                        aria-label={
-                            isMail
-                                ? i18n("Erase mail artifacts")
-                                : i18n("Erase recording artifacts")
-                        }
-                    >
-                        {working ? (
-                            <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                            <Trash2 className="size-4" />
-                        )}
-                        <span className="hidden sm:inline">
-                            {i18n("Erase")}
-                        </span>
-                        <ChevronDown className="hidden size-4 sm:block" />
-                    </Button>
-                </DropdownMenuTrigger>
+                <ActionTooltip label={i18n("Erase")}>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-destructive"
+                            disabled={working}
+                            aria-label={
+                                isMail
+                                    ? i18n("Erase mail artifacts")
+                                    : i18n("Erase recording artifacts")
+                            }
+                        >
+                            {working ? (
+                                <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                                <Trash2 className="size-4" />
+                            )}
+                        </Button>
+                    </DropdownMenuTrigger>
+                </ActionTooltip>
                 <DropdownMenuContent align="end" className="w-64">
                     {isMail ? (
                         <>

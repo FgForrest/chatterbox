@@ -54,4 +54,26 @@ function TooltipContent({
     );
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+/** Names an icon-only control below it, on hover and on keyboard focus. */
+function ActionTooltip({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactElement;
+}) {
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>{children}</TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+        </Tooltip>
+    );
+}
+
+export {
+    ActionTooltip,
+    Tooltip,
+    TooltipTrigger,
+    TooltipContent,
+    TooltipProvider,
+};
