@@ -58,6 +58,7 @@ export function LibraryLocationHeader({
     part = "all",
     canCurate = false,
     isOrgAccount = false,
+    shownCount,
 }: {
     variant: "rail" | "walk";
     organization: FolderOrganization;
@@ -75,6 +76,8 @@ export function LibraryLocationHeader({
     part?: "all" | "header" | "tiles";
     canCurate?: boolean;
     isOrgAccount?: boolean;
+    /** How many items the list below shows; nothing is shown for none. */
+    shownCount?: number;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -96,6 +99,18 @@ export function LibraryLocationHeader({
         : new Set<string>();
     const byId = new Map(folders.map((item) => [item.id, item]));
     const path = [...pathIds].reverse().flatMap((id) => byId.get(id) ?? []);
+    const crumbs = variant === "rail" && folder ? [folder] : path;
+    const countLabel =
+        shownCount === undefined
+            ? null
+            : folder
+              ? i18n(
+                    "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
+                    { count: shownCount },
+                )
+              : i18n("{count, plural, one {# item} other {# items}}", {
+                    count: shownCount,
+                });
     const level = folders.filter(
         (item) => item.parentId === (folder?.id ?? null),
     );
@@ -209,71 +224,91 @@ export function LibraryLocationHeader({
                             <ArrowLeft className="size-4" />
                         </Button>
                     )}
-                    <nav
-                        aria-label={i18n("Folder path")}
-                        className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
-                    >
-                        {!folder ? (
-                            <span className="font-semibold text-foreground">
-                                {i18n("Recent")}
-                            </span>
-                        ) : (
-                            <>
-                                {variant === "walk" && (
-                                    <>
-                                        <button
-                                            type="button"
-                                            className="hover:text-foreground"
-                                            onClick={() => onNavigate(null)}
-                                        >
-                                            {i18n("Chatter")}
-                                        </button>
-                                        <span aria-hidden="true">›</span>
-                                    </>
-                                )}
-                                {path.map((item, index) => (
-                                    <span
-                                        key={item.id}
-                                        className="inline-flex min-w-0 items-center gap-1 last:shrink-0"
-                                    >
-                                        {index > 0 && (
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <nav
+                            aria-label={i18n("Folder path")}
+                            title={
+                                variant === "rail" && folder
+                                    ? path
+                                          .map((item) => label(item))
+                                          .join(" › ")
+                                    : undefined
+                            }
+                            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
+                        >
+                            {!folder ? (
+                                <span className="font-semibold text-foreground">
+                                    {i18n("Recent")}
+                                </span>
+                            ) : (
+                                <>
+                                    {variant === "walk" && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="hover:text-foreground"
+                                                onClick={() => onNavigate(null)}
+                                            >
+                                                {i18n("Chatter")}
+                                            </button>
                                             <span aria-hidden="true">›</span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            aria-label={
-                                                item.id === folder.id &&
-                                                !folder.receivedFolder
-                                                    ? i18n(
-                                                          "Folder settings for {folder}",
-                                                          {
-                                                              folder: label(
-                                                                  item,
-                                                              ),
-                                                          },
-                                                      )
-                                                    : undefined
-                                            }
-                                            aria-current={
-                                                item.id === folder.id
-                                                    ? "location"
-                                                    : undefined
-                                            }
-                                            className="max-w-44 truncate hover:text-foreground aria-[current=location]:font-semibold aria-[current=location]:text-foreground"
-                                            onClick={() =>
-                                                item.id === folder.id &&
-                                                !folder.receivedFolder
-                                                    ? onSettings(folder)
-                                                    : onNavigate(item)
-                                            }
+                                        </>
+                                    )}
+                                    {crumbs.map((item, index) => (
+                                        <span
+                                            key={item.id}
+                                            className="inline-flex min-w-0 items-center gap-1 last:shrink-0"
                                         >
-                                            {label(item)}
-                                        </button>
-                                    </span>
-                                ))}
-                            </>
+                                            {index > 0 && (
+                                                <span aria-hidden="true">
+                                                    ›
+                                                </span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                aria-label={
+                                                    item.id === folder.id &&
+                                                    !folder.receivedFolder
+                                                        ? i18n(
+                                                              "Folder settings for {folder}",
+                                                              {
+                                                                  folder: label(
+                                                                      item,
+                                                                  ),
+                                                              },
+                                                          )
+                                                        : undefined
+                                                }
+                                                aria-current={
+                                                    item.id === folder.id
+                                                        ? "location"
+                                                        : undefined
+                                                }
+                                                className="max-w-44 truncate hover:text-foreground aria-[current=location]:font-semibold aria-[current=location]:text-foreground"
+                                                onClick={() =>
+                                                    item.id === folder.id &&
+                                                    !folder.receivedFolder
+                                                        ? onSettings(folder)
+                                                        : onNavigate(item)
+                                                }
+                                            >
+                                                {label(item)}
+                                            </button>
+                                        </span>
+                                    ))}
+                                </>
+                            )}
+                        </nav>
+                        {countLabel && shownCount !== 0 && (
+                            <span
+                                className="shrink-0 text-xs tabular-nums text-muted-foreground"
+                                title={countLabel}
+                            >
+                                <span aria-hidden="true">{shownCount}</span>
+                                <span className="sr-only">{countLabel}</span>
+                            </span>
                         )}
-                    </nav>
+                    </div>
                     {folder?.receivedFolder && (
                         <>
                             <DropdownMenu>
@@ -317,8 +352,10 @@ export function LibraryLocationHeader({
                     {folder && !folder.receivedFolder && onKnowledge && (
                         <Button
                             variant="outline"
-                            size="sm"
+                            size="icon-sm"
                             aria-pressed={knowledgeOpen}
+                            aria-label={i18n("Knowledge")}
+                            title={i18n("Knowledge")}
                             className={
                                 folder.scope === "org"
                                     ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
@@ -327,7 +364,18 @@ export function LibraryLocationHeader({
                             onClick={() => onKnowledge(folder)}
                         >
                             <BookOpen className="size-4" />
-                            {i18n("Knowledge")}
+                        </Button>
+                    )}
+                    {folder && !folder.receivedFolder && (
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0"
+                            aria-label={i18n("Folder settings")}
+                            title={i18n("Folder settings")}
+                            onClick={() => onSettings(folder)}
+                        >
+                            <MoreHorizontal className="size-4" />
                         </Button>
                     )}
                     {variant === "walk" && onShowRail && (

@@ -1852,14 +1852,7 @@ export function Workstation({
                                 onMoveRecording={handleMoveBetweenFolders}
                                 canCurate={canCurate}
                                 onFolderCreated={handleFolderCreated}
-                                onFolderSettings={
-                                    selectedFolder &&
-                                    !selectedFolder.receivedFolder
-                                        ? () =>
-                                              openFolderSettings(selectedFolder)
-                                        : undefined
-                                }
-                                header={
+                                header={(shownCount) => (
                                     <>
                                         <div className="xl:hidden">
                                             <PersonInvitations
@@ -1881,6 +1874,7 @@ export function Workstation({
                                                 {...headerProps}
                                                 variant="rail"
                                                 part="header"
+                                                shownCount={shownCount}
                                             />
                                         </div>
                                         <div
@@ -1894,6 +1888,7 @@ export function Workstation({
                                                 {...headerProps}
                                                 variant="walk"
                                                 part="header"
+                                                shownCount={shownCount}
                                                 onShowRail={
                                                     railCollapsed
                                                         ? () =>
@@ -1908,7 +1903,7 @@ export function Workstation({
                                             />
                                         </div>
                                     </>
-                                }
+                                )}
                                 navigationContent={
                                     <>
                                         <div

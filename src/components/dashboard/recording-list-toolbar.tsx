@@ -1,12 +1,6 @@
 "use client";
 
-import {
-    ChevronDown,
-    GraduationCap,
-    MoreHorizontal,
-    Search,
-    X,
-} from "lucide-react";
+import { GraduationCap, ListFilter, Search, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +29,6 @@ export function RecordingListToolbar({
     onQueryChange,
     onEnterSelectFirst,
     searchRef,
-    filteredCount,
     channelCounts,
     sortOrder,
     onSortOrderChange,
@@ -47,16 +40,11 @@ export function RecordingListToolbar({
     onKindFilterChange,
     searchScopes,
     onSearchScopesChange,
-    includesSubfolders = false,
-    onFolderSettings,
 }: {
-    includesSubfolders?: boolean;
-    onFolderSettings?: () => void;
     query: string;
     onQueryChange: (next: string) => void;
     onEnterSelectFirst: () => void;
     searchRef: React.RefObject<HTMLInputElement | null>;
-    filteredCount: number;
     channelCounts: Record<Exclude<KindFilter, "all">, number>;
     sortOrder: SortOrder;
     onSortOrderChange: (next: SortOrder) => void;
@@ -118,9 +106,21 @@ export function RecordingListToolbar({
     if (sortOrder === "oldest") sortLabel = i18n("Oldest");
     if (sortOrder === "duration") sortLabel = i18n("Duration");
     if (sortOrder === "size") sortLabel = i18n("Size");
-    const menuLabel = showChannelChoice
-        ? `${channelLabel} · ${sortLabel}`
-        : sortLabel;
+    const channelsFiltered =
+        showChannelChoice && selectedChannels.size < channels.length;
+    const reviewFiltered = showReviewChoice && needsReviewOnly;
+    const activeFilters = [
+        channelsFiltered ? channelLabel : null,
+        reviewFiltered ? i18n("Needs review") : null,
+    ].filter(Boolean);
+    const menuState = [
+        showChannelChoice && !channelsFiltered ? channelLabel : null,
+        ...activeFilters,
+        sortLabel,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+    const menuLabel = i18n("Filter and sort: {state}", { state: menuState });
     const toggleChannel = (channel: Exclude<KindFilter, "all">) => {
         const next = new Set(selectedChannels);
         if (next.has(channel)) {
@@ -147,8 +147,8 @@ export function RecordingListToolbar({
         onSearchScopesChange(next);
     };
     return (
-        <div className="flex flex-col gap-2 border-b p-3">
-            <div className="relative order-2">
+        <div className="flex items-center gap-1.5 border-b p-3">
+            <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     ref={searchRef}
@@ -175,147 +175,119 @@ export function RecordingListToolbar({
                     </button>
                 )}
             </div>
-            <div className="order-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                    {includesSubfolders
-                        ? i18n(
-                              "{count, plural, one {# item, including subfolders} other {# items, including subfolders}}",
-                              { count: filteredCount },
-                          )
-                        : i18n(
-                              "{count, plural, one {# item} other {# items}}",
-                              { count: filteredCount },
-                          )}
-                </span>
-                <div className="flex items-center gap-1">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs"
-                            >
-                                <span>{menuLabel}</span>
-                                <ChevronDown className="size-3.5" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-64">
-                            {(showChannelChoice || showReviewChoice) && (
-                                <>
-                                    <DropdownMenuLabel>
-                                        {i18n("Show")}
-                                    </DropdownMenuLabel>
-                                    {showChannelChoice &&
-                                        channels.map((channel) => (
-                                            <DropdownMenuCheckboxItem
-                                                key={channel.value}
-                                                checked={selectedChannels.has(
-                                                    channel.value,
-                                                )}
-                                                disabled={
-                                                    selectedChannels.size ===
-                                                        1 &&
-                                                    selectedChannels.has(
-                                                        channel.value,
-                                                    )
-                                                }
-                                                onCheckedChange={() =>
-                                                    toggleChannel(channel.value)
-                                                }
-                                                onSelect={(event) =>
-                                                    event.preventDefault()
-                                                }
-                                            >
-                                                {channel.label}
-                                                <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                                    {
-                                                        channelCounts[
-                                                            channel.value
-                                                        ]
-                                                    }
-                                                </span>
-                                            </DropdownMenuCheckboxItem>
-                                        ))}
-                                    {showReviewChoice && (
-                                        <DropdownMenuCheckboxItem
-                                            checked={needsReviewOnly}
-                                            onCheckedChange={(checked) =>
-                                                onNeedsReviewOnlyChange?.(
-                                                    checked === true,
-                                                )
-                                            }
-                                            onSelect={(event) =>
-                                                event.preventDefault()
-                                            }
-                                        >
-                                            <GraduationCap className="mr-2 size-3.5" />
-                                            {i18n("Needs review ({count})", {
-                                                count: String(reviewCount),
-                                            })}
-                                        </DropdownMenuCheckboxItem>
-                                    )}
-                                    <DropdownMenuSeparator />
-                                </>
-                            )}
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant={
+                            activeFilters.length > 0 ? "secondary" : "ghost"
+                        }
+                        size={activeFilters.length > 0 ? "sm" : "icon-sm"}
+                        className={
+                            activeFilters.length > 0
+                                ? "h-9 max-w-36 shrink-0 px-2 text-xs"
+                                : "size-9 shrink-0 text-muted-foreground"
+                        }
+                        aria-label={menuLabel}
+                        title={menuLabel}
+                    >
+                        <ListFilter className="size-4" />
+                        {activeFilters.length > 0 && (
+                            <span className="truncate">
+                                {activeFilters.join(" · ")}
+                            </span>
+                        )}
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-64">
+                    {(showChannelChoice || showReviewChoice) && (
+                        <>
                             <DropdownMenuLabel>
-                                {i18n("Search in")}
+                                {i18n("Show")}
                             </DropdownMenuLabel>
-                            {scopes.map((scope) => (
+                            {showChannelChoice &&
+                                channels.map((channel) => (
+                                    <DropdownMenuCheckboxItem
+                                        key={channel.value}
+                                        checked={selectedChannels.has(
+                                            channel.value,
+                                        )}
+                                        disabled={
+                                            selectedChannels.size === 1 &&
+                                            selectedChannels.has(channel.value)
+                                        }
+                                        onCheckedChange={() =>
+                                            toggleChannel(channel.value)
+                                        }
+                                        onSelect={(event) =>
+                                            event.preventDefault()
+                                        }
+                                    >
+                                        {channel.label}
+                                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                            {channelCounts[channel.value]}
+                                        </span>
+                                    </DropdownMenuCheckboxItem>
+                                ))}
+                            {showReviewChoice && (
                                 <DropdownMenuCheckboxItem
-                                    key={scope.value}
-                                    checked={searchScopes.has(scope.value)}
-                                    disabled={
-                                        searchScopes.size === 1 &&
-                                        searchScopes.has(scope.value)
-                                    }
-                                    onCheckedChange={() =>
-                                        toggleSearchScope(scope.value)
+                                    checked={needsReviewOnly}
+                                    onCheckedChange={(checked) =>
+                                        onNeedsReviewOnlyChange?.(
+                                            checked === true,
+                                        )
                                     }
                                     onSelect={(event) => event.preventDefault()}
                                 >
-                                    {scope.label}
+                                    <GraduationCap className="mr-2 size-3.5" />
+                                    {i18n("Needs review ({count})", {
+                                        count: String(reviewCount),
+                                    })}
                                 </DropdownMenuCheckboxItem>
-                            ))}
+                            )}
                             <DropdownMenuSeparator />
-                            <DropdownMenuLabel>
-                                {i18n("Sort")}
-                            </DropdownMenuLabel>
-                            <DropdownMenuRadioGroup
-                                value={sortOrder}
-                                onValueChange={(v) =>
-                                    onSortOrderChange(v as SortOrder)
-                                }
-                            >
-                                <DropdownMenuRadioItem value="newest">
-                                    {i18n("Newest")}
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="oldest">
-                                    {i18n("Oldest")}
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="name">
-                                    {nameLabel}
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="duration">
-                                    {i18n("Duration")}
-                                </DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="size">
-                                    {i18n("Size")}
-                                </DropdownMenuRadioItem>
-                            </DropdownMenuRadioGroup>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                    {onFolderSettings && (
-                        <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={i18n("Folder settings")}
-                            onClick={onFolderSettings}
-                        >
-                            <MoreHorizontal className="size-4" />
-                        </Button>
+                        </>
                     )}
-                </div>
-            </div>
+                    <DropdownMenuLabel>{i18n("Search in")}</DropdownMenuLabel>
+                    {scopes.map((scope) => (
+                        <DropdownMenuCheckboxItem
+                            key={scope.value}
+                            checked={searchScopes.has(scope.value)}
+                            disabled={
+                                searchScopes.size === 1 &&
+                                searchScopes.has(scope.value)
+                            }
+                            onCheckedChange={() =>
+                                toggleSearchScope(scope.value)
+                            }
+                            onSelect={(event) => event.preventDefault()}
+                        >
+                            {scope.label}
+                        </DropdownMenuCheckboxItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>{i18n("Sort")}</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup
+                        value={sortOrder}
+                        onValueChange={(v) => onSortOrderChange(v as SortOrder)}
+                    >
+                        <DropdownMenuRadioItem value="newest">
+                            {i18n("Newest")}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="oldest">
+                            {i18n("Oldest")}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="name">
+                            {nameLabel}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="duration">
+                            {i18n("Duration")}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="size">
+                            {i18n("Size")}
+                        </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+            </DropdownMenu>
         </div>
     );
 }
