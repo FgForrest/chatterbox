@@ -167,6 +167,60 @@ describe("speaker playback navigation", () => {
         expect(Element.prototype.scrollTo).toHaveBeenCalled();
     });
 
+    it("keeps a coloured button without audio that only scrolls through the speaker's turns", async () => {
+        render(
+            <PlaybackProvider playback={null}>
+                <TranscriptionPanel
+                    recording={recording}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: turns
+                                .map((turn) => `${turn.speaker}: ${turn.text}`)
+                                .join("\n"),
+                            turns,
+                            version: { transcriptionId: "tx-1", revision: 1 },
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                />
+            </PlaybackProvider>,
+        );
+
+        const secondSpeaker = await screen.findByRole("button", {
+            name: "Jan",
+        });
+        const show = screen.getByRole("button", {
+            name: "Show the next turn of Speaker 0 in the transcript",
+        });
+        expect(show.title).toBe("Show in transcript");
+        expect(show.getAttribute("aria-pressed")).toBeNull();
+        expect(show.className).toContain("text-primary");
+        expect(
+            screen.getByRole("button", {
+                name: "Show the next turn of Jan in the transcript",
+            }).className,
+        ).toContain("text-emerald-600");
+        expect(screen.queryByRole("button", { name: /^Play/ })).toBeNull();
+
+        fireEvent.click(show);
+        expect(
+            document.querySelector('[data-turn-index="0"]')?.className,
+        ).toContain("bg-primary/10");
+        fireEvent.click(show);
+        expect(
+            document.querySelector('[data-turn-index="2"]')?.className,
+        ).toContain("bg-primary/10");
+
+        const menu = fireEvent.contextMenu(secondSpeaker);
+        expect(menu).toBe(false);
+        expect(
+            document.querySelector('[data-turn-index="1"]')?.className,
+        ).toContain("bg-primary/10");
+        expect(Element.prototype.scrollTo).toHaveBeenCalled();
+    });
+
     it("plays only the speaker's turn from a review's speaker", async () => {
         vi.stubGlobal(
             "fetch",
