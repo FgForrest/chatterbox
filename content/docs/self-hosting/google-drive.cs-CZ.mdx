@@ -1,6 +1,6 @@
 ---
-title: Export do Google Drive
-description: Umožněte uživatelům exportovat složky do Google Drive prostřednictvím projektu Google Cloud ve Vašem vlastním Workspace.
+title: Google Drive, Kalendář a Meet
+description: Umožněte uživatelům exportovat složky do Google Drive a navrhovat mluvčí z Kalendáře a Meet prostřednictvím projektu Google Cloud ve Vašem vlastním Workspace.
 ---
 
 Export složky může zapisovat do Google Drive místo do souborového systému serveru. Funguje stejně jako export do souborového systému: každá nahrávka ve stromu složky dostane svou vlastní složku obsahující audio, přepisy a souhrny, které se průběžně aktualizují při změnách. Přepisy a souhrny lze zapisovat jako soubory Markdown, jako Google Docs, nebo obojí.
@@ -55,6 +55,33 @@ GOOGLE_WORKSPACE_DOMAINS=example.com
 ```
 
 Restartujte Klepna. V části **Nastavení → Google účet** nyní můžete propojit účet a v dialogu exportu složky zvolit **Přidat export do Google Drive**.
+
+<span id="calendar-and-meet" />
+
+## Kalendář a Meet
+
+Stejný klient OAuth umožní lidem propojit Google Kalendář a Google Meet, aby
+[Učení](../user-guide/learn#calendar-meet-and-speaker-guesses) mohlo
+navrhovat mluvčí nahrávky podle pozvaných a připojených účastníků schůzky a
+přepis mohl správně psát jejich jména. Stačí `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET` a `APP_URL`; klíč pro Picker a číslo projektu jsou
+potřeba jen pro Drive.
+
+Ve stejném projektu Google Cloud:
+
+1. **APIs & Services → Library**: povolte **Google Calendar API** a
+   **Google Meet REST API**.
+2. Na obrazovce souhlasu v části **Přístup k datům** přidejte
+   `https://www.googleapis.com/auth/calendar.events.readonly` a
+   `https://www.googleapis.com/auth/meetings.space.readonly`.
+
+Lidé propojí Kalendář a Meet v úvodním průvodci nebo tlačítkem **Připojit
+Kalendář a Meet** v **Nastavení → Google účet**. Klepna o tyto rozsahy požádá
+až tehdy, navíc k těm, které už má. Přístup je pouze pro čtení: Klepna čte
+události v hlavním kalendáři osoby kolem času nahrávky a s přístupem k Meet
+také to, kdo se ke hovoru připojil. E-mailové adresy účastníků slouží jen ke
+spárování s osobami, které už jsou v Almanachu, a nikdy se neposílají
+poskytovateli AI. U pošty se Kalendář ani Meet nepoužívají.
 
 <span id="exporting-the-organization-tree-to-a-shared-drive" />
 

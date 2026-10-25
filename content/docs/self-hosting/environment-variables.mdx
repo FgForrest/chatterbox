@@ -93,7 +93,8 @@ backup you cannot read without the app running is not much of a backup.
 
 Self-host only; ignored when `IS_HOSTED=true`. With the first four set,
 users can connect a Google account and export folders to Google Drive.
-See [Google Drive export](./google-drive) for the Google Cloud setup.
+Calendar and Meet need only the client id and secret. See
+[Google Drive, Calendar and Meet](./google-drive) for the Google Cloud setup.
 
 | Variable                      | Default | Effect                                                                                      |
 | ----------------------------- | ------- | ------------------------------------------------------------------------------------------- |
@@ -168,6 +169,54 @@ Self-host only; ignored when `IS_HOSTED=true`. All optional.
 | `LEARN_MCP_URL`        | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                    |
 | `LEARN_BRIDGE_URL`     | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
 | `KNOWLEDGE_MEMORY_MB`  | `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.       |
+
+## Inbound mail
+
+Off unless `MAIL_DOMAIN` is set. Needs [single sign-on](#single-sign-on-openid-connect)
+and both secrets; the server refuses to start without them. See
+[Inbound mail](./mail).
+
+Read by the app:
+
+| Variable                       | Default | Effect |
+| ------------------------------ | ------- | ------ |
+| `MAIL_DOMAIN`                  | —       | The domain addresses are given out at, for example `chatterbox.example.com`. |
+| `MAIL_ADDRESS_HASH_SECRET`     | —       | At least 32 characters (`openssl rand -hex 32`). Keys the lookup of addresses. |
+| `MAIL_INGEST_SECRET`           | —       | At least 32 characters. Bearer token the receiver hands messages over with. Set the same value for the receiver. |
+| `MAIL_ORG_NICKNAME`            | `org`   | Prefix of Organization folder addresses (`org-weekly@`). 1 to 20 letters or digits. |
+| `MAIL_FORMER_ORG_NICKNAMES`    | —       | Comma-separated earlier nicknames, kept reserved so nobody else is given them. |
+| `MAIL_MAX_SIGNATURE_AGE_HOURS` | `72`    | How old a message's DKIM signature may be when it arrives. |
+| `MAIL_DAILY_LIMIT`             | `500`   | Messages one owner's addresses accept per day. |
+| `MAIL_MAX_MESSAGE_MB`          | `36`    | Largest accepted message, attachments included. Set the same value for the receiver. |
+| `MAIL_INACTIVE_DAYS`           | `180`   | Days without a single sign-on sign-in after which a person's addresses pause, until their next sign-in. |
+
+Read by the `mail-receiver` service (compose profile `mail`):
+
+| Variable                   | Default      | Effect |
+| -------------------------- | ------------ | ------ |
+| `MAIL_HOSTNAME`            | —            | The `MX` host name, also the name on the TLS certificate. |
+| `MAIL_TLS_DIR`             | `./mail-tls` | Directory holding `fullchain.pem` and `privkey.pem`, mounted read-only. |
+| `MAIL_ALLOWED_SOURCES`     | `google`     | Who may connect. `google` is the ranges of Google's sending servers, refreshed every six hours. |
+| `MAIL_PROXY_PROTOCOL_FROM` | —            | Comma-separated addresses of TCP proxies whose PROXY protocol v1 header names the client. Plain IP addresses only. |
+
+## Meeting Recorder
+
+Defaults the server pushes to connected [Meeting Recorder](../guides/meeting-recorder)
+extensions. All optional; unset, nothing records with one click until a
+person opts in.
+
+| Variable                            | Default | Effect |
+| ----------------------------------- | ------- | ------ |
+| `RECORDER_AUTO_RECORD_PLATFORMS`    | —       | Comma-separated platforms that record with one click, or `all`: `google-meet`, `zoom`, `teams`, `webex`, `slack-huddle`, `whereby`, `jitsi`. |
+| `RECORDER_AUTO_STOP_QUIET_SECONDS`  | `180`   | Seconds of silence before a one-click recording stops itself (30 to 3600). |
+| `RECORDER_NOTICE_TEXT`              | —       | Recording policy the extension shows once before one-click recording is turned on. |
+| `RECORDER_LOCK_DEFAULTS`            | `false` | When `true`, people cannot switch a platform the server set to one click off. |
+| `NEXT_PUBLIC_RECORDER_EXTENSION_ID` | the published extension | Chrome extension id the app pairs with. Set it only for an extension you build yourself. |
+
+The production Compose file does not pass these into the app service yet.
+To use one, add it under the app service's `environment:`, for example
+`RECORDER_AUTO_RECORD_PLATFORMS: ${RECORDER_AUTO_RECORD_PLATFORMS:-}`, and set
+the value in `.env`.
 
 ## SMTP (email notifications)
 

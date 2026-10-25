@@ -3,7 +3,7 @@ title: For administrators
 description: What to switch on for each feature on a self-hosted instance.
 ---
 
-Most of Chatterbox works as soon as it runs. A few features need the instance set up for them first. They are switched on with variables in `.env` (see `.env.example`) and, for two of them, extra services in `docker-compose.yml`. Restart the stack after changing either.
+Most of Chatterbox works as soon as it runs. A few features need the instance set up for them first. They are switched on with variables in `.env` (see `.env.example`) and, for some of them, extra services in `docker-compose.yml`. Restart the stack after changing either.
 
 | Feature | What to set | More |
 | --- | --- | --- |
@@ -13,6 +13,9 @@ Most of Chatterbox works as soon as it runs. A few features need the instance se
 | Closed registration | `DISABLE_REGISTRATION=true` | |
 | [Folder exports to disk](exports-backups-retention.md#to-a-disk) | `FILESYSTEM_EXPORT_HOST_PATH` (Docker) or `FILESYSTEM_EXPORT_ROOT` | |
 | [Google Drive exports](exports-backups-retention.md#to-google-drive) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER`, optionally `GOOGLE_WORKSPACE_DOMAINS` | [Google Drive](../self-hosting/google-drive.mdx) |
+| [Calendar and Meet](learn.md#calendar-meet-and-speaker-guesses) speaker suggestions | the same Google variables, plus the Calendar and Meet APIs and scopes in Google Cloud | [Calendar and Meet](../self-hosting/google-drive.mdx#calendar-and-meet) |
+| [Mail](mail.md) | single sign-on, `MAIL_DOMAIN`, `MAIL_ADDRESS_HASH_SECRET`, `MAIL_INGEST_SECRET`, the `mail` profile with `MAIL_HOSTNAME` and `MAIL_TLS_DIR`, and DNS | [below](#inbound-mail) |
+| [Meeting Recorder](../guides/meeting-recorder.mdx) defaults | nothing; optionally `RECORDER_AUTO_RECORD_PLATFORMS`, `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT`, `RECORDER_LOCK_DEFAULTS` | [below](#meeting-recorder-for-chrome) |
 | Where backups are written | `BACKUP_STORAGE_PATH` | [Backup and restore](../guides/backup-and-restore.mdx) |
 | Larger video uploads | `VIDEO_UPLOAD_MAX_BYTES` (default 4 GiB) | |
 | Claude Code and Codex providers | the `agent-bridge` profile and `BRIDGE_TOKEN` | [below](#claude-code-and-codex-subscriptions) |
@@ -65,6 +68,18 @@ learns of it; how quickly your provider learns of it is up to your IT.
 [Single sign-on](../self-hosting/sso.mdx#authorization-from-the-identity-provider)
 explains the setup, including the command that prepares the Keycloak
 realm and the first administrator.
+
+## Inbound mail
+
+With inbound mail on, everyone who signs in through single sign-on gets an address at your mail domain, every folder one that files into it, and every Organization folder one that colleagues can send to. A small SMTP server, the `mail-receiver` service (compose profile `mail`), accepts mail for that domain from Google's sending servers only and hands each message to Chatterbox, which checks the sender's signature before filing it.
+
+It needs the variables in the table, port 25 reachable from the internet, an `MX` record and a certificate for `MAIL_HOSTNAME`. [Inbound mail](../self-hosting/mail.mdx) has every step, the DNS records and the checks to run after the first deployment. Send people to [Mail](mail.md).
+
+## Meeting Recorder for Chrome
+
+The Meeting Recorder extension needs no setup on the server: people install it from the Chrome Web Store through **Settings → Meeting Recorder** and connect it in three steps. See [Meeting Recorder](../guides/meeting-recorder.mdx).
+
+Optionally, the server can choose defaults for everyone: which meeting platforms record with one click (`RECORDER_AUTO_RECORD_PLATFORMS`), after how many seconds of silence a recording stops (`RECORDER_AUTO_STOP_QUIET_SECONDS`), the recording policy shown before one-click recording is turned on (`RECORDER_NOTICE_TEXT`), and whether people may switch those platforms off (`RECORDER_LOCK_DEFAULTS`). Pass them to the app service under `environment:` in `docker-compose.yml`; see [Environment variables](../self-hosting/environment-variables.mdx#meeting-recorder).
 
 ## Claude Code and Codex subscriptions
 

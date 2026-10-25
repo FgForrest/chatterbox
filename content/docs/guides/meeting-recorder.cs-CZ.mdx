@@ -9,7 +9,9 @@ shrne jako každá jiná nahrávka.
 
 Zachytává váš **mikrofon** a zvuk schůzky v kartě prohlížeče. Zvuk samostatné
 aplikace Zoom nebo Teams lze zachytit jen tehdy, když Chrome na vašem počítači
-umožňuje sdílet systémový zvuk při sdílení obrazovky.
+umožňuje sdílet systémový zvuk při sdílení obrazovky. Zvuk se ve výchozím
+nastavení míchá dohromady. Volitelný rozdělený režim dá váš hlas do levého
+kanálu a ostatní do pravého.
 
 Pouze prohlížeče na bázi Chromia: Chrome, Edge, Brave, Vivaldi. Firefox a
 Safari rozšířením zachytávání systémového zvuku neumožňují.
@@ -111,6 +113,29 @@ Pokud klávesová zkratka nic nedělá, Chrome ji mohl nechat nepřiřazenou;
 stránka Možností ukazuje aktuální přiřazení a odkazuje na nastavení zkratek
 v Chromu.
 
+<span id="in-meeting-prompt" />
+
+## Výzva ve schůzce
+
+Se zapnutou **Výzvou ve schůzce** se při zaznění zvuku ve schůzce místo
+systémového oznámení zobrazí lišta v horní části stránky schůzky. Přečtěte si
+upozornění pro účastníky a klikněte na ikonu rozšíření vpravo nahoře; karta se
+tím nahraje přímo. Lišta ukáže Vaši klávesovou zkratku, pokud je přiřazená, a
+vysvětlí, jak ikonu připnout, když je skrytá. **Sdílet přes dialog Chromu**
+použije místo toho výběr zvuku v Chromu. **Teď ne** nebo zavírací tlačítko
+lišty výzvu pro tuto schůzku zavře.
+
+Výzva je volitelná. Zapnete ji z jednorázové karty ve vyskakovacím okně,
+v **Možnostech** nebo na obrazovce připravenosti po nastavení. Chrome pak
+najednou požádá o přístup ke Google Meet, Zoomu (web), Microsoft Teams (web),
+Webexu a Whereby, s obecným upozorněním na čtení a změnu dat na několika
+webech. Lišta nečte obsah stránky a neposílá žádné síťové požadavky. Vypnutím
+přepínače se tento přístup odebere a lišta zmizí. Slack huddles a Jitsi Meet
+dál používají systémové oznámení.
+
+Během nahrávání ukazuje malý štítek na stránce schůzky uplynulý čas, cílovou
+složku a **Zastavit**. Jeho červená tečka ovládání sbalí nebo rozbalí.
+
 ## Nahrání schůzky
 
 1. Klikněte na ikonu rozšíření, přečtěte si připomenutí pro účastníky a zvolte
@@ -135,7 +160,8 @@ Po výběru se zmenší na okno nahrávání s ukazateli mikrofonu a zvuku zdroj
 Můžete ho minimalizovat; zavřením zastavíte záznam a odešlete uložený zvuk.
 
 Pole **Cílová složka v Klepně** můžete nastavit před spuštěním i během
-nahrávání ve vyskakovacím okně nebo v okně nahrávání. Pro hledání napište alespoň
+nahrávání ve vyskakovacím okně, v okně nahrávání nebo ve štítku nahrávání na
+stránce schůzky. Pro hledání napište alespoň
 dva znaky; volba **Zařadit později** ponechá zařazení na vás v Klepně.
 Volba přežije přerušení odesílání i restart prohlížeče a zapamatuje se pro příští
 nahrávku. Starší servery ukazují počáteční složku pouze pro čtení s vysvětlením.

@@ -19,7 +19,7 @@ Learn is available on self-hosted instances with an AI provider that can write s
 
 When Learn is manual, its widget says it is ready and offers **Learn**. Starting it changes the widget to **Learn is reading the transcript** without opening a window. You can leave the page while it runs. When it finishes, the widget offers **Review**.
 
-When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. If it finds suggestions, its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action opens the review and scrolls to it. The title, summary and topics wait so they use the corrected transcript. After 72 hours they continue without the review, but the review stays open and still blocks an intended Organization share.
+When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. If it finds suggestions, its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action opens the review and scrolls to it. The title, summary and topics wait so they use the corrected transcript, and an intended Organization share waits with them. After 72 hours they continue without the review. The review stays open until you finish it or the item is shared.
 
 If Learn finds nothing to review and **Correct the transcript after Learn** is on, the Learn step stays **Running** while it reads the transcript again and corrects misheard words. The summary says that it is waiting for this correction and starts by itself when the pass finishes. You can still click **Summarize** to start it immediately.
 
@@ -63,7 +63,7 @@ When you share a recording or mail whose Learn review you finished for its curre
 
 - The **Needs review** filter above the recording list.
 - The badge on **Almanac**, and the **Review** tab there.
-- A recording with an unfinished review cannot be shared with the Organization until you finish it.
+- Sharing an item with the Organization closes its unfinished private review, and its findings stay private. Only what you confirmed in a finished review becomes Organization knowledge.
 
 ## Good to know
 

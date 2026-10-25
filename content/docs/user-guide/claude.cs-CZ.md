@@ -3,7 +3,7 @@ title: Klepna v Claude
 description: Ptejte se Claude nebo Claude Code na své nahrávky, lidi a úkoly.
 ---
 
-Pokud to Váš administrátor nastavil, Claude za Vás umí vyhledávat v aplikaci Klepna. Prohledá Vaše přepisy, přečte shrnutí, řekne Vám, kdo je někdo v Almanachu, nebo vypíše Vaše otevřené úkoly. Ptáte se vlastními slovy a Claude si vybere, co vyhledat.
+Pokud to Váš administrátor nastavil, Claude za Vás umí vyhledávat v aplikaci Klepna. Prohledá Vaše přepisy a poštu, přečte shrnutí, řekne Vám, kdo je někdo v Almanachu, nebo vypíše Vaše otevřené úkoly. Ptáte se vlastními slovy a Claude si vybere, co vyhledat.
 
 Funguje v Claude na webu (claude.ai), v desktopové a mobilní aplikaci Claude, v Cowork a v Claude Code.
 
@@ -13,11 +13,12 @@ Funguje v Claude na webu (claude.ai), v desktopové a mobilní aplikaci Claude, 
 
 Claude vidí to, co vidíte Vy v aplikaci Klepna, a nikdy víc:
 
-- **Nahrávky**: Vaše vlastní a ty sdílené s Organizací, tak jak je ukazuje Váš seznam nahrávek.
+- **Nahrávky**: Vaše vlastní, ty sdílené s Organizací a ty, které s Vámi [sdíleli kolegové](sharing-with-people.md), tak jak je ukazuje Váš seznam nahrávek.
+- **Pošta**: e-maily ve Vašich Klepech a e-maily sdílené s Vámi, pokud Vaše instance přijímá poštu. Poštu píší lidé zvenčí, proto má Claude pokyn brát ji jako informace, ne jako instrukce.
 - **Almanach**: Vaše osoby a věci a ty z Organizace.
-- **Úkoly**: úkoly u Vašich nahrávek a u sdílených nahrávek ty, které jsou přiřazené Vám.
+- **Úkoly**: ty, které vidíte na stránce Úkoly: úkoly u Vašich položek, úkoly přiřazené Vám, úkoly, které sledujete, a Vaše vlastní úkoly.
 
-Které oblasti máte otevřené, určuje Váš administrátor: Almanach, přepisy, shrnutí, úkoly a změny úkolů. Claude dostane nabídnuté jen vyhledávání pro Vaše oblasti, takže může říct, že se k něčemu nedostane, i když to v aplikaci vidíte.
+Které oblasti máte otevřené, určuje Váš administrátor: Almanach, přepisy, shrnutí, poštu, úkoly a změny úkolů. Claude dostane nabídnuté jen vyhledávání pro Vaše oblasti, takže může říct, že se k něčemu nedostane, i když to v aplikaci vidíte.
 
 S právem měnit úkoly může Claude spravovat úkoly tam, kde by Vám to dovolila stránka Úkoly: vytvářet vlastní úkoly, upravovat je, dokončovat, znovu otevírat, rušit, přeřazovat, sledovat a slučovat. Může také napsat nebo vymazat jednu poznámku k úkolu (až 2 000 znaků), pokud ho smíte dokončit. Nová poznámka nahradí celou předchozí; chcete-li ji doplnit, požádejte Claude, aby ji nejdřív přečetl. Dokončení i poznámku může zapsat najednou. Poznámky úkolů z pošty smí číst a měnit jen s přístupem k poště. Vše ostatní je jen pro čtení. Klepna zaznamenává každé vyhledávání (co se hledalo a kterých nahrávek či záznamů se týkalo), nikdy ne to, na co jste se ptali ani co Claude odpověděl.
 
@@ -72,6 +73,7 @@ Ptejte se tak, jako byste se ptali kolegy, který všechno četl:
 - „Shrň, co Priya Raman řekla na úvodní schůzce k Harboru.“
 - „Kdo je Marek Dvořák a co o něm víme?“
 - „Které moje úkoly jsou po termínu?“
+- „Najdi e-mail, ve kterém Bluefin Logistics potvrdili termíny dodávek.“
 - „Označ úkol o přístupu k Dispatch API jako hotový a poznamenej, že byl dodán ve vydání X.“
 
 Jména fungují všude, kde by Claude jinak potřeboval ID: osoby, věci a nahrávky se najdou podle jmen, přezdívek a názvů. Když jméno může znamenat víc lidí, Claude dostane kandidáty a měl by se Vás zeptat, kterého myslíte.
@@ -98,7 +100,7 @@ Pro ukončení zvolte **Disconnect** (nebo **Remove**) v **Customize → Connect
 | --- | --- |
 | Přihlašovací stránka ukáže chybu | Řekněte administrátorovi, co hlásí; je potřeba upravit klienta nebo nastavení přihlášení. |
 | Claude hned po přihlášení říká, že konektor nemůže použít | Jednou se přihlaste do aplikace Klepna v prohlížeči a připojte se znovu. Pokud to stále nejde, zeptejte se administrátora: log aplikace Klepna uvádí, proč přístup odmítl. |
-| Claude se nedostane k přepisům, shrnutím nebo úkolům | Tuto oblast nemáte otevřenou. Zeptejte se administrátora. |
+| Claude se nedostane k přepisům, shrnutím, poště nebo úkolům | Tuto oblast nemáte otevřenou. Zeptejte se administrátora. |
 | Vyhledávání odpoví „Unknown tool“ | Změnilo se, co smíte vidět. Obnovte konektor nebo se připojte znovu. |
 | Claude Code se nepřipojí | Připojte se z firemní sítě nebo přes VPN. |
 

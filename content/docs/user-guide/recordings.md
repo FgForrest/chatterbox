@@ -16,10 +16,13 @@ The Chatter list on the left shows your newest recordings and mail first, groupe
 
 ## Adding recordings
 
-Recordings arrive in two ways:
+Recordings arrive in three ways:
 
 - **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
+- **From a meeting in your browser.** The Meeting Recorder extension for Chrome, Edge, Brave and Vivaldi records your microphone and the meeting tab, uploads while it records, and files the recording into the folder you chose, even one you change mid-meeting. Install and connect it from **Settings → Meeting Recorder**. See [Meeting Recorder](../guides/meeting-recorder.mdx).
 - **By upload.** Click **Upload** on Recordings, Tasks, Almanac, or Settings and pick an audio or a video file. You can choose a folder before the upload; that recording skips the categorization wait and uses the folder's default profile. Without a folder it opens at **Categorize**. On the dashboard, the upload opens on the right if you have not moved on since starting it. Otherwise a notice offers **Open** and leaves what you are reading in place. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
+
+Mail you send or forward to your Chatterbox addresses joins the same list, where your instance receives mail. See [Mail](mail.md).
 
 When your own recording or mail arrives while the dashboard is open, a notice at the bottom right shows its title and details. On phones it sits along the bottom. Your selection and folder stay in place. **Open** opens the item, and Back returns. A newer arrival replaces the notice; **+N more** counts the others since it appeared. The notice stays until you close it, open its item, or the item disappears. Items already present when you open the dashboard and items colleagues share to the Organization do not trigger it. The **Show sync notifications** setting does not silence it.
 

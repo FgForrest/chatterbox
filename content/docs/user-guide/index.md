@@ -19,18 +19,23 @@ Every screenshot shows the same invented team: **Alex Morgan**, a product lead a
 6. [The Almanac](almanac.md): the people and things Chatterbox knows, their nicknames and facts.
 7. [Learn](learn.md): let Chatterbox propose speaker names, corrections and facts, and review them.
 8. [The Organization](organization.md): sharing recordings with your colleagues.
-9. [Mail](mail.md): sending mail into Chatterbox and filing it for processing.
-10. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
-11. [Settings](settings.md): profiles, AI providers and prices, language and other account defaults.
-12. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, people and tasks.
-13. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
+9. [Sharing with people](sharing-with-people.md): inviting individual colleagues to a private recording, email or folder.
+10. [Mail](mail.md): sending mail into Chatterbox and filing it for processing.
+11. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
+12. [Settings](settings.md): profiles, AI providers and prices, language and other account defaults.
+13. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, mail, people and tasks.
+14. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
+
+Recording meetings held in the browser has a guide of its own: [Meeting Recorder](../guides/meeting-recorder.mdx).
 
 ## Where a feature comes from
 
 Some features depend on how your instance is set up. When a chapter describes one of these, it says so:
 
 - **Learn** works on self-hosted instances with an AI provider that can write summaries.
-- **The Organization** appears when the administrator has created the organization account.
+- **The Organization** appears when the administrator has created the organization account. **Sharing with people** needs it too.
+- **Mail** works when the administrator has set up inbound mail, which also needs single sign-on.
+- **Calendar and Meet** speaker suggestions appear when the administrator has set up the Google integration.
 - **Folder exports** to disk or Google Drive appear when the administrator has configured them.
 - **Single sign-on** replaces the email and password form when the administrator has connected an identity provider.
 - **Chatterbox in Claude** works when the administrator has turned on the MCP server and set up the Claude connector.

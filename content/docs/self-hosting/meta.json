@@ -6,6 +6,7 @@
         "environment-variables",
         "organization",
         "sso",
+        "mail",
         "mcp",
         "claude",
         "storage-s3",

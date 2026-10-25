@@ -109,6 +109,28 @@ If the keyboard shortcut does nothing, Chrome may have left it unassigned;
 the Options page shows the current binding and links to Chrome's shortcut
 settings.
 
+## In-meeting prompt
+
+With **In-meeting prompt** turned on, an audible meeting shows a banner at
+the top of the meeting page instead of the system notification. Read the
+participant notice, then click the recorder icon at the top right to record
+that tab directly. The banner shows your keyboard shortcut if one is
+assigned, and explains how to pin the icon when it is hidden. **Share
+through Chrome's dialog** uses Chrome's picker instead. **Not now** or the
+banner's close button dismisses it for that meeting.
+
+The prompt is optional. Turn it on from the one-time card in the popup, in
+**Options**, or on the ready screen after setup. Chrome then asks for access
+to Google Meet, Zoom (web), Microsoft Teams (web), Webex and Whereby
+together, with its generic warning about reading and changing data on a
+number of websites. The banner reads no page content and makes no network
+requests. Turning the switch off removes that access and hides the banner.
+Slack huddles and Jitsi Meet keep the system notification.
+
+While recording, a small pill on the meeting page shows the elapsed time,
+the target folder and **Stop**. Its red dot collapses or expands the
+controls.
+
 ## Record a meeting
 
 1. Click the extension icon, read the participant reminder and choose
@@ -134,7 +156,7 @@ choose, it becomes a small recorder window with microphone and source levels.
 You can minimize it; closing it stops capture and uploads the saved audio.
 
 Choose **Target folder in Chatterbox** before starting or change it while
-recording in the popup or recorder window. Type at least two characters to
+recording in the popup, the recorder window or the in-page recording pill. Type at least two characters to
 search; **File later** leaves the recording for you to file in Chatterbox.
 The target survives interrupted uploads and browser restarts, and is remembered
 for the next recording. Older servers show the start folder read-only with an

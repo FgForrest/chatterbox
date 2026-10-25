@@ -100,7 +100,8 @@ kterou nelze bez běžící aplikace přečíst, není opravdu záloha.
 
 Pouze vlastní hosting; ignoruje se, pokud je `IS_HOSTED=true`. Po nastavení
 prvních čtyř mohou uživatelé propojit svůj Google účet a exportovat složky na Google Disk.
-Viz [Export na Google Drive](./google-drive) pro nastavení v Google Cloud.
+Kalendáři a Meet stačí ID klienta a tajný klíč. Viz
+[Google Drive, Kalendář a Meet](./google-drive) pro nastavení v Google Cloud.
 
 | Proměnná                      | Výchozí | Efekt                                                                                      |
 | ----------------------------- | ------- | ----------------------------------------------------------------------------------------- |
@@ -183,6 +184,58 @@ Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 | `LEARN_MCP_URL`        | —        | Jediná URL znalostních nástrojů aplikace Klepna pouze pro čtení, kterou může můstek Učení volat zpět.   |
 | `LEARN_BRIDGE_URL`     | —        | Základní URL můstku pro agenty tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Učení přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
 | `KNOWLEDGE_MEMORY_MB`  | `256`    | Kolik dešifrovaných znalostí drží v paměti jeden proces, než vytlačí nejméně používanou položku.         |
+
+<span id="inbound-mail" />
+
+## Příjem pošty
+
+Vypnuto, dokud není nastavena `MAIL_DOMAIN`. Vyžaduje [jednotné přihlášení](#single-sign-on-openid-connect)
+a obě tajemství; bez nich server odmítne start. Viz
+[Příjem pošty](./mail).
+
+Čte aplikace:
+
+| Proměnná                       | Výchozí | Efekt |
+| ------------------------------ | ------- | ----- |
+| `MAIL_DOMAIN`                  | —       | Doména, ve které se přidělují adresy, například `chatterbox.example.com`. |
+| `MAIL_ADDRESS_HASH_SECRET`     | —       | Alespoň 32 znaků (`openssl rand -hex 32`). Klíč pro vyhledávání adres. |
+| `MAIL_INGEST_SECRET`           | —       | Alespoň 32 znaků. Bearer token, se kterým přijímač předává zprávy. Stejnou hodnotu nastavte i přijímači. |
+| `MAIL_ORG_NICKNAME`            | `org`   | Předpona adres složek Organizace (`org-weekly@`). 1 až 20 písmen nebo číslic. |
+| `MAIL_FORMER_ORG_NICKNAMES`    | —       | Čárkou oddělené dřívější předpony, které zůstávají vyhrazené, aby je nikdo jiný nedostal. |
+| `MAIL_MAX_SIGNATURE_AGE_HOURS` | `72`    | Jak starý smí být podpis DKIM zprávy při doručení. |
+| `MAIL_DAILY_LIMIT`             | `500`   | Kolik zpráv denně přijmou adresy jednoho vlastníka. |
+| `MAIL_MAX_MESSAGE_MB`          | `36`    | Největší přijatá zpráva včetně příloh. Stejnou hodnotu nastavte i přijímači. |
+| `MAIL_INACTIVE_DAYS`           | `180`   | Po kolika dnech bez přihlášení přes jednotné přihlášení se adresy osoby pozastaví, do jejího dalšího přihlášení. |
+
+Čte služba `mail-receiver` (profil compose `mail`):
+
+| Proměnná                   | Výchozí      | Efekt |
+| -------------------------- | ------------ | ----- |
+| `MAIL_HOSTNAME`            | —            | Název hostitele z `MX`, zároveň název na certifikátu TLS. |
+| `MAIL_TLS_DIR`             | `./mail-tls` | Adresář se soubory `fullchain.pem` a `privkey.pem`, připojený pouze pro čtení. |
+| `MAIL_ALLOWED_SOURCES`     | `google`     | Kdo se smí připojit. `google` jsou rozsahy odesílacích serverů Googlu, obnovované každých šest hodin. |
+| `MAIL_PROXY_PROTOCOL_FROM` | —            | Čárkou oddělené adresy TCP proxy, jejichž hlavička PROXY protocol v1 uvádí klienta. Pouze IP adresy. |
+
+<span id="meeting-recorder" />
+
+## Nahrávání schůzek
+
+Výchozí hodnoty, které server posílá propojeným rozšířením [Nahrávání schůzek](../guides/meeting-recorder).
+Vše volitelné; bez nastavení se nic nenahrává jedním kliknutím, dokud si to
+člověk sám nezapne.
+
+| Proměnná                            | Výchozí | Efekt |
+| ----------------------------------- | ------- | ----- |
+| `RECORDER_AUTO_RECORD_PLATFORMS`    | —       | Čárkou oddělené platformy, které se nahrávají jedním kliknutím, nebo `all`: `google-meet`, `zoom`, `teams`, `webex`, `slack-huddle`, `whereby`, `jitsi`. |
+| `RECORDER_AUTO_STOP_QUIET_SECONDS`  | `180`   | Po kolika sekundách ticha se nahrávání jedním kliknutím samo zastaví (30 až 3600). |
+| `RECORDER_NOTICE_TEXT`              | —       | Pravidla nahrávání, která rozšíření jednou zobrazí před zapnutím nahrávání jedním kliknutím. |
+| `RECORDER_LOCK_DEFAULTS`            | `false` | Při `true` nelze vypnout platformu, kterou server nastavil na nahrávání jedním kliknutím. |
+| `NEXT_PUBLIC_RECORDER_EXTENSION_ID` | zveřejněné rozšíření | ID rozšíření Chrome, se kterým se aplikace propojuje. Nastavte jen pro rozšíření, které si sestavujete sami. |
+
+Produkční soubor Compose tyto proměnné službě aplikace zatím nepředává.
+Chcete-li některou použít, přidejte ji do bloku `environment:` služby aplikace,
+například `RECORDER_AUTO_RECORD_PLATFORMS: ${RECORDER_AUTO_RECORD_PLATFORMS:-}`,
+a hodnotu nastavte v `.env`.
 
 <span id="smtp-email-notifications" />
 
