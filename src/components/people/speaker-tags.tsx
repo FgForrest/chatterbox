@@ -10,6 +10,7 @@ import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import type { PlayAtTarget } from "@/components/playback/play-at-button";
 import { SpeakerTurnChip } from "@/components/playback/play-turn-button";
+import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
 import { speakerGroups } from "@/lib/knowledge/speaker-groups";
@@ -37,7 +38,10 @@ interface SpeakerTagsProps {
      * knowledge base, for everyone who can see the recording.
      */
     view?: RecordingView;
-    /** Select a speaker's next timed turn, or null when none exists. */
+    /**
+     * Select a speaker's next timed turn, or null when none exists. Without
+     * audio, the chip's button only selects it.
+     */
     nextSpeakerTurn?: (
         speaker: string | readonly string[],
     ) => PlayAtTarget | null;
@@ -181,6 +185,7 @@ export function SpeakerTags({
     const i18n = useExtracted();
     const productName = useProductName();
     const speakerSource = useSpeakerSource();
+    const playback = usePlayback();
     const speakersUrl = withRecordingView(
         `/api/recordings/${recordingId}/speakers?source=${encodeURIComponent(source)}`,
         view,
@@ -400,7 +405,7 @@ export function SpeakerTags({
                         .join(", ");
                     const evidenceMs = suggestion?.evidenceStartMs;
                     const canPlayEvidence = Boolean(
-                        suggestion && evidenceMs != null,
+                        playback && suggestion && evidenceMs != null,
                     );
                     const label =
                         attribution?.name ??
@@ -430,6 +435,10 @@ export function SpeakerTags({
                                           name,
                                       })
                             }
+                            showLabel={i18n(
+                                "Show the next turn of {name} in the transcript",
+                                { name },
+                            )}
                             contextTurn={
                                 nextSpeakerTurn
                                     ? () =>
