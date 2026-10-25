@@ -21,7 +21,7 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ActionTooltip } from "@/components/ui/tooltip";
+import { ActionTooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import {
@@ -201,276 +201,298 @@ export function LibraryLocationHeader({
         </button>
     );
     return (
-        <section
-            className="space-y-2 border-b p-3"
-            aria-label={
-                variant === "walk"
-                    ? i18n("Folder navigation")
-                    : i18n("Current location")
-            }
-        >
-            {part !== "tiles" && (
-                <div className="flex items-center gap-1">
-                    {variant === "walk" && folder && (
-                        <ActionTooltip label={i18n("Back to parent folder")}>
-                            <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={i18n("Back to parent folder")}
-                                onClick={() =>
-                                    onNavigate(
-                                        byId.get(folder.parentId ?? "") ?? null,
-                                    )
-                                }
+        <TooltipProvider delayDuration={200}>
+            <section
+                className="space-y-2 border-b p-3"
+                aria-label={
+                    variant === "walk"
+                        ? i18n("Folder navigation")
+                        : i18n("Current location")
+                }
+            >
+                {part !== "tiles" && (
+                    <div className="flex items-center gap-1">
+                        {variant === "walk" && folder && (
+                            <ActionTooltip
+                                label={i18n("Back to parent folder")}
                             >
-                                <ArrowLeft className="size-4" />
-                            </Button>
-                        </ActionTooltip>
-                    )}
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <nav
-                            aria-label={i18n("Folder path")}
-                            title={
-                                variant === "rail" && folder
-                                    ? path
-                                          .map((item) => label(item))
-                                          .join(" › ")
-                                    : undefined
-                            }
-                            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
-                        >
-                            {!folder ? (
-                                <span className="font-semibold text-foreground">
-                                    {i18n("Recent")}
-                                </span>
-                            ) : (
-                                <>
-                                    {variant === "walk" && (
-                                        <>
-                                            <button
-                                                type="button"
-                                                className="hover:text-foreground"
-                                                onClick={() => onNavigate(null)}
-                                            >
-                                                {i18n("Chatter")}
-                                            </button>
-                                            <span aria-hidden="true">›</span>
-                                        </>
-                                    )}
-                                    {crumbs.map((item, index) => (
-                                        <span
-                                            key={item.id}
-                                            className="inline-flex min-w-0 items-center gap-1 last:shrink-0"
-                                        >
-                                            {index > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Back to parent folder")}
+                                    onClick={() =>
+                                        onNavigate(
+                                            byId.get(folder.parentId ?? "") ??
+                                                null,
+                                        )
+                                    }
+                                >
+                                    <ArrowLeft className="size-4" />
+                                </Button>
+                            </ActionTooltip>
+                        )}
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <nav
+                                aria-label={i18n("Folder path")}
+                                title={
+                                    variant === "rail" && folder
+                                        ? path
+                                              .map((item) => label(item))
+                                              .join(" › ")
+                                        : undefined
+                                }
+                                className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
+                            >
+                                {!folder ? (
+                                    <span className="font-semibold text-foreground">
+                                        {i18n("Recent")}
+                                    </span>
+                                ) : (
+                                    <>
+                                        {variant === "walk" && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="hover:text-foreground"
+                                                    onClick={() =>
+                                                        onNavigate(null)
+                                                    }
+                                                >
+                                                    {i18n("Chatter")}
+                                                </button>
                                                 <span aria-hidden="true">
                                                     ›
                                                 </span>
-                                            )}
-                                            <button
-                                                type="button"
-                                                aria-label={
-                                                    item.id === folder.id &&
-                                                    !folder.receivedFolder
-                                                        ? i18n(
-                                                              "Folder settings for {folder}",
-                                                              {
-                                                                  folder: label(
-                                                                      item,
-                                                                  ),
-                                                              },
-                                                          )
-                                                        : undefined
-                                                }
-                                                aria-current={
-                                                    item.id === folder.id
-                                                        ? "location"
-                                                        : undefined
-                                                }
-                                                className="max-w-44 truncate hover:text-foreground aria-[current=location]:font-semibold aria-[current=location]:text-foreground"
-                                                onClick={() =>
-                                                    item.id === folder.id &&
-                                                    !folder.receivedFolder
-                                                        ? onSettings(folder)
-                                                        : onNavigate(item)
-                                                }
+                                            </>
+                                        )}
+                                        {crumbs.map((item, index) => (
+                                            <span
+                                                key={item.id}
+                                                className="inline-flex min-w-0 items-center gap-1 last:shrink-0"
                                             >
-                                                {label(item)}
-                                            </button>
-                                        </span>
-                                    ))}
-                                </>
+                                                {index > 0 && (
+                                                    <span aria-hidden="true">
+                                                        ›
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    aria-label={
+                                                        item.id === folder.id &&
+                                                        !folder.receivedFolder
+                                                            ? i18n(
+                                                                  "Folder settings for {folder}",
+                                                                  {
+                                                                      folder: label(
+                                                                          item,
+                                                                      ),
+                                                                  },
+                                                              )
+                                                            : undefined
+                                                    }
+                                                    aria-current={
+                                                        item.id === folder.id
+                                                            ? "location"
+                                                            : undefined
+                                                    }
+                                                    className="max-w-44 truncate hover:text-foreground aria-[current=location]:font-semibold aria-[current=location]:text-foreground"
+                                                    onClick={() =>
+                                                        item.id === folder.id &&
+                                                        !folder.receivedFolder
+                                                            ? onSettings(folder)
+                                                            : onNavigate(item)
+                                                    }
+                                                >
+                                                    {label(item)}
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </>
+                                )}
+                            </nav>
+                            {countLabel && shownCount !== 0 && (
+                                <span
+                                    className="shrink-0 text-xs tabular-nums text-muted-foreground"
+                                    title={countLabel}
+                                >
+                                    <span aria-hidden="true">{shownCount}</span>
+                                    <span className="sr-only">
+                                        {countLabel}
+                                    </span>
+                                </span>
                             )}
-                        </nav>
-                        {countLabel && shownCount !== 0 && (
-                            <span
-                                className="shrink-0 text-xs tabular-nums text-muted-foreground"
-                                title={countLabel}
-                            >
-                                <span aria-hidden="true">{shownCount}</span>
-                                <span className="sr-only">{countLabel}</span>
-                            </span>
+                        </div>
+                        {folder?.receivedFolder && (
+                            <>
+                                <DropdownMenu>
+                                    <ActionTooltip
+                                        label={i18n(
+                                            "Folder actions for {folder}",
+                                            {
+                                                folder: folder.name,
+                                            },
+                                        )}
+                                    >
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                aria-label={i18n(
+                                                    "Folder actions for {folder}",
+                                                    { folder: folder.name },
+                                                )}
+                                            >
+                                                <MoreHorizontal className="size-4" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                    </ActionTooltip>
+                                    <DropdownMenuContent>
+                                        <ReceivedFolderMenu
+                                            folder={folder}
+                                            onEdit={setAttachmentEdit}
+                                        />
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                {attachmentEdit && (
+                                    <ReceivedFolderDialog
+                                        key={`${folder.id}:${attachmentEdit}`}
+                                        shareId={folder.receivedFolder.shareId}
+                                        version={
+                                            folder.receivedFolder.shareVersion
+                                        }
+                                        name={folder.name}
+                                        ownerName={
+                                            folder.receivedFolder.ownerName
+                                        }
+                                        parentId={folder.parentId}
+                                        action={attachmentEdit}
+                                        folders={folders}
+                                        open
+                                        onOpenChange={(open) => {
+                                            if (!open) setAttachmentEdit(null);
+                                        }}
+                                    />
+                                )}
+                            </>
+                        )}
+                        {folder && !folder.receivedFolder && onKnowledge && (
+                            <ActionTooltip label={i18n("Knowledge")}>
+                                <Button
+                                    variant="outline"
+                                    size="icon-sm"
+                                    aria-pressed={knowledgeOpen}
+                                    aria-label={i18n("Knowledge")}
+                                    className={
+                                        folder.scope === "org"
+                                            ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
+                                            : "shrink-0"
+                                    }
+                                    onClick={() => onKnowledge(folder)}
+                                >
+                                    <BookOpen className="size-4" />
+                                </Button>
+                            </ActionTooltip>
+                        )}
+                        {folder && !folder.receivedFolder && (
+                            <ActionTooltip label={i18n("Folder settings")}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="shrink-0"
+                                    aria-label={i18n("Folder settings")}
+                                    onClick={() => onSettings(folder)}
+                                >
+                                    <MoreHorizontal className="size-4" />
+                                </Button>
+                            </ActionTooltip>
+                        )}
+                        {variant === "walk" && onShowRail && (
+                            <ActionTooltip label={i18n("Show folders")}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="hidden xl:inline-flex"
+                                    aria-label={i18n("Show folders")}
+                                    onClick={onShowRail}
+                                >
+                                    <PanelLeftOpen className="size-4" />
+                                </Button>
+                            </ActionTooltip>
                         )}
                     </div>
-                    {folder?.receivedFolder && (
-                        <>
-                            <DropdownMenu>
-                                <ActionTooltip
-                                    label={i18n("Folder actions for {folder}", {
-                                        folder: folder.name,
-                                    })}
+                )}
+                {part !== "header" && variant === "walk" && (
+                    <>
+                        <div className="grid grid-cols-2 gap-1.5">
+                            {visible.map(tile)}
+                            {visible.length < level.length && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs"
+                                    onClick={() =>
+                                        setAllLocation(folder?.id ?? "recent")
+                                    }
                                 >
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            aria-label={i18n(
-                                                "Folder actions for {folder}",
-                                                { folder: folder.name },
-                                            )}
-                                        >
-                                            <MoreHorizontal className="size-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                </ActionTooltip>
-                                <DropdownMenuContent>
-                                    <ReceivedFolderMenu
-                                        folder={folder}
-                                        onEdit={setAttachmentEdit}
-                                    />
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                            {attachmentEdit && (
-                                <ReceivedFolderDialog
-                                    key={`${folder.id}:${attachmentEdit}`}
-                                    shareId={folder.receivedFolder.shareId}
-                                    version={folder.receivedFolder.shareVersion}
-                                    name={folder.name}
-                                    ownerName={folder.receivedFolder.ownerName}
-                                    parentId={folder.parentId}
-                                    action={attachmentEdit}
-                                    folders={folders}
-                                    open
-                                    onOpenChange={(open) => {
-                                        if (!open) setAttachmentEdit(null);
-                                    }}
-                                />
+                                    {i18n(
+                                        "{count, plural, one {All # folder} other {All # folders}}",
+                                        {
+                                            count: level.length,
+                                        },
+                                    )}
+                                </Button>
                             )}
-                        </>
-                    )}
-                    {folder && !folder.receivedFolder && onKnowledge && (
-                        <ActionTooltip label={i18n("Knowledge")}>
-                            <Button
-                                variant="outline"
-                                size="icon-sm"
-                                aria-pressed={knowledgeOpen}
-                                aria-label={i18n("Knowledge")}
-                                className={
-                                    folder.scope === "org"
-                                        ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
-                                        : "shrink-0"
-                                }
-                                onClick={() => onKnowledge(folder)}
+                        </div>
+                        {!folder && recentFolders.length > 0 && (
+                            // biome-ignore lint/a11y/useSemanticElements: These shortcuts navigate folders, rather than grouping form inputs.
+                            <div
+                                role="group"
+                                className="flex flex-wrap gap-1.5"
+                                aria-label={i18n("Recently used")}
                             >
-                                <BookOpen className="size-4" />
-                            </Button>
-                        </ActionTooltip>
-                    )}
-                    {folder && !folder.receivedFolder && (
-                        <ActionTooltip label={i18n("Folder settings")}>
-                            <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="shrink-0"
-                                aria-label={i18n("Folder settings")}
-                                onClick={() => onSettings(folder)}
-                            >
-                                <MoreHorizontal className="size-4" />
-                            </Button>
-                        </ActionTooltip>
-                    )}
-                    {variant === "walk" && onShowRail && (
-                        <ActionTooltip label={i18n("Show folders")}>
-                            <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="hidden xl:inline-flex"
-                                aria-label={i18n("Show folders")}
-                                onClick={onShowRail}
-                            >
-                                <PanelLeftOpen className="size-4" />
-                            </Button>
-                        </ActionTooltip>
-                    )}
-                </div>
-            )}
-            {part !== "header" && variant === "walk" && (
-                <>
-                    <div className="grid grid-cols-2 gap-1.5">
-                        {visible.map(tile)}
-                        {visible.length < level.length && (
+                                {recentFolders.map((item) => (
+                                    <Button
+                                        key={item.id}
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 max-w-full rounded-full px-2 text-xs"
+                                        onClick={() => onNavigate(item)}
+                                    >
+                                        <SharedFolderIcon
+                                            folder={item}
+                                            className="size-3"
+                                        />
+                                        <span className="truncate">
+                                            {label(item)}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                            {data.counts.get(item.id) ?? 0}
+                                        </span>
+                                    </Button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="flex justify-end">
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="text-xs"
-                                onClick={() =>
-                                    setAllLocation(folder?.id ?? "recent")
-                                }
+                                className="h-6 px-1 text-xs"
+                                onClick={onNewFolder}
                             >
-                                {i18n(
-                                    "{count, plural, one {All # folder} other {All # folders}}",
-                                    {
-                                        count: level.length,
-                                    },
-                                )}
+                                <FolderPlus className="size-3" />
+                                {folder &&
+                                canCreateSubfolder(
+                                    folder,
+                                    canCurate,
+                                    isOrgAccount,
+                                )
+                                    ? i18n("New subfolder")
+                                    : i18n("New folder")}
                             </Button>
-                        )}
-                    </div>
-                    {!folder && recentFolders.length > 0 && (
-                        // biome-ignore lint/a11y/useSemanticElements: These shortcuts navigate folders, rather than grouping form inputs.
-                        <div
-                            role="group"
-                            className="flex flex-wrap gap-1.5"
-                            aria-label={i18n("Recently used")}
-                        >
-                            {recentFolders.map((item) => (
-                                <Button
-                                    key={item.id}
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-6 max-w-full rounded-full px-2 text-xs"
-                                    onClick={() => onNavigate(item)}
-                                >
-                                    <SharedFolderIcon
-                                        folder={item}
-                                        className="size-3"
-                                    />
-                                    <span className="truncate">
-                                        {label(item)}
-                                    </span>
-                                    <span className="text-muted-foreground">
-                                        {data.counts.get(item.id) ?? 0}
-                                    </span>
-                                </Button>
-                            ))}
                         </div>
-                    )}
-                    <div className="flex justify-end">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-1 text-xs"
-                            onClick={onNewFolder}
-                        >
-                            <FolderPlus className="size-3" />
-                            {folder &&
-                            canCreateSubfolder(folder, canCurate, isOrgAccount)
-                                ? i18n("New subfolder")
-                                : i18n("New folder")}
-                        </Button>
-                    </div>
-                </>
-            )}
-        </section>
+                    </>
+                )}
+            </section>
+        </TooltipProvider>
     );
 }

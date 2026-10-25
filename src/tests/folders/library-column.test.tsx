@@ -688,7 +688,7 @@ it("shows the breadcrumb without the rail and only the folder beside it", () => 
     expect(railPath.title).toBe("Private › Folder 0 › Nested");
 });
 
-it("offers no folder settings for a received folder", () => {
+it("offers no folder settings for a received folder", async () => {
     const received: RecordingFolder = {
         ...nested,
         id: "received",
@@ -714,8 +714,13 @@ it("offers no folder settings for a received folder", () => {
         screen.queryByRole("button", { name: "Folder settings" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Knowledge" })).toBeNull();
-    expect(
+    fireEvent.focus(
         screen.getByRole("button", {
+            name: "Folder actions for Shared research",
+        }),
+    );
+    expect(
+        await screen.findByRole("tooltip", {
             name: "Folder actions for Shared research",
         }),
     ).toBeTruthy();

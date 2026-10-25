@@ -63,12 +63,10 @@ function ActionTooltip({
     children: React.ReactElement;
 }) {
     return (
-        <TooltipProvider delayDuration={200}>
-            <Tooltip>
-                <TooltipTrigger asChild>{children}</TooltipTrigger>
-                <TooltipContent side="bottom">{label}</TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+        <Tooltip>
+            <TooltipTrigger asChild>{children}</TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+        </Tooltip>
     );
 }
 
