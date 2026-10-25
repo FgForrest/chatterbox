@@ -55,7 +55,9 @@ describe("compose passes the documented self-host variables to the app", () => {
         expect(compose).toContain(
             `BACKUP_STORAGE_PATH: \${BACKUP_STORAGE_PATH:+/backups}`,
         );
-        expect(compose).toContain(`- \${BACKUP_STORAGE_PATH:-backups}:/backups`);
+        expect(compose).toContain(
+            `- \${BACKUP_STORAGE_PATH:-backups}:/backups`,
+        );
         expect(compose).toMatch(/^\s{2}backups:\s*$/m);
     });
 
