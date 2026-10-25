@@ -79,7 +79,7 @@ It needs the variables in the table, port 25 reachable from the internet, an `MX
 
 The Meeting Recorder extension needs no setup on the server: people install it from the Chrome Web Store through **Settings → Meeting Recorder** and connect it in three steps. See [Meeting Recorder](../guides/meeting-recorder.mdx).
 
-Optionally, the server can choose defaults for everyone: which meeting platforms record with one click (`RECORDER_AUTO_RECORD_PLATFORMS`), after how many seconds of silence a recording stops (`RECORDER_AUTO_STOP_QUIET_SECONDS`), the recording policy shown before one-click recording is turned on (`RECORDER_NOTICE_TEXT`), and whether people may switch those platforms off (`RECORDER_LOCK_DEFAULTS`). Pass them to the app service under `environment:` in `docker-compose.yml`; see [Environment variables](../self-hosting/environment-variables.mdx#meeting-recorder).
+Optionally, the server can choose defaults for everyone: which meeting platforms record with one click (`RECORDER_AUTO_RECORD_PLATFORMS`), after how many seconds of silence a recording stops (`RECORDER_AUTO_STOP_QUIET_SECONDS`), the recording policy shown before one-click recording is turned on (`RECORDER_NOTICE_TEXT`), and whether people may switch those platforms off (`RECORDER_LOCK_DEFAULTS`). Set them in `.env`; see [Environment variables](../self-hosting/environment-variables.mdx#meeting-recorder).
 
 ## Claude Code and Codex subscriptions
 

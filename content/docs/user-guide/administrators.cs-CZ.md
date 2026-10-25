@@ -89,7 +89,7 @@ Potřebuje proměnné z tabulky, port 25 dostupný z internetu, záznam `MX` a c
 
 Rozšíření Nahrávání schůzek nepotřebuje na serveru žádné nastavení: lidé si ho nainstalují z Internetového obchodu Chrome přes **Nastavení → Nahrávání schůzek** a propojí ho ve třech krocích. Viz [Nahrávání schůzek](../guides/meeting-recorder.mdx).
 
-Server může volitelně nastavit výchozí hodnoty pro všechny: které platformy schůzek se nahrávají jedním kliknutím (`RECORDER_AUTO_RECORD_PLATFORMS`), po kolika sekundách ticha se nahrávání zastaví (`RECORDER_AUTO_STOP_QUIET_SECONDS`), pravidla nahrávání zobrazená před zapnutím nahrávání jedním kliknutím (`RECORDER_NOTICE_TEXT`) a zda je lidé smějí vypnout (`RECORDER_LOCK_DEFAULTS`). Předejte je službě aplikace v `environment:` souboru `docker-compose.yml`; viz [Proměnné prostředí](../self-hosting/environment-variables.mdx#meeting-recorder).
+Server může volitelně nastavit výchozí hodnoty pro všechny: které platformy schůzek se nahrávají jedním kliknutím (`RECORDER_AUTO_RECORD_PLATFORMS`), po kolika sekundách ticha se nahrávání zastaví (`RECORDER_AUTO_STOP_QUIET_SECONDS`), pravidla nahrávání zobrazená před zapnutím nahrávání jedním kliknutím (`RECORDER_NOTICE_TEXT`) a zda je lidé smějí vypnout (`RECORDER_LOCK_DEFAULTS`). Nastavte je v `.env`; viz [Proměnné prostředí](../self-hosting/environment-variables.mdx#meeting-recorder).
 
 <span id="claude-code-and-codex-subscriptions" />
 
