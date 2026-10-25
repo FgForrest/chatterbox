@@ -132,9 +132,10 @@ services:
       # Folder export destinations are always resolved beneath this fixed
       # container boundary. Operators choose only the host-side bind path.
       FILESYSTEM_EXPORT_ROOT: /exports
-      # Backup archives. Unset, they are written beside the recordings. An
-      # absolute host path is mounted at the same path in the container.
-      BACKUP_STORAGE_PATH: ${BACKUP_STORAGE_PATH:-}
+      # Backup archives. Unset, they are written beside the recordings; set,
+      # the host path is mounted at this fixed container path, which no
+      # host path can make collide with the other mounts.
+      BACKUP_STORAGE_PATH: ${BACKUP_STORAGE_PATH:+/backups}
       # Google Drive export (optional; see docs/self-hosting/google-drive)
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -168,7 +169,7 @@ services:
       - storage:/app/storage
       - ${FILESYSTEM_EXPORT_HOST_PATH:-./exports}:/exports
       # The `backups` volume only stands in while BACKUP_STORAGE_PATH is unset.
-      - ${BACKUP_STORAGE_PATH:-backups}:${BACKUP_STORAGE_PATH:-/app/backups}
+      - ${BACKUP_STORAGE_PATH:-backups}:/backups
     depends_on:
       db:
         condition: service_healthy

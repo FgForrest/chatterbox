@@ -74,7 +74,7 @@ from the release's file when you upgrade.
 | `S3_REGION`             | —           | Region (`auto` on R2).                                              |
 | `S3_ACCESS_KEY_ID`      | —           |                                                                     |
 | `S3_SECRET_ACCESS_KEY`  | —           |                                                                     |
-| `BACKUP_STORAGE_PATH`   | —           | Absolute filesystem path for backup archives. Unset, they go beside the recordings. The bundled Compose file mounts the host path at the same path in the container. |
+| `BACKUP_STORAGE_PATH`   | —           | Filesystem path for backup archives. Unset, they go beside the recordings. With the bundled Compose file it is a host path, mounted at `/backups` in the container. |
 
 See [S3-compatible storage](./storage-s3) for per-provider
 config templates.

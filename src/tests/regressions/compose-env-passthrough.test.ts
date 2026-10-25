@@ -51,18 +51,18 @@ describe("compose passes the documented self-host variables to the app", () => {
         );
     });
 
-    it("passes BACKUP_STORAGE_PATH, unset meaning beside the recordings", () => {
-        expect(composeFallback("BACKUP_STORAGE_PATH")).toBe("");
+    it("mounts a configured backup path at a fixed container path", () => {
+        expect(compose).toContain(
+            `BACKUP_STORAGE_PATH: \${BACKUP_STORAGE_PATH:+/backups}`,
+        );
+        expect(compose).toContain(`- \${BACKUP_STORAGE_PATH:-backups}:/backups`);
+        expect(compose).toMatch(/^\s{2}backups:\s*$/m);
+    });
+
+    it("leaves backups beside the recordings while BACKUP_STORAGE_PATH is unset", () => {
         expect(
             envSchema.parse({ BACKUP_STORAGE_PATH: "" }).BACKUP_STORAGE_PATH,
         ).toBeFalsy();
-    });
-
-    it("mounts a configured backup path at the same path in the container", () => {
-        expect(compose).toContain(
-            `- \${BACKUP_STORAGE_PATH:-backups}:\${BACKUP_STORAGE_PATH:-/app/backups}`,
-        );
-        expect(compose).toMatch(/^\s{2}backups:\s*$/m);
     });
 
     it("keeps API_TOKEN_HASH_SECRET out of the app environment", () => {

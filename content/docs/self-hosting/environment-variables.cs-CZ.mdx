@@ -82,7 +82,7 @@ aktualizaci zkopírujte nové položky ze souboru z vydání.
 | `S3_REGION`             | —           | Region (`auto` na R2).                                            |
 | `S3_ACCESS_KEY_ID`      | —           |                                                                   |
 | `S3_SECRET_ACCESS_KEY`  | —           |                                                                   |
-| `BACKUP_STORAGE_PATH`   | —           | Absolutní cesta v systému pro archivy záloh. Pokud není, ukládají se vedle nahrávek. Přiložený soubor Compose připojí cestu hostitele na stejnou cestu v kontejneru. |
+| `BACKUP_STORAGE_PATH`   | —           | Cesta v systému pro archivy záloh. Pokud není, ukládají se vedle nahrávek. S přiloženým souborem Compose je to cesta hostitele, připojená v kontejneru na `/backups`. |
 
 Viz [S3-kompatibilní úložiště](./storage-s3) pro šablony konfigurací jednotlivých poskytovatelů.
 
