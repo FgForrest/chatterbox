@@ -3,7 +3,7 @@ title: Pro administrátory
 description: Co je potřeba zapnout pro jednotlivé funkce na instanci s vlastním hostingem.
 ---
 
-Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vyžadují nejprve určité nastavení instance. Zapínají se pomocí proměnných v `.env` (viz `.env.example`) a u dvou z nich také pomocí dodatečných služeb v `docker-compose.yml`. Po změně libovolného z těchto nastavení vždy restartujte sadu služeb.
+Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vyžadují nejprve určité nastavení instance. Zapínají se pomocí proměnných v `.env` (viz `.env.example`) a u některých z nich také pomocí dodatečných služeb v `docker-compose.yml`. Po změně libovolného z těchto nastavení vždy restartujte sadu služeb.
 
 | Funkce | Co nastavit | Více informací |
 | --- | --- | --- |
@@ -13,6 +13,9 @@ Většina funkcí Klepna funguje ihned po spuštění. Některé funkce však vy
 | Uzavřená registrace | `DISABLE_REGISTRATION=true` | |
 | [Export složek na disk](exports-backups-retention.md#to-a-disk) | `FILESYSTEM_EXPORT_HOST_PATH` (Docker) nebo `FILESYSTEM_EXPORT_ROOT` | |
 | [Exporty na Google Drive](exports-backups-retention.md#to-google-drive) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER`, volitelně `GOOGLE_WORKSPACE_DOMAINS` | [Google Drive](../self-hosting/google-drive.mdx) |
+| Návrhy mluvčích z [Kalendáře a Meet](learn.md#calendar-meet-and-speaker-guesses) | tytéž proměnné Google a navíc API a rozsahy Kalendáře a Meet v Google Cloud | [Kalendář a Meet](../self-hosting/google-drive.mdx#calendar-and-meet) |
+| [Pošta](mail.md) | jednotné přihlašování, `MAIL_DOMAIN`, `MAIL_ADDRESS_HASH_SECRET`, `MAIL_INGEST_SECRET`, profil `mail` s `MAIL_HOSTNAME` a `MAIL_TLS_DIR` a DNS | [níže](#inbound-mail) |
+| Výchozí hodnoty pro [Nahrávání schůzek](../guides/meeting-recorder.mdx) | nic; volitelně `RECORDER_AUTO_RECORD_PLATFORMS`, `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT`, `RECORDER_LOCK_DEFAULTS` | [níže](#meeting-recorder-for-chrome) |
 | Kam se zapisují zálohy | `BACKUP_STORAGE_PATH` | [Záloha a obnovení](../guides/backup-and-restore.mdx) |
 | Větší nahrávání videí | `VIDEO_UPLOAD_MAX_BYTES` (výchozí 4 GiB) | |
 | Poskytovatelé Claude Code a Codex | profil `agent-bridge` a `BRIDGE_TOKEN` | [níže](#claude-code-and-codex-subscriptions) |
@@ -71,6 +74,22 @@ dozví; jak rychle se to dozví váš poskytovatel, záleží na vašem IT.
 [Jednotné přihlašování](../self-hosting/sso.mdx#authorization-from-the-identity-provider)
 popisuje nastavení včetně příkazu, který připraví realm v Keycloaku a
 prvního administrátora.
+
+<span id="inbound-mail" />
+
+## Příjem pošty
+
+Se zapnutým příjmem pošty dostane každý, kdo se přihlásí přes jednotné přihlašování, adresu ve Vaší poštovní doméně, každá složka adresu, která do ní zařazuje, a každá složka Organizace adresu, na kterou mohou psát kolegové. Malý SMTP server, služba `mail-receiver` (profil compose `mail`), přijímá poštu pro tuto doménu pouze z odesílacích serverů Googlu a každou zprávu předá Klepně, která před zařazením ověří podpis odesílatele.
+
+Potřebuje proměnné z tabulky, port 25 dostupný z internetu, záznam `MX` a certifikát pro `MAIL_HOSTNAME`. Stránka [Příjem pošty](../self-hosting/mail.mdx) popisuje všechny kroky, záznamy DNS a kontroly po prvním nasazení. Lidi odkažte na kapitolu [Pošta](mail.md).
+
+<span id="meeting-recorder-for-chrome" />
+
+## Nahrávání schůzek v Chromu
+
+Rozšíření Nahrávání schůzek nepotřebuje na serveru žádné nastavení: lidé si ho nainstalují z Internetového obchodu Chrome přes **Nastavení → Nahrávání schůzek** a propojí ho ve třech krocích. Viz [Nahrávání schůzek](../guides/meeting-recorder.mdx).
+
+Server může volitelně nastavit výchozí hodnoty pro všechny: které platformy schůzek se nahrávají jedním kliknutím (`RECORDER_AUTO_RECORD_PLATFORMS`), po kolika sekundách ticha se nahrávání zastaví (`RECORDER_AUTO_STOP_QUIET_SECONDS`), pravidla nahrávání zobrazená před zapnutím nahrávání jedním kliknutím (`RECORDER_NOTICE_TEXT`) a zda je lidé smějí vypnout (`RECORDER_LOCK_DEFAULTS`). Předejte je službě aplikace v `environment:` souboru `docker-compose.yml`; viz [Proměnné prostředí](../self-hosting/environment-variables.mdx#meeting-recorder).
 
 <span id="claude-code-and-codex-subscriptions" />
 

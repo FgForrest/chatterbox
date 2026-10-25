@@ -8,13 +8,15 @@ This section covers installing, configuring, and operating your own instance.
 
 ## Where to start
 
-- **[Install](./install)** — one-line Docker Compose installer.
+- **[Install](./install)** — Docker Compose from the release assets.
 - **[Environment variables](./environment-variables)** — every knob
   Chatterbox reads at boot, with required-at-runtime values called out.
 - **[Organization](./organization)** — share recordings, transcripts and
   speaker names with everyone on the instance.
 - **[Single sign-on](./sso)** — sign in through an OpenID Connect
   provider such as Keycloak.
+- **[Inbound mail](./mail)** — give every user and folder a mail address
+  that files forwarded mail into Chatterbox.
 - **[External MCP server](./mcp)** — let AI clients and backend services
   read the Almanac, transcripts, summaries and tasks, with access decided
   by Keycloak roles.
@@ -22,6 +24,8 @@ This section covers installing, configuring, and operating your own instance.
   (claude.ai, Desktop, Cowork) and Claude Code about their recordings.
 - **[S3-compatible storage](./storage-s3)** — point audio at AWS S3,
   Cloudflare R2, MinIO, Backblaze B2, or anything S3-shaped.
+- **[Google Drive, Calendar and Meet](./google-drive)** — folder exports
+  to Google Drive and speaker suggestions from meeting invitations.
 - **[Email (SMTP) setup](./email-smtp)** — wire up an SMTP server so
   the email notification backend can deliver mail.
 - **[Upgrading](./upgrading)** — image tags, the upgrade command, and

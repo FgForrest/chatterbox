@@ -21,9 +21,11 @@ Učení je dostupné u přepisů s časovými údaji na instancích s vlastním 
 
 U ručního kroku prvek Učení uvádí, že je připravený, a nabízí tlačítko **Učení**. Po spuštění se bez otevření okna přepne na stav **Učení čte přepis**. Během zpracování můžete stránku opustit. Po dokončení prvek nabídne akci **Zkontrolovat**.
 
-Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Když najde návrhy, jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat poznatky** kontrolu rozbalí a posune se k ní. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
+Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Když najde návrhy, jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat poznatky** kontrolu rozbalí a posune se k ní. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis, a zamýšlené sdílení s Organizací čeká s nimi. Po 72 hodinách pokračují bez kontroly. Kontrola zůstane otevřená, dokud ji nedokončíte nebo dokud položka nebude sdílena.
 
 Pokud Učení nenajde nic ke kontrole a je zapnutá volba **Opravit přepis po Učení**, krok Učení zůstane ve stavu **Běží**, zatímco přepis znovu čte a opravuje špatně rozpoznaná slova. U shrnutí se zobrazí, že čeká na tuto opravu, a po jejím dokončení se samo spustí. Kliknutím na **Shrnout** jej můžete spustit ihned.
+
+<span id="calendar-meet-and-speaker-guesses" />
 
 ## Kalendář, Meet a odhady mluvčích
 
@@ -71,7 +73,7 @@ Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učen
 
 - Filtr **Vyžaduje kontrolu** nad seznamem nahrávek.
 - Odznak na **Almanach** a záložka **Ke kontrole** tamtéž.
-- Nahrávku s nedokončenou kontrolou nelze sdílet s Organizací, dokud není kontrola dokončena.
+- Sdílení položky s Organizací uzavře její nedokončenou soukromou kontrolu a její zjištění zůstanou soukromá. Znalostmi Organizace se stane jen to, co jste potvrdili v dokončené kontrole.
 
 <span id="good-to-know" />
 

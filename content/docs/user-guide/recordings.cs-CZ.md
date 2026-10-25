@@ -21,10 +21,13 @@ Seznam Klepů vlevo zobrazuje nejnovější nahrávky a poštu jako první, sesk
 
 ## Přidávání nahrávek
 
-Nahrávky přibývají dvěma způsoby:
+Nahrávky přibývají třemi způsoby:
 
 - **Z Vašeho záznamníku.** Klepna stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
+- **Ze schůzky v prohlížeči.** Rozšíření Nahrávání schůzek pro Chrome, Edge, Brave a Vivaldi nahrává Váš mikrofon a kartu se schůzkou, odesílá zvuk už během nahrávání a nahrávku zařadí do zvolené složky, i když ji změníte uprostřed schůzky. Nainstalujete a propojíte ho v **Nastavení → Nahrávání schůzek**. Viz [Nahrávání schůzek](../guides/meeting-recorder.mdx).
 - **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. V Klepech se nahrávka otevře vpravo, pokud jste od začátku nahrávání nepřešli jinam. Jinak upozornění nabídne **Otevřít** a ponechá právě čtenou položku na místě. U videa si Klepna ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+
+Pokud Vaše instance přijímá poštu, objeví se ve stejném seznamu i e-maily, které na své adresy v Klepně pošlete nebo přepošlete. Viz [Pošta](mail.md).
 
 Když máte otevřené **Klepy** a dorazí Vaše nová nahrávka nebo pošta, upozornění vpravo dole ukáže název a podrobnosti. Na telefonu je u spodního okraje. Výběr ani složka se nezmění. **Otevřít** otevře položku a tlačítko Zpět Vás vrátí. Novější příchozí položka upozornění nahradí; **+N dalších** počítá ostatní od jeho zobrazení. Upozornění zůstane, dokud ho nezavřete, neotevřete jeho položku nebo položka nezmizí. Položky, které v Klepech byly už při jejich otevření, a položky, které kolegové sdílejí do Organizace, upozornění nevyvolají. Volba **Zobrazovat oznámení o synchronizaci** ho nevypíná.
 

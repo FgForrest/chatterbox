@@ -93,8 +93,11 @@ into a profile** to keep editing one.
 - **Notifications**: browser, email and Bark notifications for new recordings.
 - **Storage**: space used, and [Auto-delete old data](exports-backups-retention.md#deleting-old-data-automatically).
 - **Export/Backup**: [exports and backups](exports-backups-retention.md#backups).
+- **Mail** (where your instance receives mail): your addresses, secret addresses and the delivery log. See [Mail](mail.md).
+- **Meeting Recorder**: install the browser extension from the Chrome Web Store and connect it, or generate a recorder key for manual pairing. See [Meeting Recorder](../guides/meeting-recorder.mdx).
 - **API Keys** and **Webhooks**: connect Chatterbox to other tools.
-- **Google Account**: connect the Google account used for [Google Drive exports](exports-backups-retention.md#to-google-drive).
+- **Google Account**: connect the Google account used for [Google Drive exports](exports-backups-retention.md#to-google-drive) and for Calendar and Meet.
+- **Access** (people who manage access, with access from the identity provider): who may use Chatterbox, curate the Organization or manage access. See [For administrators](administrators.md#access-from-the-identity-provider).
 
 Calendar and Meet access is optional and read-only. When connected, every manual and automatic audio Learn run uses the owner's meeting attendees for **?** speaker suggestions, and supported transcription providers and the correction pass use their names for spelling. Confirm suggestions yourself; unticked guesses stay unconfirmed. The review shows invitations, Meet attendance, transcript evidence or a guess with its reason. No attendee emails or voice data are used.
 

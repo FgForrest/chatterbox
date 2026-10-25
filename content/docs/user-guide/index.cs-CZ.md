@@ -21,11 +21,14 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 6. [Almanach](almanac.md): osoby a věci, které Klepna zná, jejich přezdívky a fakta.
 7. [Učení](learn.md): nechte Klepna navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
 8. [Organizace](organization.md): sdílení nahrávek s kolegy.
-9. [Pošta](mail.md): posílání pošty do Klepny a její zařazení ke zpracování.
-10. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
-11. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
-12. [Klepna v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
-13. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
+9. [Sdílení s lidmi](sharing-with-people.md): pozvání jednotlivých kolegů k soukromé nahrávce, e-mailu nebo složce.
+10. [Pošta](mail.md): posílání pošty do Klepny a její zařazení ke zpracování.
+11. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
+12. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
+13. [Klepna v Claude](claude.md): dotazy na nahrávky, poštu, lidi a úkoly z Claude nebo Claude Code.
+14. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
+
+Nahrávání schůzek v prohlížeči má vlastní návod: [Nahrávání schůzek](../guides/meeting-recorder.mdx).
 
 <span id="where-a-feature-comes-from" />
 
@@ -34,7 +37,9 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 Některé funkce závisí na tom, jak je Vaše instance nastavena. Pokud kapitola popisuje takovou vlastnost, uvádí to:
 
 - **Učení** funguje na instancích s vlastním hostingem, kde je nastaven AI poskytovatel umožňující zápis shrnutí.
-- **Organizace** se objeví, pokud správce vytvořil organizační účet.
+- **Organizace** se objeví, pokud správce vytvořil organizační účet. Potřebuje ji i **Sdílení s lidmi**.
+- **Pošta** funguje, pokud správce nastavil příjem pošty, který vyžaduje i jednotné přihlašování.
+- **Návrhy mluvčích z Kalendáře a Meet** se objeví, pokud správce nastavil integraci Google.
 - **Export složek** na disk nebo Google Drive je dostupný, pokud je správce povolil.
 - **Jednotné přihlašování (Single sign-on)** nahrazuje přihlašování e-mailem a heslem, pokud správce napojil poskytovatele identity.
 - **Klepna v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
