@@ -10,6 +10,7 @@ import {
     taskFollowers,
     taskHomeMoves,
     taskMentions,
+    taskStatusTransitions,
     taskUnfollows,
     taskUpdateProposals,
 } from "@/db/schema";
@@ -50,6 +51,13 @@ export interface ArchivedTask {
     createdAt: string;
     acceptedAt: string | null;
     statusChangedAt: string | null;
+    statusTransitions?: {
+        id: string;
+        actorUserId: string | null;
+        fromStatus: ArchivedTask["status"] | null;
+        toStatus: ArchivedTask["status"];
+        createdAt: string;
+    }[];
     /** A proposal's draft, or an accepted task's unresolved assignee. */
     review?: { ticked: boolean; assigneeCheck: boolean };
 }
@@ -251,6 +259,49 @@ export async function tasksForArchive(
             ),
         )
         .orderBy(recordingTasks.position, recordingTasks.createdAt);
+    const transitions =
+        proposals && rows.length
+            ? await db
+                  .select({
+                      taskId: taskStatusTransitions.taskId,
+                      id: taskStatusTransitions.id,
+                      actorUserId: taskStatusTransitions.actorUserId,
+                      fromStatus: taskStatusTransitions.fromStatus,
+                      toStatus: taskStatusTransitions.toStatus,
+                      createdAt: taskStatusTransitions.createdAt,
+                  })
+                  .from(taskStatusTransitions)
+                  .innerJoin(
+                      recordingTasks,
+                      eq(recordingTasks.id, taskStatusTransitions.taskId),
+                  )
+                  .leftJoin(
+                      chatterItems,
+                      eq(chatterItems.id, recordingTasks.itemId),
+                  )
+                  .where(
+                      and(
+                          archivedTaskCondition(scope),
+                          inArray(
+                              recordingTasks.id,
+                              rows.map((row) => row.id),
+                          ),
+                      ),
+                  )
+                  .orderBy(
+                      taskStatusTransitions.createdAt,
+                      taskStatusTransitions.id,
+                  )
+            : [];
+    const history = new Map<
+        string,
+        NonNullable<ArchivedTask["statusTransitions"]>
+    >();
+    for (const { taskId, createdAt, ...transition } of transitions) {
+        const entries = history.get(taskId) ?? [];
+        entries.push({ ...transition, createdAt: createdAt.toISOString() });
+        history.set(taskId, entries);
+    }
     const mentions = await loadArchivedTaskMentions(
         scope,
         rows.map((row) => row.id),
@@ -307,6 +358,9 @@ export async function tasksForArchive(
             createdAt: row.createdAt.toISOString(),
             acceptedAt: row.acceptedAt?.toISOString() ?? null,
             statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
+            ...(proposals
+                ? { statusTransitions: history.get(row.id) ?? [] }
+                : {}),
             ...(status === "proposed" || row.assigneeCheck
                 ? {
                       review: {

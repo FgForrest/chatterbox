@@ -48,7 +48,7 @@ export function Footer() {
                         </span>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-3">
                         {/* Self-host-only update notice. Suspended with a
                             null fallback so a cold GitHub-API cache
                             doesn't block the rest of the footer from
@@ -83,6 +83,12 @@ export function Footer() {
                                 {i18n("What's new")}
                             </Link>
                         ) : null}
+                        <Link
+                            href="/statistics"
+                            className="hover:text-foreground transition-colors"
+                        >
+                            {i18n("Statistics")}
+                        </Link>
                         <Link
                             href="/docs"
                             className="hover:text-foreground transition-colors"

@@ -31,6 +31,11 @@
     --chart-3: oklch(0.8816 0.0276 93.128);
     --chart-4: oklch(0.8822 0.0403 298.1792);
     --chart-5: #e35364;
+    --series-1: #c63b50;
+    --series-2: #0f958c;
+    --series-3: #d08a10;
+    --series-4: #7353d0;
+    --series-5: #8a9a2a;
     --sidebar: oklch(0.9663 0.008 98.8792);
     --sidebar-foreground: oklch(0.359 0.0051 106.6524);
     --sidebar-primary: #c63b50;
@@ -132,6 +137,11 @@
     --chart-3: oklch(0.213 0.0078 95.4245);
     --chart-4: oklch(0.3074 0.0516 289.323);
     --chart-5: #c63b50;
+    --series-1: #e8566a;
+    --series-2: #1f9d92;
+    --series-3: #b9801c;
+    --series-4: #8a74e0;
+    --series-5: #869a2c;
     --sidebar: oklch(0.2357 0.0024 67.7077);
     --sidebar-foreground: oklch(0.8074 0.0142 93.0137);
     --sidebar-primary: #f35f6d;

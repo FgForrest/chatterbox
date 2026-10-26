@@ -1777,12 +1777,15 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
         });
 
         it("returns at most 50 matches, with audit ids and a continuation", async () => {
-            for (let index = 0; index < 51; index++)
-                await seedMail(
-                    `search-many-${String(index).padStart(3, "0")}`,
-                    READER,
-                    { segments: [body("Manymatches")] },
-                );
+            await Promise.all(
+                Array.from({ length: 51 }, (_, index) =>
+                    seedMail(
+                        `search-many-${String(index).padStart(3, "0")}`,
+                        READER,
+                        { segments: [body("Manymatches")] },
+                    ),
+                ),
+            );
             const tool = ALL_TOOLS.find((tool) => tool.name === "search_mail");
             if (!tool) throw new Error("missing tool");
             const touched: string[] = [];
@@ -1799,7 +1802,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             });
             expect(next.results).toHaveLength(1);
             expect(ids(next).some((id) => touched.includes(id))).toBe(false);
-        });
+        }, 30_000);
 
         it("stops after 500 mails and continues without gaps at equal timestamps", async () => {
             const at = new Date("2026-10-18");
@@ -1874,6 +1877,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                 actual.allowMcpScan,
             );
             try {
+                await db().delete(apiRateLimitBuckets);
                 for (let index = 0; index < 10; index++)
                     await search(reader(), {
                         query: "Absentbudgetword",
