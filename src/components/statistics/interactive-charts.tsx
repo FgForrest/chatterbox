@@ -1,7 +1,13 @@
 "use client";
 
 import { useExtracted, useLocale } from "next-intl";
-import { type KeyboardEvent, useRef, useState } from "react";
+import {
+    type KeyboardEvent,
+    useCallback,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import {
     type DayRange,
     metricIndex,
@@ -45,12 +51,45 @@ export function Waveform({
     );
     const max = Math.max(1, ...values);
     const selected = draft ?? range;
-    const date = (index: number) =>
-        new Intl.DateTimeFormat(locale, {
-            day: "numeric",
-            month: "numeric",
+    const dateFormatter = useMemo(
+        () =>
+            new Intl.DateTimeFormat(locale, {
+                day: "numeric",
+                month: "numeric",
+                timeZone: "UTC",
+            }),
+        [locale],
+    );
+    const date = useCallback(
+        (index: number) =>
+            dateFormatter.format(
+                new Date(`${shiftDay(data.start, index)}T00:00:00Z`),
+            ),
+        [data.start, dateFormatter],
+    );
+    const tableRows = useCallback(
+        () =>
+            data.daily[metricIndex.minutes].map((value, i) => [
+                date(i),
+                format(value),
+            ]),
+        [data.daily, date, format],
+    );
+    const months = useMemo(() => {
+        const formatter = new Intl.DateTimeFormat(locale, {
+            month: "short",
             timeZone: "UTC",
-        }).format(new Date(`${shiftDay(data.start, index)}T00:00:00Z`));
+        });
+        return Array.from({ length: data.days }, (_, i) => ({
+            index: i,
+            day: shiftDay(data.start, i),
+        }))
+            .filter(({ day }) => day.endsWith("-01"))
+            .map(({ index, day }) => ({
+                index,
+                label: formatter.format(new Date(`${day}T00:00:00Z`)),
+            }));
+    }, [data.days, data.start, locale]);
     function dayAt(clientX: number, element: SVGSVGElement) {
         const bounds = element.getBoundingClientRect();
         return Math.max(
@@ -183,20 +222,15 @@ export function Waveform({
                         />
                     );
                 })}
-                {Array.from({ length: data.days }, (_, i) => i)
-                    .filter((i) => shiftDay(data.start, i).endsWith("-01"))
-                    .map((i) => (
-                        <text key={i} x={(i / data.days) * width + 2} y={129}>
-                            {new Intl.DateTimeFormat(locale, {
-                                month: "short",
-                                timeZone: "UTC",
-                            }).format(
-                                new Date(
-                                    `${shiftDay(data.start, i)}T00:00:00Z`,
-                                ),
-                            )}
-                        </text>
-                    ))}
+                {months.map(({ index, label }) => (
+                    <text
+                        key={index}
+                        x={(index / data.days) * width + 2}
+                        y={129}
+                    >
+                        {label}
+                    </text>
+                ))}
             </svg>
             {active !== null && active >= 0 && (
                 <ChartTooltip
@@ -222,10 +256,7 @@ export function Waveform({
             <DataTable
                 label={i18n("Recorded time")}
                 columns={[i18n("Period"), i18n("Recorded time")]}
-                rows={data.daily[metricIndex.minutes].map((value, i) => [
-                    date(i),
-                    format(value),
-                ])}
+                rows={tableRows}
             />
         </div>
     );
@@ -252,6 +283,15 @@ export function RankedRows({
 }) {
     const i18n = useExtracted();
     const [active, setActive] = useState<string | null>(null);
+    const tableRows = useCallback(
+        () =>
+            rows.map((row) => [
+                row.subtitle ? `${row.subtitle} · ${row.name}` : row.name,
+                row.formatted,
+                ...row.parts.map((part) => part.detail),
+            ]),
+        [rows],
+    );
     const max = Math.max(1e-9, ...rows.map((row) => row.value));
     const selected = rows.find((row) => row.key === active);
     return (
@@ -339,11 +379,7 @@ export function RankedRows({
                     i18n("Total"),
                     ...(rows[0]?.parts.map((part) => part.label) ?? []),
                 ]}
-                rows={rows.map((row) => [
-                    row.subtitle ? `${row.subtitle} · ${row.name}` : row.name,
-                    row.formatted,
-                    ...row.parts.map((part) => part.detail),
-                ])}
+                rows={tableRows}
             />
         </div>
     );
@@ -359,24 +395,48 @@ export function Heatmap({
     const i18n = useExtracted();
     const locale = useLocale();
     const [active, setActive] = useState<number | null>(null);
-    const cells = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
-    for (const [day, hour, count] of data.heat) {
-        if (day < range.start || day > range.end) continue;
-        const weekday =
-            (new Date(`${shiftDay(data.start, day)}T00:00:00Z`).getUTCDay() +
-                6) %
-            7;
-        cells[weekday][hour] += count;
-    }
+    const cells = useMemo(() => {
+        const cells = Array.from({ length: 7 }, () =>
+            Array<number>(24).fill(0),
+        );
+        for (const [day, hour, count] of data.heat) {
+            if (day < range.start || day > range.end) continue;
+            const weekday =
+                (new Date(
+                    `${shiftDay(data.start, day)}T00:00:00Z`,
+                ).getUTCDay() +
+                    6) %
+                7;
+            cells[weekday][hour] += count;
+        }
+        return cells;
+    }, [data.heat, data.start, range.start, range.end]);
     const max = Math.max(1, ...cells.flat());
     const hours = Array.from({ length: 24 }, (_, hour) => hour);
-    const weekday = (day: number) =>
-        new Intl.DateTimeFormat(locale, {
+    const weekdays = useMemo(() => {
+        const formatter = new Intl.DateTimeFormat(locale, {
             weekday: "short",
             timeZone: "UTC",
-        }).format(new Date(Date.UTC(2026, 0, 5 + day)));
-    const rows = cells.flatMap((row, day) =>
-        row.map((count, hour) => ({ day, hour, count })),
+        });
+        return Array.from({ length: 7 }, (_, day) =>
+            formatter.format(new Date(Date.UTC(2026, 0, 5 + day))),
+        );
+    }, [locale]);
+    const rows = useMemo(
+        () =>
+            cells.flatMap((row, day) =>
+                row.map((count, hour) => ({ day, hour, count })),
+            ),
+        [cells],
+    );
+    const tableRows = useCallback(
+        () =>
+            rows.map(({ day, hour, count }) => [
+                weekdays[day],
+                `${hour}:00–${hour + 1}:00`,
+                count,
+            ]),
+        [rows, weekdays],
     );
     const chosen = active === null ? null : rows[active];
     const busiest = rows.reduce(
@@ -388,14 +448,9 @@ export function Heatmap({
             <p className={styles.sub}>
                 {busiest.count
                     ? i18n(
-                          "Most recordings start on {day} between {from}:00 and {to}:00.",
+                          "Most recordings start {day, select, 1 {on Monday} 2 {on Tuesday} 3 {on Wednesday} 4 {on Thursday} 5 {on Friday} 6 {on Saturday} 7 {on Sunday} other {on this day}} between {from}:00 and {to}:00.",
                           {
-                              day: new Intl.DateTimeFormat("en", {
-                                  weekday: "long",
-                                  timeZone: "UTC",
-                              }).format(
-                                  new Date(Date.UTC(2026, 0, 5 + busiest.day)),
-                              ),
+                              day: String(busiest.day + 1),
                               from: String(busiest.hour),
                               to: String(busiest.hour + 1),
                           },
@@ -412,13 +467,13 @@ export function Heatmap({
                         </span>
                     ))}
                     {cells.map((row, day) => (
-                        <div className={styles.heatRow} key={weekday(day)}>
-                            <span>{weekday(day)}</span>
+                        <div className={styles.heatRow} key={weekdays[day]}>
+                            <span>{weekdays[day]}</span>
                             {row.map((count, hour) => (
                                 <button
-                                    key={`${weekday(day)}:${hour}:00`}
+                                    key={`${weekdays[day]}:${hour}:00`}
                                     type="button"
-                                    aria-label={`${weekday(day)} ${hour}:00–${hour + 1}:00: ${count}`}
+                                    aria-label={`${weekdays[day]} ${hour}:00–${hour + 1}:00: ${count}`}
                                     style={{
                                         background: count
                                             ? `color-mix(in oklab, var(--primary) ${16 + Math.ceil((count / max) * 4) * 19}%, var(--card))`
@@ -483,7 +538,7 @@ export function Heatmap({
             </div>
             {chosen && (
                 <ChartTooltip
-                    title={`${weekday(chosen.day)} ${chosen.hour}:00–${chosen.hour + 1}:00`}
+                    title={`${weekdays[chosen.day]} ${chosen.hour}:00–${chosen.hour + 1}:00`}
                     rows={[
                         {
                             label: i18n("Recordings"),
@@ -498,11 +553,7 @@ export function Heatmap({
             <DataTable
                 label={i18n("When people talk")}
                 columns={[i18n("Day"), i18n("Hour"), i18n("Recordings")]}
-                rows={rows.map(({ day, hour, count }) => [
-                    weekday(day),
-                    `${hour}:00–${hour + 1}:00`,
-                    count,
-                ])}
+                rows={tableRows}
             />
         </div>
     );

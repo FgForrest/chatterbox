@@ -2844,7 +2844,6 @@
   "HEyxr5": "Nahraný čas",
   "u4nYxm": "V tomto období není žádná aktivita.",
   "MJ2jZQ": "Celkem",
-  "lBXE9k": "Nejvíc nahrávek začíná {day, select, Monday {v pondělí} Tuesday {v úterý} Wednesday {ve středu} Thursday {ve čtvrtek} Friday {v pátek} Saturday {v sobotu} Sunday {v neděli} other {{day}}} mezi {from}. a {to}. hodinou.",
   "ah2kTV": "méně",
   "gk3x_E": "více",
   "mYOCCZ": "Kdy se mluví",
@@ -3358,5 +3357,6 @@
   "41a7gc": "Kolega s vámi sdílí položku.",
   "YKi7kr": "Zobrazit pozvánky",
   "IkG8j8": "h",
-  "TZr4xU": "min"
+  "TZr4xU": "min",
+  "decmfH": "Nejvíc nahrávek začíná {day, select, 1 {v pondělí} 2 {v úterý} 3 {ve středu} 4 {ve čtvrtek} 5 {v pátek} 6 {v sobotu} 7 {v neděli} other {v tento den}} mezi {from}. a {to}. hodinou."
 }

@@ -96,7 +96,33 @@ const bundleSchema = z.object({
         .default([]),
 });
 
-/** Restore task files and optional status history after items and people. Unknown historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. */
+async function authorizedTaskActor(
+    executor: Pick<typeof db, "select">,
+    taskId: string,
+    actorUserId: string,
+): Promise<string | null> {
+    const [actor] = await executor
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, actorUserId))
+        .limit(1);
+    if (!actor) return null;
+    const actorViewer = await taskViewerById(actor.id);
+    const [closable] = await executor
+        .select({ id: recordingTasks.id })
+        .from(recordingTasks)
+        .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                eq(recordingTasks.id, taskId),
+                taskClosable(actorViewer, ANY_TASK_ITEM, true),
+            ),
+        )
+        .limit(1);
+    return closable ? actor.id : null;
+}
+
+/** Restore task files and optional status history after items and people. Unknown or unauthorized historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. */
 export async function restoreTaskArchive(
     viewer: TaskViewer,
     input: unknown,
@@ -286,74 +312,44 @@ export async function restoreTaskArchive(
                 ticked: task.review?.ticked ?? true,
                 assigneeCheck: task.review?.assigneeCheck ?? false,
             });
-            if (task.statusTransitions?.length) {
-                const actorIds = [
-                    ...new Set(
-                        task.statusTransitions.flatMap((row) =>
-                            row.actorUserId ? [row.actorUserId] : [],
-                        ),
-                    ),
-                ];
-                const actors = new Set(
-                    actorIds.length
-                        ? (
-                              await tx
-                                  .select({ id: users.id })
-                                  .from(users)
-                                  .where(inArray(users.id, actorIds))
-                          ).map((row) => row.id)
-                        : [],
+            const actorIds = new Set(
+                task.statusTransitions?.flatMap((row) =>
+                    row.actorUserId ? [row.actorUserId] : [],
+                ),
+            );
+            if (task.note && task.noteUpdatedByUserId)
+                actorIds.add(task.noteUpdatedByUserId);
+            const actors = new Map<string, string | null>();
+            for (const actorId of actorIds)
+                actors.set(
+                    actorId,
+                    await authorizedTaskActor(tx, task.id, actorId),
                 );
+            if (task.statusTransitions?.length) {
                 await tx.insert(taskStatusTransitions).values(
                     task.statusTransitions.map((row) => ({
                         ...row,
                         taskId: task.id,
-                        actorUserId:
-                            row.actorUserId && actors.has(row.actorUserId)
-                                ? row.actorUserId
-                                : null,
+                        actorUserId: row.actorUserId
+                            ? (actors.get(row.actorUserId) ?? null)
+                            : null,
                         createdAt: new Date(row.createdAt),
                     })),
                 );
             }
-            if (
-                task.note &&
-                task.noteUpdatedByUserId &&
-                task.noteUpdatedByUserId !== viewer.userId
-            ) {
-                const [author] = await tx
-                    .select({ id: users.id })
-                    .from(users)
-                    .where(eq(users.id, task.noteUpdatedByUserId))
-                    .limit(1);
-                if (author) {
-                    const authorViewer = await taskViewerById(author.id);
-                    const [closable] = await tx
-                        .select({ id: recordingTasks.id })
-                        .from(recordingTasks)
-                        .leftJoin(
-                            chatterItems,
-                            eq(chatterItems.id, recordingTasks.itemId),
-                        )
-                        .where(
-                            and(
-                                eq(recordingTasks.id, task.id),
-                                taskClosable(authorViewer, ANY_TASK_ITEM, true),
-                            ),
-                        )
-                        .limit(1);
-                    if (closable)
-                        await tx
-                            .update(recordingTasks)
-                            .set({ noteUpdatedByUserId: author.id })
-                            .where(
-                                and(
-                                    eq(recordingTasks.id, task.id),
-                                    eq(recordingTasks.userId, owner),
-                                ),
-                            );
-                }
-            }
+            const noteAuthor = task.noteUpdatedByUserId
+                ? actors.get(task.noteUpdatedByUserId)
+                : null;
+            if (task.note && noteAuthor)
+                await tx
+                    .update(recordingTasks)
+                    .set({ noteUpdatedByUserId: noteAuthor })
+                    .where(
+                        and(
+                            eq(recordingTasks.id, task.id),
+                            eq(recordingTasks.userId, owner),
+                        ),
+                    );
             if (itemId)
                 await tx.insert(taskMentions).values({
                     taskId: task.id,

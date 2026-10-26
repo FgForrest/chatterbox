@@ -2844,7 +2844,6 @@
   "HEyxr5": "Recorded time",
   "u4nYxm": "No activity in this period.",
   "MJ2jZQ": "Total",
-  "lBXE9k": "Most recordings start on {day} between {from}:00 and {to}:00.",
   "ah2kTV": "less",
   "gk3x_E": "more",
   "mYOCCZ": "When people talk",
@@ -3358,5 +3357,6 @@
   "41a7gc": "A colleague shared an item with you.",
   "YKi7kr": "Review invitations",
   "IkG8j8": "h",
-  "TZr4xU": "min"
+  "TZr4xU": "min",
+  "decmfH": "Most recordings start {day, select, 1 {on Monday} 2 {on Tuesday} 3 {on Wednesday} 4 {on Thursday} 5 {on Friday} 6 {on Saturday} 7 {on Sunday} other {on this day}} between {from}:00 and {to}:00."
 }

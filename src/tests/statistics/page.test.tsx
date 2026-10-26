@@ -10,25 +10,47 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
+import { createTranslator } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Waveform } from "@/components/statistics/interactive-charts";
 import { StatisticsPage } from "@/components/statistics/statistics-page";
 import { useStatisticsView } from "@/components/statistics/use-statistics-view";
 import { metricIndex } from "@/lib/statistics/data";
+import czechMessages from "../../../messages/cs-CZ.json";
+import englishMessages from "../../../messages/en.json";
 import { statisticsFixture } from "./fixtures";
+
+const language = vi.hoisted(() => ({ locale: "en" }));
+const translations = new Map(
+    Object.entries(englishMessages).map(([key, message]) => [
+        message,
+        czechMessages[key as keyof typeof czechMessages],
+    ]),
+);
 
 const unitLabels = vi.hoisted(() => ({}) as Record<string, string>);
 
 vi.mock("next-intl", () => ({
-    useLocale: () => "en",
+    useLocale: () => language.locale,
     useExtracted:
         () =>
-        (text: string | { message: string }, values?: Record<string, string>) =>
-            Object.entries(values ?? {}).reduce(
-                (result, [key, value]) => result.replace(`{${key}}`, value),
-                unitLabels[typeof text === "string" ? text : text.message] ??
-                    (typeof text === "string" ? text : text.message),
-            ),
+        (
+            text: string | { message: string },
+            values?: Record<string, string>,
+        ) => {
+            const message = typeof text === "string" ? text : text.message;
+            return createTranslator({
+                locale: language.locale,
+                messages: {
+                    message:
+                        unitLabels[message] ??
+                        (language.locale === "cs-CZ"
+                            ? translations.get(message)
+                            : undefined) ??
+                        message,
+                },
+            })("message", values);
+        },
 }));
 vi.mock("@/components/product-name-provider", () => ({
     useProductName: () => "Chatterbox",
@@ -36,12 +58,14 @@ vi.mock("@/components/product-name-provider", () => ({
 
 const fetchMock = vi.fn();
 beforeEach(() => {
+    language.locale = "en";
     for (const key of Object.keys(unitLabels)) delete unitLabels[key];
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 
@@ -63,6 +87,118 @@ describe("statistics page", () => {
         ).toBeTruthy();
         expect(
             within(panel).getByText("minutes", { selector: "small" }),
+        ).toBeTruthy();
+    });
+    it.each([
+        [1, "v pondělí"],
+        [2, "v úterý"],
+        [3, "ve středu"],
+        [4, "ve čtvrtek"],
+        [5, "v pátek"],
+        [6, "v sobotu"],
+        [7, "v neděli"],
+    ])("renders Czech heatmap grammar for ISO weekday %s", (day, weekday) => {
+        language.locale = "cs-CZ";
+        const data = statisticsFixture();
+        data.heat = [[356 + Number(day), 9, 3]];
+        data.measuredFrom = "2026-10-01";
+        const DateTimeFormat = Intl.DateTimeFormat;
+        const dateFormatter = vi
+            .spyOn(Intl, "DateTimeFormat")
+            .mockImplementation(function formatDate(locale, options) {
+                return new DateTimeFormat(locale, options);
+            });
+        render(<StatisticsPage initialData={data} scopes={["mine"]} />);
+        const locales = dateFormatter.mock.calls.map(([locale]) => locale);
+        dateFormatter.mockRestore();
+        expect(locales).not.toContain("en");
+        expect(
+            screen.getByText(
+                `Nejvíc nahrávek začíná ${weekday} mezi 9. a 10. hodinou.`,
+                { exact: false },
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("region", { name: "Nahraný čas" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("radio", { name: "30 dní" })).toBeTruthy();
+        expect(screen.getByText("Měříme od 1. 10. 2026")).toBeTruthy();
+        expect(
+            screen.getAllByText("Zobrazit jako tabulku").length,
+        ).toBeGreaterThan(1);
+    });
+    it("does not format waveform table rows while closed or rebuild them while brushing", async () => {
+        const data = statisticsFixture();
+        const format = vi.fn((value: number) => `${value} min`);
+        const onRange = vi.fn();
+        const { rerender } = render(
+            <Waveform
+                data={data}
+                range={{ start: 275, end: 364 }}
+                onRange={onRange}
+                format={format}
+            />,
+        );
+        expect(format).not.toHaveBeenCalled();
+        const details = screen.getByText("Show as a table").closest("details");
+        if (!details) throw new Error("Missing waveform table");
+        fireEvent.click(details.querySelector("summary") as HTMLElement);
+        await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+        expect(format).toHaveBeenCalledTimes(365);
+        const DateTimeFormat = Intl.DateTimeFormat;
+        const dateFormatter = vi
+            .spyOn(Intl, "DateTimeFormat")
+            .mockImplementation(function formatDate(locale, options) {
+                return new DateTimeFormat(locale, options);
+            });
+        try {
+            const wave = screen.getByRole("img");
+            for (const key of ["Home", "ArrowRight", "ArrowRight", "End"])
+                fireEvent.keyDown(wave, { key });
+            expect(format).toHaveBeenCalledTimes(369);
+            format.mockClear();
+            vi.stubGlobal("PointerEvent", MouseEvent);
+            wave.setPointerCapture = vi.fn();
+            vi.spyOn(wave, "getBoundingClientRect").mockReturnValue(
+                new DOMRect(0, 0, 540, 132),
+            );
+            fireEvent.pointerDown(wave, { clientX: 0, pointerId: 1 });
+            for (const clientX of [12, 24, 36])
+                fireEvent.pointerMove(wave, { clientX, pointerId: 1 });
+            fireEvent.pointerUp(wave, { clientX: 36, pointerId: 1 });
+            expect(onRange).toHaveBeenCalled();
+            expect(format).toHaveBeenCalledTimes(3);
+            expect(dateFormatter).not.toHaveBeenCalled();
+        } finally {
+            dateFormatter.mockRestore();
+        }
+        const updated = {
+            ...data,
+            daily: data.daily.map((values) => [...values]),
+        };
+        updated.daily[metricIndex.minutes][364] = 125;
+        rerender(
+            <Waveform
+                data={updated}
+                range={{ start: 275, end: 364 }}
+                onRange={onRange}
+                format={format}
+            />,
+        );
+        expect(
+            within(screen.getByRole("table")).getByText("125 min"),
+        ).toBeTruthy();
+        language.locale = "cs-CZ";
+        rerender(
+            <Waveform
+                data={updated}
+                range={{ start: 275, end: 364 }}
+                onRange={onRange}
+                format={format}
+            />,
+        );
+        expect(
+            within(screen.getByRole("table")).getByText("26. 10."),
         ).toBeTruthy();
     });
     it("averages start-day minutes by start-day counts when older recordings are imported later", () => {

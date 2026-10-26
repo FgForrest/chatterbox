@@ -6,6 +6,7 @@ import {
     type ReactNode,
     useCallback,
     useId,
+    useMemo,
     useState,
 } from "react";
 import { chartScale, niceStep, tickIndices } from "@/lib/statistics/data";
@@ -90,10 +91,14 @@ export function DataTable({
 }: {
     label: string;
     columns: string[];
-    rows: (string | number)[][];
+    rows: (string | number)[][] | (() => (string | number)[][]);
 }) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
+    const tableRows = useMemo(() => {
+        if (!open) return [];
+        return typeof rows === "function" ? rows() : rows;
+    }, [open, rows]);
     return (
         <details
             className={styles.table}
@@ -113,7 +118,7 @@ export function DataTable({
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((row, i) => (
+                            {tableRows.map((row, i) => (
                                 <tr key={`${i}:${row[0]}`}>
                                     {row.map((cell, j) =>
                                         j === 0 ? (
@@ -269,6 +274,18 @@ export function TimeChart({
     const i18n = useExtracted();
     const { ref, width } = useChartWidth();
     const [focused, setFocused] = useState<number | null>(null);
+    const tableRows = useCallback(
+        () =>
+            labels.map((date, i) => [
+                date,
+                ...series.map((s) =>
+                    (s.raw ?? s.values)[i] === null
+                        ? "–"
+                        : format((s.raw ?? s.values)[i] ?? 0),
+                ),
+            ]),
+        [labels, series, format],
+    );
     const id = useId();
     const right = width - 12,
         top = 12,
@@ -571,14 +588,7 @@ export function TimeChart({
             <DataTable
                 label={label}
                 columns={[i18n("Period"), ...series.map((s) => s.label)]}
-                rows={labels.map((date, i) => [
-                    date,
-                    ...series.map((s) =>
-                        (s.raw ?? s.values)[i] === null
-                            ? "–"
-                            : format((s.raw ?? s.values)[i] ?? 0),
-                    ),
-                ])}
+                rows={tableRows}
             />
         </div>
     );

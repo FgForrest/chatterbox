@@ -73,6 +73,7 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/org/config", () => ({
     assertOrgScopeWritable: vi.fn(),
     getOrgUserId: async () => "org",
+    isOrgScopeEnabled: () => true,
 }));
 vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: vi.fn(),
