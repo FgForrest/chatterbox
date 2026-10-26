@@ -29,6 +29,7 @@ import {
     fieldProposalIsLater,
     plausibleQuotedStatementTime,
 } from "@/lib/tasks/chronology";
+import { logTaskStatusInTx } from "@/lib/tasks/status-transitions";
 
 export { liveFollowUpCondition } from "@/db/queries/tasks";
 
@@ -410,6 +411,8 @@ export async function writeTaskProposalsInTx(
                   .returning({ id: recordingTasks.id })
             : [];
     if (insertedTasks.length > 0) {
+        for (const row of insertedTasks)
+            await logTaskStatusInTx(tx, row.id, actorUserId, null, "proposed");
         await tx.insert(taskMentions).values(
             insertedTasks.map((row, index) => {
                 const stored = rows[index];

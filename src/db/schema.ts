@@ -5025,3 +5025,60 @@ export const almanacShareChanges = pgTable(
         ),
     }),
 );
+
+export const storageDailySnapshots = pgTable(
+    "storage_daily_snapshots",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        day: date("day", { mode: "string" }).notNull(),
+        audioBytes: bigint("audio_bytes", { mode: "number" }).notNull(),
+        mailBytes: bigint("mail_bytes", { mode: "number" }).notNull(),
+        sharedAudioBytes: bigint("shared_audio_bytes", {
+            mode: "number",
+        }).notNull(),
+        sharedMailBytes: bigint("shared_mail_bytes", {
+            mode: "number",
+        }).notNull(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.userId, table.day] }),
+        dayIdx: index("storage_daily_snapshots_day_idx").on(table.day),
+    }),
+);
+
+export const taskStatusTransitions = pgTable(
+    "task_status_transitions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        fromStatus: varchar("from_status", { length: 16 }).$type<
+            "proposed" | "open" | "done" | "dropped"
+        >(),
+        toStatus: varchar("to_status", { length: 16 })
+            .$type<"proposed" | "open" | "done" | "dropped">()
+            .notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskTimeIdx: index("task_status_transitions_task_time_idx").on(
+            table.taskId,
+            table.createdAt,
+        ),
+        actorIdx: index("task_status_transitions_actor_idx").on(
+            table.actorUserId,
+        ),
+        statusCheck: check(
+            "task_status_transitions_status_check",
+            sql`${table.toStatus} in ('proposed', 'open', 'done', 'dropped') and (${table.fromStatus} is null or (${table.fromStatus} in ('proposed', 'open', 'done', 'dropped') and ${table.fromStatus} <> ${table.toStatus}))`,
+        ),
+    }),
+);

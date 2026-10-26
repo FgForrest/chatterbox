@@ -41,6 +41,7 @@ import {
 } from "@/lib/tasks/access";
 import { fieldProposalIsLater } from "@/lib/tasks/chronology";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
+import { logTaskStatusInTx } from "@/lib/tasks/status-transitions";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type ProposalKind = (typeof taskUpdateProposals.$inferSelect)["kind"];
@@ -290,7 +291,22 @@ async function applyToTarget(
     await tx
         .update(recordingTasks)
         .set(changes)
-        .where(eq(recordingTasks.id, target.taskId));
+        .where(
+            and(
+                eq(recordingTasks.id, target.taskId),
+                eq(recordingTasks.userId, target.ownerUserId),
+            ),
+        );
+    if (proposal.kind === "done" || proposal.kind === "drop") {
+        await logTaskStatusInTx(
+            tx,
+            target.taskId,
+            actorUserId,
+            target.status,
+            proposal.kind === "done" ? "done" : "dropped",
+            now,
+        );
+    }
 }
 
 /** Settles source-review rows superseded by a field's new effective time. */

@@ -660,6 +660,25 @@ describe("job worker", () => {
         await waitForIdle();
     });
 
+    it("waits out the hourly interval after a failed housekeeping run", async () => {
+        // A persistent failure retried on every 5-second tick would rerun every
+        // prune and the instance-wide storage snapshot in a tight loop.
+        housekeeping.runHousekeeping.mockRejectedValue(
+            new Error("snapshot failed"),
+        );
+        const errorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+        try {
+            await runTick();
+            await runTick();
+            await runTick();
+            expect(housekeeping.runHousekeeping).toHaveBeenCalledTimes(1);
+        } finally {
+            errorSpy.mockRestore();
+        }
+    });
+
     it("survives a housekeeping failure", async () => {
         registerJobHandler(testHandler());
         housekeeping.runHousekeeping.mockRejectedValue(new Error("db down"));

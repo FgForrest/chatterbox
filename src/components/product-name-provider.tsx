@@ -2,7 +2,11 @@
 
 import { useLocale } from "next-intl";
 import { createContext, type ReactNode, useContext } from "react";
-import { productName, UPSTREAM_PRODUCT_NAME } from "@/lib/brand";
+import {
+    type ProductNameCase,
+    productName,
+    UPSTREAM_PRODUCT_NAME,
+} from "@/lib/brand";
 
 const HostedDeploymentContext = createContext(false);
 
@@ -29,8 +33,12 @@ export function useHostedDeployment(): boolean {
 }
 
 /** Returns the deployment-aware product name for the active locale. */
-export function useProductName(): string {
+export function useProductName(
+    grammaticalCase: ProductNameCase = "nominative",
+): string {
     const isHosted = useHostedDeployment();
     const locale = useLocale();
-    return isHosted ? UPSTREAM_PRODUCT_NAME : productName(locale);
+    return isHosted
+        ? UPSTREAM_PRODUCT_NAME
+        : productName(locale, grammaticalCase);
 }
