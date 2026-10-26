@@ -7,6 +7,7 @@ import {
     people,
     recordingTasks,
     taskMentions,
+    taskStatusTransitions,
     users,
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
@@ -55,6 +56,19 @@ const archivedTask = z.object({
     createdAt: z.iso.datetime(),
     acceptedAt: z.iso.datetime().nullable().default(null),
     statusChangedAt: z.iso.datetime().nullable().default(null),
+    statusTransitions: z
+        .array(
+            z.object({
+                id: z.string().min(1),
+                actorUserId: z.string().nullable(),
+                fromStatus: z
+                    .enum(["proposed", "open", "done", "dropped"])
+                    .nullable(),
+                toStatus: z.enum(["proposed", "open", "done", "dropped"]),
+                createdAt: z.iso.datetime(),
+            }),
+        )
+        .optional(),
     version: z.number().int().nonnegative().default(0),
     review: z
         .object({ ticked: z.boolean(), assigneeCheck: z.boolean() })
@@ -82,7 +96,7 @@ const bundleSchema = z.object({
         .default([]),
 });
 
-/** Restore task files after their items and people, re-encrypting content for this installation. Existing tasks stay unchanged. */
+/** Restore task files and optional status history after items and people. Unknown historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. */
 export async function restoreTaskArchive(
     viewer: TaskViewer,
     input: unknown,
@@ -272,6 +286,36 @@ export async function restoreTaskArchive(
                 ticked: task.review?.ticked ?? true,
                 assigneeCheck: task.review?.assigneeCheck ?? false,
             });
+            if (task.statusTransitions?.length) {
+                const actorIds = [
+                    ...new Set(
+                        task.statusTransitions.flatMap((row) =>
+                            row.actorUserId ? [row.actorUserId] : [],
+                        ),
+                    ),
+                ];
+                const actors = new Set(
+                    actorIds.length
+                        ? (
+                              await tx
+                                  .select({ id: users.id })
+                                  .from(users)
+                                  .where(inArray(users.id, actorIds))
+                          ).map((row) => row.id)
+                        : [],
+                );
+                await tx.insert(taskStatusTransitions).values(
+                    task.statusTransitions.map((row) => ({
+                        ...row,
+                        taskId: task.id,
+                        actorUserId:
+                            row.actorUserId && actors.has(row.actorUserId)
+                                ? row.actorUserId
+                                : null,
+                        createdAt: new Date(row.createdAt),
+                    })),
+                );
+            }
             if (
                 task.note &&
                 task.noteUpdatedByUserId &&

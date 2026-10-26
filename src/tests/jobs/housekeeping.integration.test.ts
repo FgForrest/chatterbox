@@ -7,6 +7,7 @@
  * create scratch databases on.
  */
 
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -271,7 +272,12 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
         });
 
         expect(
-            await ids(db().select({ id: asyncJobs.id }).from(asyncJobs)),
+            await ids(
+                db()
+                    .select({ id: asyncJobs.id })
+                    .from(asyncJobs)
+                    .where(eq(asyncJobs.kind, "test")),
+            ),
         ).toEqual(["job-pending", "job-recent"]);
         expect(
             await ids(
@@ -358,6 +364,32 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
         expect(await db().select().from(apiRateLimitBuckets)).toHaveLength(5);
     });
 
+    it("aggregates storage only once across concurrent housekeeping processes", async () => {
+        const client = database?.sql;
+        if (!client) throw new Error("Database not initialized");
+        await client`create sequence snapshot_refreshes`;
+        await client`create function count_snapshot_refresh() returns trigger language plpgsql as $$
+            begin perform nextval('snapshot_refreshes'); perform pg_sleep(0.1); return null; end $$`;
+        await client`create trigger count_snapshot_refresh after insert on storage_daily_snapshots for each statement execute function count_snapshot_refresh()`;
+        try {
+            await Promise.all([runHousekeeping(), runHousekeeping()]);
+            expect(
+                (
+                    await client`select last_value::int as count, is_called from snapshot_refreshes`
+                )[0],
+            ).toEqual({ count: 1, is_called: true });
+            await runHousekeeping();
+            expect(
+                (
+                    await client`select last_value::int as count from snapshot_refreshes`
+                )[0].count,
+            ).toBe(1);
+        } finally {
+            await client`drop trigger count_snapshot_refresh on storage_daily_snapshots`;
+            await client`drop function count_snapshot_refresh()`;
+            await client`drop sequence snapshot_refreshes`;
+        }
+    });
     it("splits the work between processes running at once", async () => {
         await closedBuckets(60);
         const limits = { batchSize: 5, maxBatches: 100, budgetMs: 60_000 };

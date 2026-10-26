@@ -11,6 +11,7 @@ import {
 } from "@/db/queries/mail";
 import { pruneMcpAccessLog } from "@/db/queries/mcp-audit";
 import { pruneExpiredRateLimitBuckets } from "@/db/queries/rate-limit";
+import { writeStorageSnapshots } from "@/db/queries/storage-snapshots";
 import { pruneSettledWebhookDeliveries } from "@/db/queries/webhook-deliveries";
 import { env } from "@/lib/env";
 import { captureServerException } from "@/lib/posthog-server";
@@ -58,7 +59,9 @@ export async function pruneInBatches(
  *
  * Each table is pruned on its own, so one failing does not stop the rest.
  * Safe to run in several processes at once. Returns the rows deleted per
- * table.
+ * table. Also writes the UTC storage snapshot on the first run of each day,
+ * skipping days that already have rows. A snapshot failure leaves earlier
+ * measurements in place and rejects after pruning; the next hourly run retries.
  */
 export async function runHousekeeping(
     limits: PruneLimits = DEFAULT_PRUNE_LIMITS,
@@ -118,6 +121,16 @@ export async function runHousekeeping(
                 table,
             });
         }
+    }
+    try {
+        await writeStorageSnapshots(new Date(now));
+    } catch (error) {
+        console.error("[housekeeping] storage snapshot failed:", error);
+        captureServerException(error, {
+            source: "worker:housekeeping",
+            table: "storage_daily_snapshots",
+        });
+        throw error;
     }
     return pruned;
 }

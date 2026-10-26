@@ -15,6 +15,9 @@ const { prunes, posthog } = vi.hoisted(() => ({
     posthog: { captureServerException: vi.fn() },
 }));
 
+vi.mock("@/db/queries/storage-snapshots", () => ({
+    writeStorageSnapshots: vi.fn().mockResolvedValue(0),
+}));
 vi.mock("@/db/queries/admin", () => ({
     pruneAdminAuditLog: prunes.pruneAdminAuditLog,
 }));
@@ -44,6 +47,7 @@ vi.mock("@/db/queries/webhook-deliveries", () => ({
 vi.mock("@/lib/env", () => ({ env: { MCP_AUDIT_RETENTION_DAYS: 30 } }));
 vi.mock("@/lib/posthog-server", () => posthog);
 
+import { writeStorageSnapshots } from "@/db/queries/storage-snapshots";
 import { pruneInBatches, runHousekeeping } from "@/lib/jobs/housekeeping";
 
 const limits = { batchSize: 10, maxBatches: 5, budgetMs: 60_000 };
@@ -104,11 +108,30 @@ describe("runHousekeeping", () => {
             mcp_access_log: 0,
             mail_delivery_log: 0,
         });
+        expect(writeStorageSnapshots).toHaveBeenCalledTimes(1);
         expect(prunes.pruneMcpAccessLog).toHaveBeenCalledWith(30, 10);
         expect(prunes.pruneMailDeliveryLog).toHaveBeenCalledWith(30, 10);
         expect(posthog.captureServerException).toHaveBeenCalledWith(
             expect.any(Error),
             expect.objectContaining({ table: "async_jobs" }),
+        );
+    });
+    it("reports a snapshot failure after finishing all independent prunes", async () => {
+        vi.mocked(writeStorageSnapshots).mockRejectedValueOnce(
+            new Error("snapshot failed"),
+        );
+        const errorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+        await expect(runHousekeeping(limits)).rejects.toThrow(
+            "snapshot failed",
+        );
+        errorSpy.mockRestore();
+        for (const prune of Object.values(prunes))
+            expect(prune).toHaveBeenCalledTimes(1);
+        expect(posthog.captureServerException).toHaveBeenCalledWith(
+            expect.any(Error),
+            expect.objectContaining({ table: "storage_daily_snapshots" }),
         );
     });
 });

@@ -92,6 +92,7 @@ import {
     settleEarlierTaskProposalsInTx,
     settleSourceTaskUpdatesInTx,
 } from "@/lib/tasks/routing";
+import { logTaskStatusInTx } from "@/lib/tasks/status-transitions";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -1286,6 +1287,14 @@ export async function addTask(
             })
             .returning({ id: recordingTasks.id });
         if (row) {
+            await logTaskStatusInTx(
+                tx,
+                row.id,
+                viewer.userId,
+                null,
+                input.status,
+                now,
+            );
             await tx.insert(taskMentions).values({
                 taskId: row.id,
                 itemId: recordingId,
@@ -1432,7 +1441,7 @@ export async function updateTask(
                 set.statusChangedByUserId = viewer.userId;
                 set.statusEffectiveAt = now;
             }
-            await tx
+            const updated = await tx
                 .update(recordingTasks)
                 .set(set)
                 .where(
@@ -1441,8 +1450,18 @@ export async function updateTask(
                         eq(recordingTasks.userId, task.ownerUserId),
                         eq(recordingTasks.version, change.version),
                     ),
-                );
+                )
+                .returning({ id: recordingTasks.id });
+            if (!updated.length) throw versionConflict();
             if (change.status !== undefined && change.status !== task.status) {
+                await logTaskStatusInTx(
+                    tx,
+                    taskId,
+                    viewer.userId,
+                    task.status,
+                    change.status,
+                    now,
+                );
                 await settleEarlierTaskProposalsInTx(tx, {
                     taskId,
                     ownerUserId: task.ownerUserId,
@@ -2732,6 +2751,14 @@ export async function acceptReview(
                             version: sql`${recordingTasks.version} + 1`,
                         })
                         .where(eq(recordingTasks.id, proposal.id));
+                    await logTaskStatusInTx(
+                        tx,
+                        proposal.id,
+                        viewer.userId,
+                        "proposed",
+                        "open",
+                        now,
+                    );
                 }
             }
             if (rejected.length > 0) {
@@ -3540,6 +3567,14 @@ export async function createPersonalTask(
                 updatedByUserId: viewer.userId,
             })
             .returning({ id: recordingTasks.id });
+        await logTaskStatusInTx(
+            tx,
+            created.id,
+            viewer.userId,
+            null,
+            "open",
+            now,
+        );
         return created;
     });
     return requireTaskView(viewer, row.id);
