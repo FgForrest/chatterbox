@@ -37,9 +37,9 @@ export function RecordedTime({
                 <p className={styles.sub}>{i18n("Recorded time")}</p>
                 <p className={styles.big}>
                     {Math.floor(Math.round(minutesTotal) / 60)}
-                    <small>h</small>
+                    <small>{i18n("h")}</small>
                     {Math.round(minutesTotal) % 60}
-                    <small>min</small>
+                    <small>{i18n("min")}</small>
                 </p>
                 <p className={styles.meta}>
                     {i18n("{count} recordings, averaging {minutes} min", {

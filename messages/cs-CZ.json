@@ -2870,7 +2870,7 @@
   "j5QMQw": "90 % shrnutí hotovo do",
   "snC7V6": "Moje",
   "2XDuH4": "Všichni",
-  "i1laK7": "Kolik toho {name} nahrála, přepsala a shrnula, co to stálo a kolik místa zabírá.",
+  "i1laK7": "Kolik se toho nahrálo, přepsalo a shrnulo, co to stálo a kolik místa to zabírá.",
   "J-Nfvx": "Čí data",
   "SwAA-M": "30 dní",
   "9EVTQO": "90 dní",
@@ -2919,7 +2919,7 @@
   "Ygyqli": "Žebříček lidí je v pohledech Organizace a Všichni.",
   "4_xOT5": "Zobrazit Organizaci",
   "l1XAGt": "Žebříček lidí",
-  "lFJjYd": "Co se {name} naučila",
+  "lFJjYd": "Co přibylo v Almanachu",
   "nZ_7Pi": "Záznamy v Almanachu celkem.",
   "0VNC0Q": "Opravené přeslechy",
   "0LR6OR": "Růst Almanachu",
@@ -3356,5 +3356,7 @@
   "X1BDgP": "Otevřít aplikaci {name}",
   "wOF4ZI": "„Emailová podpora“ zde není fronta tiketů. Odpovězte na tento e-mail, pokud něco není v pořádku nebo máte otázku. Dostane se to přímo ke mně.",
   "41a7gc": "Kolega s vámi sdílí položku.",
-  "YKi7kr": "Zobrazit pozvánky"
+  "YKi7kr": "Zobrazit pozvánky",
+  "IkG8j8": "h",
+  "TZr4xU": "min"
 }

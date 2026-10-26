@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import {
     bucketize,
     type DayRange,
@@ -16,6 +16,9 @@ export type StatisticsView = ReturnType<typeof useStatisticsView>;
 
 export function useStatisticsView(data: StatisticsData, range: DayRange) {
     const locale = useLocale();
+    const i18n = useExtracted();
+    const hourUnit = i18n("h");
+    const minuteUnit = i18n("min");
     const number = (value: number) =>
         new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
             value,
@@ -33,8 +36,8 @@ export function useStatisticsView(data: StatisticsData, range: DayRange) {
     const minutes = (value: number) => {
         const rounded = Math.round(value);
         return rounded >= 60
-            ? `${count(Math.floor(rounded / 60))} h ${count(rounded % 60)} min`
-            : `${count(rounded)} min`;
+            ? `${count(Math.floor(rounded / 60))} ${hourUnit} ${count(rounded % 60)} ${minuteUnit}`
+            : `${count(rounded)} ${minuteUnit}`;
     };
     const bytes = (value: number) =>
         value >= 1024 ** 3

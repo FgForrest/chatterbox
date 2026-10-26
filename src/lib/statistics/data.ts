@@ -1,5 +1,9 @@
 export type StatisticsScope = "mine" | "organization" | "everyone";
 
+export function isStatisticsScope(value: string): value is StatisticsScope {
+    return value === "mine" || value === "organization" || value === "everyone";
+}
+
 export const METRICS = [
     "recordings",
     "minutes",

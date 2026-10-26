@@ -5,6 +5,7 @@ import {
     cleanup,
     fireEvent,
     render,
+    renderHook,
     screen,
     waitFor,
     within,
@@ -12,8 +13,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Waveform } from "@/components/statistics/interactive-charts";
 import { StatisticsPage } from "@/components/statistics/statistics-page";
+import { useStatisticsView } from "@/components/statistics/use-statistics-view";
 import { metricIndex } from "@/lib/statistics/data";
 import { statisticsFixture } from "./fixtures";
+
+const unitLabels = vi.hoisted(() => ({}) as Record<string, string>);
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
@@ -22,7 +26,8 @@ vi.mock("next-intl", () => ({
         (text: string | { message: string }, values?: Record<string, string>) =>
             Object.entries(values ?? {}).reduce(
                 (result, [key, value]) => result.replace(`{${key}}`, value),
-                typeof text === "string" ? text : text.message,
+                unitLabels[typeof text === "string" ? text : text.message] ??
+                    (typeof text === "string" ? text : text.message),
             ),
 }));
 vi.mock("@/components/product-name-provider", () => ({
@@ -31,6 +36,7 @@ vi.mock("@/components/product-name-provider", () => ({
 
 const fetchMock = vi.fn();
 beforeEach(() => {
+    for (const key of Object.keys(unitLabels)) delete unitLabels[key];
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
 });
@@ -40,6 +46,25 @@ afterEach(() => {
 });
 
 describe("statistics page", () => {
+    it("uses translated duration units in the hero and rounds chart durations across the hour boundary", () => {
+        unitLabels.h = "hours";
+        unitLabels.min = "minutes";
+        const data = statisticsFixture();
+        const { result } = renderHook(() =>
+            useStatisticsView(data, { start: 0, end: 364 }),
+        );
+        expect(result.current.minutes(59.4)).toBe("59 minutes");
+        expect(result.current.minutes(59.5)).toBe("1 hours 0 minutes");
+        expect(result.current.minutes(125)).toBe("2 hours 5 minutes");
+        render(<StatisticsPage initialData={data} scopes={["mine"]} />);
+        const panel = screen.getByRole("region", { name: "Recorded time" });
+        expect(
+            within(panel).getByText("hours", { selector: "small" }),
+        ).toBeTruthy();
+        expect(
+            within(panel).getByText("minutes", { selector: "small" }),
+        ).toBeTruthy();
+    });
     it("averages start-day minutes by start-day counts when older recordings are imported later", () => {
         const data = statisticsFixture();
         data.daily[metricIndex.minutes].fill(0);

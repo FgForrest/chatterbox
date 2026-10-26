@@ -1,11 +1,11 @@
 ---
 title: Members see three aggregate statistics scopes on shared self-host
 date: 2026-10-26
-updated: 2026-10-26 17:34
+updated: 2026-10-26 20:07
 status: proposed
 kind: feature
 issues: [287]
-prs: []
+prs: [288]
 areas: [src/db/queries/statistics.ts, src/components/statistics, src/app/api/statistics]
 supersedes: []
 superseded-by: []

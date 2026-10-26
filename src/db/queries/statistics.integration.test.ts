@@ -243,8 +243,13 @@ describe.skipIf(!url)("statistics scopes (PostgreSQL)", () => {
         });
         expect(statements).toHaveLength(0);
     });
-    it("returns 400 for an unknown scope through the real API", async () => {
-        const response = await api("invalid");
+    it.each([
+        "invalid",
+        "",
+        "Mine",
+        "__proto__",
+    ])("returns 400 for unknown scope %s through the real API", async (scope) => {
+        const response = await api(scope);
         expect(response.status).toBe(400);
         expect(await response.json()).toMatchObject({ code: "INVALID_INPUT" });
         expect(statements).toHaveLength(0);
@@ -402,6 +407,105 @@ describe.skipIf(!url)("statistics scopes (PostgreSQL)", () => {
         expect(data.latency).toEqual([[364, 600, 1]]);
         expect(JSON.stringify(data)).not.toMatch(
             /Never expose|Owner summary|Legacy org copy|example.test/,
+        );
+    });
+    it("excludes Organization item and task copies from every Everyone activity and storage total", async () => {
+        const before = await loadStatistics("viewer", "everyone", "UTC", at);
+        for (const id of ["org-recording", "meeting-org", "uploaded-org"])
+            await recording(id, "org", 90, true);
+        await recording(
+            "org-prior",
+            "org",
+            90,
+            true,
+            new Date("2025-08-01T12:00:00Z"),
+        );
+        await database.db.insert(chatterItems).values({
+            id: "org-mail",
+            userId: "org",
+            kind: "mail",
+            title: "Synthetic mail",
+            occurredAt: at,
+            createdAt: at,
+        });
+        await database.db.insert(mailMessages).values({
+            id: "org-mail",
+            userId: "org",
+            rawHash: "org-mail",
+            receivedAt: at,
+            sizeBytes: 500,
+            rawStoragePath: "test/org.eml",
+            auth: {},
+            senderVerified: true,
+            createdAt: at,
+        });
+        await database.db.insert(aiEnhancements).values({
+            itemId: "org-recording",
+            userId: "org",
+            summary: "Synthetic summary",
+            model: "example-model",
+            provider: "Example",
+            createdAt: new Date(at.getTime() + 100 * 60_000),
+        });
+        for (const [itemId, operation] of [
+            ["org-recording", "transcription"],
+            ["org-recording", "summary"],
+            ["org-mail", "summary"],
+        ])
+            await usage(itemId, "org", "org", "org", "0", operation);
+        for (const status of ["open", "done", "dropped"] as const) {
+            for (const logged of [true, false]) {
+                const [task] = await database.db
+                    .insert(recordingTasks)
+                    .values({
+                        userId: "org",
+                        itemId: logged ? "org-recording" : null,
+                        source: logged ? "manual" : "personal",
+                        text: "Synthetic task",
+                        status,
+                        createdAt: at,
+                        acceptedAt: at,
+                        statusChangedAt: at,
+                        statusChangedByUserId: "viewer",
+                    })
+                    .returning();
+                if (logged) {
+                    await database.db.insert(taskStatusTransitions).values({
+                        taskId: task.id,
+                        fromStatus: null,
+                        toStatus: "open",
+                        actorUserId: "viewer",
+                        createdAt: at,
+                    });
+                    if (status !== "open")
+                        await database.db.insert(taskStatusTransitions).values({
+                            taskId: task.id,
+                            fromStatus: "open",
+                            toStatus: status,
+                            actorUserId: "viewer",
+                            createdAt: at,
+                        });
+                }
+            }
+        }
+        const after = await loadStatistics("viewer", "everyone", "UTC", at);
+        expect(after.daily).toEqual(before.daily);
+        expect(after.baseline).toEqual(before.baseline);
+        expect(after.comparisonMinutes).toEqual(before.comparisonMinutes);
+        expect(after.heat).toEqual(before.heat);
+        expect(after.latency).toEqual(before.latency);
+        expect(after.ranking).toEqual(before.ranking);
+        expect(after.daily[metricIndex.people][364]).toBe(3);
+        expect(after.modelDays.reduce((n, row) => n + row[3], 0)).toBe(
+            before.modelDays.reduce((n, row) => n + row[3], 0) + 3,
+        );
+        await writeStorageSnapshots(at);
+        const measured = await loadStatistics("viewer", "everyone", "UTC", at);
+        expect(measured.daily[metricIndex.audioBytes]).toEqual(
+            after.daily[metricIndex.audioBytes],
+        );
+        expect(measured.daily[metricIndex.mailBytes]).toEqual(
+            after.daily[metricIndex.mailBytes],
         );
     });
     it.each([

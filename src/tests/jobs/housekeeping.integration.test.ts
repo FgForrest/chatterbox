@@ -24,6 +24,7 @@ import {
     mailDeliveryLog,
     mcpAccessLog,
     sessions,
+    storageDailySnapshots,
     stripeWebhookEvents,
     users,
     verifications,
@@ -389,6 +390,37 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
             await client`drop function count_snapshot_refresh()`;
             await client`drop sequence snapshot_refreshes`;
         }
+    });
+    it("rolls back a snapshot insert failure after the day check and retries on a later housekeeping run", async () => {
+        const client = database?.sql;
+        if (!client) throw new Error("Database not initialized");
+        await db()
+            .insert(users)
+            .values({ id: "second-user", email: "second@example.test" });
+        expect(await db().select().from(storageDailySnapshots)).toEqual([]);
+        await client`create function reject_snapshot_insert() returns trigger language plpgsql as $$
+            begin raise exception 'synthetic snapshot insert failure'; end $$`;
+        await client`create trigger reject_snapshot_insert after insert on storage_daily_snapshots for each statement execute function reject_snapshot_insert()`;
+        const errorLog = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined);
+        try {
+            await expect(runHousekeeping()).rejects.toMatchObject({
+                cause: { message: "synthetic snapshot insert failure" },
+            });
+            expect(await db().select().from(storageDailySnapshots)).toEqual([]);
+        } finally {
+            errorLog.mockRestore();
+            await client`drop trigger reject_snapshot_insert on storage_daily_snapshots`;
+            await client`drop function reject_snapshot_insert()`;
+        }
+        await runHousekeeping();
+        expect(
+            (await db().select().from(storageDailySnapshots))
+                .map((row) => row.userId)
+                .sort(),
+        ).toEqual([USER, "second-user"]);
+        expect(await db().select().from(asyncJobs)).toEqual([]);
     });
     it("splits the work between processes running at once", async () => {
         await closedBuckets(60);

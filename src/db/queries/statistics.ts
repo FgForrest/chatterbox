@@ -20,6 +20,7 @@ import { getOrgUserId, isOrgScopeVisible } from "@/lib/org/config";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import {
     calendarDay,
+    isStatisticsScope,
     METRICS,
     metricIndex,
     packRanking,
@@ -72,7 +73,7 @@ export async function loadStatistics(
     timeZone: string,
     now = new Date(),
 ): Promise<StatisticsData> {
-    if (!["mine", "organization", "everyone"].includes(scope)) {
+    if (!isStatisticsScope(scope)) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
             "Unknown statistics scope",
@@ -108,15 +109,14 @@ export async function loadStatistics(
         scope === "everyone"
             ? sql`true`
             : sql`${column} = ${scope === "organization" ? orgUserId : callerUserId}`;
-    const item = (ownerColumn: AnyColumn, idColumn: AnyColumn) =>
-        scope === "organization"
-            ? sharedItemCondition(orgUserId as string, idColumn)
-            : owner(ownerColumn);
+    const item = (ownerColumn: AnyColumn, idColumn: AnyColumn) => {
+        if (scope === "organization")
+            return sharedItemCondition(orgUserId as string, idColumn);
+        if (scope === "everyone" && orgUserId)
+            return sql`${ownerColumn} <> ${orgUserId}`;
+        return owner(ownerColumn);
+    };
     const itemScope = item(chatterItems.userId, chatterItems.id);
-    const diskScope =
-        scope === "everyone" && orgUserId
-            ? sql`${itemScope} and ${chatterItems.userId} <> ${orgUserId}`
-            : itemScope;
     const taskScope = item(recordingTasks.userId, recordingTasks.itemId);
     const payerScope = owner(aiUsageEvents.payerUserId);
     const knownStep = sql`case ${aiUsageEvents.operation}
@@ -231,21 +231,21 @@ export async function loadStatistics(
         disk: sql`select ${clippedDay(recordings.createdAt)} as day, 'audioBytes' as metric,
                 sum(${recordings.filesize}) as value, null::text as member
             from ${recordings} inner join ${chatterItems} on ${chatterItems.id} = ${recordings.id}
-            where ${diskScope} and ${recordings.createdAt} < ${endUtc} group by 1
+            where ${itemScope} and ${recordings.createdAt} < ${endUtc} group by 1
             union all
             select ${clippedDay(sql`least(${recordings.deletedAt}, ${recordings.audioReapedAt}, ${chatterItems.deletedAt})`)},
                 'audioBytes', -sum(${recordings.filesize}), null::text
             from ${recordings} inner join ${chatterItems} on ${chatterItems.id} = ${recordings.id}
-            where ${diskScope} and least(${recordings.deletedAt}, ${recordings.audioReapedAt}, ${chatterItems.deletedAt}) < ${endUtc} group by 1
+            where ${itemScope} and least(${recordings.deletedAt}, ${recordings.audioReapedAt}, ${chatterItems.deletedAt}) < ${endUtc} group by 1
             union all
             select ${clippedDay(mailMessages.createdAt)}, 'mailBytes', sum(${mailMessages.sizeBytes}), null::text
             from ${mailMessages} inner join ${chatterItems} on ${chatterItems.id} = ${mailMessages.id}
-            where ${diskScope} and ${mailMessages.createdAt} < ${endUtc} group by 1
+            where ${itemScope} and ${mailMessages.createdAt} < ${endUtc} group by 1
             union all
             select ${clippedDay(sql`least(${mailMessages.deletedAt}, ${mailMessages.rawReapedAt}, ${chatterItems.deletedAt})`)},
                 'mailBytes', -sum(${mailMessages.sizeBytes}), null::text
             from ${mailMessages} inner join ${chatterItems} on ${chatterItems.id} = ${mailMessages.id}
-            where ${diskScope} and least(${mailMessages.deletedAt}, ${mailMessages.rawReapedAt}, ${chatterItems.deletedAt}) < ${endUtc} group by 1`,
+            where ${itemScope} and least(${mailMessages.deletedAt}, ${mailMessages.rawReapedAt}, ${chatterItems.deletedAt}) < ${endUtc} group by 1`,
         snapshots: sql`with scoped_users as (
             select ${users.id} as id from ${users} where ${snapshotOwners}
         ), observations as (
@@ -272,6 +272,7 @@ export async function loadStatistics(
         firstMeasurement: sql`select min(${storageDailySnapshots.day})::text as day
             from ${storageDailySnapshots}
             where ${storageDailySnapshots.day} < ${end}::date and ${firstMeasurementScope}`,
+        // Everyone retains promoted Organization knowledge: live records move in place, and linked aliases are deduplicated below.
         knowledge: sql`select ${clippedDay(people.createdAt)} as day, 'people' as metric, count(*) as value, null::text as member
             from ${people} where ${owner(people.userId)} and ${people.mergedIntoId} is null and ${people.createdAt} < ${endUtc} group by 1
             union all
