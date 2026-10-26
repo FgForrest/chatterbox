@@ -15,6 +15,7 @@ interface DocsView {
     setSelectFolderEnabled(enabled: boolean): DocsView;
     setIncludeFolders(included: boolean): DocsView;
     setMimeTypes(mimeTypes: string): DocsView;
+    setParent(parentId: string): DocsView;
     setEnableDrives(enabled: boolean): DocsView;
 }
 
@@ -102,10 +103,17 @@ export interface PickedDriveFolder {
     name: string;
 }
 
+function folderView(api: PickerApi): DocsView {
+    return new api.DocsView(api.ViewId.FOLDERS)
+        .setSelectFolderEnabled(true)
+        .setIncludeFolders(true)
+        .setMimeTypes(FOLDER_MIME);
+}
+
 /**
- * Opens the Google Picker on folders (My Drive and shared drives) and
- * resolves with the one chosen, or null when the user cancels. Picking
- * grants the app `drive.file` access to that folder.
+ * Opens the Google Picker on folders, with one tab for My Drive and one
+ * for shared drives, and resolves with the folder chosen, or null when the
+ * user cancels. Picking grants the app `drive.file` access to that folder.
  */
 export async function pickDriveFolder(
     credentials: PickerCredentials,
@@ -113,13 +121,12 @@ export async function pickDriveFolder(
 ): Promise<PickedDriveFolder | null> {
     const api = await loadPickerApi();
     return new Promise((resolve) => {
-        const view = new api.DocsView(api.ViewId.FOLDERS)
-            .setSelectFolderEnabled(true)
-            .setIncludeFolders(true)
-            .setMimeTypes(FOLDER_MIME)
-            .setEnableDrives(true);
+        // setEnableDrives(true) limits a view to shared drives, so My Drive needs its own view.
+        const myDrive = folderView(api).setParent("root");
+        const sharedDrives = folderView(api).setEnableDrives(true);
         const picker = new api.PickerBuilder()
-            .addView(view)
+            .addView(myDrive)
+            .addView(sharedDrives)
             .enableFeature(api.Feature.SUPPORT_DRIVES)
             .setOAuthToken(credentials.accessToken)
             .setDeveloperKey(credentials.apiKey)
