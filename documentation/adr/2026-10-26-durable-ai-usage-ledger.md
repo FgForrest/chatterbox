@@ -5,7 +5,7 @@ updated: 2026-10-26 21:09
 status: proposed
 kind: fix
 issues: [290]
-prs: []
+prs: [292]
 areas: [src/db/schema.ts, src/lib/ai/usage-cost.ts, src/lib/ai/usage-attempt.ts, src/lib/knowledge/embeddings.ts, src/db/queries/statistics.ts, src/lib/export/build-archive.ts]
 supersedes: []
 superseded-by: []
