@@ -15,15 +15,44 @@ export const createMeetingInput = z.object({
     start: instant.optional(),
     end: instant.optional(),
 });
-export const patchMeetingInput = z.object({
+const meetingPrevious = z.object({
     title: line.min(1).max(500).optional(),
     start: instant.nullable().optional(),
     end: instant.nullable().optional(),
     calendarEventId: id.nullable().optional(),
     taskSourceItemId: id.nullable().optional(),
-    state: z.enum(["planned", "live", "held"]).optional(),
-    version: z.number().int().nonnegative().optional(),
 });
+export const patchMeetingInput = z
+    .object({
+        title: line.min(1).max(500).optional(),
+        start: instant.nullable().optional(),
+        end: instant.nullable().optional(),
+        calendarEventId: id.nullable().optional(),
+        taskSourceItemId: id.nullable().optional(),
+        state: z.enum(["planned", "live", "held"]).optional(),
+        version: z.number().int().nonnegative().optional(),
+        previous: meetingPrevious.optional(),
+    })
+    .superRefine((input, ctx) => {
+        if (!input.previous) return;
+        for (const field of [
+            "title",
+            "start",
+            "end",
+            "calendarEventId",
+            "taskSourceItemId",
+        ] as const) {
+            if (
+                input[field] !== undefined &&
+                input.previous[field] === undefined
+            )
+                ctx.addIssue({
+                    code: "custom",
+                    path: ["previous", field],
+                    message: "Previous value is required",
+                });
+        }
+    });
 export const createPointInput = z.object({
     text: line.min(1),
     parentId: id.nullable().optional(),

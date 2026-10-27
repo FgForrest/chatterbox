@@ -10,6 +10,7 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { assertCategorizableFolderInput } from "@/lib/folders/folders";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { deniedOnAdminHost } from "@/lib/hosted/hostname-gate";
+import { requireMeetingAccess } from "@/lib/meetings/access";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -117,6 +118,17 @@ export const POST = apiHandler(async (request: Request) => {
         await assertCategorizableFolderInput(session.user.id, folderId);
     }
 
+    const agendaId =
+        request.headers.get("x-upload-agenda-id")?.trim() || undefined;
+    if (agendaId) {
+        if (agendaId.length > 255)
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Invalid agendaId",
+                400,
+            );
+        await requireMeetingAccess(session.user.id, agendaId, "edit");
+    }
     const upload = readUploadMetadata(request);
     const ext = uploadExtension(upload.filename);
 
@@ -189,6 +201,7 @@ export const POST = apiHandler(async (request: Request) => {
                 sourceSize: source.bytes,
                 userId: session.user.id,
                 folderId,
+                ...(agendaId ? { agendaId } : {}),
             });
             if (!enqueued.created) throw anotherVideoConverting();
             return NextResponse.json(
@@ -219,6 +232,7 @@ export const POST = apiHandler(async (request: Request) => {
         sourceExtension: ext,
         convertedFromVideo: false,
         folderId,
+        ...(agendaId ? { agendaId } : {}),
     });
 
     return NextResponse.json({

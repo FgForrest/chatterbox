@@ -33,6 +33,7 @@ import {
     agendaPoints,
     agendaSuggestions,
     agendaTasks,
+    asyncJobs,
     chatterItems,
     folderShares,
     meetingAgendas,
@@ -62,6 +63,7 @@ import {
     requireMeetingAccess,
 } from "@/lib/meetings/access";
 import {
+    calendarSnapshotWithEditors,
     encryptCalendarSnapshot,
     readMeetingCalendarSnapshot,
 } from "@/lib/meetings/calendar-snapshot";
@@ -112,6 +114,7 @@ async function editMeeting<T>(
     id: string,
     mode: "edit" | "manage",
     run: (tx: MeetingTx, access: Access) => Promise<T>,
+    participant = false,
 ): Promise<T> {
     const viewer = await meetingViewer(userId);
     return db.transaction(async (tx) => {
@@ -121,6 +124,19 @@ async function editMeeting<T>(
             lock: true,
         });
         const result = await run(tx, access);
+        if (result === false) return result;
+        if (participant)
+            await tx
+                .update(meetingAgendas)
+                .set({
+                    calendarSnapshot: sql`coalesce(${meetingAgendas.calendarSnapshot}, '{}'::jsonb) || jsonb_build_object('editorUserIds', coalesce(${meetingAgendas.calendarSnapshot}->'editorUserIds', '[]'::jsonb) || ${JSON.stringify([userId])}::jsonb)`,
+                })
+                .where(
+                    and(
+                        whereAgenda(access.agenda),
+                        sql`not coalesce(${meetingAgendas.calendarSnapshot}->'editorUserIds', '[]'::jsonb) @> ${JSON.stringify([userId])}::jsonb`,
+                    ),
+                );
         await bumpAgenda(tx, access.agenda);
         return result;
     });
@@ -247,15 +263,17 @@ async function carryOver(
                 ),
                 sql`${meetingAgendas.createdAt} < ${access.agenda.createdAt.toISOString()}::timestamp`,
                 sql`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt}) < ${(access.agenda.plannedStart ?? access.agenda.createdAt).toISOString()}::timestamp`,
-                access.agenda.calendarSeriesId
-                    ? eq(
-                          meetingAgendas.calendarSeriesId,
-                          access.agenda.calendarSeriesId,
-                      )
-                    : sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId}) and ${recordingFolderAssignments.folderId} = ${folderId})`,
+                sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId}) and ${recordingFolderAssignments.folderId} = ${folderId})`,
             ),
         )
         .orderBy(
+            ...(access.agenda.calendarSeriesId
+                ? [
+                      desc(
+                          sql`${meetingAgendas.calendarSeriesId} is not distinct from ${access.agenda.calendarSeriesId}`,
+                      ),
+                  ]
+                : []),
             desc(
                 sql`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt})`,
             ),
@@ -509,12 +527,47 @@ function buildPointTree<T extends { id: string; parentId: string | null }>(
 }
 
 /** Meeting detail; unchanged polls avoid loading tasks, points and Google. */
-export async function getMeeting(userId: string, id: string, since?: number) {
+export async function getMeeting(
+    userId: string,
+    id: string,
+    since?: number | string,
+) {
     const access = await requireMeetingAccess(userId, id);
     let { agenda } = access;
     const { item } = access;
+    const [suggestionJob] = await db
+        .select({ status: asyncJobs.status, errorCode: asyncJobs.errorCode })
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.subjectId, agenda.id),
+                eq(asyncJobs.kind, "agenda.suggestions"),
+            ),
+        )
+        .orderBy(
+            sql`case when ${asyncJobs.status} in ('pending', 'processing') then 0 else 1 end`,
+            desc(asyncJobs.createdAt),
+            desc(asyncJobs.id),
+        )
+        .limit(1);
+    const job = {
+        state:
+            suggestionJob?.status === "pending"
+                ? ("queued" as const)
+                : suggestionJob?.status === "processing"
+                  ? ("running" as const)
+                  : suggestionJob?.status === "failed"
+                    ? ("failed" as const)
+                    : null,
+        ...(suggestionJob?.status === "failed" && suggestionJob.errorCode
+            ? { errorCode: suggestionJob.errorCode }
+            : {}),
+    };
+    const cursor = `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`;
+    if (agenda.recordingItemId && since === cursor)
+        return { unchanged: true as const, version: agenda.version, cursor };
     if (
-        since === agenda.version &&
+        (Number(since) === agenda.version || since === cursor) &&
         !agenda.recordingItemId &&
         (!agenda.calendarEventId ||
             (agenda.calendarRefreshedAt &&
@@ -536,7 +589,11 @@ export async function getMeeting(userId: string, id: string, since?: number) {
             )
             .limit(1);
         if (!changedTask)
-            return { unchanged: true as const, version: agenda.version };
+            return {
+                unchanged: true as const,
+                version: agenda.version,
+                cursor,
+            };
         const [refreshed] = await db
             .update(meetingAgendas)
             .set({
@@ -652,15 +709,22 @@ export async function getMeeting(userId: string, id: string, since?: number) {
         ...point,
         text: decryptText(point.text),
         note: point.note ? decryptText(point.note) : null,
+        summaryOutcome:
+            agenda.recordingItemId && !access.recordingVisible
+                ? null
+                : point.summaryOutcome,
     }));
     const {
         calendarSnapshot: _snapshot,
         calendarRefreshedAt: _refreshedAt,
+        outcomeUnplanned: _unplanned,
+        outcomeSummaryId: _summaryId,
         ...publicAgenda
     } = agenda;
     return {
         unchanged: false as const,
         ...publicAgenda,
+        cursor: `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`,
         attachedRecording: agenda.recordingItemId
             ? { visible: access.recordingVisible }
             : null,
@@ -692,11 +756,19 @@ export async function getMeeting(userId: string, id: string, since?: number) {
             ...suggestion,
             text: decryptText(suggestion.text),
         })),
-        aiSuggestions: agenda.recordingItemId
-            ? { available: false, reason: null }
-            : await agendaSuggestionsAvailability(userId, agenda.id),
-        outcomeUnplanned:
-            decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [],
+        aiSuggestions: {
+            ...(agenda.recordingItemId
+                ? { available: false, reason: null }
+                : await agendaSuggestionsAvailability(userId, agenda.id)),
+            job,
+        },
+        ...(agenda.recordingItemId && !access.recordingVisible
+            ? {}
+            : {
+                  outcomeSummaryId: agenda.outcomeSummaryId,
+                  outcomeUnplanned:
+                      decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [],
+              }),
         calendar: event
             ? {
                   organizer: event.organizer
@@ -738,7 +810,35 @@ export async function patchMeeting(
     };
     await editMeeting(userId, id, "manage", async (tx, access) => {
         const agenda = access.agenda;
-        if (input.version !== undefined && input.version !== agenda.version)
+        const current = {
+            title: decryptText(access.item.title),
+            start: agenda.plannedStart?.toISOString() ?? null,
+            end: agenda.plannedEnd?.toISOString() ?? null,
+            calendarEventId: agenda.calendarEventId,
+            taskSourceItemId: agenda.taskSourceItemId,
+        };
+        const metadataFields = [
+            "title",
+            "start",
+            "end",
+            "calendarEventId",
+            "taskSourceItemId",
+        ] as const;
+        const fields = metadataFields.filter(
+            (field) => input[field] !== undefined,
+        );
+        if (fields.length === 0 && input.state === agenda.state) return false;
+        const conflict = input.previous
+            ? fields.some((field) => {
+                  const previous = input.previous?.[field];
+                  return (field === "start" || field === "end") && previous
+                      ? new Date(previous).toISOString() !== current[field]
+                      : previous !== current[field];
+              })
+            : fields.length > 0 &&
+              input.version !== undefined &&
+              input.version !== agenda.version;
+        if (conflict)
             throw new AppError(ErrorCode.CONFLICT, "Meeting changed", 409, {
                 version: agenda.version,
             });
@@ -788,9 +888,9 @@ export async function patchMeeting(
                     ? {
                           calendarEventId: event?.id ?? null,
                           calendarSeriesId: event?.recurringEventId ?? null,
-                          calendarSnapshot: event
-                              ? encryptCalendarSnapshot(event)
-                              : null,
+                          calendarSnapshot: calendarSnapshotWithEditors(
+                              event ? encryptCalendarSnapshot(event) : null,
+                          ),
                           calendarRefreshedAt: event ? new Date() : null,
                       }
                     : {}),
@@ -807,7 +907,10 @@ export async function patchMeeting(
                                     liveEndedAt: null,
                                 }
                               : input.state === "held"
-                                ? { liveEndedAt: new Date() }
+                                ? {
+                                      liveEndedAt:
+                                          agenda.liveEndedAt ?? new Date(),
+                                  }
                                 : {}),
                       }
                     : {}),
@@ -874,40 +977,46 @@ export async function addPoint(
     raw: z.input<typeof createPointInput>,
 ) {
     const input = createPointInput.parse(raw);
-    return editMeeting(userId, id, "edit", async (tx, { agenda }) => {
-        const points = await tx
-            .select()
-            .from(agendaPoints)
-            .where(pointWhere(agenda));
-        const next = {
-            id: nanoid(),
-            parentId: input.parentId ?? null,
-            position: input.position ?? points.length,
-        };
-        validatePointTree([...points, next]);
-        if (input.position !== undefined)
-            await tx
-                .update(agendaPoints)
-                .set({ position: sql`${agendaPoints.position} + 1` })
-                .where(
-                    and(
-                        pointWhere(agenda),
-                        sql`${agendaPoints.position} >= ${input.position}`,
-                    ),
-                );
-        const [point] = await tx
-            .insert(agendaPoints)
-            .values({
-                ...next,
-                agendaId: agenda.id,
-                userId: agenda.userId,
-                text: encryptText(input.text),
-                authorUserId: userId,
-                origin: input.origin ?? "manual",
-            })
-            .returning();
-        return { ...point, text: input.text, note: null };
-    });
+    return editMeeting(
+        userId,
+        id,
+        "edit",
+        async (tx, { agenda }) => {
+            const points = await tx
+                .select()
+                .from(agendaPoints)
+                .where(pointWhere(agenda));
+            const next = {
+                id: nanoid(),
+                parentId: input.parentId ?? null,
+                position: input.position ?? points.length,
+            };
+            validatePointTree([...points, next]);
+            if (input.position !== undefined)
+                await tx
+                    .update(agendaPoints)
+                    .set({ position: sql`${agendaPoints.position} + 1` })
+                    .where(
+                        and(
+                            pointWhere(agenda),
+                            sql`${agendaPoints.position} >= ${input.position}`,
+                        ),
+                    );
+            const [point] = await tx
+                .insert(agendaPoints)
+                .values({
+                    ...next,
+                    agendaId: agenda.id,
+                    userId: agenda.userId,
+                    text: encryptText(input.text),
+                    authorUserId: userId,
+                    origin: input.origin ?? "manual",
+                })
+                .returning();
+            return { ...point, text: input.text, note: null };
+        },
+        true,
+    );
 }
 
 /** Update or delete a point with optimistic concurrency and per-author structural permissions. */
@@ -919,150 +1028,160 @@ export async function changePoint(
     remove = false,
 ) {
     const input = patchPointInput.parse(raw);
-    return editMeeting(userId, id, "edit", async (tx, access) => {
-        const { agenda } = access;
-        const points = await tx
-            .select()
-            .from(agendaPoints)
-            .where(pointWhere(agenda));
-        const point = points.find((entry) => entry.id === pointId);
-        if (!point)
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Agenda point not found",
-                404,
-            );
-        if (point.version !== input.version)
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "Agenda point changed",
-                409,
-                {
-                    point: {
-                        ...point,
-                        text: decryptText(point.text),
-                        note: point.note ? decryptText(point.note) : null,
+    return editMeeting(
+        userId,
+        id,
+        "edit",
+        async (tx, access) => {
+            const { agenda } = access;
+            const points = await tx
+                .select()
+                .from(agendaPoints)
+                .where(pointWhere(agenda));
+            const point = points.find((entry) => entry.id === pointId);
+            if (!point)
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Agenda point not found",
+                    404,
+                );
+            if (point.version !== input.version)
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Agenda point changed",
+                    409,
+                    {
+                        point: {
+                            ...point,
+                            text: decryptText(point.text),
+                            note: point.note ? decryptText(point.note) : null,
+                        },
                     },
-                },
-            );
-        const structural =
-            remove ||
-            input.text !== undefined ||
-            input.parentId !== undefined ||
-            input.position !== undefined;
-        if (
-            structural &&
-            point.authorUserId !== userId &&
-            !access.permissions.manage
-        )
-            throw new AppError(
-                ErrorCode.FORBIDDEN,
-                "You may edit only your own points",
-                403,
-            );
-        if (remove) {
-            const descendants = new Set([point.id]);
-            for (let depth = 0; depth < 3; depth++)
-                for (const entry of points)
-                    if (entry.parentId && descendants.has(entry.parentId))
-                        descendants.add(entry.id);
+                );
+            const structural =
+                remove ||
+                input.text !== undefined ||
+                input.parentId !== undefined ||
+                input.position !== undefined;
             if (
-                !access.permissions.manage &&
-                points.some(
-                    (entry) =>
-                        descendants.has(entry.id) &&
-                        entry.authorUserId !== userId,
-                )
+                structural &&
+                point.authorUserId !== userId &&
+                !access.permissions.manage
             )
                 throw new AppError(
                     ErrorCode.FORBIDDEN,
-                    "This point contains another author's points",
+                    "You may edit only your own points",
                     403,
                 );
-            if (input.mergeUp)
+            if (remove) {
+                const descendants = new Set([point.id]);
+                for (let depth = 0; depth < 3; depth++)
+                    for (const entry of points)
+                        if (entry.parentId && descendants.has(entry.parentId))
+                            descendants.add(entry.id);
+                if (
+                    !access.permissions.manage &&
+                    points.some(
+                        (entry) =>
+                            descendants.has(entry.id) &&
+                            entry.authorUserId !== userId,
+                    )
+                )
+                    throw new AppError(
+                        ErrorCode.FORBIDDEN,
+                        "This point contains another author's points",
+                        403,
+                    );
+                if (input.mergeUp)
+                    await tx
+                        .update(agendaPoints)
+                        .set({
+                            parentId: point.parentId,
+                            version: sql`${agendaPoints.version} + 1`,
+                            updatedAt: new Date(),
+                        })
+                        .where(
+                            and(
+                                pointWhere(agenda),
+                                eq(agendaPoints.parentId, point.id),
+                            ),
+                        );
+                await tx
+                    .delete(agendaPoints)
+                    .where(
+                        and(pointWhere(agenda), eq(agendaPoints.id, pointId)),
+                    );
+                return null;
+            }
+            validatePointTree(
+                points.map((entry) =>
+                    entry.id === pointId
+                        ? {
+                              ...entry,
+                              parentId:
+                                  input.parentId !== undefined
+                                      ? input.parentId
+                                      : entry.parentId,
+                          }
+                        : entry,
+                ),
+            );
+            if (input.position !== undefined)
                 await tx
                     .update(agendaPoints)
-                    .set({
-                        parentId: point.parentId,
-                        version: sql`${agendaPoints.version} + 1`,
-                        updatedAt: new Date(),
-                    })
+                    .set({ position: sql`${agendaPoints.position} + 1` })
                     .where(
                         and(
                             pointWhere(agenda),
-                            eq(agendaPoints.parentId, point.id),
+                            ne(agendaPoints.id, pointId),
+                            sql`${agendaPoints.position} >= ${input.position}`,
                         ),
                     );
-            await tx
-                .delete(agendaPoints)
-                .where(and(pointWhere(agenda), eq(agendaPoints.id, pointId)));
-            return null;
-        }
-        validatePointTree(
-            points.map((entry) =>
-                entry.id === pointId
-                    ? {
-                          ...entry,
-                          parentId:
-                              input.parentId !== undefined
-                                  ? input.parentId
-                                  : entry.parentId,
-                      }
-                    : entry,
-            ),
-        );
-        if (input.position !== undefined)
-            await tx
+            const [updated] = await tx
                 .update(agendaPoints)
-                .set({ position: sql`${agendaPoints.position} + 1` })
+                .set({
+                    ...(input.text !== undefined
+                        ? { text: encryptText(input.text) }
+                        : {}),
+                    ...(input.parentId !== undefined
+                        ? { parentId: input.parentId }
+                        : {}),
+                    ...(input.position !== undefined
+                        ? { position: input.position }
+                        : {}),
+                    ...(input.discussed !== undefined
+                        ? {
+                              discussedAt: input.discussed ? new Date() : null,
+                              discussedByUserId: input.discussed
+                                  ? userId
+                                  : null,
+                          }
+                        : {}),
+                    ...(input.note !== undefined
+                        ? {
+                              note: input.note ? encryptText(input.note) : null,
+                              noteAt: new Date(),
+                          }
+                        : {}),
+                    version: point.version + 1,
+                    updatedAt: new Date(),
+                })
                 .where(
                     and(
                         pointWhere(agenda),
-                        ne(agendaPoints.id, pointId),
-                        sql`${agendaPoints.position} >= ${input.position}`,
+                        eq(agendaPoints.id, pointId),
+                        eq(agendaPoints.version, input.version),
                     ),
-                );
-        const [updated] = await tx
-            .update(agendaPoints)
-            .set({
-                ...(input.text !== undefined
-                    ? { text: encryptText(input.text) }
-                    : {}),
-                ...(input.parentId !== undefined
-                    ? { parentId: input.parentId }
-                    : {}),
-                ...(input.position !== undefined
-                    ? { position: input.position }
-                    : {}),
-                ...(input.discussed !== undefined
-                    ? {
-                          discussedAt: input.discussed ? new Date() : null,
-                          discussedByUserId: input.discussed ? userId : null,
-                      }
-                    : {}),
-                ...(input.note !== undefined
-                    ? {
-                          note: input.note ? encryptText(input.note) : null,
-                          noteAt: new Date(),
-                      }
-                    : {}),
-                version: point.version + 1,
-                updatedAt: new Date(),
-            })
-            .where(
-                and(
-                    pointWhere(agenda),
-                    eq(agendaPoints.id, pointId),
-                    eq(agendaPoints.version, input.version),
-                ),
-            )
-            .returning();
-        return {
-            ...updated,
-            text: decryptText(updated.text),
-            note: updated.note ? decryptText(updated.note) : null,
-        };
-    });
+                )
+                .returning();
+            return {
+                ...updated,
+                text: decryptText(updated.text),
+                note: updated.note ? decryptText(updated.note) : null,
+            };
+        },
+        true,
+    );
 }
 
 /** Add an explicitly chosen older visible task to the frozen review list. */
@@ -1332,4 +1451,64 @@ export async function meetingFolderPaths(userId: string) {
         }
         return names.join(" / ");
     };
+}
+
+/** Restrict recorder reminders to authors, point editors and invitees in stored Calendar snapshots. */
+export async function reminderMeetings(
+    userId: string,
+    input: Parameters<typeof listMeetingRows>[2],
+) {
+    const viewer = await meetingViewer(userId);
+    const [rows, connection] = await Promise.all([
+        listMeetingRows(userId, viewer.orgUserId, input),
+        getGoogleConnectionStatus(userId),
+    ]);
+    const email =
+        connection?.status === "active"
+            ? connection.email?.trim().toLowerCase()
+            : null;
+    const eligible = new Set<string>();
+    for (const { agenda } of rows) {
+        const snapshot = decryptJsonField<{ attendees?: { email?: string }[] }>(
+            agenda.calendarSnapshot,
+        );
+        const metadata = agenda.calendarSnapshot as {
+            editorUserIds?: string[];
+        } | null;
+        if (
+            agenda.userId === userId ||
+            metadata?.editorUserIds?.includes(userId) ||
+            (email &&
+                snapshot?.attendees?.some(
+                    (attendee) =>
+                        attendee.email?.trim().toLowerCase() === email,
+                ))
+        )
+            eligible.add(agenda.id);
+    }
+    if (rows.length) {
+        const edited = await db
+            .select({ agendaId: agendaPoints.agendaId })
+            .from(agendaPoints)
+            .where(
+                and(
+                    or(
+                        ...rows.map(({ agenda }) =>
+                            and(
+                                eq(agendaPoints.agendaId, agenda.id),
+                                eq(agendaPoints.userId, agenda.userId),
+                            ),
+                        ),
+                    ),
+                    or(
+                        eq(agendaPoints.authorUserId, userId),
+                        eq(agendaPoints.discussedByUserId, userId),
+                    ),
+                ),
+            );
+        for (const row of edited) eligible.add(row.agendaId);
+    }
+    return (await listMeetings(userId, input)).filter((row) =>
+        eligible.has(row.id),
+    );
 }

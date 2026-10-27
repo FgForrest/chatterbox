@@ -3,6 +3,10 @@ import { runCorrectionPass } from "@/lib/learn/correction-pass";
 import { runBridgePass } from "@/lib/learn/run-bridge";
 import { runFallbackPass } from "@/lib/learn/run-fallback";
 import {
+    agendaLearnEvent,
+    agendaSpellingTerms,
+} from "@/lib/meetings/pipeline-context";
+import {
     mergeAgendaOutcomes,
     readAgendaOutcome,
 } from "@/lib/meetings/summary-directive";
@@ -145,7 +149,7 @@ describe("agenda outcome contract", () => {
 });
 
 describe("agenda terms and Learn hints", () => {
-    it("places agenda spellings after meeting names and respects the vocabulary cap", () => {
+    it("ranks agenda spellings after Almanac terms under the vocabulary cap", () => {
         const terms = [
             { text: "Recorder", soundsLike: [] },
             ...Array.from({ length: 500 }, (_, i) => ({
@@ -162,9 +166,10 @@ describe("agenda terms and Learn hints", () => {
         expect(result.slice(0, 3).map((term) => term.text)).toEqual([
             "Recorder",
             "Jitka Dvořáková",
-            "Acme",
+            "term0",
         ]);
         expect(result).toHaveLength(500);
+        expect(result.some((term) => term.text === "Acme")).toBe(false);
     });
     it.each([
         "bridge",
@@ -223,4 +228,48 @@ describe("agenda terms and Learn hints", () => {
         expect(requests).toContain("spelling only, plan never evidence");
         expect(requests).toContain("Never add planned content");
     });
+});
+
+it("filters Czech and English function words and caps agenda keyterms at 50", () => {
+    const terms = agendaSpellingTerms({
+        id: "agenda",
+        userId: "owner",
+        version: 0,
+        calendarEventId: null,
+        points: [
+            {
+                id: "point",
+                parentId: null,
+                position: 0,
+                discussedAt: null,
+                note: null,
+                text: `je na pro při nebo the and with from Acme Dvořáková ${Array.from({ length: 100 }, (_, i) => `term${i}`).join(" ")}`,
+            },
+        ],
+        tasks: [],
+    });
+    expect(terms.slice(0, 2)).toEqual(["Acme", "Dvořáková"]);
+    expect(terms).toHaveLength(50);
+    for (const word of [
+        "je",
+        "na",
+        "pro",
+        "při",
+        "nebo",
+        "the",
+        "and",
+        "with",
+        "from",
+    ])
+        expect(terms).not.toContain(word);
+});
+
+it.each([
+    ["chosen", "agenda", "stored", "chosen"],
+    ["", "agenda", "stored", ""],
+    [undefined, "agenda", "stored", "agenda"],
+    [undefined, null, "stored", "stored"],
+    [undefined, null, undefined, undefined],
+])("Learn event precedence explicit=%s agenda=%s stored=%s", (explicit, agenda, stored, expected) => {
+    expect(agendaLearnEvent(explicit, agenda, stored)).toBe(expected);
 });

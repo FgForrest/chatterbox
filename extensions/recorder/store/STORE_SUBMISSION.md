@@ -60,7 +60,7 @@ how to finish there. Manual address-and-key pairing stays available.
 
 ## Data-use declarations to check in the dashboard
 
-Declare recording audio, authentication information (the recorder key), the random installation identifier, website/tab information used for meeting detection, meeting agenda content and edits, and user settings as applicable to the current Store form. State that recordings go to the user-selected server, not to the extension publisher by default. Declare no advertising use or sale only while the implementation continues to match those statements. If the publisher also operates a selectable server, disclose that service and its separate privacy policy accurately.
+Declare recording audio, authentication information (the recorder key), the random installation identifier, website/tab information used for meeting detection, meeting agenda titles, points and notes, invitee and author names, task texts, assignees, task notes and edits (agenda content cached only in session storage), and user settings as applicable to the current Store form. State that recordings go to the user-selected server, not to the extension publisher by default. Declare no advertising use or sale only while the implementation continues to match those statements. If the publisher also operates a selectable server, disclose that service and its separate privacy policy accurately.
 
 The privacy policy, store listing, permission explanations, and in-extension consent text must describe the same behavior. Approval remains the Chrome Web Store reviewer's decision.
 
@@ -78,7 +78,7 @@ The privacy policy, store listing, permission explanations, and in-extension con
   Released servers without this flag keep 0.7.0 recording behavior.
 - The side panel supports preparation and live review: discussed ticks, notes,
   quick points and actual task Done/Drop actions with existing permissions.
-- Reminder alarms load the next 24 hours with configuration refresh and notify
+- Reminder alarms load the next 24 hours every 30 minutes and when the popup opens, and notify
   one minute before timed agendas. Options can disable reminders or the banner
   agenda independently. No agenda means no agenda reminder.
 - The meeting banner and pill offer Agenda. Matching sends only a tab's Meet

@@ -38,8 +38,9 @@ The meeting page can observe keystrokes typed into the pill's folder search thro
 ## Meeting agendas
 
 On servers that advertise agenda support, the extension reads visible meeting titles,
-planned times, folder names, discussion points, notes and task reviews from your paired
-server. It caches the next 24 hours of timed agendas in extension session storage for
+planned times, folder names, discussion points and notes, invitee and author names,
+task texts, assignees and task notes from your paired server. This agenda content is
+stored only in extension session storage. It caches the next 24 hours of timed agendas in extension session storage for
 reminders, and displays an agenda in Chrome's side panel or a small extension window.
 The reminder and banner switches are independent. Servers without support retain the
 existing recording behavior and receive no agenda calls.
@@ -51,7 +52,7 @@ is collected. The isolated banner displays server-provided agenda information an
 only control messages to the worker; the recorder key stays outside the meeting page.
 Ticking points, adding notes or points and marking tasks Done or Dropped saves those
 changes to your server. Task changes affect the actual task under your existing access
-rights. A selected agenda’s ID and title are kept with upload recovery metadata until the recording is completed or discarded; the ID is sent on completion.
+rights. A selected agenda’s ID is kept with upload recovery metadata until the recording is completed or discarded; the ID is sent on completion.
 Cached agendas and choices are cleared on disconnect or a new pairing. Reminder titles
 may be visible in your operating system's notifications; turn reminders off in Options
 to prevent them.

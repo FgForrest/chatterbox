@@ -16,6 +16,10 @@ vi.mock("@/db", () => ({
     },
 }));
 
+vi.mock("@/db/queries/meetings", () => ({
+    meetingVisibility: vi.fn(),
+}));
+
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn().mockResolvedValue({
         user: { id: "user-1" },
@@ -59,6 +63,7 @@ describe("GET /api/recordings", () => {
             selectRows([
                 {
                     id: "rec-1",
+                    hasAgenda: true,
                     userId: "user-1",
                     deviceSn: "SN-1",
                     plaudFileId: "plaud-1",
@@ -93,7 +98,9 @@ describe("GET /api/recordings", () => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toMatchObject({
-            recordings: [{ id: "rec-1", filename: "Planning Call" }],
+            recordings: [
+                { id: "rec-1", filename: "Planning Call", hasAgenda: true },
+            ],
         });
     });
 });

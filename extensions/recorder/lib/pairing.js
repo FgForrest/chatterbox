@@ -240,7 +240,8 @@ export async function refreshServerConfig() {
             fetchedAt: new Date().toISOString(),
         },
     });
-    await refreshAgendas().catch(() => {});
+    if (config.features?.agendas === true) void refreshAgendas().catch(() => {});
+    else await clearAgendas();
     return true;
 }
 

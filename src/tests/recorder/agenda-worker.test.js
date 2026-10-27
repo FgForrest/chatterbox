@@ -232,9 +232,11 @@ const message = (input, from = sender()) =>
     new Promise((resolve) => h.listeners.message(input, from, resolve));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const defaultRequest = h.request.getMockImplementation();
 beforeEach(async () => {
     await settle();
     vi.clearAllMocks();
+    h.request.mockReset().mockImplementation(defaultRequest);
     for (const store of [h.local, h.session])
         for (const key of Object.keys(store)) delete store[key];
     h.tabs.clear();
@@ -362,7 +364,7 @@ describe("reviewed agenda decisions", () => {
         await finish();
         expect(completeSession.mock.calls[0][2]).not.toHaveProperty("agendaId");
     });
-    it("bounds a hanging banner match to one second before capture starts", async () => {
+    it("starts capture using cached agendas without waiting for a hanging banner match", async () => {
         h.local.serverDefaults.agendas = true;
         h.request.mockImplementationOnce(() => new Promise(() => {}));
         const began = Date.now();
@@ -374,8 +376,7 @@ describe("reviewed agenda decisions", () => {
             extension,
         );
         expect(result.ok).toBe(true);
-        expect(Date.now() - began).toBeLessThan(1250);
-        expect(h.request).toHaveBeenCalledTimes(1);
+        expect(Date.now() - began).toBeLessThan(500);
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({ target: "offscreen", type: "start" }),
         );
@@ -388,17 +389,21 @@ describe("reviewed agenda decisions", () => {
         await arm();
         await h.listeners.command("toggle-recording");
         expect(h.session.recordingState.agendaId).toBeNull();
-        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
-            7,
-            expect.objectContaining({
-                view: "recording",
-                state: expect.objectContaining({
-                    agendas: expect.arrayContaining([
-                        expect.objectContaining({ id: "agenda-one" }),
-                    ]),
-                }),
-            }),
-            { frameId: 0 },
+        await vi.waitFor(
+            () =>
+                expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+                    7,
+                    expect.objectContaining({
+                        view: "recording",
+                        state: expect.objectContaining({
+                            agendas: expect.arrayContaining([
+                                expect.objectContaining({ id: "agenda-one" }),
+                            ]),
+                        }),
+                    }),
+                    { frameId: 0 },
+                ),
+            { timeout: 2500 },
         );
         await message(
             {
@@ -773,5 +778,69 @@ describe("refused agenda completion recovery", () => {
             ),
         ).toMatchObject({ ok: true });
         expect(h.metas.get("session-1").agendaId).toBeNull();
+    });
+});
+
+describe("banner selection regressions", () => {
+    it.each([
+        0,
+        2,
+        "timeout",
+    ])("omits agendaId with the banner on for %s matches", async (count) => {
+        h.local.serverDefaults.agendas = true;
+        h.local.agendaBanner = true;
+        const row = (id) => ({
+            id,
+            title: "Acme",
+            start: new Date(Date.now() - 60000).toISOString(),
+            end: new Date(Date.now() + 3600000).toISOString(),
+            folders: [],
+        });
+        h.request.mockImplementation(
+            count === "timeout"
+                ? () => new Promise(() => {})
+                : async () => ({
+                      json: async () => ({
+                          data: Array.from({ length: count }, (_, i) =>
+                              row(`agenda-${i}`),
+                          ),
+                      }),
+                  }),
+        );
+        await start();
+        getSession.mockResolvedValue({ status: "completing" });
+        await finish();
+        expect(completeSession.mock.calls[0][2]).not.toHaveProperty("agendaId");
+        if (count === "timeout")
+            expect(h.session["agenda-match:7"]).toBeUndefined();
+    });
+    it.each([
+        "chosen-folder",
+        null,
+    ])("honors the popup folder pick %s while an agenda card is selected", async (folderId) => {
+        h.local.serverDefaults.agendas = true;
+        h.local.agendaBanner = false;
+        const match = await message(
+            { type: "match-agendas", tabId: 7 },
+            extension,
+        );
+        await message(
+            {
+                type: "start-recording",
+                payload: {
+                    tabId: 7,
+                    agendaId: match.agendas[0].id,
+                    noticeAcknowledgedAt: "now",
+                    folderId,
+                    folderLabel: "Chosen",
+                },
+            },
+            extension,
+        );
+        expect(h.createSession.mock.calls[0][1].folderId ?? null).toBe(
+            folderId,
+        );
+        expect(h.session.recordingState.folderId).toBe(folderId);
+        expect(h.metas.get("session-1")).not.toHaveProperty("agendaTitle");
     });
 });

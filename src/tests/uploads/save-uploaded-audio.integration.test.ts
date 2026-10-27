@@ -12,8 +12,10 @@ import {
     chatterItems,
     folderDefaultProfiles,
     itemProcessing,
+    meetingAgendas,
     processingProfiles,
     recordingFolders,
+    recordings,
     users,
 } from "@/db/schema";
 import {
@@ -85,6 +87,7 @@ vi.mock("@/lib/org/config", () => ({
 }));
 
 import { createFolder, ensureRootFolders } from "@/lib/folders/folders";
+import { prepareMeeting } from "@/lib/meetings/service";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
@@ -230,5 +233,43 @@ describeWithDatabase("uploaded audio filing gate (PostgreSQL)", () => {
             state: "waiting",
             reason: "needs_folder",
         });
+    });
+    it("attaches an uploaded held meeting explicitly before any transcription", async () => {
+        const meeting = await prepareMeeting("upload-user", {
+            folderId,
+            title: "Held meeting",
+            start: "2026-10-20T10:00:00Z",
+            end: "2026-10-20T11:00:00Z",
+        });
+        await db()
+            .update(meetingAgendas)
+            .set({ state: "held" })
+            .where(eq(meetingAgendas.id, meeting.id));
+        const saved = await saveUploadedAudio({
+            userId: "upload-user",
+            fileId: "held-upload",
+            basename: "Held upload",
+            extension: ".mp3",
+            buffer: Buffer.from("audio"),
+            storage: {
+                uploadFile: vi.fn().mockResolvedValue("stored"),
+                deleteFile: vi.fn(),
+            } as never,
+            sourceExtension: ".mp3",
+            convertedFromVideo: false,
+            agendaId: meeting.id,
+        });
+        expect(
+            await db()
+                .select()
+                .from(meetingAgendas)
+                .where(eq(meetingAgendas.id, meeting.id)),
+        ).toMatchObject([{ recordingItemId: saved.recordingId }]);
+        expect(
+            await db()
+                .select()
+                .from(recordings)
+                .where(eq(recordings.id, saved.recordingId)),
+        ).toHaveLength(1);
     });
 });

@@ -10,10 +10,11 @@ export const GET = meetingRoute(async ({ userId, params, url }) =>
         userId,
         params.id,
         url.searchParams.has("since")
-            ? z.coerce
-                  .number()
-                  .int()
-                  .nonnegative()
+            ? z
+                  .string()
+                  .regex(
+                      /^\d+(?::(?:visible|hidden|standalone)(?::(?:queued|running|failed|idle))?)?$/,
+                  )
                   .parse(url.searchParams.get("since"))
             : undefined,
     ),

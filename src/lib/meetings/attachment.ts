@@ -356,6 +356,34 @@ export async function attachArrivingRecordingInTx(
     userId: string,
     itemId: string,
     fileId: string,
+    agendaId?: string,
+) {
+    try {
+        await tx.transaction((savepoint) =>
+            attachArrivalInSavepoint(
+                savepoint,
+                userId,
+                itemId,
+                fileId,
+                agendaId,
+            ),
+        );
+    } catch (error) {
+        console.error("[meetings] arrival attachment failed", {
+            code:
+                error instanceof AppError
+                    ? error.code
+                    : ErrorCode.INTERNAL_ERROR,
+        });
+    }
+}
+
+async function attachArrivalInSavepoint(
+    tx: MeetingTx,
+    userId: string,
+    itemId: string,
+    fileId: string,
+    agendaId?: string,
 ) {
     const orgUserId = await getOrgUserId();
     const [session] = fileId.startsWith("meeting-")
@@ -376,7 +404,7 @@ export async function attachArrivingRecordingInTx(
                   ),
               )
         : [];
-    if (session?.metadata.agendaId === null) return;
+    if (!agendaId && session?.metadata.agendaId === null) return;
     const agendaOutcome = session?.metadata.agendaOutcome;
     if (
         agendaOutcome &&
@@ -386,33 +414,18 @@ export async function attachArrivingRecordingInTx(
     )
         return;
     const explicitId =
-        typeof session?.metadata.agendaId === "string"
+        agendaId ??
+        (typeof session?.metadata.agendaId === "string"
             ? session.metadata.agendaId
-            : null;
+            : null);
     if (explicitId) {
         const attached = await findMeeting(userId, orgUserId, explicitId, tx);
         if (attached?.agenda.recordingItemId === itemId) return;
-        try {
-            await requireMeetingAccess(userId, explicitId, "edit", {
-                viewer: { userId, orgUserId, curator: false },
-                executor: tx,
-            });
-            await absorbInTx(
-                tx,
-                userId,
-                explicitId,
-                itemId,
-                orgUserId,
-                true,
-                true,
-            );
-        } catch (error) {
-            if (
-                !(error instanceof AppError) ||
-                ![403, 404, 409].includes(error.statusCode)
-            )
-                throw error;
-        }
+        await requireMeetingAccess(userId, explicitId, "edit", {
+            viewer: { userId, orgUserId, curator: false },
+            executor: tx,
+        });
+        await absorbInTx(tx, userId, explicitId, itemId, orgUserId, true, true);
         return;
     }
     const { candidates, overlappingCount } = await candidatesInTx(
@@ -426,22 +439,14 @@ export async function attachArrivingRecordingInTx(
         candidates.length === 1 &&
         candidates[0].safe
     ) {
-        try {
-            await absorbInTx(
-                tx,
-                userId,
-                candidates[0].agenda.id,
-                itemId,
-                orgUserId,
-                false,
-            );
-        } catch (error) {
-            if (
-                !(error instanceof AppError) ||
-                ![404, 409].includes(error.statusCode)
-            )
-                throw error;
-        }
+        await absorbInTx(
+            tx,
+            userId,
+            candidates[0].agenda.id,
+            itemId,
+            orgUserId,
+            false,
+        );
     }
 }
 

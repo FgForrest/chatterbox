@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { meetingAgendas } from "@/db/schema";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
@@ -19,17 +19,39 @@ export function encryptCalendarSnapshot(event: CalendarEventCandidate) {
     return encryptJsonField(snapshot);
 }
 
+/** Read event data without interpreting participation metadata as a Calendar event. */
+export function cachedMeetingCalendarSnapshot(
+    agenda: Pick<typeof meetingAgendas.$inferSelect, "calendarSnapshot">,
+): MeetingCalendarSnapshot | null {
+    const snapshot = decryptJsonField<MeetingCalendarSnapshot>(
+        agenda.calendarSnapshot,
+    );
+    return snapshot &&
+        typeof snapshot.id === "string" &&
+        Array.isArray(snapshot.attendees)
+        ? snapshot
+        : null;
+}
+
+/** Preserve editor participation when replacing the rebuildable event snapshot. */
+export function calendarSnapshotWithEditors(
+    snapshot: ReturnType<typeof encryptCalendarSnapshot> | null,
+) {
+    return sql`coalesce(${JSON.stringify(snapshot ?? {})}::jsonb, '{}'::jsonb) || jsonb_build_object('editorUserIds', coalesce(${meetingAgendas.calendarSnapshot}->'editorUserIds', '[]'::jsonb))`;
+}
+
 /** A conditional database claim permits one refresh per agenda and TTL across app processes. */
 export async function readMeetingCalendarSnapshot(
     agenda: typeof meetingAgendas.$inferSelect,
 ): Promise<MeetingCalendarSnapshot | null> {
     if (!agenda.calendarEventId) return null;
-    const cached = decryptJsonField<MeetingCalendarSnapshot>(
-        agenda.calendarSnapshot,
-    );
+    const cached = cachedMeetingCalendarSnapshot(agenda);
     const now = new Date();
     const staleBefore = new Date(now.getTime() - TTL_MS);
-    if (agenda.calendarRefreshedAt && agenda.calendarRefreshedAt > staleBefore)
+    if (
+        agenda.recordingItemId ||
+        (agenda.calendarRefreshedAt && agenda.calendarRefreshedAt > staleBefore)
+    )
         return cached;
     const [claimed] = await db
         .update(meetingAgendas)
@@ -38,6 +60,7 @@ export async function readMeetingCalendarSnapshot(
             and(
                 eq(meetingAgendas.id, agenda.id),
                 eq(meetingAgendas.userId, agenda.userId),
+                isNull(meetingAgendas.recordingItemId),
                 eq(meetingAgendas.calendarEventId, agenda.calendarEventId),
                 or(
                     isNull(meetingAgendas.calendarRefreshedAt),
@@ -58,7 +81,9 @@ export async function readMeetingCalendarSnapshot(
                 ),
             );
         return latest
-            ? decryptJsonField<MeetingCalendarSnapshot>(latest.snapshot)
+            ? cachedMeetingCalendarSnapshot({
+                  calendarSnapshot: latest.snapshot,
+              })
             : null;
     }
     try {
@@ -66,18 +91,30 @@ export async function readMeetingCalendarSnapshot(
             agenda.userId,
             agenda.calendarEventId,
         );
+        const { description: _description, ...snapshot } = event;
+        const changed = JSON.stringify(cached) !== JSON.stringify(snapshot);
         await db
             .update(meetingAgendas)
-            .set({ calendarSnapshot: encryptCalendarSnapshot(event) })
+            .set({
+                ...(changed
+                    ? {
+                          version: sql`${meetingAgendas.version} + 1`,
+                          updatedAt: new Date(),
+                      }
+                    : {}),
+                calendarSnapshot: calendarSnapshotWithEditors(
+                    encryptCalendarSnapshot(event),
+                ),
+            })
             .where(
                 and(
                     eq(meetingAgendas.id, agenda.id),
                     eq(meetingAgendas.userId, agenda.userId),
                     eq(meetingAgendas.calendarEventId, agenda.calendarEventId),
                     eq(meetingAgendas.calendarRefreshedAt, now),
+                    isNull(meetingAgendas.recordingItemId),
                 ),
             );
-        const { description: _description, ...snapshot } = event;
         return snapshot;
     } catch {
         return cached;

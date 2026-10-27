@@ -92,6 +92,7 @@ export async function resolveMeetingRoster(input: {
                 start: chatterItems.occurredAt,
                 end: recordings.endTime,
                 calendarEventId: recordings.calendarEventId,
+                calendarSeriesId: recordings.calendarSeriesId,
             })
             .from(recordings)
             .innerJoin(chatterItems, recordingItemJoin)
@@ -127,18 +128,22 @@ export async function resolveMeetingRoster(input: {
                   ).catch(() => null)
                 : null);
         if (!event) return null;
-        await db
-            .update(recordings)
-            .set({
-                calendarEventId: event.id,
-                calendarSeriesId: event.recurringEventId ?? null,
-            })
-            .where(
-                and(
-                    eq(recordings.id, input.itemId),
-                    eq(recordings.userId, input.ownerUserId),
-                ),
-            );
+        if (
+            recording.calendarEventId !== event.id ||
+            recording.calendarSeriesId !== (event.recurringEventId ?? null)
+        )
+            await db
+                .update(recordings)
+                .set({
+                    calendarEventId: event.id,
+                    calendarSeriesId: event.recurringEventId ?? null,
+                })
+                .where(
+                    and(
+                        eq(recordings.id, input.itemId),
+                        eq(recordings.userId, input.ownerUserId),
+                    ),
+                );
         const joined = await getMeetSpeakerCandidates({
             userId: input.ownerUserId,
             event,

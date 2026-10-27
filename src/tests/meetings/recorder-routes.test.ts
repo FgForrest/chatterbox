@@ -14,8 +14,10 @@ vi.mock("@/lib/recording-sessions/route-gate", () => ({
 }));
 vi.mock("@/lib/meetings/service", () => ({
     listMeetings: mocks.list,
+    reminderMeetings: mocks.list,
     getMeeting: mocks.get,
     addPoint: mocks.point,
+    changePoint: mocks.point,
     meetingFolderPaths: async () => () => "Private / Acme",
 }));
 vi.mock("@/lib/meetings/calendar", () => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/recorder/config", () => ({
     serializeRecorderServerConfig: () => ({ noticeText: "Recording notice" }),
 }));
 
+import { PATCH as patchPoint } from "@/app/api/v1/recorder/agendas/[id]/points/[pointId]/route";
 import { POST as add } from "@/app/api/v1/recorder/agendas/[id]/points/route";
 import { GET as detail } from "@/app/api/v1/recorder/agendas/[id]/route";
 import { GET as match } from "@/app/api/v1/recorder/agendas/match/route";
@@ -140,4 +143,41 @@ describe("recorder agenda API", () => {
                 parseCompleteRecordingSessionBody({ ...base, agendaId }),
             ).toThrow();
     });
+});
+
+it.each([
+    "text",
+    "parentId",
+    "position",
+    "mergeUp",
+])("recorder PATCH refuses structural field %s", async (field) => {
+    const response = await patchPoint(
+        new Request(
+            "https://example.com/api/v1/recorder/agendas/agenda/points/point",
+            {
+                method: "PATCH",
+                body: JSON.stringify({
+                    version: 0,
+                    [field]:
+                        field === "position"
+                            ? 1
+                            : field === "mergeUp"
+                              ? true
+                              : "value",
+                }),
+            },
+        ),
+        { params: Promise.resolve({ id: "agenda", pointId: "point" }) },
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.point).not.toHaveBeenCalled();
+});
+it("passes the recorder polling cursor to the shared detail service", async () => {
+    await detail(
+        new Request(
+            "https://example.com/api/v1/recorder/agendas/agenda?since=4:hidden:idle",
+        ),
+        context,
+    );
+    expect(mocks.get).toHaveBeenCalledWith("owner", "agenda", "4:hidden:idle");
 });
