@@ -10,6 +10,7 @@
         onPick,
         request,
         save,
+        saveOnRefresh = save,
         t,
     }) {
         let readOnly = false;
@@ -32,12 +33,14 @@
         let inFlight = false;
         let saving = Promise.resolve();
 
-        function persist() {
+        function persist(refresh = false) {
             const settings = {
                 folderId: remembered?.id ?? null,
                 folderLabel: remembered?.label ?? null,
             };
-            saving = saving.catch(() => {}).then(() => save(settings));
+            saving = saving.catch(() => {}).then(() =>
+                (refresh ? saveOnRefresh : save)(settings),
+            );
             return saving;
         }
 
@@ -137,10 +140,10 @@
                     if (job.selection !== selectionVersion) return;
                     if (response?.ok && response.folders?.[0]) {
                         remembered = response.folders[0];
-                        await persist().catch(() => {});
+                        await persist(true).catch(() => {});
                     } else if (response?.status === 404) {
                         remembered = null;
-                        await persist().catch(() => {});
+                        await persist(true).catch(() => {});
                     }
                     if (!open) showSelection();
                 } else if (job.version === version) {
@@ -247,6 +250,7 @@
         onPick,
         request,
         save,
+        saveOnRefresh = save,
         t,
     }) {
         const node = (tag, suffix, className, attributes = {}) => {
@@ -285,19 +289,21 @@
             hint: el("hint"),
             onPick,
             request,
-            save: async (settings) => {
-                try {
-                    await save(settings);
-                    el("error").hidden = true;
-                } catch (error) {
-                    el("error").textContent =
-                        error?.message || t("folderChangeFailed");
-                    el("error").hidden = false;
-                    throw error;
-                }
-            },
+            save: (settings) => persistFolder(settings, save),
+            saveOnRefresh: (settings) => persistFolder(settings, saveOnRefresh),
             t,
         });
+        async function persistFolder(settings, saver) {
+            try {
+                await saver(settings);
+                el("error").hidden = true;
+            } catch (error) {
+                el("error").textContent =
+                    error?.message || t("folderChangeFailed");
+                el("error").hidden = false;
+                throw error;
+            }
+        }
         return {
             reset(settings, options = {}) {
                 el("hint").textContent = t(
@@ -315,6 +321,24 @@
         let current = null;
         let signature = "";
         let field;
+        async function saveFolder(folder, remember = true) {
+            try {
+                const response = await send({
+                    type: "set-recording-folder",
+                    sessionId: current.sessionId,
+                    ...folder,
+                    ...(!remember ? { remember: false } : {}),
+                });
+                if (!response?.ok)
+                    throw new Error(response?.error || t("folderChangeFailed"));
+            } catch (error) {
+                field.reset(current, {
+                    readOnly: current.recordingFolderOverride !== true,
+                    refresh: false,
+                });
+                throw error;
+            }
+        }
         return {
             render(state) {
                 container.hidden = state.state !== "recording" || state.stopped;
@@ -325,26 +349,8 @@
                     onPick,
                     request,
                     t,
-                    save: async (folder) => {
-                        try {
-                            const response = await send({
-                                type: "set-recording-folder",
-                                sessionId: current.sessionId,
-                                ...folder,
-                            });
-                            if (!response?.ok)
-                                throw new Error(
-                                    response?.error || t("folderChangeFailed"),
-                                );
-                        } catch (error) {
-                            field.reset(current, {
-                                readOnly:
-                                    current.recordingFolderOverride !== true,
-                                refresh: false,
-                            });
-                            throw error;
-                        }
-                    },
+                    save: (folder) => saveFolder(folder),
+                    saveOnRefresh: (folder) => saveFolder(folder, false),
                 });
                 current = state;
                 const next = JSON.stringify([

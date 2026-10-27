@@ -129,6 +129,42 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
+## Meeting agendas (0.8.0)
+
+A supporting server advertises `features.agendas: true`. The popup then shows an
+Agenda card for a meeting running now or starting within 15 minutes and preselects
+its folder. Meet matches by room code on the server; other platforms match by time.
+Several matches open a choice instead of selecting one silently.
+
+**Show agenda** opens Chrome's side panel, which stays available while switching
+tabs. If Chrome refuses the request, the same page opens in a small extension
+window. Preparation shows the outline and task review; **Live meeting** enables
+discussed ticks, timestamped hints, notes, quick points and task **Done / Drop**.
+Changes save to the server and colleagues' changes refresh every 15 seconds.
+Task actions change real tasks and honor their existing permissions. Absorbed
+agendas remain read-only. **Open in Chatterbox** opens the full meeting page.
+
+While recording, the panel and popup show which agenda will accompany the
+recording. **Another agenda…** offers agendas at the same time or **No agenda**.
+The chosen ID survives upload recovery and is sent when the recording completes.
+Only an agenda shown before Record or explicitly chosen is sent. Unseen matches
+use the server's safe automatic rule unless you confirm a choice during recording.
+An agenda's folder applies to this recording only; your default folder stays unchanged.
+**No agenda** tells the server to skip automatic attachment. On a server that
+ignores this decision, automatic attachment may still apply.
+If the selected agenda becomes unavailable, the recording is saved without it
+and the completion message explains this.
+The optional in-meeting banner adds an Agenda line and the recording pill an
+Agenda button; neither reads page content.
+
+With configuration refresh, the extension fetches the next 24 hours of timed
+agendas and schedules reminders one minute before each start. Refresh configuration
+in Options after adding or rescheduling a meeting to update reminders immediately.
+**Remind me of agendas at meeting time** and **Offer agendas in the meeting banner**
+are independent Options switches, both on by default. On an older server Options
+explains that agendas need a server update; no agenda UI or requests are added to
+recording. The only new manifest permission is `sidePanel`.
+
 ## Load it for development
 
 1. Open `chrome://extensions`.
@@ -154,7 +190,7 @@ pairing, first open the extension's **Options**, read the data-use disclosure,
 and agree.
 Then in Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
 (a `recordings:write` API key that creates recordings and looks up folder names
-to file them, but cannot read recordings). Then either:
+to file them, and reads and edits visible agendas on supporting servers, but cannot read recordings). Then either:
 
 - Click **Connect** on that page. A matching active setup stores the key directly;
   without an active setup, confirm the destination in the extension's Options
@@ -191,7 +227,8 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `offscreen` | Keeps the current tab's capture running while the toolbar popup is closed. |
 | `desktopCapture` | Opens the screen picker to capture system audio. |
 | `tabCapture` | Records the current tab's audio directly, without the screen picker. |
-| `alarms` | Auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
+| `sidePanel` | Shows the selected agenda alongside browser tabs after a user click. |
+| `alarms` | Agenda reminders one minute before timed meetings, auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
 | `tabs` | Detects meeting URLs, finds marked recorder setup tabs and their titles for connection, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
 | `storage` | Stores settings, an encrypted recorder token, and recording state. Encrypted audio chunks use the browser's private file system. |

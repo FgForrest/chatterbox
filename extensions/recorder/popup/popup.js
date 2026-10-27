@@ -5,6 +5,8 @@
 // On tabs armed in auto mode the popup is disabled entirely (the toolbar
 // click starts recording directly), so this UI only appears elsewhere.
 
+import { createAgendaCard } from "../lib/agenda-card.js";
+import { agendaFolder, supportsAgendas } from "../lib/agendas.js";
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
@@ -103,6 +105,18 @@ const recordingFolder = createRecordingFolder({
     send: sendMessage, t,
 });
 
+let agendaCard;
+async function renderAgendaCard(settings, state) {
+    const container = el("agenda-card");
+    if (!container) return;
+    if (!supportsAgendas(settings)) { container.hidden = true; return; }
+    agendaCard ??= createAgendaCard(container, {
+        tab: () => currentTab,
+        onFolder: (agenda) => { if (currentState.state === STATE.idle) folderCombobox.reset(agendaFolder(agenda), { refresh: false }); },
+    });
+    await agendaCard(settings, state);
+}
+
 // ---- Unpaired: connect to the current site ------------------------------
 
 async function renderUnpaired() {
@@ -158,9 +172,11 @@ async function renderIdle(version = renderVersion) {
         hint.textContent = t("noMeeting");
     }
     show("idle");
+    void renderAgendaCard(settings, currentState);
 }
 
 async function startRecording(forceDesktop = false) {
+    const agendaChoice = agendaCard?.choice() ?? {};
     const button = el(forceDesktop ? "start-desktop" : "start");
     el("start").disabled = true;
     el("start-desktop").disabled = true;
@@ -174,6 +190,7 @@ async function startRecording(forceDesktop = false) {
                 tabId: currentTab?.id,
                 platformHint: currentPlatform?.id ?? undefined,
                 noticeAcknowledgedAt: new Date().toISOString(),
+                ...agendaChoice,
             },
         });
         if (response?.ok !== true) {
@@ -238,6 +255,7 @@ function renderFinalizing(state) {
 async function render(state) {
     const version = ++renderVersion;
     currentState = state;
+    void getSettings().then((settings) => renderAgendaCard(settings, state));
     await renderMicrophoneWarning(state);
     if (version !== renderVersion) return;
     currentSessionId = state.sessionId;
@@ -288,6 +306,7 @@ async function render(state) {
             el("completion-message").textContent = t(
                 state.partial ? "partialRecordingSent" : "recordingStored",
             );
+            el("completion-agenda-notice").textContent = state.agendaUnavailable ? t("agendaUnavailable") : "";
             show("completed");
             break;
         case STATE.awaitingPicker:

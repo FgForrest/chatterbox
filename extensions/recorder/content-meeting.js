@@ -19,8 +19,8 @@
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `
-        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; }
-        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; } }
+        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; --meeting:#23766e; }
+        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; --meeting:#7bd4c8; } }
         * { box-sizing:border-box; }
         [hidden] { display:none!important; }
         .surface { pointer-events:auto; position:relative; max-width:600px; width:100%; background:var(--surface); color:var(--foreground); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px -12px rgb(20 30 45 / .35),0 2px 6px rgb(20 30 45 / .12); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; text-align:left; overflow-wrap:anywhere; }
@@ -64,6 +64,7 @@
         .folder-option:hover,.folder-option[data-active="true"] { background:var(--muted); outline:1px solid var(--primary); outline-offset:-1px; }
         .folder-status { padding:7px 8px; }
         .folder-status:empty { display:none; }
+        .agenda-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px; border-top:1px solid var(--border); padding-top:8px; color:var(--meeting); }
         .confirmation { padding:10px 16px; width:fit-content; }
         @media(max-width:440px) { .prompt { grid-template-columns:minmax(0,1fr) 26px; gap:8px; padding:12px; } .logo { display:none; } .folder-button { max-width:130px; } .label { font-size:12px; } }
     `;
@@ -165,6 +166,16 @@
             ]),
             button("close", "close", ["×"]),
         );
+        if (message.agendas?.length) {
+            const line = node("div", { class: "agenda-line" }, [
+                node("span", {}, [t("agendaTitle"), ": ", message.agendas.length === 1 ? message.agendas[0].title : t("agendaMultiple", String(message.agendas.length))]),
+                button("agenda-show", "", [t("agendaShow")]),
+            ]);
+            el("how").parentElement.append(line);
+            el("agenda-show").addEventListener("click", () => {
+                void send({ type: "open-agenda" }).catch(showError);
+            });
+        }
         text("title", t("meetingPromptTitle", t("appName")));
         if (message.pinned && !message.policyRequired) {
             const icon = node("strong", {}, [t("meetingPromptIcon", t("appName"))]);
@@ -227,6 +238,7 @@
                     node("span", { id: "recording-label", class: "label" }),
                     node("span", { id: "elapsed", class: "elapsed" }),
                     button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false" }),
+                    button("pill-agenda", "", [t("agendaTitle")], { hidden: "" }),
                     button("stop", "stop"),
                 ]),
                 node("div", { id: "pill-folder", class: "field", hidden: "" }),
@@ -256,6 +268,9 @@
                 updateCollapsed();
                 if (folderOpen) el("meeting-folder-picker").focus();
             });
+            el("pill-agenda").addEventListener("click", () => {
+                void send({ type: "open-agenda" }).catch(showError);
+            });
             el("stop").addEventListener("click", async () => {
                 el("stop").disabled = true;
                 try {
@@ -274,6 +289,7 @@
                 }
             });
         }
+        el("pill-agenda").hidden = !state.agendas?.length;
         text("folder-toggle", `${state.folderLabel || t("fileLater")}\u200E`);
         el("folder-toggle").title =
             `${t("folder")}: ${state.folderLabel || t("fileLater")}`;
