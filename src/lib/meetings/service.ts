@@ -13,10 +13,7 @@ import {
 import { nanoid } from "nanoid";
 import type { z } from "zod";
 import { db } from "@/db";
-import {
-    activeShareRecipientExistsCondition,
-    notifyFolderReceiversInTx,
-} from "@/db/queries/item-shares";
+import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import {
     listMeetingRows,
     lockMeetingEvent,
@@ -24,6 +21,7 @@ import {
     meetingFolders,
     meetingVisibility,
 } from "@/db/queries/meetings";
+import { receivedMeetingFolderNodes } from "@/db/queries/received-meeting-folders";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -34,9 +32,7 @@ import {
     agendaSuggestions,
     agendaTasks,
     chatterItems,
-    folderShares,
     meetingAgendas,
-    receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -52,6 +48,7 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
+    lockCategorizableFolderInTx,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { getCalendarEvent } from "@/lib/integrations/google/calendar-events";
@@ -341,6 +338,8 @@ export async function prepareMeeting(
             );
             if (existing) return { id: existing.agenda.id, existing: true };
         }
+        if (folder.scope !== "org")
+            await lockCategorizableFolderInTx(tx, userId, folder.folderId);
         const itemId = nanoid();
         const at = new Date();
         await tx.insert(chatterItems).values({
@@ -395,7 +394,13 @@ export async function listMeetings(
     input: Parameters<typeof listMeetingRows>[2] = {},
 ) {
     const viewer = await meetingViewer(userId);
-    const rows = await listMeetingRows(userId, viewer.orgUserId, input);
+    const [rows, receivedFolders] = await Promise.all([
+        listMeetingRows(userId, viewer.orgUserId, input),
+        receivedMeetingFolderNodes(db, userId),
+    ]);
+    const navigation = new Map(
+        receivedFolders.map((folder) => [folder.sourceId, folder]),
+    );
     const folders = rows.length
         ? await db
               .select({
@@ -487,10 +492,15 @@ export async function listMeetings(
         author: { id: agenda.userId, name: authorName },
         folders: folders
             .filter((folder) => folder.itemId === agenda.meetingItemId)
-            .map(({ itemId: _itemId, ...folder }) => ({
-                ...folder,
-                name: decryptText(folder.name),
-            })),
+            .map(({ itemId: _itemId, ...folder }) => {
+                const visible = navigation.get(folder.id);
+                return {
+                    ...folder,
+                    id: visible?.id ?? folder.id,
+                    name: decryptText(visible?.name ?? folder.name),
+                    parentId: visible ? visible.parentId : folder.parentId,
+                };
+            }),
         counts,
         version: agenda.version,
     }));
@@ -1273,33 +1283,7 @@ export async function meetingFolderPaths(userId: string) {
                     ...(viewer.orgUserId ? [viewer.orgUserId] : []),
                 ]),
             ),
-        viewer.orgUserId
-            ? db
-                  .select({
-                      sourceId: folderShares.folderId,
-                      id: receivedFolderAttachments.id,
-                      name: receivedFolderAttachments.name,
-                      parentId: receivedFolderAttachments.parentId,
-                  })
-                  .from(receivedFolderAttachments)
-                  .innerJoin(
-                      folderShares,
-                      and(
-                          eq(
-                              folderShares.id,
-                              receivedFolderAttachments.shareId,
-                          ),
-                          eq(folderShares.receiverUserId, userId),
-                      ),
-                  )
-                  .where(
-                      and(
-                          eq(receivedFolderAttachments.userId, userId),
-                          eq(folderShares.state, "accepted"),
-                          activeShareRecipientExistsCondition(userId),
-                      ),
-                  )
-            : [],
+        receivedMeetingFolderNodes(db, userId),
     ]);
     const nodes = new Map(
         [...tree, ...received].map((row) => [

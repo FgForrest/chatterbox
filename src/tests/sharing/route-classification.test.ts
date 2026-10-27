@@ -35,9 +35,35 @@ type Rule =
     | "tasks"
     | "mail"
     | "session"
-    | "shares";
+    | "shares"
+    | "meeting";
 
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
+    "meetings/route.ts": { GET: "meeting", POST: "meeting" },
+    "meetings/calendar-events/route.ts": { GET: "meeting" },
+    "meetings/restore/route.ts": { POST: "meeting" },
+    "meetings/[id]/route.ts": {
+        GET: "meeting",
+        PATCH: "meeting",
+        DELETE: "meeting",
+    },
+    "meetings/[id]/folders/[folderId]/route.ts": { DELETE: "meeting" },
+    "meetings/[id]/attach/route.ts": { POST: "meeting" },
+    "meetings/[id]/calendar-export/route.ts": { POST: "meeting" },
+    "meetings/[id]/markdown/route.ts": { GET: "meeting" },
+    "meetings/[id]/older-tasks/route.ts": { GET: "meeting" },
+    "meetings/[id]/points/route.ts": { POST: "meeting" },
+    "meetings/[id]/points/[pointId]/route.ts": {
+        PATCH: "meeting",
+        DELETE: "meeting",
+    },
+    "meetings/[id]/suggestions/route.ts": { POST: "meeting" },
+    "meetings/[id]/suggestions/[sid]/route.ts": { PATCH: "meeting" },
+    "meetings/[id]/tasks/route.ts": { POST: "meeting" },
+    "meetings/[id]/tasks/[taskId]/route.ts": {
+        PATCH: "meeting",
+        DELETE: "meeting",
+    },
     "events/route.ts": { GET: "session" },
     "items/[id]/shares/route.ts": { GET: "shares", POST: "shares" },
     "shares/route.ts": { GET: "shares" },
@@ -160,6 +186,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
 const API_ROOT = join(__dirname, "../../app/api");
 const GUARDED_DIRECTORIES = [
     "events",
+    "meetings",
     "items/[id]/shares",
     "shares",
     "folder-shares",
@@ -207,6 +234,8 @@ describe("recording route classification", () => {
         for (const [file, methods] of Object.entries(CLASSIFIED)) {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
+            if (rules.has("meeting"))
+                expect(source, file).toMatch(/meetingRoute|requireApiSession/);
             if (rules.has("shares"))
                 expect(source, file).toContain("requirePersonShareSession");
             if (rules.has("session")) {

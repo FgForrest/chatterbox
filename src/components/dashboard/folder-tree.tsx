@@ -354,15 +354,9 @@ export function FolderTree({
                         }
                         title={
                             folder.receivedFolder
-                                ? i18n(
-                                      "Shared by {owner} · read-only · originally {name}",
-                                      {
-                                          owner: folder.receivedFolder
-                                              .ownerName,
-                                          name: folder.receivedFolder
-                                              .originalName,
-                                      },
-                                  )
+                                ? `${i18n("Shared by {owner}", {
+                                      owner: folder.receivedFolder.ownerName,
+                                  })} (${folder.receivedFolder.originalName})`
                                 : undefined
                         }
                         onDragStart={(event) => {
@@ -382,10 +376,7 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (
-                                    folder.kind === "private" ||
-                                    folder.receivedFolder
-                                ) {
+                                if (folder.kind === "private") {
                                     event.dataTransfer.dropEffect = "none";
                                     setRecordingDropFolderId(null);
                                     return;
@@ -444,7 +435,6 @@ export function FolderTree({
                                     );
                                 if (
                                     folder.kind === "private" ||
-                                    folder.receivedFolder ||
                                     recordingDropEffect(
                                         Array.from(event.dataTransfer.types),
                                         folder.scope,

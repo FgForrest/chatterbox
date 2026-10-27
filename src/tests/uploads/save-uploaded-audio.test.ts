@@ -113,6 +113,7 @@ describe("saveUploadedAudio", () => {
             folder: null,
             profile: null,
             manualOnly: false,
+            allowUnavailableFolder: false,
         });
     });
 });

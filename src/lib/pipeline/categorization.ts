@@ -29,11 +29,12 @@ export async function resolveCategorizationSelection(input: {
     if (!item || item.kind === "meeting")
         throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
 
-    const folderIds = [...new Set(input.folderIds)];
+    const requestedFolderIds = [...new Set(input.folderIds)];
     const folders = await assertCategorizableFolders(
         input.ownerUserId,
-        folderIds,
+        requestedFolderIds,
     );
+    const folderIds = [...new Set(folders.map((folder) => folder.folderId))];
     const resolution = await resolveProfileForPlacements({
         ownerUserId: input.ownerUserId,
         itemId: input.itemId,

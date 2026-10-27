@@ -162,6 +162,9 @@ export async function saveUploadedAudio(
                     requestArrivalInTx(tx, {
                         ...arrival,
                         folder,
+                        allowUnavailableFolder: Boolean(
+                            input.deferredFolderFallback,
+                        ),
                         profile: profileResolution?.profile ?? null,
                         manualOnly: profileResolution?.manualOnly ?? false,
                     }),

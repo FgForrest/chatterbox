@@ -52,6 +52,7 @@ export interface ProcessingFolderSummary {
     name: string;
     path: string;
     scope: "personal" | "org";
+    receivedFolder?: RecordingFolder["receivedFolder"];
 }
 
 export interface CategorizationPanelPresentation {
@@ -196,17 +197,16 @@ export async function loadPrivateCategorizationPanel(
     const label = (folder: RecordingFolder) =>
         folderDisplayName(folder, labels);
     const folders = folderOrganization.folders
-        .filter(
-            (folder) =>
-                !folder.receivedFolder &&
-                (folder.scope === "personal" || isOrgScopeEnabled()),
-        )
+        .filter((folder) => folder.scope === "personal" || isOrgScopeEnabled())
         .map((folder) => ({
             id: folder.id,
             parentId: folder.parentId,
             name: label(folder),
             path: folderDisplayPath(folder, byId, label, " › "),
             scope: folder.scope,
+            ...(folder.receivedFolder
+                ? { receivedFolder: folder.receivedFolder }
+                : {}),
         }));
     const selectableFolderIds = new Set(
         folders

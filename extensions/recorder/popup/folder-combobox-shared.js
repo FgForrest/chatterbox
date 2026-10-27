@@ -78,7 +78,23 @@
                         String(option.id === (remembered?.id ?? null)),
                     );
                     node.setAttribute("data-active", String(index === active));
-                    node.textContent = option.label;
+                    if (option.sharedWithPeople) {
+                        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                        icon.setAttribute("viewBox", "0 0 24 24");
+                        icon.setAttribute("width", "16");
+                        icon.setAttribute("height", "16");
+                        icon.setAttribute("fill", "none");
+                        icon.setAttribute("stroke", "currentColor");
+                        icon.setAttribute("stroke-width", "2");
+                        icon.setAttribute("aria-hidden", "true");
+                        icon.style.cssText = "color:#9c5e8f;vertical-align:middle;margin-right:6px";
+                        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                        path.setAttribute("d", "M2 9V5a1 1 0 0 1 1-1h5l2 2h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1 M2 13h10 M9 10l3 3-3 3");
+                        icon.append(path);
+                        node.append(icon, document.createTextNode(option.label));
+                    } else {
+                        node.textContent = option.label;
+                    }
                     node.title = option.label;
                     node.addEventListener("mousedown", (event) =>
                         event.preventDefault(),

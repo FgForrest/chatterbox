@@ -15,6 +15,7 @@ import {
     type FolderSearchEntry,
     FolderSearchList,
 } from "@/components/recordings/folder-search-list";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import { joinFolderPath } from "@/lib/folders/navigation";
@@ -56,9 +57,7 @@ export function FolderCombobox({
     const trigger = useRef<HTMLButtonElement>(null);
     const popup = useRef<HTMLDivElement>(null);
     const expanded = open && !disabled;
-    const writableEntries = entries.filter(
-        (entry) => !entry.folder.receivedFolder,
-    );
+    const writableEntries = entries;
     const selected = writableEntries.find((entry) => entry.folder.id === value);
     const selectedPath = selected
         ? joinFolderPath(selected.path, label(selected.folder))
@@ -216,8 +215,12 @@ export function FolderCombobox({
                     }
                 }}
             >
-                {variant === "pill" && (
-                    <Folder className="size-3 shrink-0" aria-hidden />
+                {selected?.folder.receivedFolder ? (
+                    <SharedFolderIcon folder={selected.folder} />
+                ) : (
+                    variant === "pill" && (
+                        <Folder className="size-3 shrink-0" aria-hidden />
+                    )
                 )}
                 {selected?.folder.scope === "org" && (
                     <Users

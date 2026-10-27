@@ -24,6 +24,7 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
+    lockCategorizableFolderInTx,
     lockOrgTree,
     orgTreeChanged,
     withdrawRecordingInTx,
@@ -265,7 +266,8 @@ async function absorbInTx(
                 folderId: folder.id,
                 requestPipeline: !arriving,
             });
-        } else
+        } else {
+            await lockCategorizableFolderInTx(tx, userId, folder.id);
             await tx
                 .insert(recordingFolderAssignments)
                 .values({
@@ -274,6 +276,7 @@ async function absorbInTx(
                     folderId: folder.id,
                 })
                 .onConflictDoNothing();
+        }
     }
     const at = new Date();
     await tx
@@ -333,20 +336,22 @@ export async function attachAgenda(
 ) {
     const viewer = await meetingViewer(userId);
     await requireMeetingAccess(userId, id, "edit", { viewer });
-    await db.transaction(async (tx) => {
-        await requireMeetingAccess(userId, id, "edit", {
-            viewer,
-            executor: tx,
-        });
-        await absorbInTx(
-            tx,
-            userId,
-            id,
-            recordingItemId,
-            viewer.orgUserId,
-            true,
-        );
-    });
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            await requireMeetingAccess(userId, id, "edit", {
+                viewer,
+                executor: tx,
+            });
+            await absorbInTx(
+                tx,
+                userId,
+                id,
+                recordingItemId,
+                viewer.orgUserId,
+                true,
+            );
+        }),
+    );
     nudge();
 }
 

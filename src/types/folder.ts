@@ -14,6 +14,7 @@ export interface RecordingFolder {
     version: number;
     sharedWithPeople?: boolean;
     receivedFolder?: {
+        sourceFolderId?: string;
         shareId: string;
         shareVersion: number;
         ownerName: string;

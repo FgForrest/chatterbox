@@ -19,6 +19,7 @@ import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { openWidget } from "@/components/pipeline/workflow-widget";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
+import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -248,11 +249,28 @@ export function WorkstationDetailPane({
                             }
                         />
                         {currentRecording.view === "received" ? (
-                            <ReceivedItemBanner
-                                recording={currentRecording}
-                                folders={folders}
-                                shared={recordingShared}
-                            />
+                            <>
+                                <ReceivedItemBanner
+                                    recording={currentRecording}
+                                    folders={folders}
+                                    shared={recordingShared}
+                                />
+                                <RecordingFolderTags
+                                    recordingId={currentRecording.id}
+                                    kind="audio"
+                                    folders={folders.filter(
+                                        (folder) =>
+                                            folder.scope === "personal" &&
+                                            !folder.receivedFolder,
+                                    )}
+                                    assignments={folderAssignments}
+                                    isOwn={false}
+                                    canUnfilePersonal
+                                    onSelectFolder={onSelectFolder}
+                                    onAdd={onAddToFolder}
+                                    onRemove={onRemoveFromFolder}
+                                />
+                            </>
                         ) : (
                             <ItemWorkflow
                                 itemId={currentRecording.id}
