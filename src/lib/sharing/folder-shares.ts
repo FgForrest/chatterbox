@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { folderItemOwnerCondition } from "@/db/queries/folder-participants";
+import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import {
     activeShareRecipientCondition,
     activeShareRecipientExistsCondition,
@@ -17,9 +17,11 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
+import { nudge } from "@/lib/jobs/nudge";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
 import { isOrgScopeVisible } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 
@@ -326,7 +328,7 @@ export async function changeFolderShare(
                     sortOrder: input.sortOrder ?? 1_000_000,
                 });
             } else if (input.action === "remove") {
-                await tx
+                const unfiled = await tx
                     .delete(recordingFolderAssignments)
                     .where(
                         and(
@@ -339,7 +341,15 @@ export async function changeFolderShare(
                                 share.receiverUserId,
                             ),
                         ),
-                    );
+                    )
+                    .returning({ itemId: recordingFolderAssignments.itemId });
+                for (const item of unfiled)
+                    await requestAdvanceInTx(tx, {
+                        itemId: item.itemId,
+                        userId: share.receiverUserId,
+                        view: "private",
+                        reason: "placement",
+                    });
                 await tx
                     .delete(receivedFolderAttachments)
                     .where(
@@ -412,6 +422,7 @@ export async function changeFolderShare(
             return share;
         }),
     );
+    if (input.action === "remove") nudge();
     await Promise.all([
         notifyPersonShareChanged(changed.userId),
         notifyPersonShareChanged(changed.receiverUserId),
@@ -508,7 +519,7 @@ export async function listReceivedFolderOrganization(
             recordingFolderAssignments,
             and(
                 eq(recordingFolderAssignments.folderId, folderShares.folderId),
-                folderItemOwnerCondition(
+                folderParticipantCondition(
                     folderShares.userId,
                     recordingFolderAssignments.userId,
                     folderShares.folderId,

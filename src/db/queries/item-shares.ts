@@ -1,9 +1,6 @@
 import { type AnyColumn, and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    folderItemOwnerCondition,
-    folderParticipantCondition,
-} from "@/db/queries/folder-participants";
+import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 
 export {
@@ -106,7 +103,7 @@ function receivedFolderItemIds(
         inner join ${recordingFolders} on ${recordingFolders.id} = eligible_folders.id
         inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
             and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
-        where ${folderItemOwnerCondition(recordingFolders.userId, chatterItems.userId, recordingFolders.id)}
+        where ${folderParticipantCondition(recordingFolders.userId, chatterItems.userId, recordingFolders.id)}
             and ${chatterItems.userId} <> ${receiverUserId}
             and ${recordingFolders.kind} = 'custom'
             ${
@@ -142,7 +139,7 @@ export function outgoingItemShareCondition(ownerUserId: string) {
         inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
             and ${recordingFolders.userId} = ${folderShares.userId}
         inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
-            and ${folderItemOwnerCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId)}
+            and ${folderParticipantCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId)}
         inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
             and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
         where ${chatterItems.userId} = ${ownerUserId}
@@ -175,17 +172,25 @@ export async function notifyFolderReceiversInTx(
     folderId?: string,
 ): Promise<void> {
     if (!isOrgScopeVisible()) return;
-    await tx.execute(sql`select pg_notify(${"riffado_personal"},
-        json_build_object('type', 'share', 'userId', recipients.id)::text)
-        from (select distinct ${users.id} as id from ${recordingFolderAssignments}
-            inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
-            inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
-                and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
-            inner join ${users} on ${folderParticipantCondition(recordingFolders.userId, users.id, recordingFolders.id)}
-            where ${recordingFolderAssignments.userId} = ${ownerUserId}
-              and ${recordingFolderAssignments.itemId} = ${itemId}
-              and ${folderItemOwnerCondition(recordingFolders.userId, chatterItems.userId, recordingFolders.id)}
-              and ${recordingFolders.kind} = 'custom'
-              and ${users.id} <> ${ownerUserId}
-              ${folderId ? sql`and ${recordingFolders.id} = ${folderId}` : sql``}) recipients`);
+    await tx.execute(sql`with eligible_folders as (
+        select ${recordingFolders.id}, ${recordingFolders.userId} from ${recordingFolderAssignments}
+        inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
+        inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
+            and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
+        where ${recordingFolderAssignments.userId} = ${ownerUserId}
+          and ${recordingFolderAssignments.itemId} = ${itemId}
+          and ${folderParticipantCondition(recordingFolders.userId, recordingFolderAssignments.userId, recordingFolders.id)}
+          and ${recordingFolders.kind} = 'custom'
+          ${folderId ? sql`and ${recordingFolders.id} = ${folderId}` : sql``}
+    ), recipients as (
+        select user_id as id from eligible_folders
+        union
+        select ${folderShares.receiverUserId} as id from eligible_folders
+        inner join ${folderShares} on ${folderShares.folderId} = eligible_folders.id
+            and ${folderShares.userId} = eligible_folders.user_id
+        inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
+        where ${folderShares.state} = 'accepted' and ${activeShareRecipientCondition()}
+    )
+    select pg_notify(${"riffado_personal"}, json_build_object('type', 'share', 'userId', recipients.id)::text)
+    from recipients where recipients.id <> ${ownerUserId}`);
 }

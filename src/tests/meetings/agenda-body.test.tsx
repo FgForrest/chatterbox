@@ -38,11 +38,13 @@ vi.mock("@/components/tasks/task-row", () => ({
     TaskRow: ({
         task,
         actions,
+        readOnly,
     }: {
         task: { text: string; note: string | null };
         actions?: ReactNode;
+        readOnly?: boolean;
     }) => (
-        <li>
+        <li data-read-only={readOnly}>
             <p>{task.text}</p>
             {task.note && <p>{task.note}</p>}
             {actions}
@@ -451,7 +453,7 @@ it.each([
     expect(
         translatedSourceMessage(
             "cs-CZ",
-            "{count, number} tasks · {done, number} done",
+            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
             { count, done },
         ),
     ).toBe(expected);
@@ -483,4 +485,56 @@ it.each([
             { count },
         ),
     ).toBe(recordings);
+});
+
+it("keeps other task rows editable while one save waits", async () => {
+    let finish: (response: Response) => void = () => {};
+    server = detail({ tasks: [task("First", null), task("Second", null)] });
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+        init?.method === "PATCH"
+            ? new Promise<Response>((resolve) => {
+                  finish = resolve;
+              })
+            : Promise.resolve(Response.json(server)),
+    );
+    render(<AgendaBody id="agenda" initial={server} userId="owner" />);
+    fireEvent.click(
+        screen.getByRole("button", { name: "Remove First from agenda" }),
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(
+        screen
+            .getByText("Second")
+            .closest("li")
+            ?.getAttribute("data-read-only"),
+    ).toBe("false");
+    expect(
+        screen.getByRole("button", { name: "Remove Second from agenda" }),
+    ).toHaveProperty("disabled", false);
+    await act(async () => finish(Response.json({ success: true })));
+});
+it.each([
+    [1, 0, "1 task · 0 done"],
+    [2, 1, "2 tasks · 1 done"],
+])("uses English task plurals for %s", (count, done, expected) => {
+    expect(
+        translatedSourceMessage(
+            "en",
+            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
+            { count, done },
+        ),
+    ).toBe(expected);
+});
+it("keeps a hidden absorbed agenda read-only when its recording id is redacted", async () => {
+    server = detail({
+        recordingItemId: null,
+        attachedRecording: { visible: false },
+        state: "held",
+        permissions: { view: true, edit: false, manage: false },
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="other" />);
+    expect(screen.getByText("Recorded")).toBeTruthy();
+    expect(
+        screen.queryByText(/The meeting ended without a recording/),
+    ).toBeNull();
 });

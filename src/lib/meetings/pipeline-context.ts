@@ -45,6 +45,7 @@ export interface RecordingAgendaContext {
 export async function loadRecordingAgenda(
     userId: string,
     recordingId: string,
+    options: { authoredByUserId?: string } = {},
 ): Promise<RecordingAgendaContext | null> {
     const row = await findMeeting(userId, await getOrgUserId(), recordingId);
     if (!row || row.agenda.recordingItemId !== recordingId) return null;
@@ -57,20 +58,28 @@ export async function loadRecordingAgenda(
                 and(
                     eq(agendaPoints.agendaId, agenda.id),
                     eq(agendaPoints.userId, agenda.userId),
+                    options.authoredByUserId
+                        ? eq(
+                              agendaPoints.authorUserId,
+                              options.authoredByUserId,
+                          )
+                        : undefined,
                 ),
             )
             .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
-        db
-            .select()
-            .from(agendaTasks)
-            .where(
-                and(
-                    eq(agendaTasks.agendaId, agenda.id),
-                    eq(agendaTasks.userId, agenda.userId),
-                    isNull(agendaTasks.removedAt),
-                ),
-            )
-            .orderBy(asc(agendaTasks.position), asc(agendaTasks.taskId)),
+        options.authoredByUserId
+            ? []
+            : db
+                  .select()
+                  .from(agendaTasks)
+                  .where(
+                      and(
+                          eq(agendaTasks.agendaId, agenda.id),
+                          eq(agendaTasks.userId, agenda.userId),
+                          isNull(agendaTasks.removedAt),
+                      ),
+                  )
+                  .orderBy(asc(agendaTasks.position), asc(agendaTasks.taskId)),
         taskViewerById(userId),
     ]);
     const visible = new Map(
@@ -121,11 +130,16 @@ export async function loadRecordingAgenda(
         calendarEventId: agenda.calendarEventId,
         points: points.map((point) => ({
             id: point.id,
-            parentId: point.parentId,
+            parentId: points.some((parent) => parent.id === point.parentId)
+                ? point.parentId
+                : null,
             position: point.position,
             text: decryptText(point.text),
             discussedAt: point.discussedAt?.toISOString() ?? null,
-            note: point.note ? decryptText(point.note) : null,
+            note:
+                !options.authoredByUserId && point.note
+                    ? decryptText(point.note)
+                    : null,
         })),
         tasks: links.flatMap((link) => {
             const task = visible.get(link.taskId);

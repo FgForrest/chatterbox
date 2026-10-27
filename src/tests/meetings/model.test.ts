@@ -106,4 +106,13 @@ describe("Calendar agenda block", () => {
             "Before\n--- Agenda z Klepny ---\nUpdated\n--- konec agendy ---\nAfter",
         );
     });
+    it("replaces a block written under another deployment's product name", () =>
+        expect(
+            replaceAgendaDescription(
+                "Before\n--- Agenda from Riffado ---\nOld\n--- end of agenda ---\nAfter",
+                "New agenda",
+            ),
+        ).toBe(
+            "Before\n--- Agenda from Chatterbox ---\nNew agenda\n--- end of agenda ---\nAfter",
+        ));
 });

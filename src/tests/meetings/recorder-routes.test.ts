@@ -45,7 +45,7 @@ beforeEach(() => {
     mocks.list.mockResolvedValue([
         { id: "agenda", timeSet: true, folders: [] },
     ]);
-    mocks.get.mockResolvedValue({ id: "agenda" });
+    mocks.get.mockResolvedValue({ id: "agenda", points: [] });
     mocks.point.mockResolvedValue({ id: "point" });
     mocks.match.mockResolvedValue([]);
 });
@@ -180,4 +180,107 @@ it("passes the recorder polling cursor to the shared detail service", async () =
         context,
     );
     expect(mocks.get).toHaveBeenCalledWith("owner", "agenda", "4:hidden:idle");
+});
+
+it.each([
+    true,
+    false,
+])("withholds summary-derived fields regardless of recording visibility %s", async (visible) => {
+    mocks.get.mockResolvedValue({
+        unchanged: false,
+        id: "agenda",
+        title: "Acme meeting",
+        version: 3,
+        cursor: "3:visible:idle",
+        permissions: { edit: false },
+        recordingItemId: "recording",
+        attachedRecording: { visible },
+        points: [{ id: "point", text: "Plan", summaryOutcome: "covered" }],
+        pointTree: [{ id: "point", summaryOutcome: "covered", children: [] }],
+        outcomeUnplanned: ["Transcript topic"],
+        outcomeSummaryId: "summary",
+        taskSourceItemId: "source",
+        snapshotSourceItemId: "source",
+        taskSource: { id: "source", title: "Previous summary title" },
+        redirectTo: "/dashboard?recording=recording",
+        taskGroups: [{ name: "Acme", tasks: [{ id: "task" }] }],
+    });
+    const response = await detail(
+        new Request("https://example.com/api/v1/recorder/agendas/agenda"),
+        context,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+        unchanged: false,
+        id: "agenda",
+        title: "Acme meeting",
+        version: 3,
+        cursor: "3:visible:idle",
+        permissions: { edit: false },
+        recordingItemId: "recording",
+        attachedRecording: { visible },
+        points: [{ id: "point", text: "Plan" }],
+        taskGroups: [{ name: "Acme", tasks: [{ id: "task" }] }],
+    });
+});
+it("preserves unchanged recorder polls", async () => {
+    mocks.get.mockResolvedValue({
+        unchanged: true,
+        version: 3,
+        cursor: "3:visible:idle",
+    });
+    const response = await detail(
+        new Request("https://example.com/api/v1/recorder/agendas/agenda"),
+        context,
+    );
+    expect(await response.json()).toEqual({
+        unchanged: true,
+        version: 3,
+        cursor: "3:visible:idle",
+    });
+});
+
+it.each([
+    "add",
+    "patch",
+])("strips summaryOutcome from the recorder point %s response", async (operation) => {
+    mocks.point.mockResolvedValue({
+        id: "point",
+        text: "Plan",
+        version: 1,
+        summaryOutcome: "covered",
+    });
+    const response =
+        operation === "add"
+            ? await add(
+                  new Request(
+                      "https://example.com/api/v1/recorder/agendas/agenda/points",
+                      {
+                          method: "POST",
+                          body: JSON.stringify({ text: "Plan" }),
+                      },
+                  ),
+                  context,
+              )
+            : await patchPoint(
+                  new Request(
+                      "https://example.com/api/v1/recorder/agendas/agenda/points/point",
+                      {
+                          method: "PATCH",
+                          body: JSON.stringify({ version: 0, discussed: true }),
+                      },
+                  ),
+                  {
+                      params: Promise.resolve({
+                          id: "agenda",
+                          pointId: "point",
+                      }),
+                  },
+              );
+    expect(await response.json()).toEqual({
+        id: "point",
+        text: "Plan",
+        version: 1,
+    });
 });

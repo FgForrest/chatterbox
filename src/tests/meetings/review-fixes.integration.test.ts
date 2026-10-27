@@ -339,7 +339,6 @@ suite("meeting planning server (PostgreSQL)", () => {
         ]) {
             expect(detail).toMatchObject({
                 attachedRecording: { visible: false },
-                points: [{ summaryOutcome: null }],
             });
             expect(detail).not.toHaveProperty("outcomeUnplanned");
             expect(detail).not.toHaveProperty("outcomeSummaryId");
@@ -347,6 +346,11 @@ suite("meeting planning server (PostgreSQL)", () => {
                 "Confidential transcript topic",
             );
         }
+        expect(recorder.points[0]).not.toHaveProperty("summaryOutcome");
+        for (const detail of [web, (mcp as { meeting: unknown }).meeting])
+            expect(detail).toMatchObject({
+                points: [{ summaryOutcome: null }],
+            });
         expect(await getMeeting("owner", meeting.id)).toMatchObject({
             outcomeUnplanned: ["Confidential transcript topic"],
             points: [{ summaryOutcome: "covered" }],

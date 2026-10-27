@@ -274,11 +274,13 @@ it("queues Enter while another write is pending, preserving both points in order
     fireEvent.change(input, { target: { value: "First queued" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByText("First queued")).toBeTruthy();
     rerender(<OutlineEditor {...props} pending={false} />);
     expect(onAdd).toHaveBeenCalledExactlyOnceWith("First queued", null, 0);
     fireEvent.change(input, { target: { value: "Second queued" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Second queued")).toBeTruthy();
     await act(async () => finish(true));
     expect(onAdd).toHaveBeenCalledTimes(2);
     expect(onAdd).toHaveBeenLastCalledWith("Second queued", null, 1);

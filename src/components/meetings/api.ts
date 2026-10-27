@@ -22,6 +22,7 @@ export async function meetingRequest<T>(
         throw Object.assign(new Error(error.error), {
             status: response.status,
             code: error.code,
+            reason: error.details?.reason,
         });
     }
     return response.status === 204
@@ -49,4 +50,12 @@ export function takePrewarmedAgenda(id: string): Promise<MeetingDetail> | null {
     const cached = prewarmed.get(id);
     prewarmed.delete(id);
     return cached && Date.now() - cached.at < 15000 ? cached.value : null;
+}
+
+export function recordingAudienceConflict(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        "reason" in error &&
+        error.reason === "recording_audience_exceeds_agenda"
+    );
 }

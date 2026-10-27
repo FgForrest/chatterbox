@@ -1,8 +1,8 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 18:22
-status: partially-implemented
+updated: 2026-10-27 19:01
+status: proposed
 kind: feature
 issues: []
 prs: [293]
@@ -16,8 +16,8 @@ relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speake
 
 A meeting is its own item with encrypted discussion points and a frozen list of task references.
 Its recording absorbs the agenda, hides the standalone item and keeps its stable link as a redirect.
-The server foundation implements permissions, attachment, Calendar access, exports, recorder APIs and MCP.
-The editor, extension side panel and model integration remain separate work.
+The implementation includes the editor, Chrome side panel, AI suggestions, summary/keyterm/Learn
+context, permissions, attachment, Calendar export, recorder APIs and MCP. It is awaiting integration.
 
 ## Why
 
@@ -59,17 +59,19 @@ permissions, and an absorbed agenda is read-only.
 Overlap alone would attach more recordings without a dialog. **Rejected because:** it could publish a
 private recording into a shared folder or reveal a private agenda through an already shared recording.
 Automatic attachment counts every visible overlapping agenda and requires exactly one candidate, the
-same owner and an existing matching placement or an unshared owner-private folder. Without the matching
-placement, the recording must have no Organization placement or intent, person shares or shared-folder
-placement. It never files the recording. Explicit attachment requires agenda edit access and recording
-ownership and files into the agenda folder with the resulting audience available to the client.
+same owner and an existing matching placement or an unshared owner-private folder. Both paths check
+exposure: neither agenda nor recording may gain viewers, and a pending Organization placement or person
+share prevents automatic attachment. It never files the recording. Explicit attachment requires agenda
+edit access and recording ownership and files into the agenda folder with the resulting audience available
+to the client. A non-author may attach only when the recording's current audience is contained in the
+agenda's audience; otherwise a localized 409 explains the conflict.
 Sharing the recording later is the owner's explicit action and carries its absorbed agenda with it.
 
 ## Decision
 
 Keep the plan separate until a real recording arrives, then absorb it without inventing transcript
-evidence. Planned points, discussed ticks and meeting notes are hints only. A future summary integration
-must report coverage solely from transcript support and label agenda context as a plan. Every workflow
+evidence. Planned points, discussed ticks and meeting notes are hints only. Summary integration
+reports coverage solely from transcript support and labels agenda context as a plan. Every workflow
 continues without Google; Google remains self-host only. Hosted uses the same scoped meeting APIs without
 Google consent or provider fallbacks.
 
@@ -88,7 +90,8 @@ Google consent or provider fallbacks.
 - Explicit Organization attachment records a normal intended placement through
   `recordIntendedPlacementInTx`. Publication waits for the ordinary transcription and speaker share gate.
   Colleagues who could see the meeting retain read-only agenda access while the recording is unpublished:
-  `attachedRecording: { visible: false }` and `redirectTo: null`. Once readable, its stable link redirects
+  `attachedRecording: { visible: false }` and `redirectTo: null`, with recording/source IDs and
+  transcript outcomes withheld. Once readable, its stable link redirects
   to the recording with the caller's private, Organization or received view.
 - Calendar event and recurring-series IDs fill only empty recording columns. Detach clears identifiers
   only when equal to the agenda's values and removes attach-created filing in someone else's folder.
@@ -106,9 +109,20 @@ Google consent or provider fallbacks.
   Task review and task counts require `tasks:read`; service callers cannot prepare or edit agendas.
   Recorder keys with `recordings:write` also read visible agendas, add live points,
   change discussed ticks and notes, and change tasks allowed by the holder's existing task permissions.
-  They cannot read recordings. The recorder capability and optional completion metadata are additive for older extensions. An
+  Already-issued keys gain these agenda read and edit powers. They cannot read recordings or their
+  summary-derived agenda outcomes, task-source titles/IDs or summary IDs. The recorder route projects
+  its own payload independently of the holder's broader web permissions. The recorder capability and
+  optional completion metadata are additive for older extensions. An
   unavailable selected agenda never blocks completion: the response adds
   `agenda: { attached: false, reason: "unavailable" }`. Requests without `agendaId` keep their response shape.
+
+- Summary commits retain the attachment lock and reconcile outcomes against current point IDs rather
+  than rejecting unrelated agenda-version changes. Private and Organization summary runs update the
+  same owner-scoped summary row, the one all recording viewers read. Missing `agendaOutcome` preserves
+  prior coverage; detach clears it. Learn includes only point text authored by the recording owner;
+  notes have no recorded author and are omitted. Summary and spelling context retain their normal scope.
+- MCP callers without mail access receive no suggestions sourced from mail items or mail-evidence tasks,
+  including merged mail notes and accepted points still carrying that suggestion text.
 
 ## Verification
 
@@ -121,14 +135,18 @@ and mail-role filtering. Existing task, sharing, export, Google, recorder and MC
 
 ## Consequences & open follow-ups
 
-- This is the server foundation. UI, Chrome side panel, summary/keyterm/Learn agenda context and the
-  AI suggestions job body are deferred to their implementation runs. The durable suggestions kind
-  returns an explicit unavailable error until that body exists.
-- Browser verification must settle notification-click side-panel opening and its window fallback.
-  Live Google verification must check recurring-series IDs for non-organizer invitees. Time-only
-  matching on Zoom and Teams and summary coverage leakage require evaluation.
-- The meeting migration numbers follow the branch's existing 0143; another branch merging first may
-  require regeneration. No environment variable, compose or deployment-step change is required.
+- Live browser checks remain: notification-click side-panel opening and its window fallback, and
+  time-only matching on Zoom and Teams.
+- Live Google checks remain for recurring-series IDs returned to non-organizer invitees.
+- Model coverage quality remains to be evaluated, especially whether planned points without transcript
+  support are incorrectly classified as covered.
+- Migration `0148_agenda_review_indexes.sql` adds six foreign-key indexes and tightens the time check;
+  the service already rejects an end without a start. No environment variable, compose or deployment-step
+  change is required. Earlier meeting migrations remain separate generated artifacts.
+- A privacy-filter regression can reveal content to shared self-host members; corrected filtering stops
+  subsequent reads but cannot recall prior responses. Hosted has no person-sharing surface, while recorder
+  and MCP capability filtering applies in both modes. The indexes require no data conversion; a failed
+  attachment rolls back without moving or deleting either item.
 
 ## Related work
 
@@ -146,4 +164,5 @@ and mail-role filtering. Existing task, sharing, export, Google, recorder and MC
 ## Timeline
 
 - **2026-10-27**: maintainer approved the design and attachment safety boundary; server foundation
-  implemented in the working tree for review, with the remaining feature runs pending.
+  implemented in the working tree, then completed with editor, recorder and model integration. PR review
+  fixes add explicit capability filtering, audience checks and concurrency regressions; live checks remain.

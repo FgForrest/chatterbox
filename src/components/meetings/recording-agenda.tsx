@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
-import { meetingRequest, meetingUrl } from "./api";
+import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
 import {
     type AgendaSummaryState,
@@ -146,9 +146,15 @@ export function RecordingAgenda({
             });
             await load(undefined, true);
             onChanged();
-        } catch {
+        } catch (error) {
             setCandidates(previous);
-            toast.error(i18n("Could not attach the agenda"));
+            toast.error(
+                recordingAudienceConflict(error)
+                    ? i18n(
+                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
+                      )
+                    : i18n("Could not attach the agenda"),
+            );
         } finally {
             setBusy(false);
         }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agendaMailDerivedContent } from "@/db/queries/agenda-mail-sources";
 import { AppError } from "@/lib/errors";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { McpToolError } from "@/lib/mcp/errors";
@@ -56,20 +57,59 @@ async function meetingCall<T>(run: () => Promise<T>): Promise<T> {
 async function detailFor(caller: McpCaller, meetingId: string) {
     const detail = await getMeeting(actorId(caller), meetingId);
     if (detail.unchanged) return detail;
-    if (!caller.roles.has("tasks:read"))
-        return { ...detail, tasks: [], taskGroups: [], taskSource: null };
-    if (mayReadMail(caller)) return detail;
-    const tasks = detail.tasks.filter(
-        (task) =>
-            task.evidenceItemKind !== "mail" && task.recording?.kind !== "mail",
-    );
+    const mailAllowed = mayReadMail(caller);
+    const mail = mailAllowed
+        ? null
+        : await agendaMailDerivedContent(
+              actorId(caller),
+              caller.orgUserId,
+              detail.id,
+          );
+    const tasks = caller.roles.has("tasks:read")
+        ? detail.tasks.filter(
+              (task) =>
+                  mailAllowed ||
+                  (task.evidenceItemKind !== "mail" &&
+                      task.recording?.kind !== "mail" &&
+                      !task.noteMailSourced),
+          )
+        : [];
+    const pointAllowed = (point: { id: string }) =>
+        !mail?.pointIds.has(point.id);
+    const points = detail.points.filter(pointAllowed).map((point) => ({
+        ...point,
+        parentId: detail.points.some(
+            (parent) => parent.id === point.parentId && pointAllowed(parent),
+        )
+            ? point.parentId
+            : null,
+    }));
+    function pointTree(parentId: string | null): ((typeof points)[number] & {
+        children: ReturnType<typeof pointTree>;
+    })[] {
+        return points
+            .filter((point) => point.parentId === parentId)
+            .map((point) => ({ ...point, children: pointTree(point.id) }));
+    }
     return {
         ...detail,
         tasks,
+        taskSource: caller.roles.has("tasks:read") ? detail.taskSource : null,
+        taskSourceItemId: caller.roles.has("tasks:read")
+            ? detail.taskSourceItemId
+            : null,
+        snapshotSourceItemId: caller.roles.has("tasks:read")
+            ? detail.snapshotSourceItemId
+            : null,
         taskGroups: groupAgendaTasks(
             tasks.filter((task) => !task.removedAt),
             detail.invitees,
         ),
+        suggestions: detail.suggestions.filter(
+            (suggestion) => !mail?.suggestionIds.has(suggestion.id),
+        ),
+        points,
+        pointTree: pointTree(null),
     };
 }
 

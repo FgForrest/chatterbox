@@ -1,9 +1,6 @@
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    folderItemOwnerCondition,
-    folderParticipantCondition,
-} from "@/db/queries/folder-participants";
+import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
@@ -764,7 +761,7 @@ async function listTreeOrganization(
                     isNull(chatterItems.deletedAt),
                     assignmentUserId
                         ? includeParticipants
-                            ? folderItemOwnerCondition(
+                            ? folderParticipantCondition(
                                   recordingFolders.userId,
                                   recordingFolderAssignments.userId,
                                   recordingFolders.id,
@@ -1304,7 +1301,10 @@ export async function pruneRedundantAssignmentsInTx(
             .from(recordingFolders)
             .where(eq(recordingFolders.userId, treeOwnerId)),
         tx
-            .select({ folderId: recordingFolderAssignments.folderId })
+            .select({
+                folderId: recordingFolderAssignments.folderId,
+                userId: recordingFolderAssignments.userId,
+            })
             .from(recordingFolderAssignments)
             .innerJoin(
                 recordingFolders,
@@ -1330,13 +1330,14 @@ export async function pruneRedundantAssignmentsInTx(
         }
     }
     if (redundant.size > 0) {
-        for (const folderId of redundant)
-            await notifyFolderReceiversInTx(
-                tx,
-                treeOwnerId,
-                recordingId,
-                folderId,
-            );
+        for (const assignment of assignments)
+            if (redundant.has(assignment.folderId))
+                await notifyFolderReceiversInTx(
+                    tx,
+                    assignment.userId,
+                    recordingId,
+                    assignment.folderId,
+                );
         await tx
             .delete(recordingFolderAssignments)
             .where(

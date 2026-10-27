@@ -21,6 +21,3 @@ export function folderParticipantCondition(
             : sql`false`,
     );
 }
-
-/** Direct folder contents stay owned by a current participant, independently of agendas. */
-export const folderItemOwnerCondition = folderParticipantCondition;

@@ -13,13 +13,17 @@ type Detail = Exclude<
     { unchanged: true }
 >;
 const escapeMarkdown = (value: string) =>
-    value.replace(/([\\`*_{}[\]<>#])/gu, "\\$1").replace(/[\r\n]/gu, " ");
+    value
+        .replace(/([\\`*_{}[\]<>#])/gu, "\\$1")
+        .replace(/-{3,}/gu, (run) => run.replaceAll("-", "\\-"))
+        .replace(/[\r\n]/gu, " ");
 
-/** Export only shared agenda content; assignee and live notes are deliberately omitted. */
+/** Export only shared agenda content; assignee task notes and live notes are deliberately omitted. */
 export function meetingMarkdown(
     detail: Detail,
     includeTasks = true,
     locale: "en" | "cs-CZ" = "en",
+    calendar = false,
 ): string {
     const cs = locale === "cs-CZ";
     const lines = [
@@ -40,9 +44,10 @@ export function meetingMarkdown(
         lines.push(`## 1. ${cs ? "Kontrola úkolů" : "Task review"}`, "");
         for (const group of detail.taskGroups) {
             if (!group.tasks.length) continue;
-            lines.push(
-                `### ${escapeMarkdown(group.name ?? (cs ? "Bez řešitele" : "No assignee"))}${group.name && !group.invited ? (cs ? " (není mezi pozvanými)" : " (not invited)") : ""}`,
-            );
+            if (!calendar)
+                lines.push(
+                    `### ${escapeMarkdown(group.name ?? (cs ? "Bez řešitele" : "No assignee"))}${group.name && !group.invited ? (cs ? " (není mezi pozvanými)" : " (not invited)") : ""}`,
+                );
             for (const task of group.tasks)
                 lines.push(
                     `- [${task.status === "done" ? "x" : " "}] ${escapeMarkdown(task.text)}${task.dueDate ? ` (${cs ? "termín" : "due"} ${task.dueDate})` : ""}${task.status === "dropped" ? (cs ? " (zrušeno)" : " (dropped)") : ""}`,
@@ -127,7 +132,7 @@ export async function exportMeetingCalendar(
         ...(await writeCalendarAgenda(
             userId,
             event.id,
-            meetingMarkdown(detail, includeTasks, locale),
+            meetingMarkdown(detail, includeTasks, locale, true),
             locale,
         )),
     };

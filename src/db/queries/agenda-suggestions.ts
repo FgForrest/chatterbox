@@ -46,7 +46,9 @@ export async function agendaSuggestionInputs(input: {
     const { agenda } = input;
     const [previous] = await db
         .select({
-            at: sql<Date>`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt})`,
+            at: sql<Date>`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt})`.mapWith(
+                meetingAgendas.plannedStart,
+            ),
         })
         .from(meetingAgendas)
         .innerJoin(

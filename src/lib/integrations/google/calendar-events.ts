@@ -345,7 +345,7 @@ export async function getCalendarEvent(
     return event;
 }
 
-/** Replace only our marked block, recognizing both English and Czech exports. */
+/** Replace only our marked block, recognizing English and Czech exports under any product name. */
 export function replaceAgendaDescription(
     description: string,
     markdown: string,
@@ -356,7 +356,7 @@ export function replaceAgendaDescription(
             ? `--- Agenda z ${deploymentProductName(locale, "genitive")} ---\n${markdown}\n--- konec agendy ---`
             : `--- Agenda from ${deploymentProductName(locale)} ---\n${markdown}\n--- end of agenda ---`;
     const marked =
-        /--- (?:Agenda from Chatterbox|Agenda z Klepny) ---[\s\S]*?--- (?:end of agenda|konec agendy) ---/gu;
+        /--- Agenda (?:from|z) [^\n]{1,80}? ---[\s\S]*?--- (?:end of agenda|konec agendy) ---/gu;
     let replaced = false;
     const updated = description.replace(marked, () => {
         if (replaced) return "";

@@ -1,6 +1,10 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
+import {
+    meetingAudienceWithin,
+    meetingItemAudienceInTx,
+} from "@/db/queries/meeting-audience";
 import { restoreStandaloneAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import {
     findMeeting,
@@ -32,6 +36,7 @@ import {
 import { nudge } from "@/lib/jobs/nudge";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
+import { meetingPipelineMessage } from "@/lib/meetings/messages";
 import { meetingOverlap } from "@/lib/meetings/model";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
@@ -79,6 +84,7 @@ async function candidatesInTx(
         },
         tx,
     );
+    if (!rows.length) return { candidates: [], overlappingCount: 0 };
     const assignments = await tx
         .select({
             folderId: recordingFolderAssignments.folderId,
@@ -129,6 +135,12 @@ async function candidatesInTx(
                 inArray(folderShares.state, ["pending", "accepted"]),
             ),
         );
+    const recordingAudience = await meetingItemAudienceInTx(
+        tx,
+        itemId,
+        userId,
+        orgUserId,
+    );
     const result = [];
     let overlappingCount = 0;
     for (const row of rows) {
@@ -171,20 +183,29 @@ async function candidatesInTx(
             (assignment) => assignment.folderId === folder.id,
         );
         const privateFolder = folder.userId === userId && shares.length === 0;
+        const agendaAudience = await meetingItemAudienceInTx(
+            tx,
+            row.agenda.meetingItemId,
+            row.agenda.userId,
+            orgUserId,
+        );
         result.push({
             ...row,
             folder,
             overlapMs: overlap,
             safe:
                 row.agenda.userId === userId &&
-                (inFolder ||
-                    (privateFolder &&
-                        !intent &&
-                        !personShare &&
-                        !assignments.some(
-                            (assignment) => assignment.folderOwnerId !== userId,
-                        ) &&
-                        otherSharedFolders.length === 0)),
+                meetingAudienceWithin(recordingAudience, agendaAudience) &&
+                meetingAudienceWithin(agendaAudience, recordingAudience) &&
+                (inFolder || privateFolder) &&
+                !intent &&
+                !personShare &&
+                !assignments.some(
+                    (assignment) =>
+                        assignment.folderId !== folder.id &&
+                        assignment.folderOwnerId !== userId,
+                ) &&
+                !otherSharedFolders.some((shared) => shared.id !== folder.id),
             widensSharing:
                 !inFolder && (folder.userId !== userId || shares.length > 0),
             audience:
@@ -257,6 +278,35 @@ async function absorbInTx(
         agenda.meetingItemId,
         agenda.userId,
     );
+    if (explicit && agenda.userId !== userId) {
+        const recordingAudience = await meetingItemAudienceInTx(
+            tx,
+            recordingItemId,
+            userId,
+            orgUserId,
+        );
+        const agendaAudience = await meetingItemAudienceInTx(
+            tx,
+            agenda.meetingItemId,
+            agenda.userId,
+            orgUserId,
+        );
+        if (!meetingAudienceWithin(recordingAudience, agendaAudience)) {
+            const [caller] = await tx
+                .select({ locale: users.uiLocale })
+                .from(users)
+                .where(eq(users.id, userId));
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                meetingPipelineMessage(
+                    caller?.locale === "cs-CZ" ? "cs-CZ" : "en",
+                    "recordingAudience",
+                ),
+                409,
+                { reason: "recording_audience_exceeds_agenda" },
+            );
+        }
+    }
     if (explicit && folder) {
         if (folder.userId === orgUserId) {
             assertOrgScopeWritable();

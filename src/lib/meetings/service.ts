@@ -50,6 +50,8 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
     lockCategorizableFolderInTx,
+    orgTreeChanged,
+    scheduleFolderExportProjection,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { getCalendarEvent } from "@/lib/integrations/google/calendar-events";
@@ -73,6 +75,7 @@ import {
     validatePointTree,
 } from "@/lib/meetings/model";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
+import { assertOrgScopeWritable } from "@/lib/org/config";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTask, getVisibleTasks } from "@/lib/tasks/tasks";
 
@@ -289,7 +292,23 @@ async function carryOver(
                     : isNull(agendaPoints.discussedAt),
             ),
         );
-    if (points.length)
+    if (points.length) {
+        const sources = await tx
+            .select({
+                text: agendaSuggestions.text,
+                sources: agendaSuggestions.sources,
+            })
+            .from(agendaSuggestions)
+            .where(
+                and(
+                    eq(agendaSuggestions.agendaId, previous.agenda.id),
+                    eq(agendaSuggestions.userId, previous.agenda.userId),
+                    inArray(
+                        agendaSuggestions.text,
+                        points.map((point) => point.text),
+                    ),
+                ),
+            );
         await tx.insert(agendaSuggestions).values(
             points.map((point) => ({
                 agendaId: access.agenda.id,
@@ -299,15 +318,33 @@ async function carryOver(
                 originPointId: point.id,
                 sources: {
                     itemIds: [
-                        previous.agenda.recordingItemId ??
-                            previous.agenda.meetingItemId ??
-                            "",
-                    ].filter(Boolean),
-                    taskIds: [],
+                        ...new Set(
+                            [
+                                previous.agenda.recordingItemId ??
+                                    previous.agenda.meetingItemId ??
+                                    "",
+                                ...sources
+                                    .filter(
+                                        (source) => source.text === point.text,
+                                    )
+                                    .flatMap(
+                                        (source) => source.sources.itemIds,
+                                    ),
+                            ].filter(Boolean),
+                        ),
+                    ],
+                    taskIds: [
+                        ...new Set(
+                            sources
+                                .filter((source) => source.text === point.text)
+                                .flatMap((source) => source.sources.taskIds),
+                        ),
+                    ],
                 },
                 createdByUserId: userId,
             })),
         );
+    }
 }
 
 /** Create and file a meeting, returning a visible existing event agenda on repeated requests. */
@@ -734,6 +771,17 @@ export async function getMeeting(
     return {
         unchanged: false as const,
         ...publicAgenda,
+        recordingItemId: access.recordingVisible
+            ? agenda.recordingItemId
+            : null,
+        taskSourceItemId:
+            agenda.recordingItemId && !access.recordingVisible
+                ? null
+                : agenda.taskSourceItemId,
+        snapshotSourceItemId:
+            agenda.recordingItemId && !access.recordingVisible
+                ? null
+                : agenda.snapshotSourceItemId,
         cursor: `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`,
         attachedRecording: agenda.recordingItemId
             ? { visible: access.recordingVisible }
@@ -748,13 +796,15 @@ export async function getMeeting(
             name: decryptText(folder.name),
         })),
         invitees,
-        taskSource: sourceRows[0]
-            ? {
-                  ...sourceRows[0],
-                  title: decryptText(sourceRows[0].title),
-                  automatic: agenda.taskSourceItemId === null,
-              }
-            : null,
+        taskSource:
+            sourceRows[0] &&
+            (!agenda.recordingItemId || access.recordingVisible)
+                ? {
+                      ...sourceRows[0],
+                      title: decryptText(sourceRows[0].title),
+                      automatic: agenda.taskSourceItemId === null,
+                  }
+                : null,
         points: tree,
         pointTree: buildPointTree(tree),
         tasks,
@@ -962,6 +1012,68 @@ export async function patchMeeting(
         }
     });
     return getMeeting(userId, id);
+}
+
+/** Unfile a standalone meeting under its edit lock, preserving contribution ownership. */
+export async function removeMeetingFromFolder(
+    userId: string,
+    id: string,
+    folderId: string,
+) {
+    const scope = await editMeeting(userId, id, "edit", async (tx, access) => {
+        const { agenda, viewer } = access;
+        if (!agenda.meetingItemId)
+            throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
+        const [folder] = await tx
+            .select({
+                id: recordingFolders.id,
+                userId: recordingFolders.userId,
+            })
+            .from(recordingFolderAssignments)
+            .innerJoin(
+                recordingFolders,
+                eq(recordingFolders.id, recordingFolderAssignments.folderId),
+            )
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, agenda.meetingItemId),
+                    eq(recordingFolderAssignments.userId, agenda.userId),
+                    eq(recordingFolders.id, folderId),
+                    agenda.userId === userId
+                        ? undefined
+                        : eq(recordingFolders.userId, userId),
+                ),
+            )
+            .for("update", { of: recordingFolders });
+        if (!folder)
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Meeting folder not found",
+                404,
+            );
+        if (folder.userId === viewer.orgUserId) assertOrgScopeWritable();
+        await notifyFolderReceiversInTx(
+            tx,
+            agenda.userId,
+            agenda.meetingItemId,
+            folder.id,
+        );
+        await tx
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, agenda.meetingItemId),
+                    eq(recordingFolderAssignments.userId, agenda.userId),
+                    eq(recordingFolderAssignments.folderId, folder.id),
+                ),
+            );
+        return {
+            org: folder.userId === viewer.orgUserId,
+            ownerId: agenda.userId,
+        };
+    });
+    if (scope.org) await orgTreeChanged();
+    else await scheduleFolderExportProjection(scope.ownerId);
 }
 
 /** Delete a standalone meeting and its agenda, leaving real task changes intact. */
@@ -1238,7 +1350,25 @@ export async function changeAgendaTask(
     taskId: string,
     change: { note?: string | null; removed?: boolean },
 ) {
+    const viewer = { ...(await taskViewerById(userId)), includeReceived: true };
     await editMeeting(userId, id, "edit", async (tx, { agenda }) => {
+        const [task] = await tx
+            .select({ id: recordingTasks.id })
+            .from(recordingTasks)
+            .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+            .where(
+                and(
+                    eq(recordingTasks.id, taskId),
+                    taskVisible(viewer, ANY_TASK_ITEM, true),
+                ),
+            )
+            .limit(1);
+        if (!task)
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Agenda task not found",
+                404,
+            );
         const [row] = await tx
             .update(agendaTasks)
             .set({

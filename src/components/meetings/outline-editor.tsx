@@ -597,6 +597,26 @@ export function OutlineEditor({
                 );
             })}
             {canAdd &&
+                queued
+                    .filter(
+                        (entry) =>
+                            !detail.points.some(
+                                (point) =>
+                                    point.id.startsWith("pending-") &&
+                                    point.text === entry.text &&
+                                    point.parentId === entry.parentId &&
+                                    point.position === entry.position,
+                            ),
+                    )
+                    .map((entry) => (
+                        <output
+                            key={`${entry.parentId}:${entry.position}:${entry.text}`}
+                            className="block py-1 text-muted-foreground"
+                        >
+                            {entry.text}
+                        </output>
+                    ))}
+            {canAdd &&
                 failedAdds.map((entry) => (
                     <div
                         key={`${entry.parentId}:${entry.position}:${entry.text}`}

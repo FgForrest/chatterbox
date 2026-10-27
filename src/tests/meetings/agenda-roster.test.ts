@@ -76,7 +76,6 @@ describe("explicit agenda Calendar event", () => {
         });
         expect(get).toHaveBeenCalledWith("owner", "agenda-event", undefined);
         expect(update).toHaveBeenCalledWith({
-            calendarEventId: "agenda-event",
             calendarSeriesId: "series",
         });
     });
@@ -118,5 +117,39 @@ it("does not write Calendar identifiers again when repeated views resolve the sa
         await expect(
             resolveMeetingRoster({ ownerUserId: "owner", itemId: "recording" }),
         ).resolves.toMatchObject({ eventId: "agenda-event" });
+    expect(update).not.toHaveBeenCalled();
+});
+
+it("keeps existing event and series identifiers when an explicit roster choice differs", async () => {
+    stored.calendarEventId = "attached-event";
+    stored.calendarSeriesId = "attached-series";
+    update.mockClear();
+    get.mockResolvedValue({
+        id: "new-event",
+        recurringEventId: "new-series",
+        attendees: [],
+    });
+    await resolveMeetingRoster({
+        ownerUserId: "owner",
+        itemId: "recording",
+        calendarEventId: "new-event",
+    });
+    expect(update).not.toHaveBeenCalled();
+});
+
+it("does not fill an unrelated series beside an existing explicit event", async () => {
+    stored.calendarEventId = "chosen-event";
+    stored.calendarSeriesId = null;
+    update.mockClear();
+    get.mockResolvedValue({
+        id: "other-event",
+        recurringEventId: "other-series",
+        attendees: [],
+    });
+    await resolveMeetingRoster({
+        ownerUserId: "owner",
+        itemId: "recording",
+        calendarEventId: "other-event",
+    });
     expect(update).not.toHaveBeenCalled();
 });

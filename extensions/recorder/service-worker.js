@@ -193,6 +193,7 @@ async function writeState(patch) {
         "recordingFolderOverride", "error", "agendaId",
     ];
     if (Object.keys(patch).some((key) => bannerFields.includes(key))) {
+        // State writes must bypass bannerUpdates so capture never waits for a queued agenda lookup.
         if (current.tabId != null && current.tabId !== next.tabId) await syncMeetingBannerNow(current.tabId, true);
         if (next.tabId != null) await syncMeetingBannerNow(next.tabId, true);
     }

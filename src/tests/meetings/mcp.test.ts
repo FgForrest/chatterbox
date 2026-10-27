@@ -15,6 +15,10 @@ const service = vi.hoisted(() => ({
     change: vi.fn(),
     addTask: vi.fn(),
     changeTask: vi.fn(),
+    mail: vi.fn(),
+}));
+vi.mock("@/db/queries/agenda-mail-sources", () => ({
+    agendaMailDerivedContent: service.mail,
 }));
 vi.mock("@/lib/meetings/service", () => ({
     listMeetings: service.list,
@@ -54,9 +58,15 @@ async function run(
 }
 beforeEach(() => {
     vi.clearAllMocks();
+    service.mail.mockResolvedValue({
+        suggestionIds: new Set(),
+        pointIds: new Set(),
+    });
     service.list.mockResolvedValue([{ id: "agenda" }]);
     service.get.mockResolvedValue({
         unchanged: false,
+        points: [],
+        suggestions: [],
         id: "agenda",
         tasks: [],
         invitees: [],
@@ -141,6 +151,8 @@ describe("meeting MCP tools", () => {
     it("does not disclose mail-origin tasks without mail:read", async () => {
         service.get.mockResolvedValue({
             unchanged: false,
+            points: [],
+            suggestions: [],
             tasks: [{ id: "mail-task", evidenceItemKind: "mail" }],
             invitees: [],
             taskGroups: [],
@@ -155,6 +167,8 @@ describe("meeting MCP tools", () => {
     ])("%s conceals the task review without tasks:read", async (name) => {
         service.get.mockResolvedValue({
             unchanged: false,
+            points: [],
+            suggestions: [],
             tasks: [{ id: "task", text: "Private task", note: "Note" }],
             invitees: [],
             taskGroups: [{ tasks: ["task"] }],
@@ -181,6 +195,8 @@ describe("meeting MCP tools", () => {
     it("returns task review when tasks:read is granted", async () => {
         service.get.mockResolvedValue({
             unchanged: false,
+            points: [],
+            suggestions: [],
             tasks: [{ id: "task", evidenceItemKind: "audio" }],
             invitees: [],
             taskGroups: [],
@@ -220,5 +236,79 @@ describe("meeting MCP tools", () => {
         ).rejects.toMatchObject({ outcome: "denied" });
         expect(service.prepare).not.toHaveBeenCalled();
         expect(service.add).not.toHaveBeenCalled();
+    });
+});
+
+it.each([
+    "tasks:read",
+    "summaries:read",
+] as const)("filters mail-derived suggestions and accepted points with role %s", async (role) => {
+    service.get.mockResolvedValue({
+        unchanged: false,
+        id: "agenda",
+        tasks: [],
+        invitees: [],
+        taskGroups: [],
+        suggestions: [
+            { id: "mail-suggestion", text: "Mail topic" },
+            { id: "audio-suggestion", text: "Audio topic" },
+        ],
+        points: [
+            { id: "mail-point", text: "Mail topic", parentId: null },
+            { id: "audio-point", text: "Audio topic", parentId: null },
+        ],
+        pointTree: [{ id: "mail-point", text: "Mail topic" }],
+    });
+    service.mail.mockResolvedValue({
+        suggestionIds: new Set(["mail-suggestion"]),
+        pointIds: new Set(["mail-point"]),
+    });
+    const result = await run(
+        "get_meeting",
+        { meetingId: "agenda" },
+        { ...caller, roles: new Set([role]) },
+    );
+    expect(JSON.stringify(result)).not.toContain("Mail topic");
+    expect(result).toMatchObject({
+        meeting: {
+            suggestions: [{ id: "audio-suggestion" }],
+            points: [{ id: "audio-point" }],
+        },
+    });
+    service.mail.mockClear();
+    expect(
+        await run(
+            "get_meeting",
+            { meetingId: "agenda" },
+            { ...caller, roles: new Set([role, "mail:read"]) },
+        ),
+    ).toMatchObject({
+        meeting: {
+            suggestions: [
+                { id: "mail-suggestion" },
+                { id: "audio-suggestion" },
+            ],
+        },
+    });
+    expect(service.mail).not.toHaveBeenCalled();
+});
+it("withholds a task with merged mail-derived notes even when its current evidence is audio", async () => {
+    service.get.mockResolvedValue({
+        unchanged: false,
+        id: "agenda",
+        points: [],
+        suggestions: [],
+        invitees: [],
+        tasks: [
+            {
+                id: "task",
+                evidenceItemKind: "audio",
+                noteMailSourced: true,
+                note: "Mail content",
+            },
+        ],
+    });
+    expect(await run("get_meeting", { meetingId: "agenda" })).toMatchObject({
+        meeting: { tasks: [] },
     });
 });

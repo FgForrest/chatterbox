@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings } from "@/db/schema";
@@ -128,20 +128,35 @@ export async function resolveMeetingRoster(input: {
                   ).catch(() => null)
                 : null);
         if (!event) return null;
-        if (
-            recording.calendarEventId !== event.id ||
-            recording.calendarSeriesId !== (event.recurringEventId ?? null)
-        )
+        if (!recording.calendarEventId)
             await db
                 .update(recordings)
-                .set({
-                    calendarEventId: event.id,
-                    calendarSeriesId: event.recurringEventId ?? null,
-                })
+                .set({ calendarEventId: event.id })
                 .where(
                     and(
                         eq(recordings.id, input.itemId),
                         eq(recordings.userId, input.ownerUserId),
+                        isNull(recordings.calendarEventId),
+                    ),
+                );
+        if (
+            !recording.calendarSeriesId &&
+            event.recurringEventId &&
+            (!recording.calendarEventId ||
+                recording.calendarEventId === event.id)
+        )
+            await db
+                .update(recordings)
+                .set({ calendarSeriesId: event.recurringEventId })
+                .where(
+                    and(
+                        eq(recordings.id, input.itemId),
+                        eq(recordings.userId, input.ownerUserId),
+                        isNull(recordings.calendarSeriesId),
+                        or(
+                            isNull(recordings.calendarEventId),
+                            eq(recordings.calendarEventId, event.id),
+                        ),
                     ),
                 );
         const joined = await getMeetSpeakerCandidates({

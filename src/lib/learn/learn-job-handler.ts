@@ -843,6 +843,7 @@ async function runLearnJob({
         const agenda = await loadRecordingAgenda(
             run.actorUserId ?? run.userId,
             run.itemId,
+            { authoredByUserId: run.userId },
         );
         const agendaPlan = agenda
             ? agendaPlanBlock({ ...agenda, tasks: [] })

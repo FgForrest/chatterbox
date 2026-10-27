@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
-import { meetingRequest, meetingUrl } from "./api";
+import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import type { MeetingDetail } from "./types";
 
 export function AttachRecordingDialog({
@@ -58,8 +58,14 @@ export function AttachRecordingDialog({
             });
             onAttached(selected);
             onOpenChange(false);
-        } catch {
-            toast.error(i18n("Could not attach the recording"));
+        } catch (error) {
+            toast.error(
+                recordingAudienceConflict(error)
+                    ? i18n(
+                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
+                      )
+                    : i18n("Could not attach the recording"),
+            );
         } finally {
             setBusy(false);
         }

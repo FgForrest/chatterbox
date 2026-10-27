@@ -16,6 +16,7 @@ export function useAgenda(
     const [detail, setDetail] = useState<MeetingDetail | null>(initial ?? null);
     const [error, setError] = useState<string | null>(null);
     const [pending, setPending] = useState(0);
+    const [pendingPaths, setPendingPaths] = useState<string[]>([]);
     const [colleagueChange, setColleagueChange] = useState(false);
     const loadError = i18n("Could not load the agenda");
     const loading = useRef(false);
@@ -25,7 +26,11 @@ export function useAgenda(
     const outstanding = useRef(0);
     const base = useRef(detail);
     const overlays = useRef<
-        { token: object; apply: (value: MeetingDetail) => MeetingDetail }[]
+        {
+            token: object;
+            path: string;
+            apply: (value: MeetingDetail) => MeetingDetail;
+        }[]
     >([]);
     const mounted = useRef(true);
     const seeded = useRef(Boolean(initial));
@@ -101,7 +106,8 @@ export function useAgenda(
             const token = {};
             revision.current++;
             outstanding.current++;
-            overlays.current.push({ token, apply: optimistic });
+            overlays.current.push({ token, path, apply: optimistic });
+            setPendingPaths(overlays.current.map((entry) => entry.path));
             setPending(outstanding.current);
             setDetail((value) => (value ? optimistic(value) : value));
             const operation = queue.current.then(async () => {
@@ -163,6 +169,9 @@ export function useAgenda(
                 revision.current++;
                 if (mounted.current) {
                     setPending(outstanding.current);
+                    setPendingPaths(
+                        overlays.current.map((entry) => entry.path),
+                    );
                     const confirmed = base.current;
                     const next = confirmed
                         ? overlays.current.reduce(
@@ -187,6 +196,7 @@ export function useAgenda(
         detail,
         error,
         pending,
+        pendingPaths,
         colleagueChange,
         conflict,
         dismissChange: () => setColleagueChange(false),

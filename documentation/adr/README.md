@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-10-27 | [Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export](2026-10-27-meeting-agendas.md) | feature | partially-implemented | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
+| 2026-10-27 | [Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export](2026-10-27-meeting-agendas.md) | feature | proposed | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
 | 2026-10-27 | [Person-shared folders accept every participant's own items while processing and exports follow ownership](2026-10-27-shared-folders-are-two-way.md) | feature | proposed | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
 | 2026-10-26 | [AI usage outlives item erasure but remains bounded by account deletion](2026-10-26-durable-ai-usage-ledger.md) | fix | proposed | [#290](https://github.com/FgForrest/chatterbox/issues/290), [PR #292](https://github.com/FgForrest/chatterbox/pull/292) |
 | 2026-10-26 | [Members see three aggregate statistics scopes on shared self-host](2026-10-26-member-visible-usage-statistics.md) | feature | accepted | [#287](https://github.com/FgForrest/chatterbox/issues/287), [PR #288](https://github.com/FgForrest/chatterbox/pull/288) |

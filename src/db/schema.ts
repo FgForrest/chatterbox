@@ -5143,6 +5143,15 @@ export const meetingAgendas = pgTable(
             table.userId,
             table.plannedStart,
         ),
+        taskSourceIdx: index("meeting_agendas_task_source_idx").on(
+            table.taskSourceItemId,
+        ),
+        snapshotSourceIdx: index("meeting_agendas_snapshot_source_idx").on(
+            table.snapshotSourceItemId,
+        ),
+        outcomeSummaryIdx: index("meeting_agendas_outcome_summary_idx").on(
+            table.outcomeSummaryId,
+        ),
         eventIdx: index("meeting_agendas_event_idx").on(table.calendarEventId),
         seriesIdx: index("meeting_agendas_series_idx").on(
             table.calendarSeriesId,
@@ -5158,7 +5167,7 @@ export const meetingAgendas = pgTable(
         ),
         timeCheck: check(
             "meeting_agendas_time_check",
-            sql`(not ${table.timeSet} or ${table.plannedStart} is not null) and (${table.plannedEnd} is null or ${table.plannedEnd} > ${table.plannedStart})`,
+            sql`(not ${table.timeSet} or ${table.plannedStart} is not null) and (${table.plannedEnd} is null or (${table.plannedStart} is not null and ${table.plannedEnd} > ${table.plannedStart}))`,
         ),
     }),
 );
@@ -5212,6 +5221,9 @@ export const agendaPoints = pgTable(
             table.position,
         ),
         parentIdx: index("agenda_points_parent_idx").on(table.parentId),
+        originPointIdx: index("agenda_points_origin_point_idx").on(
+            table.originPointId,
+        ),
         originCheck: check(
             "agenda_points_origin_check",
             sql`${table.origin} in ('manual', 'carry_over', 'ai', 'live')`,
@@ -5291,6 +5303,12 @@ export const agendaSuggestions = pgTable(
     },
     (table) => ({
         agendaIdx: index("agenda_suggestions_agenda_idx").on(table.agendaId),
+        parentPointIdx: index("agenda_suggestions_parent_point_idx").on(
+            table.parentPointId,
+        ),
+        originPointIdx: index("agenda_suggestions_origin_point_idx").on(
+            table.originPointId,
+        ),
         kindCheck: check(
             "agenda_suggestions_kind_check",
             sql`${table.kind} in ('carry_over', 'ai')`,

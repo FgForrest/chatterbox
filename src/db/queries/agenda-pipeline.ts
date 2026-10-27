@@ -14,7 +14,7 @@ export interface AgendaSummaryWrite {
     outcome: AgendaOutcome | null;
 }
 
-/** Lock and fence the plan under the recording lock, before a summary writes anything. */
+/** Lock and recheck the attachment under the recording lock, before a summary writes anything. */
 export async function lockSummaryAgenda(
     tx: MeetingTx,
     recordingId: string,
@@ -31,7 +31,7 @@ export async function lockSummaryAgenda(
             ),
         )
         .for("update");
-    return current?.version === agenda.version;
+    return current !== undefined;
 }
 
 /** Replace encrypted agenda outcomes atomically with the summary that produced them. */

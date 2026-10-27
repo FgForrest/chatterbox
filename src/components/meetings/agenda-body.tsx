@@ -98,7 +98,9 @@ export function AgendaBody({
         [recordings],
     );
     const readOnly =
-        variant === "recording" || Boolean(detail?.recordingItemId);
+        variant === "recording" ||
+        Boolean(detail?.attachedRecording) ||
+        Boolean(detail?.recordingItemId);
     const live = !readOnly && (variant === "live" || detail?.state === "live");
     useEffect(() => {
         if (!live || !active) return;
@@ -205,6 +207,12 @@ export function AgendaBody({
     const changedCount = tasks.filter(taskChanged).length;
     const discussed = detail.points.filter((point) => point.discussedAt).length;
     const busy = agenda.pending > 0;
+    const taskPending = (taskId: string) =>
+        agenda.pendingPaths.some(
+            (path) =>
+                path === `/tasks/${encodeURIComponent(taskId)}` ||
+                path === `/api/tasks/${encodeURIComponent(taskId)}`,
+        );
     const job = detail.aiSuggestions.job;
     const suggesting = job?.state === "queued" || job?.state === "running";
     const suggest = () =>
@@ -308,11 +316,15 @@ export function AgendaBody({
                 <div className="flex flex-wrap items-center gap-2">
                     <CardTitle>{i18n("1 · Task review")}</CardTitle>
                     <span className="text-xs text-muted-foreground">
-                        {i18n("{count, number} tasks · {done, number} done", {
-                            count: tasks.length,
-                            done: tasks.filter((task) => task.status === "done")
-                                .length,
-                        })}
+                        {i18n(
+                            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
+                            {
+                                count: tasks.length,
+                                done: tasks.filter(
+                                    (task) => task.status === "done",
+                                ).length,
+                            },
+                        )}
                     </span>
                     {changedCount > 0 && (
                         <span className="text-xs text-muted-foreground">
@@ -412,7 +424,9 @@ export function AgendaBody({
                                         task={task}
                                         recording={task.recording}
                                         evidence={task.evidence}
-                                        readOnly={readOnly || busy}
+                                        readOnly={
+                                            readOnly || taskPending(task.id)
+                                        }
                                         notesReadOnly={live}
                                         actions={
                                             <>
@@ -433,7 +447,9 @@ export function AgendaBody({
                                                     task.canClose && (
                                                         <button
                                                             type="button"
-                                                            disabled={busy}
+                                                            disabled={taskPending(
+                                                                task.id,
+                                                            )}
                                                             onClick={() =>
                                                                 changeTask(
                                                                     task,
@@ -452,7 +468,9 @@ export function AgendaBody({
                                                 {canEdit && (
                                                     <button
                                                         type="button"
-                                                        disabled={busy}
+                                                        disabled={taskPending(
+                                                            task.id,
+                                                        )}
                                                         aria-label={i18n(
                                                             "Remove {task} from agenda",
                                                             { task: task.text },
@@ -472,7 +490,10 @@ export function AgendaBody({
                                                 {(live || task.agendaNote) && (
                                                     <AgendaTaskNote
                                                         task={task}
-                                                        readOnly={!canEdit}
+                                                        readOnly={
+                                                            !canEdit ||
+                                                            taskPending(task.id)
+                                                        }
                                                         onSave={(note) => {
                                                             void mutate(
                                                                 `/tasks/${encodeURIComponent(task.id)}`,
@@ -526,15 +547,18 @@ export function AgendaBody({
                 )}
                 {removed.length > 0 && canEdit && (
                     <div className="text-xs text-muted-foreground">
-                        {i18n("{count, number} tasks removed from agenda", {
-                            count: removed.length,
-                        })}
+                        {i18n(
+                            "{count, plural, one {# task removed from agenda} other {# tasks removed from agenda}}",
+                            {
+                                count: removed.length,
+                            },
+                        )}
                         {removed.map((task) => (
                             <Button
                                 key={task.id}
                                 variant="ghost"
                                 size="sm"
-                                disabled={busy}
+                                disabled={taskPending(task.id)}
                                 title={task.text}
                                 onClick={() => removeTask(task, false)}
                             >
@@ -1028,7 +1052,7 @@ export function AgendaBody({
                                 .join(", ")}
                         </span>
                         <span className="rounded-full bg-meeting/10 px-2 py-1 text-meeting">
-                            {detail.recordingItemId
+                            {detail.attachedRecording || detail.recordingItemId
                                 ? i18n("Recorded")
                                 : live
                                   ? i18n("In progress")
@@ -1044,7 +1068,7 @@ export function AgendaBody({
                             </time>
                             <span>
                                 {i18n(
-                                    "{discussed, number} of {total, number} points discussed · {tasks, number} tasks changed",
+                                    "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task changed} other {# tasks changed}}",
                                     {
                                         discussed,
                                         total: detail.points.length,
@@ -1084,7 +1108,7 @@ export function AgendaBody({
                         <span className="font-medium">{i18n("Agenda")}</span>
                         <span className="ml-2 text-xs text-muted-foreground">
                             {i18n(
-                                "{discussed, number} of {total, number} points discussed · {tasks, number} tasks",
+                                "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task} other {# tasks}}",
                                 {
                                     discussed,
                                     total: detail.points.length,
