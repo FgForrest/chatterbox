@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/db", () => ({ db: {} }));
+
 vi.mock("@/lib/env", () => ({
     env: {
         IS_HOSTED: false,

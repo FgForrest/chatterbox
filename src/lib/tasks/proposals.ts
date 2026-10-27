@@ -19,7 +19,10 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { getTranscriptSpeakers } from "@/lib/knowledge/attribution";
-import { embeddingClient } from "@/lib/knowledge/embeddings";
+import {
+    type EmbeddingUsage,
+    embeddingClient,
+} from "@/lib/knowledge/embeddings";
 import { vectorGenerationFor } from "@/lib/knowledge/knowledge-embed";
 import { findByName, knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
@@ -598,6 +601,7 @@ async function rankedCandidateEntries(
     itemText: string,
     participantPersonIds: readonly string[],
     contentKey?: ContentVectorKey,
+    usage?: EmbeddingUsage,
 ): Promise<{
     ranked: RankedTaskCandidate<CandidateTask>[];
     usedEmbeddings: boolean;
@@ -694,19 +698,38 @@ async function rankedCandidateEntries(
                     : Promise.resolve(),
             ]);
         };
-        if (pending.length > 0) {
+        const contentCount = pending.filter(
+            (request) => request.kind === "content",
+        ).length;
+        const groups = usage?.query
+            ? [pending.slice(0, contentCount), pending.slice(contentCount)]
+            : [pending];
+        let groupStart = 0;
+        for (const group of groups) {
+            if (group.length === 0) continue;
+            const start = groupStart;
             const vectors = await client.embed(
-                pending.map((request) => request.text),
+                group.map((request) => request.text),
                 {
-                    onBatch: (batch) => acceptBatch(batch.start, batch.vectors),
+                    usage: usage
+                        ? {
+                              ...usage,
+                              query: Boolean(
+                                  usage.query && group[0].kind === "content",
+                              ),
+                          }
+                        : undefined,
+                    onBatch: (batch) =>
+                        acceptBatch(start + batch.start, batch.vectors),
                 },
             );
-            if (vectors.length !== pending.length) {
+            if (vectors.length !== group.length) {
                 throw new Error(
                     "The embedding response does not match the request",
                 );
             }
-            await acceptBatch(0, vectors);
+            await acceptBatch(start, vectors);
+            groupStart += group.length;
         }
         const itemVectors: Float32Array[] = [];
         for (const index of contentChunks.keys()) {
@@ -752,9 +775,16 @@ async function rankedCandidates(
     candidates: readonly CandidateTask[],
     itemText: string,
     participantPersonIds: readonly string[],
+    usage: EmbeddingUsage,
 ): Promise<CandidateTask[]> {
     return (
-        await rankedCandidateEntries(candidates, itemText, participantPersonIds)
+        await rankedCandidateEntries(
+            candidates,
+            itemText,
+            participantPersonIds,
+            undefined,
+            usage,
+        )
     ).ranked
         .slice(0, TASK_CANDIDATE_LIMIT)
         .map((entry) => entry.candidate);
@@ -891,6 +921,15 @@ export async function searchMergeCandidates(
                   revision: content.revision,
               }
             : undefined,
+        {
+            userId: item.userId,
+            recordingId: item.id,
+            actorUserId: reviewer.userId,
+            credentialUserIds: [reviewer.userId],
+            query: Boolean(text),
+            payerUserId:
+                (item.shared ? reviewer.orgUserId : null) ?? item.userId,
+        },
     );
     const matching = text
         ? rankTaskSearchCandidates(ranking.ranked, text, ranking.usedEmbeddings)
@@ -1030,6 +1069,14 @@ export async function loadTasksPromptContext({
         eligible.filter((task) => !reviewedIds.has(task.id)),
         itemText,
         participantPersonIds,
+        {
+            userId: recording.userId,
+            recordingId: recording.id,
+            actorUserId: reviewer.userId,
+            credentialUserIds: [reviewer.userId],
+            payerUserId:
+                (orgView ? reviewer.orgUserId : null) ?? recording.userId,
+        },
     );
     const rows = [
         ...reviewedTasks

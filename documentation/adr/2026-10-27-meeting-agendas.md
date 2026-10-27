@@ -82,8 +82,8 @@ Google consent or provider fallbacks.
   it was absorbed elsewhere after completion, finalization preserves the recording without attaching it. A DB claim marks overdue agendas held;
   the original meeting tombstone preserves redirect and detach behavior. Deleting a recording deletes
   its own agenda; deleting a colleague's attached recording instead restores the author's standalone
-  meeting as planned or held under the ordinary time rules. Migrations `0144_parched_rogue.sql`,
-  `0145_unusual_sheva_callister.sql` and `0146_numerous_mother_askani.sql` are additive.
+  meeting as planned or held under the ordinary time rules. Migrations `0145_parched_rogue.sql`,
+  `0146_unusual_sheva_callister.sql` and `0147_numerous_mother_askani.sql` are additive.
 - [Two-way shared folders](2026-10-27-shared-folders-are-two-way.md) define general participant-owned filing, replacing this implementation's original explicit-attachment exception. An attached recording remains its owner's data, and acceptance/revocation controls its shared-folder visibility.
 - Explicit Organization attachment records a normal intended placement through
   `recordIntendedPlacementInTx`. Publication waits for the ordinary transcription and speaker share gate.

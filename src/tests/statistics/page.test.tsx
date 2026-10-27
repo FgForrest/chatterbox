@@ -70,6 +70,45 @@ afterEach(() => {
 });
 
 describe("statistics page", () => {
+    it("shows retained spend without activity and failed embedding calls in model tooltips and tables", async () => {
+        const data = statisticsFixture();
+        for (const metric of [
+            "minutes",
+            "recordings",
+            "startedRecordings",
+            "transcripts",
+        ] as const)
+            data.daily[metricIndex[metric]].fill(0);
+        data.models = [["Example provider", "retained-model"]];
+        data.modelDays = [[364, 0, 5, 2, 0.5, 1, 1]];
+        data.daily[metricIndex.summaryCost].fill(0);
+        data.daily[metricIndex.otherCost][364] = 0.5;
+        render(<StatisticsPage initialData={data} scopes={["mine"]} />);
+        const spend = screen.getByRole("region", { name: "AI spend" });
+        expect(within(spend).getByText("$0.50")).toBeTruthy();
+        const models = screen.getByRole("region", { name: "Models" });
+        fireEvent.focus(
+            within(models).getByRole("button", { name: /retained-model/ }),
+        );
+        expect(within(models).getByRole("tooltip").textContent).toContain(
+            "1 failed",
+        );
+        expect(within(models).getByRole("tooltip").textContent).toContain(
+            "Other",
+        );
+        const details = within(models)
+            .getByText("Show as a table")
+            .closest("details");
+        if (!details) throw new Error("Missing models table");
+        fireEvent.click(details.querySelector("summary") as HTMLElement);
+        await waitFor(() =>
+            expect(within(models).getByRole("table")).toBeTruthy(),
+        );
+        expect(within(models).getByRole("table").textContent).toContain(
+            "1 failed",
+        );
+    });
+
     it("uses translated duration units in the hero and rounds chart durations across the hour boundary", () => {
         unitLabels.h = "hours";
         unitLabels.min = "minutes";

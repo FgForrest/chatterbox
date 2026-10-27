@@ -139,6 +139,7 @@ vi.mock("@/db/schema", async (importOriginal) => ({
         folderId: "mailPendingShares.folderId",
         createdAt: "mailPendingShares.createdAt",
     },
+    almanacDuplicateDismissals: { userId: "almanacDuplicateDismissals.userId" },
     aiUsageEvents: {
         __table: "aiUsageEvents",
         payerUserId: "aiUsageEvents.payerUserId",
@@ -502,6 +503,45 @@ describe("buildAndUploadExportArchive", () => {
         ).toMatchObject({
             meetings: { count: 1, path: "meetings/agendas.json" },
         });
+    });
+
+    it.each([
+        "personal",
+        "organization",
+    ] as const)("exports null-item usage in the %s payer ledger even without recordings", async (kind) => {
+        const event = {
+            id: "deleted-usage",
+            itemId: null,
+            itemKind: "mail",
+            outcome: "failed",
+            payerUserId: "user-1",
+            operation: "embedding",
+            costUsd: "0.01",
+            createdAt: new Date("2026-10-26T10:00:00Z"),
+        };
+        mockSelectSequence([], { usage: [event] });
+        await buildAndUploadExportArchive({
+            scope:
+                kind === "personal"
+                    ? { kind, userId: "user-1" }
+                    : { kind, orgUserId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/ledger.zip",
+        });
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries.get("ai/usage.json")?.buffer.toString("utf8") ?? "[]",
+            ),
+        ).toEqual([{ ...event, createdAt: event.createdAt.toISOString() }]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf8") ?? "{}",
+        );
+        expect(manifest.aiUsage).toEqual({ count: 1, path: "ai/usage.json" });
+        expect(
+            [...entries.keys()].some((name) => name.endsWith("/ai-usage.json")),
+        ).toBe(false);
     });
 
     it("exports the payer's usage and rate snapshots", async () => {

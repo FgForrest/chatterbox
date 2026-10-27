@@ -1,6 +1,6 @@
 {
-  "id": "cbaa78f8-263d-4401-bcb3-eb2d63a004b8",
-  "prevId": "2290a31f-baef-4232-b052-347b638dca03",
+  "id": "2e9233f5-f7e3-4609-a200-ad7dd7630063",
+  "prevId": "637d0948-9dd2-4d3a-8dfc-1632cc66b7e0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1460,7 +1460,20 @@
           "name": "recording_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "item_kind": {
+          "name": "item_kind",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'succeeded'"
         },
         "user_id": {
           "name": "user_id",
@@ -1616,7 +1629,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "ai_usage_events_user_id_users_id_fk": {
@@ -10379,18 +10392,6 @@
         "calendar_series_id": {
           "name": "calendar_series_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "calendar_snapshot": {
-          "name": "calendar_snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "calendar_refreshed_at": {
-          "name": "calendar_refreshed_at",
-          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

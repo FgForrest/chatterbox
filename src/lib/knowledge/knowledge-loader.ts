@@ -312,6 +312,8 @@ export function startKnowledgeListener(): void {
 
 /** What one reader may know, merged from the scopes it reads. */
 export interface KnowledgeView {
+    usageUserId?: string;
+    actorUserId?: string;
     items: (KnownItem & {
         scope: "personal" | "org";
         /** Its names in the view: its own, aliases and heard-as forms. */
@@ -352,6 +354,16 @@ export async function knowledgeView(
     }
     const own = loaded.find((held) => held.scope === viewerUserId);
     return {
+        actorUserId:
+            context.kind === "pages"
+                ? context.viewerUserId
+                : (context.actorUserId ?? context.ownerUserId),
+        usageUserId:
+            context.kind === "pages"
+                ? context.viewerUserId
+                : context.shared
+                  ? (orgScope ?? context.ownerUserId)
+                  : context.ownerUserId,
         items: loaded.flatMap((held) =>
             held.items.map((item) => ({
                 ...item,
@@ -385,7 +397,15 @@ export async function searchByMeaning(
     const client = embeddingClient();
     if (!client?.available) return { available: false, hits: [] };
     try {
-        const [query] = await client.embed([text]);
+        const [query] = await client.embed([text], {
+            usage: view.usageUserId
+                ? {
+                      userId: view.usageUserId,
+                      actorUserId: view.actorUserId,
+                      query: true,
+                  }
+                : undefined,
+        });
         if (!query) return { available: true, hits: [] };
         return { available: true, hits: topK(query, view.vectors, k) };
     } catch (error) {

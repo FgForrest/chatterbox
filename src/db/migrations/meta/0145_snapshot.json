@@ -1,6 +1,6 @@
 {
-  "id": "2290a31f-baef-4232-b052-347b638dca03",
-  "prevId": "62994390-ee3f-4074-83c2-886847226f97",
+  "id": "637d0948-9dd2-4d3a-8dfc-1632cc66b7e0",
+  "prevId": "b0e1e50e-dba7-4790-8f2e-eda3cbeb1205",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1460,7 +1460,20 @@
           "name": "recording_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "item_kind": {
+          "name": "item_kind",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'succeeded'"
         },
         "user_id": {
           "name": "user_id",
@@ -1616,7 +1629,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "ai_usage_events_user_id_users_id_fk": {
@@ -10432,12 +10445,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "snapshot_source_item_id": {
-          "name": "snapshot_source_item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "outcome_unplanned": {
           "name": "outcome_unplanned",
           "type": "jsonb",
@@ -10587,19 +10594,6 @@
           "tableTo": "chatter_items",
           "columnsFrom": [
             "task_source_item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "meeting_agendas_snapshot_source_item_id_chatter_items_id_fk": {
-          "name": "meeting_agendas_snapshot_source_item_id_chatter_items_id_fk",
-          "tableFrom": "meeting_agendas",
-          "tableTo": "chatter_items",
-          "columnsFrom": [
-            "snapshot_source_item_id"
           ],
           "columnsTo": [
             "id"

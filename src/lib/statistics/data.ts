@@ -34,6 +34,7 @@ export const METRICS = [
     "unpriced",
     "otherCost",
     "startedRecordings",
+    "audioCost",
 ] as const;
 
 export type Metric = (typeof METRICS)[number];
@@ -60,6 +61,7 @@ export interface StatisticsData {
         jobs: number,
         cost: number,
         unpriced: number,
+        failed?: number,
     ][];
     heat: [day: number, hour: number, count: number][];
     latency: [day: number, seconds: number, count: number][];

@@ -50,6 +50,7 @@ async function runOf(token: string): Promise<McpRun | null> {
                 id: learnRuns.id,
                 itemId: learnRuns.itemId,
                 userId: learnRuns.userId,
+                actorUserId: learnRuns.actorUserId,
                 view: learnRuns.view,
                 language: transcriptions.detectedLanguage,
             })
@@ -80,6 +81,7 @@ async function runOf(token: string): Promise<McpRun | null> {
             id: passes.id,
             itemId: passes.recordingId,
             userId: passes.userId,
+            actorUserId: passes.actorUserId,
             view: passes.view,
             language: transcriptions.detectedLanguage,
         })

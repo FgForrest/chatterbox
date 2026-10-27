@@ -3369,9 +3369,14 @@ export const aiUsageEvents = pgTable(
         id: text("id")
             .primaryKey()
             .$defaultFn(() => nanoid()),
-        itemId: text("recording_id")
+        itemId: text("recording_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        itemKind: varchar("item_kind", { length: 16 }).$type<ChatterItemKind>(),
+        outcome: varchar("outcome", { length: 16 })
+            .$type<"succeeded" | "failed">()
             .notNull()
-            .references(() => chatterItems.id, { onDelete: "cascade" }),
+            .default("succeeded"),
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
