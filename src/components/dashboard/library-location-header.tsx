@@ -3,6 +3,7 @@
 import {
     ArrowLeft,
     BookOpen,
+    CalendarClock,
     FolderPlus,
     MoreHorizontal,
     PanelLeftOpen,
@@ -52,6 +53,7 @@ export function LibraryLocationHeader({
     onKnowledge,
     knowledgeOpen = false,
     onNewFolder,
+    onPrepareMeeting,
     onAssign,
     onMove,
     onShowRail,
@@ -70,6 +72,7 @@ export function LibraryLocationHeader({
     onKnowledge?: (folder: RecordingFolder) => void;
     knowledgeOpen?: boolean;
     onNewFolder: () => void;
+    onPrepareMeeting?: () => void;
     onAssign: (recordingId: string, folderId: string) => Promise<void>;
     onMove: (recordingId: string, from: string, to: string) => Promise<void>;
     onShowRail?: () => void;
@@ -322,6 +325,18 @@ export function LibraryLocationHeader({
                                 </span>
                             )}
                         </div>
+                        {onPrepareMeeting && (
+                            <ActionTooltip label={i18n("Prepare a meeting")}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Prepare a meeting")}
+                                    onClick={onPrepareMeeting}
+                                >
+                                    <CalendarClock className="size-4 text-meeting" />
+                                </Button>
+                            </ActionTooltip>
+                        )}
                         {folder?.receivedFolder && (
                             <>
                                 <DropdownMenu>

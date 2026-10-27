@@ -245,11 +245,11 @@ describe("folder row menu", () => {
             screen
                 .getAllByRole("menuitem")
                 .map((item) => item.textContent?.trim()),
-        ).toEqual(
-            allowed
-                ? ["New subfolder", "Folder settings"]
-                : ["Folder settings"],
-        );
+        ).toEqual([
+            ...(allowed ? ["New subfolder"] : []),
+            ...(name === "Private" ? [] : ["Prepare a meeting"]),
+            "Folder settings",
+        ]);
     });
 
     it("opens the same menu from a right-click anywhere on the row without navigating", () => {

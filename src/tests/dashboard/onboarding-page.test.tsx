@@ -71,6 +71,7 @@ vi.mock("@/lib/learn/llm-input", () => ({
 }));
 vi.mock("@/lib/learn/pending", () => ({ recordingsNeedingReview: review }));
 vi.mock("@/lib/learn/render", () => ({ readTextOf: () => null }));
+vi.mock("@/lib/meetings/service", () => ({ listMeetings: async () => [] }));
 vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => false }));
 vi.mock("@/lib/settings/user-settings", () => ({ getUserSettings: settings }));
 vi.mock("@/lib/settings/plaud-connection", () => ({

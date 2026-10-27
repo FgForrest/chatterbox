@@ -26,6 +26,7 @@ import {
     recordings,
     recordingTasks,
     taskMentions,
+    users,
 } from "@/db/schema";
 import {
     decryptJsonField,
@@ -404,6 +405,26 @@ export async function listMeetings(
                   ),
               )
         : [];
+    const editors = rows.length
+        ? await db
+              .selectDistinct({
+                  agendaId: agendaPoints.agendaId,
+                  id: users.id,
+                  name: users.name,
+              })
+              .from(agendaPoints)
+              .innerJoin(users, eq(users.id, agendaPoints.authorUserId))
+              .where(
+                  or(
+                      ...rows.map(({ agenda }) =>
+                          and(
+                              eq(agendaPoints.agendaId, agenda.id),
+                              eq(agendaPoints.userId, agenda.userId),
+                          ),
+                      ),
+                  ),
+              )
+        : [];
     return rows.map(({ agenda, item, counts, authorName }) => ({
         id: agenda.id,
         meetingItemId: agenda.meetingItemId,
@@ -411,7 +432,19 @@ export async function listMeetings(
         start: agenda.plannedStart,
         end: agenda.plannedEnd,
         timeSet: agenda.timeSet,
+        createdAt: agenda.createdAt,
         state: agenda.state,
+        liveStartedAt: agenda.liveStartedAt,
+        editors: [
+            { id: agenda.userId, name: authorName },
+            ...editors
+                .filter(
+                    (editor) =>
+                        editor.agendaId === agenda.id &&
+                        editor.id !== agenda.userId,
+                )
+                .map(({ id, name }) => ({ id, name })),
+        ],
         calendarEventId: agenda.calendarEventId,
         calendarSeriesId: agenda.calendarSeriesId,
         author: { id: agenda.userId, name: authorName },
@@ -560,6 +593,24 @@ export async function getMeeting(userId: string, id: string, since?: number) {
               ]
             : [];
     });
+    const authorIds = [
+        ...new Set([
+            agenda.userId,
+            ...points.flatMap((point) =>
+                point.authorUserId ? [point.authorUserId] : [],
+            ),
+        ]),
+    ];
+    const authors = await db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, authorIds));
+    const exportEvent =
+        agenda.calendarEventId && agenda.userId !== userId
+            ? await getCalendarEvent(userId, agenda.calendarEventId).catch(
+                  () => null,
+              )
+            : event;
     const invitees = event?.attendees.map(({ name }) => ({ name })) ?? [];
     const tree = points.map((point) => ({
         ...point,
@@ -571,6 +622,8 @@ export async function getMeeting(userId: string, id: string, since?: number) {
         ...agenda,
         title: decryptText(item.title),
         permissions: access.permissions,
+        authors,
+        canExportCalendar: exportEvent?.organizer?.self === true,
         redirectTo: agenda.recordingItemId
             ? `/dashboard?recording=${encodeURIComponent(agenda.recordingItemId)}`
             : null,
@@ -779,6 +832,16 @@ export async function addPoint(
             position: input.position ?? points.length,
         };
         validatePointTree([...points, next]);
+        if (input.position !== undefined)
+            await tx
+                .update(agendaPoints)
+                .set({ position: sql`${agendaPoints.position} + 1` })
+                .where(
+                    and(
+                        pointWhere(agenda),
+                        sql`${agendaPoints.position} >= ${input.position}`,
+                    ),
+                );
         const [point] = await tx
             .insert(agendaPoints)
             .values({
@@ -863,6 +926,20 @@ export async function changePoint(
                     "This point contains another author's points",
                     403,
                 );
+            if (input.mergeUp)
+                await tx
+                    .update(agendaPoints)
+                    .set({
+                        parentId: point.parentId,
+                        version: sql`${agendaPoints.version} + 1`,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            pointWhere(agenda),
+                            eq(agendaPoints.parentId, point.id),
+                        ),
+                    );
             await tx
                 .delete(agendaPoints)
                 .where(and(pointWhere(agenda), eq(agendaPoints.id, pointId)));
@@ -881,6 +958,17 @@ export async function changePoint(
                     : entry,
             ),
         );
+        if (input.position !== undefined)
+            await tx
+                .update(agendaPoints)
+                .set({ position: sql`${agendaPoints.position} + 1` })
+                .where(
+                    and(
+                        pointWhere(agenda),
+                        ne(agendaPoints.id, pointId),
+                        sql`${agendaPoints.position} >= ${input.position}`,
+                    ),
+                );
         const [updated] = await tx
             .update(agendaPoints)
             .set({

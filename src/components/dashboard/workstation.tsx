@@ -33,6 +33,10 @@ import {
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
+import { AgendaBody } from "@/components/meetings/agenda-body";
+import { meetingRequest, meetingUrl } from "@/components/meetings/api";
+import { CreateMeetingDialog } from "@/components/meetings/create-meeting-dialog";
+import type { MeetingRowData } from "@/components/meetings/types";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import {
     type Invitation,
@@ -57,6 +61,7 @@ import {
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import {
+    descendantFolderIds,
     recordingIdsVisibleInFolder,
     sharedRecordingIds,
 } from "@/lib/folders/hierarchy";
@@ -90,6 +95,7 @@ interface TranscriptionData {
 }
 
 const EMPTY_RECORDINGS: Recording[] = [];
+const EMPTY_MEETINGS: MeetingRowData[] = [];
 
 function clearItemLinkContext(params: URLSearchParams) {
     for (const key of [...params.keys()]) {
@@ -112,6 +118,7 @@ export interface OrganizationLibrary {
 
 interface WorkstationProps {
     userId?: string;
+    initialMeetings?: MeetingRowData[];
     recordings: Recording[];
     transcriptions: Map<string, TranscriptionData>;
     transcriptVariants?: Map<string, TranscriptOption[]>;
@@ -139,6 +146,7 @@ interface WorkstationProps {
 /** Recording library, selection, uploads and transcription actions. */
 export function Workstation({
     userId,
+    initialMeetings = EMPTY_MEETINGS,
     recordings,
     transcriptions,
     transcriptVariants,
@@ -165,8 +173,41 @@ export function Workstation({
     const libraryRecordings = isOrgAccount ? orgRecordings : recordings;
     const locationQuery = useSearchParams().toString();
     const initialQuery = locationQuery;
+    const [wideLayout, setWideLayout] = useState(false);
+    useEffect(() => {
+        const media = window.matchMedia?.("(min-width: 1024px)");
+        if (!media) return;
+        const update = () => setWideLayout(media.matches);
+        update();
+        media.addEventListener("change", update);
+        return () => media.removeEventListener("change", update);
+    }, []);
+    const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(
+        () => new URLSearchParams(initialQuery).get("meeting"),
+    );
+    const [meetingFolderId, setMeetingFolderId] = useState<
+        string | null | undefined
+    >(undefined);
+    const [meetings, setMeetings] = useState(initialMeetings);
+    const meetingUploads = useRef(
+        new Map<string, { agendaId: string; folderId?: string }>(),
+    );
+    const meetingUpload = useRef<{
+        agendaId: string;
+        folderId?: string;
+    } | null>(null);
+    useEffect(() => setMeetings(initialMeetings), [initialMeetings]);
+    const reloadMeetings = useCallback(() => {
+        refresh();
+        void meetingRequest<{ meetings: MeetingRowData[] }>("/api/meetings")
+            .then((result) => setMeetings(result.meetings))
+            .catch(() => {});
+    }, [refresh]);
     const newcomer =
-        !isOrgAccount && recordings.length === 0 && orgRecordings.length > 0;
+        !isOrgAccount &&
+        recordings.length === 0 &&
+        orgRecordings.length > 0 &&
+        !initialMeetings.some((meeting) => meeting.author.id === userId);
     const newest = (items: Recording[]) =>
         [...items].sort(
             (a, b) => Date.parse(b.startTime) - Date.parse(a.startTime),
@@ -298,6 +339,8 @@ export function Workstation({
             const params = new URLSearchParams(window.location.search);
             clearItemLinkContext(params);
             params.delete("recording");
+            params.delete("meeting");
+            setCurrentMeetingId(null);
             params.delete("folder");
             params.delete("view");
             params.delete("googleExport");
@@ -369,6 +412,27 @@ export function Workstation({
         },
         [writeSelection, folderOrganization, isOrgAccount, setSelectedFolderId],
     );
+    const openMeeting = useCallback((id: string) => {
+        selectionRevisionRef.current++;
+        setPendingUploadSelection(null);
+        setItemLinkQuery("");
+        setKnowledgeFolderId(null);
+        setCurrentRecording(null);
+        setCurrentMeetingId(id);
+        setMobileView("detail");
+        const params = new URLSearchParams(window.location.search);
+        clearItemLinkContext(params);
+        params.delete("recording");
+        params.delete("view");
+        params.delete("knowledge");
+        params.set("meeting", id);
+        handledLocationQuery.current = params.toString();
+        window.history.pushState(
+            { mobileView: "detail" },
+            "",
+            dashboardLocation(params),
+        );
+    }, []);
     const selectRecordingByUser = useCallback(
         (recording: Recording) => {
             selectRecording(recording, "push");
@@ -488,6 +552,20 @@ export function Workstation({
                 );
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
+            const meetingId = params.get("meeting");
+            if (meetingId) {
+                setCurrentMeetingId(meetingId);
+                setCurrentRecording(null);
+                setKnowledgeFolderId(null);
+                setSelectedFolderId(params.get("folder"));
+                setMobileView(
+                    window.history.state?.mobileView === "list"
+                        ? "list"
+                        : "detail",
+                );
+                return;
+            }
+            setCurrentMeetingId(null);
             const recordingId = params.get("recording");
             const folderId = params.get("folder");
             const folder = navigationFolders.find(
@@ -691,6 +769,23 @@ export function Workstation({
         visibleRecordings,
     ]);
     locationRecordingsRef.current = locationRecordings;
+    const locationMeetings = useMemo(() => {
+        const descendants = selectedFolder
+            ? descendantFolderIds(folderOrganization.folders, selectedFolder.id)
+            : null;
+        return meetings.filter((meeting) =>
+            descendants
+                ? meeting.folders.some((folder) => descendants.has(folder.id))
+                : meeting.author.id === userId ||
+                  meeting.folders.some((folder) =>
+                      folderOrganization.folders.some(
+                          (visible) =>
+                              visible.id === folder.id &&
+                              visible.receivedFolder,
+                      ),
+                  ),
+        );
+    }, [meetings, selectedFolder, folderOrganization.folders, userId]);
     const rowLocations = useMemo(
         () =>
             folderRowLocations(
@@ -883,6 +978,10 @@ export function Workstation({
 
     const handleUploadStarted = useCallback(
         ({ uploadId }: { uploadId: string }) => {
+            if (meetingUpload.current) {
+                meetingUploads.current.set(uploadId, meetingUpload.current);
+                meetingUpload.current = null;
+            }
             uploadSelectionRevisionsRef.current.set(
                 uploadId,
                 selectionRevisionRef.current,
@@ -902,6 +1001,27 @@ export function Workstation({
             uploadSelectionRevisionsRef.current.delete(uploadId);
             if (resumed) resumedArrivalIds.current.add(recordingId);
             refresh();
+            const meetingTarget = meetingUploads.current.get(uploadId);
+            meetingUploads.current.delete(uploadId);
+            if (meetingTarget) {
+                const target = meetingTarget;
+                void meetingRequest(
+                    meetingUrl(target.agendaId, "/attach"),
+                    "POST",
+                    { recordingItemId: recordingId },
+                )
+                    .then(() => {
+                        reloadMeetings();
+                        const params = new URLSearchParams({
+                            recording: recordingId,
+                        });
+                        window.location.assign(`/dashboard?${params}`);
+                    })
+                    .catch((err: Error) => {
+                        toast.error(err.message);
+                    });
+                return;
+            }
             const selectUploadedRecording = (
                 selectionRevision: number,
                 historyMethod: "push" | "replace" = "replace",
@@ -933,11 +1053,12 @@ export function Workstation({
             }
             selectUploadedRecording(uploadSelection);
         },
-        [i18n, refresh, setSelectedFolderId],
+        [i18n, refresh, reloadMeetings, setSelectedFolderId],
     );
 
     const handleUploadFailed = useCallback((uploadId: string) => {
         uploadSelectionRevisionsRef.current.delete(uploadId);
+        meetingUploads.current.delete(uploadId);
     }, []);
 
     const handleSync = useCallback(async () => {
@@ -974,13 +1095,21 @@ export function Workstation({
         handleUpload,
         selectedFile,
         confirmUpload,
-        cancelUpload,
-        triggerUpload,
+        cancelUpload: cancelQueuedUpload,
+        triggerUpload: triggerQueuedUpload,
     } = useUploadQueue({
         onUploadStarted: handleUploadStarted,
         onUploadFailed: handleUploadFailed,
         onUploadComplete: handleUploadComplete,
     });
+    const triggerUpload = useCallback(() => {
+        meetingUpload.current = null;
+        triggerQueuedUpload();
+    }, [triggerQueuedUpload]);
+    const cancelUpload = () => {
+        meetingUpload.current = null;
+        cancelQueuedUpload();
+    };
     const uploadFolders = useMemo(
         () =>
             uploadFolderOptions(
@@ -995,6 +1124,28 @@ export function Workstation({
         [canCurate, folderLabel, navigationFolders],
     );
     const hasFilingFolder = uploadFolders.length > 0;
+    useEffect(() => {
+        const input = uploadInputRef.current;
+        const cancel = () => {
+            meetingUpload.current = null;
+        };
+        input?.addEventListener("cancel", cancel);
+        return () => input?.removeEventListener("cancel", cancel);
+    }, [uploadInputRef]);
+    useEffect(() => {
+        const handleMeetingUpload = (event: Event) => {
+            const data = (
+                event as CustomEvent<{ agendaId: string; folderId?: string }>
+            ).detail;
+            if (!data?.agendaId) return;
+            meetingUpload.current = data;
+            if (data.folderId) setSelectedFolderId(data.folderId);
+            triggerQueuedUpload();
+        };
+        window.addEventListener("meeting-upload", handleMeetingUpload);
+        return () =>
+            window.removeEventListener("meeting-upload", handleMeetingUpload);
+    }, [setSelectedFolderId, triggerQueuedUpload]);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
@@ -1641,21 +1792,49 @@ export function Workstation({
     const settingsFolder = folderOrganization.folders.find(
         (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
     );
-    const navigation = useMemo(
-        () =>
-            libraryNavigation(
-                navigationFolders,
-                folderOrganization.assignments,
-                treeRecordings,
-                folderLabel,
-            ),
-        [
+    const navigation = useMemo(() => {
+        const meetingItems = meetings.map((meeting) => ({
+            id: meeting.meetingItemId ?? meeting.id,
+            startTime: meeting.start ?? meeting.createdAt,
+            view: (meeting.author.id === userId
+                ? "private"
+                : meeting.folders.some((folder) =>
+                        navigationFolders.some(
+                            (visible) =>
+                                visible.id === folder.id &&
+                                visible.scope === "org",
+                        ),
+                    )
+                  ? "org"
+                  : "received") as "private" | "org" | "received",
+        }));
+        const assignments = [...folderOrganization.assignments];
+        for (const meeting of meetings)
+            for (const folder of meeting.folders) {
+                const recordingId = meeting.meetingItemId ?? meeting.id;
+                if (
+                    !assignments.some(
+                        (entry) =>
+                            entry.recordingId === recordingId &&
+                            entry.folderId === folder.id,
+                    )
+                )
+                    assignments.push({ recordingId, folderId: folder.id });
+            }
+        return libraryNavigation(
             navigationFolders,
-            folderOrganization.assignments,
-            treeRecordings,
+            assignments,
+            [...treeRecordings, ...meetingItems],
             folderLabel,
-        ],
-    );
+        );
+    }, [
+        navigationFolders,
+        folderOrganization.assignments,
+        treeRecordings,
+        folderLabel,
+        meetings,
+        userId,
+    ]);
     const openFolderSettings = (folder: RecordingFolder, action?: "create") => {
         setSettingsAction(action);
         setSettingsFolderId(folder.id);
@@ -1678,7 +1857,8 @@ export function Workstation({
             !paletteOpen &&
             !shortcutsOpen &&
             !settingsFolder &&
-            !firstLevelFolderOpen,
+            !firstLevelFolderOpen &&
+            meetingFolderId === undefined,
     });
 
     const navigateRecent = () => {
@@ -1730,6 +1910,7 @@ export function Workstation({
             canCreateSubfolder(selectedFolder, canCurate, isOrgAccount)
                 ? openFolderSettings(selectedFolder, "create")
                 : setFirstLevelFolderOpen(true),
+        onPrepareMeeting: () => setMeetingFolderId(selectedFolderId),
         onAssign: assignRecording,
         onMove: handleMoveBetweenFolders,
     };
@@ -1777,6 +1958,9 @@ export function Workstation({
                                 assignments={folderOrganization.assignments}
                                 recordings={treeRecordings}
                                 selectedFolderId={selectedFolderId}
+                                onPrepareMeeting={(folder) =>
+                                    setMeetingFolderId(folder.id)
+                                }
                                 onRecent={navigateRecent}
                                 onSelectFolder={selectFolderByUser}
                                 onMoveFolder={handleMoveFolder}
@@ -1810,6 +1994,9 @@ export function Workstation({
                                 ref={listRef}
                                 searchView={locationIsOrg ? "org" : "private"}
                                 isOrgAccount={isOrgAccount}
+                                meetings={locationMeetings}
+                                currentMeetingId={currentMeetingId}
+                                onSelectMeeting={openMeeting}
                                 recordings={locationRecordings}
                                 mailEnabled={mailEnabled}
                                 transcriptions={locationTranscriptions}
@@ -1972,6 +2159,7 @@ export function Workstation({
                                 emptyState={
                                     visibleRecordings.length === 0 &&
                                     visibleOrgRecordings.length === 0 &&
+                                    meetings.length === 0 &&
                                     pendingUploads.length === 0 ? (
                                         <div className="mt-4 lg:hidden">
                                             <WorkstationEmptyState
@@ -2001,8 +2189,58 @@ export function Workstation({
                                 contentRevision={orgContentRevision}
                                 onBack={closeKnowledge}
                             />
+                        ) : currentMeetingId ? (
+                            <div
+                                className={cn(
+                                    "min-w-0 space-y-4 lg:block lg:self-start",
+                                    mobileView === "list" && "hidden",
+                                )}
+                            >
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="lg:hidden"
+                                    onClick={() => {
+                                        setMobileView("list");
+                                        window.history.replaceState(
+                                            { mobileView: "list" },
+                                            "",
+                                            window.location.href,
+                                        );
+                                    }}
+                                >
+                                    {selectedFolder
+                                        ? folderLabel(selectedFolder)
+                                        : i18n("Recent")}
+                                </Button>
+                                <AgendaBody
+                                    key={currentMeetingId}
+                                    id={currentMeetingId}
+                                    userId={userId}
+                                    active={
+                                        mobileView === "detail" || wideLayout
+                                    }
+                                    recordings={[
+                                        ...visibleRecordings,
+                                        ...visibleOrgRecordings,
+                                    ]}
+                                    folders={folderOrganization.folders}
+                                    onChanged={reloadMeetings}
+                                    onDeleted={() => {
+                                        setCurrentMeetingId(null);
+                                        navigateRecent();
+                                    }}
+                                    onRecording={(id) => {
+                                        reloadMeetings();
+                                        window.location.assign(
+                                            `/dashboard?recording=${encodeURIComponent(id)}`,
+                                        );
+                                    }}
+                                />
+                            </div>
                         ) : visibleRecordings.length === 0 &&
                           visibleOrgRecordings.length === 0 &&
+                          meetings.length === 0 &&
                           pendingUploads.length === 0 ? (
                             <div className="hidden min-w-0 lg:block lg:self-start">
                                 <WorkstationEmptyState
@@ -2068,6 +2306,7 @@ export function Workstation({
                             />
                         ) : (
                             <WorkstationDetailPane
+                                userId={userId}
                                 currentRecording={selectedRecording}
                                 canCurate={canCurate}
                                 itemLinkQuery={itemLinkQuery}
@@ -2187,6 +2426,21 @@ export function Workstation({
                 selectedFolderId={selectedFolderId}
             />
 
+            {meetingFolderId !== undefined && (
+                <CreateMeetingDialog
+                    key={meetingFolderId ?? "recent"}
+                    folders={navigationFolders}
+                    folderId={meetingFolderId}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setMeetingFolderId(undefined);
+                    }}
+                    onCreated={(id) => {
+                        reloadMeetings();
+                        openMeeting(id);
+                    }}
+                />
+            )}
             <FirstLevelFolderDialog
                 folders={navigationFolders}
                 includeOrganization={canCurate}

@@ -6,6 +6,7 @@ export const GET = meetingRoute(async ({ userId, params, url }) => {
         userId,
         params.id,
         z.enum(["en", "cs-CZ"]).parse(url.searchParams.get("locale") ?? "en"),
+        url.searchParams.get("includeTasks") !== "false",
     );
     return new Response(result.markdown, {
         headers: {

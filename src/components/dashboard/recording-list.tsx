@@ -22,6 +22,8 @@ import {
     type SortOrder,
 } from "@/components/dashboard/recording-list-toolbar";
 import { RecordingRow } from "@/components/dashboard/recording-row";
+import { MeetingRow } from "@/components/meetings/meeting-row";
+import type { MeetingRowData } from "@/components/meetings/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { folderDisplayPath } from "@/lib/folders/labels";
@@ -50,6 +52,9 @@ interface TranscriptionData {
 
 interface RecordingListProps {
     recordings: Recording[];
+    meetings?: MeetingRowData[];
+    currentMeetingId?: string | null;
+    onSelectMeeting?: (id: string) => void;
     /** Offers the Mail channel; it also shows once the pile holds mail. */
     mailEnabled?: boolean;
     transcriptions: Map<string, TranscriptionData>;
@@ -129,6 +134,9 @@ function searchHitSnippet(
 
 export function RecordingList({
     recordings,
+    meetings = [],
+    currentMeetingId,
+    onSelectMeeting,
     mailEnabled = false,
     transcriptions,
     currentRecording,
@@ -373,28 +381,81 @@ export function RecordingList({
         searchScopes,
     ]);
 
-    const visible = filtered.slice(0, visibleCount);
+    const visibleMeetings = meetings.filter(
+        (meeting) =>
+            kindShown === "all" &&
+            !needsReviewOnly &&
+            meeting.title
+                .toLocaleLowerCase()
+                .includes(query.trim().toLocaleLowerCase()),
+    );
+    const entries = [
+        ...filtered.map((recording) => ({
+            id: recording.id,
+            startTime: recording.startTime,
+            filename: recording.filename,
+            duration: recording.duration,
+            filesize: recording.filesize,
+            recording,
+            meeting: null as MeetingRowData | null,
+        })),
+        ...visibleMeetings.map((meeting) => ({
+            id: meeting.id,
+            startTime: meeting.start ?? meeting.createdAt,
+            filename: meeting.title,
+            duration: 0,
+            filesize: 0,
+            recording: null as Recording | null,
+            meeting,
+        })),
+    ].sort((a, b) => {
+        const aFuture = Boolean(
+            a.meeting?.timeSet && Date.parse(a.startTime) > Date.now(),
+        );
+        const bFuture = Boolean(
+            b.meeting?.timeSet && Date.parse(b.startTime) > Date.now(),
+        );
+        if (aFuture !== bFuture) return aFuture ? -1 : 1;
+        if (aFuture) return Date.parse(a.startTime) - Date.parse(b.startTime);
+        if (sortOrder === "name") return a.filename.localeCompare(b.filename);
+        if (sortOrder === "duration")
+            return b.duration - a.duration || a.id.localeCompare(b.id);
+        if (sortOrder === "size")
+            return b.filesize - a.filesize || a.id.localeCompare(b.id);
+        return (
+            (sortOrder === "oldest" ? 1 : -1) *
+            (Date.parse(a.startTime) - Date.parse(b.startTime))
+        );
+    });
+    const selectEntry = useCallback(
+        (entry: (typeof entries)[number]) => {
+            if (entry.meeting) onSelectMeeting?.(entry.id);
+            else if (entry.recording) onSelect(entry.recording);
+        },
+        [onSelectMeeting, onSelect],
+    );
+    const visible = entries.slice(0, visibleCount);
 
     const grouped = useMemo(() => {
-        if (
-            sortOrder === "name" ||
-            sortOrder === "duration" ||
-            sortOrder === "size"
-        ) {
-            return [{ label: null as string | null, items: visible }];
-        }
-        const groups: { label: string; items: Recording[] }[] = [];
+        const groups: { label: string | null; items: typeof entries }[] = [];
         for (const r of visible) {
-            const label = dateGroupLabel(
-                r.startTime,
-                {
-                    today: i18n("Today"),
-                    yesterday: i18n("Yesterday"),
-                    thisWeek: i18n("This week"),
-                    earlierThisMonth: i18n("Earlier this month"),
-                },
-                locale,
-            );
+            const label =
+                r.meeting?.timeSet && Date.parse(r.startTime) > Date.now()
+                    ? i18n("Upcoming")
+                    : sortOrder === "name" ||
+                        sortOrder === "duration" ||
+                        sortOrder === "size"
+                      ? null
+                      : dateGroupLabel(
+                            r.startTime,
+                            {
+                                today: i18n("Today"),
+                                yesterday: i18n("Yesterday"),
+                                thisWeek: i18n("This week"),
+                                earlierThisMonth: i18n("Earlier this month"),
+                            },
+                            locale,
+                        );
             const last = groups[groups.length - 1];
             if (last && last.label === label) {
                 last.items.push(r);
@@ -425,11 +486,9 @@ export function RecordingList({
     }, [initialChunkSize, resetToRecentKey]);
     useEffect(() => {
         setVisibleCount((c) =>
-            c > filtered.length
-                ? Math.max(initialChunkSize, filtered.length)
-                : c,
+            c > entries.length ? Math.max(initialChunkSize, entries.length) : c,
         );
-    }, [filtered.length, initialChunkSize]);
+    }, [entries.length, initialChunkSize]);
 
     useEffect(() => {
         const el = sentinelRef.current;
@@ -439,10 +498,10 @@ export function RecordingList({
         const observe = () => {
             observer?.disconnect();
             observer = new IntersectionObserver(
-                (entries) => {
-                    if (entries.some((entry) => entry.isIntersecting))
+                (observed) => {
+                    if (observed.some((entry) => entry.isIntersecting))
                         setVisibleCount((count) =>
-                            Math.min(count + initialChunkSize, filtered.length),
+                            Math.min(count + initialChunkSize, entries.length),
                         );
                 },
                 {
@@ -458,17 +517,22 @@ export function RecordingList({
             observer.disconnect();
             media?.removeEventListener("change", observe);
         };
-    }, [filtered.length, initialChunkSize]);
+    }, [entries.length, initialChunkSize]);
 
     useImperativeHandle(
         ref,
         () => ({
             focusSearch: () => searchRef.current?.focus(),
             next: () => {
-                const list = filtered;
+                const list = entries;
                 if (list.length === 0) return;
-                const idx = currentRecording
-                    ? list.findIndex((r) => r.id === currentRecording.id)
+                const selectedId = currentMeetingId ?? currentRecording?.id;
+                const idx = selectedId
+                    ? list.findIndex(
+                          (r) =>
+                              r.id === selectedId ||
+                              r.meeting?.meetingItemId === selectedId,
+                      )
                     : -1;
                 const nextIdx = Math.min(idx + 1, list.length - 1);
                 const target = list[Math.max(0, nextIdx)];
@@ -476,17 +540,22 @@ export function RecordingList({
                     setVisibleCount((count) =>
                         Math.max(count, list.indexOf(target) + 1),
                     );
-                    onSelect(target);
+                    selectEntry(target);
                     rowRefs.current
                         .get(target.id)
                         ?.scrollIntoView({ block: "nearest" });
                 }
             },
             prev: () => {
-                const list = filtered;
+                const list = entries;
                 if (list.length === 0) return;
-                const idx = currentRecording
-                    ? list.findIndex((r) => r.id === currentRecording.id)
+                const selectedId = currentMeetingId ?? currentRecording?.id;
+                const idx = selectedId
+                    ? list.findIndex(
+                          (r) =>
+                              r.id === selectedId ||
+                              r.meeting?.meetingItemId === selectedId,
+                      )
                     : 0;
                 const prevIdx = Math.max(0, idx - 1);
                 const target = list[prevIdx];
@@ -494,14 +563,14 @@ export function RecordingList({
                     setVisibleCount((count) =>
                         Math.max(count, list.indexOf(target) + 1),
                     );
-                    onSelect(target);
+                    selectEntry(target);
                     rowRefs.current
                         .get(target.id)
                         ?.scrollIntoView({ block: "nearest" });
                 }
             },
         }),
-        [filtered, currentRecording, onSelect],
+        [entries, currentMeetingId, currentRecording, selectEntry],
     );
 
     const snippetFor = (recording: Recording): string | null => {
@@ -532,12 +601,12 @@ export function RecordingList({
             className="flex h-full min-h-0 flex-col overflow-hidden"
         >
             <div className="shrink-0">
-                {header?.(filtered.length)}
+                {header?.(filtered.length + visibleMeetings.length)}
                 <RecordingListToolbar
                     query={query}
                     onQueryChange={setQuery}
                     onEnterSelectFirst={() => {
-                        if (filtered.length > 0) onSelect(filtered[0]);
+                        if (entries.length > 0) selectEntry(entries[0]);
                     }}
                     searchRef={searchRef}
                     channelCounts={channelCounts}
@@ -583,65 +652,89 @@ export function RecordingList({
                                 </div>
                             )}
                             <div className="divide-y">
-                                {group.items.map((recording) => (
-                                    <RecordingRow
-                                        key={recording.id}
-                                        recording={recording}
-                                        isSelected={
-                                            currentRecording?.id ===
-                                            recording.id
-                                        }
-                                        inFlight={inFlightActions.get(
-                                            recording.id,
-                                        )}
-                                        snippet={snippetFor(recording)}
-                                        firstFolder={firstFolders.get(
-                                            recording.id,
-                                        )}
-                                        isCompact={false}
-                                        rowPadding={rowPadding}
-                                        dateTimeFormat={dateTimeFormat}
-                                        onSelect={onSelect}
-                                        onDelete={onDelete}
-                                        shared={sharedItemIds?.has(
-                                            recording.id,
-                                        )}
-                                        registerRef={registerRowRef}
-                                        folderLocations={rowLocations.get(
-                                            recording.id,
-                                        )}
-                                        sourceFolder={folder}
-                                        folders={folders}
-                                        assignedIds={assignedByRecording.get(
-                                            recording.id,
-                                        )}
-                                        canCurate={canCurate}
-                                        isOrgAccount={isOrgAccount}
-                                        onFolderCreated={onFolderCreated}
-                                        onAssignRecording={onAssignRecording}
-                                        onMoveRecording={onMoveRecording}
-                                    />
-                                ))}
+                                {group.items.map((entry) => {
+                                    if (entry.meeting && onSelectMeeting)
+                                        return (
+                                            <MeetingRow
+                                                key={entry.id}
+                                                meeting={entry.meeting}
+                                                selected={
+                                                    currentMeetingId ===
+                                                        entry.id ||
+                                                    currentMeetingId ===
+                                                        entry.meeting
+                                                            .meetingItemId
+                                                }
+                                                onSelect={onSelectMeeting}
+                                                registerRef={registerRowRef}
+                                            />
+                                        );
+                                    const recording = entry.recording;
+                                    if (!recording) return null;
+                                    return (
+                                        <RecordingRow
+                                            key={recording.id}
+                                            recording={recording}
+                                            isSelected={
+                                                currentRecording?.id ===
+                                                recording.id
+                                            }
+                                            inFlight={inFlightActions.get(
+                                                recording.id,
+                                            )}
+                                            snippet={snippetFor(recording)}
+                                            firstFolder={firstFolders.get(
+                                                recording.id,
+                                            )}
+                                            isCompact={false}
+                                            rowPadding={rowPadding}
+                                            dateTimeFormat={dateTimeFormat}
+                                            onSelect={onSelect}
+                                            onDelete={onDelete}
+                                            shared={sharedItemIds?.has(
+                                                recording.id,
+                                            )}
+                                            registerRef={registerRowRef}
+                                            folderLocations={rowLocations.get(
+                                                recording.id,
+                                            )}
+                                            sourceFolder={folder}
+                                            folders={folders}
+                                            assignedIds={assignedByRecording.get(
+                                                recording.id,
+                                            )}
+                                            canCurate={canCurate}
+                                            isOrgAccount={isOrgAccount}
+                                            onFolderCreated={onFolderCreated}
+                                            onAssignRecording={
+                                                onAssignRecording
+                                            }
+                                            onMoveRecording={onMoveRecording}
+                                        />
+                                    );
+                                })}
                             </div>
                         </div>
                     ))}
 
-                    {filtered.length === 0 && pendingUploads.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-10 text-center">
-                            <MessagesSquare className="mb-2 size-8 text-muted-foreground" />
-                            <p className="text-sm text-muted-foreground">
-                                {emptyMessage}
-                            </p>
-                            {folder && !query && (
-                                <p className="mt-2 px-4 text-xs text-muted-foreground">
-                                    {i18n(
-                                        "Drag a recording onto this folder, or add it from its detail view. Recordings can appear in more than one folder.",
-                                    )}
+                    {filtered.length === 0 &&
+                        visibleMeetings.length === 0 &&
+                        pendingUploads.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-10 text-center">
+                                <MessagesSquare className="mb-2 size-8 text-muted-foreground" />
+                                <p className="text-sm text-muted-foreground">
+                                    {emptyMessage}
                                 </p>
-                            )}
-                            {emptyState}
-                        </div>
-                    )}
+                                {folder && !query && (
+                                    <p className="mt-2 px-4 text-xs text-muted-foreground">
+                                        {i18n(
+                                            "Drag a recording onto this folder, or add it from its detail view. Recordings can appear in more than one folder.",
+                                        )}
+                                    </p>
+                                )}
+                                {emptyState}
+                            </div>
+                        )}
 
                     <div ref={sentinelRef} className="h-4" aria-hidden="true" />
                 </div>

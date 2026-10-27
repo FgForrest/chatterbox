@@ -73,6 +73,7 @@ export async function exportMeetingMarkdown(
     userId: string,
     id: string,
     locale: "en" | "cs-CZ" = "en",
+    includeTasks = true,
 ) {
     const detail = await getMeeting(userId, id);
     if (detail.unchanged)
@@ -81,7 +82,7 @@ export async function exportMeetingMarkdown(
         .toISOString()
         .slice(0, 10);
     return {
-        markdown: meetingMarkdown(detail, true, locale),
+        markdown: meetingMarkdown(detail, includeTasks, locale),
         filename: `${date} ${detail.title.replace(/[\\/:*?"<>|\r\n]/gu, " ").slice(0, 150)} - agenda.md`,
     };
 }

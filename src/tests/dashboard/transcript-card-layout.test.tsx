@@ -7,21 +7,23 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/components/summary/summary-widget", () => ({
-    SummaryWidget: () => null,
+    SummaryWidget: () => <div data-testid="summary-and-tasks" />,
 }));
 vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
 vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
     TranscribeInBrowserButton: () => null,
 }));
 
-function panel() {
+function panel(slots: { agenda?: ReactNode; nextMeeting?: ReactNode } = {}) {
     return render(
         <TranscriptionPanel
+            {...slots}
             recording={{
                 id: "rec-layout",
                 filename: "Meeting",
@@ -149,5 +151,32 @@ describe("transcript card narrow controls", () => {
                 .getByRole("link", { name: "Download transcript Markdown" })
                 .getAttribute("href"),
         ).toContain("source=riffado");
+    });
+    it("places recurring preparation and the absorbed agenda after summary/tasks and before the transcript", () => {
+        panel({
+            agenda: <div data-testid="absorbed-agenda" />,
+            nextMeeting: <div data-testid="next-meeting" />,
+        });
+        expect(
+            screen.getByTestId("summary-and-tasks").parentElement?.className,
+        ).toContain("order-1");
+        expect(
+            screen.getByTestId("next-meeting").parentElement?.className,
+        ).toContain("order-2");
+        expect(
+            screen.getByTestId("absorbed-agenda").parentElement?.className,
+        ).toContain("order-3");
+        expect(
+            screen
+                .getByRole("region", { name: "Transcript content" })
+                .closest(".order-4"),
+        ).toBeTruthy();
+    });
+    it("preserves the existing content layout for recordings without an agenda", () => {
+        const { container } = panel();
+        expect(
+            screen.getByTestId("summary-and-tasks").parentElement?.className,
+        ).toBe("contents");
+        expect(container.querySelector(".order-4")).toBeNull();
     });
 });

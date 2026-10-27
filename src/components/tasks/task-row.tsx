@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PlayAtButton } from "@/components/playback/play-at-button";
 import {
@@ -49,7 +49,10 @@ import type { RecordingFolder } from "@/types/folder";
  * came from, and dropping it. Rows go in a `divide-y` bordered list.
  */
 export function TaskRow({
-    task,
+    task: suppliedTask,
+    readOnly = false,
+    notesReadOnly = false,
+    actions,
     recording,
     evidence,
     currentItemId,
@@ -63,6 +66,9 @@ export function TaskRow({
     folders = [],
 }: {
     task: TaskView;
+    readOnly?: boolean;
+    notesReadOnly?: boolean;
+    actions?: ReactNode;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
     /** The latest visible item that evidences the task. */
@@ -80,6 +86,16 @@ export function TaskRow({
     onFollow?: () => void;
     folders?: RecordingFolder[];
 }) {
+    const task = readOnly
+        ? {
+              ...suppliedTask,
+              canEdit: false,
+              canClose: false,
+              canFollow: false,
+              canMerge: false,
+              canUndoMatch: false,
+          }
+        : suppliedTask;
     const i18n = useExtracted();
     const format = useFormatter();
     const [noteOpen, setNoteOpen] = useState(false);
@@ -97,11 +113,11 @@ export function TaskRow({
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
     let closeReason: string | null = null;
-    if (task.receivedOwnerName && !task.canClose && !dropped) {
+    if (!readOnly && task.receivedOwnerName && !task.canClose && !dropped) {
         closeReason = i18n("Only {owner} can edit this task.", {
             owner: task.receivedOwnerName,
         });
-    } else if (!task.canClose && !dropped) {
+    } else if (!readOnly && !task.canClose && !dropped) {
         if (!task.assignee) {
             closeReason = i18n(
                 "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
@@ -123,7 +139,7 @@ export function TaskRow({
             type="checkbox"
             className="mt-1 size-4 shrink-0 accent-primary aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
             checked={done}
-            disabled={dropped}
+            disabled={dropped || readOnly}
             aria-disabled={closeReason ? true : undefined}
             onClick={() => {
                 if (closeReason) {
@@ -140,7 +156,7 @@ export function TaskRow({
                 if (!task.canClose || dropped) return;
                 const status = event.target.checked ? "done" : "open";
                 onChange({ status }, { status });
-                if (status === "done") setNoteOpen(true);
+                if (status === "done" && !notesReadOnly) setNoteOpen(true);
             }}
             aria-label={i18n("Done")}
         />
@@ -334,7 +350,8 @@ export function TaskRow({
                         </span>
                     )}
                     <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
-                        {task.canClose && (
+                        {actions}
+                        {task.canClose && !notesReadOnly && (
                             <button
                                 type="button"
                                 className="inline-flex items-center gap-1 hover:text-foreground"
@@ -446,7 +463,7 @@ export function TaskRow({
                         </div>
                     </div>
                 )}
-                {noteOpen && task.canClose && (
+                {noteOpen && task.canClose && !notesReadOnly && (
                     <div className="space-y-2">
                         <textarea
                             ref={noteInput}

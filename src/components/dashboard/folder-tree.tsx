@@ -1,6 +1,7 @@
 "use client";
 
 import {
+    CalendarClock,
     ChevronDown,
     ChevronRight,
     FolderPlus,
@@ -88,6 +89,7 @@ interface FolderTreeProps {
         toFolderId: string,
     ) => Promise<void>;
     onNewFolder?: () => void;
+    onPrepareMeeting?: (folder: RecordingFolder) => void;
     canCurate?: boolean;
     isOrgAccount?: boolean;
     onSettings: (folder: RecordingFolder, action?: "create") => void;
@@ -107,6 +109,7 @@ export function FolderTree({
     onAssignRecording,
     onMoveRecording,
     onNewFolder,
+    onPrepareMeeting,
     canCurate = false,
     isOrgAccount = false,
     onSettings,
@@ -586,6 +589,18 @@ export function FolderTree({
                                             {i18n("New subfolder")}
                                         </DropdownMenuItem>
                                     )}
+                                    {onPrepareMeeting &&
+                                        folder.kind !== "private" &&
+                                        !folder.receivedFolder && (
+                                            <DropdownMenuItem
+                                                onSelect={() =>
+                                                    onPrepareMeeting(folder)
+                                                }
+                                            >
+                                                <CalendarClock className="text-meeting" />
+                                                {i18n("Prepare a meeting")}
+                                            </DropdownMenuItem>
+                                        )}
                                     {sharingEnabled &&
                                         folder.scope === "personal" &&
                                         folder.kind === "custom" && (

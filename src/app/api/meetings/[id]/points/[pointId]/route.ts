@@ -10,6 +10,7 @@ export const DELETE = meetingRoute(async ({ userId, params, url }) =>
         params.id,
         params.pointId,
         {
+            mergeUp: url.searchParams.get("mergeUp") === "true",
             version: z.coerce
                 .number()
                 .int()

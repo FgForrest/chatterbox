@@ -86,7 +86,7 @@ vi.mock("@/lib/integrations/google/calendar-events", () => ({
         end: "2026-11-03T11:00:00Z",
         recurringEventId: "series",
         attendees: [],
-        organizer: { self: true },
+        organizer: { self: _userId === "owner" },
     }),
 }));
 
@@ -109,6 +109,7 @@ import {
     changePoint,
     decideSuggestion,
     getMeeting,
+    listMeetings,
     patchMeeting,
     prepareMeeting,
 } from "@/lib/meetings/service";
@@ -801,5 +802,59 @@ suite("meeting planning server (PostgreSQL)", () => {
                     ),
                 ),
         ).toHaveLength(0);
+    });
+    it("inserts outline points in a stable order without overwriting existing authors", async () => {
+        const meeting = await create("org-folder");
+        await addPoint("owner", meeting.id, { text: "First", position: 0 });
+        await addPoint("other", meeting.id, { text: "Last", position: 1 });
+        await addPoint("owner", meeting.id, { text: "Middle", position: 1 });
+        const value = await getMeeting("owner", meeting.id);
+        if (value.unchanged) throw new Error("Missing detail");
+        expect(value.points.map((entry) => entry.text)).toEqual([
+            "First",
+            "Middle",
+            "Last",
+        ]);
+        expect(value.authors.map((author) => author.id).sort()).toEqual([
+            "other",
+            "owner",
+        ]);
+        const rows = await listMeetings("owner", { includePast: true });
+        expect(rows[0].editors.map((editor) => editor.id).sort()).toEqual([
+            "other",
+            "owner",
+        ]);
+    });
+    it("reports Calendar export authority from the caller's account", async () => {
+        const meeting = await prepareMeeting("owner", {
+            folderId: "org-folder",
+            calendarEventId: "event",
+        });
+        const owner = await getMeeting("owner", meeting.id);
+        const colleague = await getMeeting("other", meeting.id);
+        if (owner.unchanged || colleague.unchanged)
+            throw new Error("Missing detail");
+        expect(owner.canExportCalendar).toBe(true);
+        expect(colleague.canExportCalendar).toBe(false);
+    });
+    it("merges an empty outline line upward without deleting its children", async () => {
+        const meeting = await create();
+        const parent = await addPoint("owner", meeting.id, { text: "Parent" });
+        const child = await addPoint("owner", meeting.id, {
+            text: "Child",
+            parentId: parent.id,
+        });
+        await changePoint(
+            "owner",
+            meeting.id,
+            parent.id,
+            { version: 0, mergeUp: true },
+            true,
+        );
+        const value = await getMeeting("owner", meeting.id);
+        if (value.unchanged) throw new Error("Missing detail");
+        expect(value.points).toMatchObject([
+            { id: child.id, parentId: null, text: "Child", version: 1 },
+        ]);
     });
 });
