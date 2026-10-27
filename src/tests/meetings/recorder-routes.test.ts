@@ -16,7 +16,7 @@ vi.mock("@/lib/meetings/service", () => ({
     listMeetings: mocks.list,
     getMeeting: mocks.get,
     addPoint: mocks.point,
-    meetingFolderPath: async () => "Private / Acme",
+    meetingFolderPaths: async () => () => "Private / Acme",
 }));
 vi.mock("@/lib/meetings/calendar", () => ({
     matchRecorderAgendas: mocks.match,

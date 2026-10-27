@@ -149,4 +149,76 @@ describe("meeting MCP tools", () => {
             { meeting: { tasks: [], taskGroups: [] } },
         );
     });
+    it.each([
+        "get_meeting",
+        "list_meetings",
+    ])("%s conceals the task review without tasks:read", async (name) => {
+        service.get.mockResolvedValue({
+            unchanged: false,
+            tasks: [{ id: "task", text: "Private task", note: "Note" }],
+            invitees: [],
+            taskGroups: [{ tasks: ["task"] }],
+            taskSource: { id: "source" },
+        });
+        service.list.mockResolvedValue([
+            { id: "agenda", counts: { points: 1, tasks: 2 } },
+        ]);
+        const result = await run(
+            name,
+            name === "get_meeting" ? { meetingId: "agenda" } : {},
+            { ...caller, roles: new Set(["summaries:read"]) },
+        );
+        expect(JSON.stringify(result)).not.toContain("Private task");
+        if (name === "get_meeting")
+            expect(result).toMatchObject({
+                meeting: { tasks: [], taskGroups: [], taskSource: null },
+            });
+        else
+            expect(result).toMatchObject({
+                meetings: [{ counts: { points: 1, tasks: undefined } }],
+            });
+    });
+    it("returns task review when tasks:read is granted", async () => {
+        service.get.mockResolvedValue({
+            unchanged: false,
+            tasks: [{ id: "task", evidenceItemKind: "audio" }],
+            invitees: [],
+            taskGroups: [],
+        });
+        expect(await run("get_meeting", { meetingId: "agenda" })).toMatchObject(
+            { meeting: { tasks: [{ id: "task" }] } },
+        );
+        service.list.mockResolvedValue([
+            { id: "agenda", counts: { points: 1, tasks: 2 } },
+        ]);
+        expect(await run("list_meetings", {})).toMatchObject({
+            meetings: [{ counts: { tasks: 2 } }],
+        });
+    });
+    it.each([
+        "prepare_meeting",
+        "edit_agenda",
+    ])("refuses service callers on %s", async (name) => {
+        const principal: McpCaller = {
+            kind: "service",
+            orgUserId: "org",
+            subject: "service",
+            clientId: "test",
+            roles: new Set(["tasks:write"]),
+        };
+        await expect(
+            run(
+                name,
+                name === "prepare_meeting"
+                    ? { folderId: "folder", title: "Acme" }
+                    : {
+                          meetingId: "agenda",
+                          operations: [{ action: "add_point", text: "Point" }],
+                      },
+                principal,
+            ),
+        ).rejects.toMatchObject({ outcome: "denied" });
+        expect(service.prepare).not.toHaveBeenCalled();
+        expect(service.add).not.toHaveBeenCalled();
+    });
 });

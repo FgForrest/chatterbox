@@ -9,7 +9,7 @@ import {
 } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { requireMeetingAccess } from "@/lib/meetings/access";
+import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import type { StorageProvider } from "@/lib/storage/types";
 import { MAX_SESSION_BYTES } from "./constants";
@@ -469,16 +469,26 @@ export async function markRecordingSessionCompleting(input: {
     truncatedAtChunk: number | null;
     agendaId?: string;
 }): Promise<RecordingSessionRow | null> {
-    const agendaAccess = input.agendaId
-        ? await requireMeetingAccess(input.userId, input.agendaId, "edit")
-        : null;
+    const viewer = input.agendaId ? await meetingViewer(input.userId) : null;
     return db.transaction(async (tx) => {
-        if (input.agendaId && agendaAccess)
-            await requireMeetingAccess(input.userId, input.agendaId, "edit", {
-                viewer: agendaAccess.viewer,
-                executor: tx,
-                lock: true,
-            });
+        let agendaAvailable = false;
+        if (input.agendaId && viewer) {
+            try {
+                await requireMeetingAccess(
+                    input.userId,
+                    input.agendaId,
+                    "edit",
+                    { viewer, executor: tx, lock: true },
+                );
+                agendaAvailable = true;
+            } catch (error) {
+                if (
+                    !(error instanceof AppError) ||
+                    ![403, 404, 409].includes(error.statusCode)
+                )
+                    throw error;
+            }
+        }
         const [session] = await tx
             .select({ status: recordingSessions.status })
             .from(recordingSessions)
@@ -519,7 +529,19 @@ export async function markRecordingSessionCompleting(input: {
                     : {}),
                 ...(input.agendaId
                     ? {
-                          metadata: sql`${recordingSessions.metadata} || ${JSON.stringify({ agendaId: input.agendaId })}::jsonb`,
+                          metadata: sql`(${recordingSessions.metadata} - 'agendaId') || ${JSON.stringify(
+                              {
+                                  ...(agendaAvailable
+                                      ? { agendaId: input.agendaId }
+                                      : {}),
+                                  agendaOutcome: agendaAvailable
+                                      ? { attached: true }
+                                      : {
+                                            attached: false,
+                                            reason: "unavailable",
+                                        },
+                              },
+                          )}::jsonb`,
                       }
                     : {}),
                 status: "completing",

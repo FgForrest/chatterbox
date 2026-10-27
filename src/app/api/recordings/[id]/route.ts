@@ -8,6 +8,7 @@ import {
     setItemTitle,
     toRecordingResponseRow,
 } from "@/db/items";
+import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import {
     aiEnhancements,
     asyncJobs,
@@ -634,6 +635,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                 .returning({ id: recordings.id });
             if (tombstoned.length > 0) {
                 // Nothing waits for Learn on a deleted recording.
+                await deleteRecordingAgendaInTx(tx, { id, userId, at: now });
                 await markItemDeleted(tx, { id, userId, at: now });
             }
 

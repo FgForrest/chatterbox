@@ -17,9 +17,6 @@ import type * as sessionActor from "@/tests/helpers/session-actor";
  *      object it always did.
  */
 
-vi.mock("@/lib/meetings/attachment", () => ({
-    attachArrivingRecordingInTx: vi.fn(),
-}));
 vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 // Without corrections a model reads the stored text as it is.
 vi.mock("@/lib/learn/llm-input", () => ({

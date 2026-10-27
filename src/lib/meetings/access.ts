@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { isItemReceived } from "@/db/queries/item-shares";
 import { findMeeting, type MeetingExecutor } from "@/db/queries/meetings";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -70,4 +71,20 @@ export async function requireMeetingAccess(
             manage: manage && !row.agenda.recordingItemId,
         },
     };
+}
+
+/** Recording links choose the same owner, received or Organization view as application search. */
+export async function meetingRecordingRedirect(
+    userId: string,
+    access: Awaited<ReturnType<typeof requireMeetingAccess>>,
+) {
+    if (!access.agenda.recordingItemId || !access.recordingVisible) return null;
+    const received = await isItemReceived(userId, access.item.id);
+    const view = received
+        ? "received"
+        : access.item.userId !== userId ||
+            access.item.userId === access.viewer.orgUserId
+          ? "org"
+          : null;
+    return `/dashboard?recording=${encodeURIComponent(access.item.id)}${view ? `&view=${view}` : ""}`;
 }

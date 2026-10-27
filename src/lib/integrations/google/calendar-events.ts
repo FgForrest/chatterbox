@@ -24,7 +24,7 @@ export interface CalendarEventCandidate {
     end: string;
     attendees: { name: string; email?: string }[];
     recurringEventId?: string | null;
-    organizer?: { self: boolean; name?: string };
+    organizer?: { self: boolean; name?: string; email?: string };
     description?: string;
     htmlLink?: string;
     /** Meet code read from the event list; never returned to the browser. */
@@ -37,7 +37,7 @@ interface CalendarEventResponse {
         summary?: string;
         recurringEventId?: string;
         recurrence?: string[];
-        organizer?: { self?: boolean; displayName?: string };
+        organizer?: { self?: boolean; displayName?: string; email?: string };
         description?: string;
         htmlLink?: string;
         status?: string;
@@ -173,7 +173,7 @@ export async function listCalendarEventsForRecording(input: {
 }
 
 const EVENT_FIELDS =
-    "id,summary,recurringEventId,recurrence,status,description,htmlLink,organizer(self,displayName),hangoutLink,conferenceData,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,email,responseStatus,resource,self)";
+    "id,summary,recurringEventId,recurrence,status,description,htmlLink,organizer(self,displayName,email),hangoutLink,conferenceData,start/dateTime,end/dateTime,attendeesOmitted,attendees(displayName,email,responseStatus,resource,self)";
 
 type GoogleEvent = NonNullable<CalendarEventResponse["items"]>[number];
 
@@ -201,6 +201,7 @@ function upcomingCandidate(event: GoogleEvent): CalendarEventCandidate | null {
         organizer: {
             self: event.organizer?.self === true,
             name: event.organizer?.displayName,
+            email: event.organizer?.email,
         },
         description: event.description ?? "",
         htmlLink: event.htmlLink,

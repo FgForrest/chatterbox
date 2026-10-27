@@ -23,6 +23,7 @@ import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
+import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     findInlineContent,
@@ -586,7 +587,7 @@ async function processRecording(
                 title,
                 occurredAt,
             },
-            { pipeline: "arrival" },
+            { pipeline: "arrival", initializeInTx: requestArrivalInTx },
         );
 
         seenRecordingIds.add(newRecording.id);

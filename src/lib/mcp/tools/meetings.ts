@@ -55,7 +55,10 @@ async function meetingCall<T>(run: () => Promise<T>): Promise<T> {
 
 async function detailFor(caller: McpCaller, meetingId: string) {
     const detail = await getMeeting(actorId(caller), meetingId);
-    if (detail.unchanged || mayReadMail(caller)) return detail;
+    if (detail.unchanged) return detail;
+    if (!caller.roles.has("tasks:read"))
+        return { ...detail, tasks: [], taskGroups: [], taskSource: null };
+    if (mayReadMail(caller)) return detail;
     const tasks = detail.tasks.filter(
         (task) =>
             task.evidenceItemKind !== "mail" && task.recording?.kind !== "mail",
@@ -83,7 +86,14 @@ const list = defineTool({
         meetingCall(async () => {
             const meetings = await listMeetings(actorId(caller), input);
             touched.push(...meetings.map((meeting) => meeting.id));
-            return { meetings };
+            return {
+                meetings: caller.roles.has("tasks:read")
+                    ? meetings
+                    : meetings.map((meeting) => ({
+                          ...meeting,
+                          counts: { ...meeting.counts, tasks: undefined },
+                      })),
+            };
         }),
 });
 
@@ -119,7 +129,12 @@ const prepare = defineTool({
     },
     run: async ({ caller, touched }, input) =>
         meetingCall(async () => {
-            const result = await prepareMeeting(actorId(caller), input);
+            if (caller.kind === "service")
+                throw new McpToolError(
+                    "Service accounts cannot prepare meetings",
+                    "denied",
+                );
+            const result = await prepareMeeting(caller.userId, input);
             touched.push(result.id);
             return { ...result, meeting: await detailFor(caller, result.id) };
         }),
@@ -154,7 +169,12 @@ const edit = defineTool({
         completed: z.number().int(),
     },
     run: async ({ caller, touched }, input) => {
-        const userId = actorId(caller);
+        if (caller.kind === "service")
+            throw new McpToolError(
+                "Service accounts cannot edit agendas",
+                "denied",
+            );
+        const userId = caller.userId;
         let completed = 0;
         try {
             for (const op of input.operations) {

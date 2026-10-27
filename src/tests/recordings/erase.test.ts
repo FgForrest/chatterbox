@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { dbMock, deleteItemTaskDataInTx, lockItemTaskGraphInTx } = vi.hoisted(
-    () => ({
-        dbMock: {
-            select: vi.fn(),
-            transaction: vi.fn(),
-        },
-        deleteItemTaskDataInTx: vi.fn(),
-        lockItemTaskGraphInTx: vi.fn(),
-    }),
-);
+const {
+    dbMock,
+    deleteItemTaskDataInTx,
+    lockItemTaskGraphInTx,
+    deleteRecordingAgendaInTx,
+} = vi.hoisted(() => ({
+    dbMock: {
+        select: vi.fn(),
+        transaction: vi.fn(),
+    },
+    deleteItemTaskDataInTx: vi.fn(),
+    deleteRecordingAgendaInTx: vi.fn(),
+    lockItemTaskGraphInTx: vi.fn(),
+}));
 
 vi.mock("@/db", () => ({ db: dbMock }));
+vi.mock("@/db/queries/meeting-lifecycle", () => ({
+    deleteRecordingAgendaInTx,
+}));
 // Erasing a shared recording withdraws it, which reaches the folders and
 // the Organization's configuration; neither is exercised here.
 vi.mock("@/lib/env", () => ({ env: {} }));
@@ -185,6 +192,11 @@ describe("recording artifact erasure", () => {
         await eraseLocalArtifact("u", "recording", "audio");
 
         expect(dbMock.transaction).toHaveBeenCalledTimes(2);
+        expect(deleteRecordingAgendaInTx).toHaveBeenCalledWith(tx, {
+            id: "recording",
+            userId: "u",
+            at: expect.any(Date),
+        });
         expect(lockItemTaskGraphInTx).toHaveBeenCalledWith(tx, {
             itemId: "recording",
             ownerUserId: "u",

@@ -1,6 +1,7 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
+import { restoreStandaloneAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import {
     findMeeting,
     listMeetingRows,
@@ -10,18 +11,31 @@ import {
 import {
     chatterItems,
     folderShares,
+    itemShares,
+    mailPendingShares,
     meetingAgendas,
     recordingFolderAssignments,
+    recordingFolders,
     recordingSessions,
     recordings,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { shareItemToOrganizationFolderInTx } from "@/lib/folders/folders";
+import {
+    lockOrgTree,
+    orgTreeChanged,
+    withdrawRecordingInTx,
+} from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
 import { meetingOverlap } from "@/lib/meetings/model";
-import { assertOrgScopeWritable } from "@/lib/org/config";
+import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
+import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 async function ownedRecording(tx: MeetingTx, userId: string, itemId: string) {
     const [row] = await tx
@@ -65,15 +79,57 @@ async function candidatesInTx(
         tx,
     );
     const assignments = await tx
-        .select({ folderId: recordingFolderAssignments.folderId })
+        .select({
+            folderId: recordingFolderAssignments.folderId,
+            folderOwnerId: recordingFolders.userId,
+        })
         .from(recordingFolderAssignments)
+        .innerJoin(
+            recordingFolders,
+            eq(recordingFolders.id, recordingFolderAssignments.folderId),
+        )
         .where(
             and(
                 eq(recordingFolderAssignments.itemId, itemId),
                 eq(recordingFolderAssignments.userId, userId),
             ),
         );
+    const [intent] = await tx
+        .select({ id: mailPendingShares.itemId })
+        .from(mailPendingShares)
+        .where(
+            and(
+                eq(mailPendingShares.itemId, itemId),
+                eq(mailPendingShares.userId, userId),
+            ),
+        )
+        .limit(1);
+    const [personShare] = await tx
+        .select({ id: itemShares.id })
+        .from(itemShares)
+        .where(
+            and(
+                eq(itemShares.itemId, itemId),
+                eq(itemShares.userId, userId),
+                inArray(itemShares.state, ["pending", "accepted"]),
+            ),
+        )
+        .limit(1);
+    const otherSharedFolders = await tx
+        .select({ id: folderShares.folderId })
+        .from(folderShares)
+        .where(
+            and(
+                eq(folderShares.userId, userId),
+                inArray(
+                    folderShares.folderId,
+                    assignments.map((row) => row.folderId).concat([""]),
+                ),
+                inArray(folderShares.state, ["pending", "accepted"]),
+            ),
+        );
     const result = [];
+    let overlappingCount = 0;
     for (const row of rows) {
         if (
             !row.agenda.timeSet ||
@@ -89,6 +145,7 @@ async function candidatesInTx(
                 new Date(row.agenda.plannedStart.getTime() + 2 * 3600000),
         );
         if (!overlap) continue;
+        overlappingCount++;
         const [folder] = await meetingFolders(
             tx,
             row.agenda.meetingItemId,
@@ -117,7 +174,16 @@ async function candidatesInTx(
             ...row,
             folder,
             overlapMs: overlap,
-            safe: row.agenda.userId === userId && (inFolder || privateFolder),
+            safe:
+                row.agenda.userId === userId &&
+                (inFolder ||
+                    (privateFolder &&
+                        !intent &&
+                        !personShare &&
+                        !assignments.some(
+                            (assignment) => assignment.folderOwnerId !== userId,
+                        ) &&
+                        otherSharedFolders.length === 0)),
             widensSharing:
                 !inFolder && (folder.userId !== userId || shares.length > 0),
             audience:
@@ -153,7 +219,7 @@ async function candidatesInTx(
                       },
         });
     }
-    return result;
+    return { candidates: result, overlappingCount };
 }
 
 async function absorbInTx(
@@ -163,6 +229,7 @@ async function absorbInTx(
     recordingItemId: string,
     orgUserId: string | null,
     explicit: boolean,
+    arriving = false,
 ) {
     await ownedRecording(tx, userId, recordingItemId);
     const row = await findMeeting(userId, orgUserId, agendaId, tx, true);
@@ -192,20 +259,12 @@ async function absorbInTx(
     if (explicit && folder) {
         if (folder.userId === orgUserId) {
             assertOrgScopeWritable();
-            const problems = await shareItemToOrganizationFolderInTx(tx, {
+            await recordIntendedPlacementInTx(tx, {
                 ownerUserId: userId,
                 itemId: recordingItemId,
                 folderId: folder.id,
-                orgUserId,
-                explicitAgendaId: agenda.id,
+                requestPipeline: !arriving,
             });
-            if (problems.length)
-                throw new AppError(
-                    ErrorCode.SHARE_REQUIREMENTS_UNMET,
-                    "Finish the recording review before sharing",
-                    409,
-                    { problems },
-                );
         } else
             await tx
                 .insert(recordingFolderAssignments)
@@ -237,8 +296,8 @@ async function absorbInTx(
     await tx
         .update(recordings)
         .set({
-            calendarEventId: agenda.calendarEventId,
-            calendarSeriesId: agenda.calendarSeriesId,
+            calendarEventId: sql`coalesce(${recordings.calendarEventId}, ${agenda.calendarEventId})`,
+            calendarSeriesId: sql`coalesce(${recordings.calendarSeriesId}, ${agenda.calendarSeriesId})`,
             updatedAt: at,
         })
         .where(
@@ -247,6 +306,14 @@ async function absorbInTx(
                 eq(recordings.userId, userId),
             ),
         );
+    if (explicit && folder && folder.userId !== orgUserId && !arriving) {
+        await requestAdvanceInTx(tx, {
+            itemId: recordingItemId,
+            userId,
+            view: "private",
+            reason: "placement",
+        });
+    }
     await tx
         .update(chatterItems)
         .set({ deletedAt: at, updatedAt: at })
@@ -280,6 +347,7 @@ export async function attachAgenda(
             true,
         );
     });
+    nudge();
 }
 
 /** Automatic matching never moves or shares a recording; ambiguity is left for the card. */
@@ -289,12 +357,7 @@ export async function attachArrivingRecordingInTx(
     itemId: string,
     fileId: string,
 ) {
-    const [organization] = await tx
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.role, "org"))
-        .limit(1);
-    const orgUserId = organization?.id ?? null;
+    const orgUserId = await getOrgUserId();
     const [session] = fileId.startsWith("meeting-")
         ? await tx
               .select({ metadata: recordingSessions.metadata })
@@ -310,6 +373,14 @@ export async function attachArrivingRecordingInTx(
                   ),
               )
         : [];
+    const agendaOutcome = session?.metadata.agendaOutcome;
+    if (
+        agendaOutcome &&
+        typeof agendaOutcome === "object" &&
+        "attached" in agendaOutcome &&
+        agendaOutcome.attached === false
+    )
+        return;
     const explicitId =
         typeof session?.metadata.agendaId === "string"
             ? session.metadata.agendaId
@@ -322,7 +393,15 @@ export async function attachArrivingRecordingInTx(
                 viewer: { userId, orgUserId, curator: false },
                 executor: tx,
             });
-            await absorbInTx(tx, userId, explicitId, itemId, orgUserId, true);
+            await absorbInTx(
+                tx,
+                userId,
+                explicitId,
+                itemId,
+                orgUserId,
+                true,
+                true,
+            );
         } catch (error) {
             if (
                 !(error instanceof AppError) ||
@@ -332,16 +411,22 @@ export async function attachArrivingRecordingInTx(
         }
         return;
     }
-    const candidates = await candidatesInTx(tx, userId, itemId, orgUserId);
-    const owned = candidates.filter(
-        (candidate) => candidate.agenda.userId === userId,
+    const { candidates, overlappingCount } = await candidatesInTx(
+        tx,
+        userId,
+        itemId,
+        orgUserId,
     );
-    if (owned.length === 1 && owned[0].safe) {
+    if (
+        overlappingCount === 1 &&
+        candidates.length === 1 &&
+        candidates[0].safe
+    ) {
         try {
             await absorbInTx(
                 tx,
                 userId,
-                owned[0].agenda.id,
+                candidates[0].agenda.id,
                 itemId,
                 orgUserId,
                 false,
@@ -360,69 +445,81 @@ export async function attachArrivingRecordingInTx(
 export async function agendaCandidates(userId: string, itemId: string) {
     const viewer = await meetingViewer(userId);
     return db.transaction(async (tx) =>
-        (await candidatesInTx(tx, userId, itemId, viewer.orgUserId)).map(
-            (candidate) => ({
-                id: candidate.agenda.id,
-                title: decryptText(candidate.item.title),
-                start: candidate.agenda.plannedStart,
-                end: candidate.agenda.plannedEnd,
-                folder: {
-                    id: candidate.folder.id,
-                    name: decryptText(candidate.folder.name),
-                },
-                overlapMs: candidate.overlapMs,
-                widensSharing: candidate.widensSharing,
-                audience: candidate.audience,
-            }),
-        ),
+        (
+            await candidatesInTx(tx, userId, itemId, viewer.orgUserId)
+        ).candidates.map((candidate) => ({
+            id: candidate.agenda.id,
+            title: decryptText(candidate.item.title),
+            start: candidate.agenda.plannedStart,
+            end: candidate.agenda.plannedEnd,
+            folder: {
+                id: candidate.folder.id,
+                name: decryptText(candidate.folder.name),
+            },
+            overlapMs: candidate.overlapMs,
+            widensSharing: candidate.widensSharing,
+            audience: candidate.audience,
+        })),
     );
 }
 
 /** Restore the standalone item; summaries and actual task changes remain untouched. */
 export async function detachAgenda(userId: string, recordingItemId: string) {
     const viewer = await meetingViewer(userId);
-    await db.transaction(async (tx) => {
-        await ownedRecording(tx, userId, recordingItemId);
-        const row = await findMeeting(
-            userId,
-            viewer.orgUserId,
-            recordingItemId,
-            tx,
-            true,
-        );
-        if (
-            !row ||
-            row.agenda.recordingItemId !== recordingItemId ||
-            !row.agenda.meetingItemId
-        )
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Attached agenda not found",
-                404,
+    let withdrew = false;
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            if (viewer.orgUserId) await lockOrgTree(tx);
+            await ownedRecording(tx, userId, recordingItemId);
+            const row = await findMeeting(
+                userId,
+                viewer.orgUserId,
+                recordingItemId,
+                tx,
+                true,
             );
-        const agenda = row.agenda;
-        await tx
-            .update(meetingAgendas)
-            .set({
-                recordingItemId: null,
-                absorbedAt: null,
-                version: agenda.version + 1,
-                updatedAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(meetingAgendas.id, agenda.id),
-                    eq(meetingAgendas.userId, agenda.userId),
-                ),
-            );
-        await tx
-            .update(chatterItems)
-            .set({ deletedAt: null, updatedAt: new Date() })
-            .where(
-                and(
-                    eq(chatterItems.id, agenda.meetingItemId as string),
-                    eq(chatterItems.userId, agenda.userId),
-                ),
-            );
-    });
+            if (
+                !row ||
+                row.agenda.recordingItemId !== recordingItemId ||
+                !row.agenda.meetingItemId
+            )
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Attached agenda not found",
+                    404,
+                );
+            const wasShared = viewer.orgUserId
+                ? await isRecordingShared(recordingItemId, viewer.orgUserId, tx)
+                : false;
+            await notifyFolderReceiversInTx(tx, userId, recordingItemId);
+            await restoreStandaloneAgendaInTx(tx, row.agenda, userId);
+            if (
+                viewer.orgUserId &&
+                wasShared &&
+                !(await isRecordingShared(
+                    recordingItemId,
+                    viewer.orgUserId,
+                    tx,
+                ))
+            ) {
+                await bumpScopeInTx(
+                    tx,
+                    await withdrawRecordingInTx(
+                        tx,
+                        viewer.orgUserId,
+                        recordingItemId,
+                        userId,
+                    ),
+                );
+                withdrew = true;
+            }
+            if (row.agenda.meetingItemId)
+                await notifyFolderReceiversInTx(
+                    tx,
+                    row.agenda.userId,
+                    row.agenda.meetingItemId,
+                );
+        }),
+    );
+    if (withdrew) await orgTreeChanged();
 }

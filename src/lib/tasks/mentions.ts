@@ -26,7 +26,7 @@ import {
     taskUpdateProposals,
     users,
 } from "@/db/schema";
-import { contentKindColumn } from "@/lib/content/item-kinds";
+import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { decryptText } from "@/lib/encryption/fields";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
 import { hasAudio } from "@/lib/recordings/audio-availability";
@@ -212,6 +212,7 @@ async function loadTaskMentions(
                 and(
                     inArray(taskMentions.taskId, [...taskIds]),
                     linkedTaskMentionCondition(),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
                     visible,
                 ),
             )
@@ -223,7 +224,7 @@ async function loadTaskMentions(
             ),
     ]);
     for (const row of all) taskIdsWithMentions.add(row.taskId);
-    for (const row of rows) {
+    for (const row of rows.filter((row) => hasContentKind(row, "kind"))) {
         const { audioId, audioReapedAt, audioDeletedAt, ...mention } = row;
         const evidence = {
             ...mention,
@@ -360,14 +361,20 @@ async function taskGraphItemRefs(
             if (row.itemId) ids.add(row.itemId);
         }
     }
-    return tx
+    const rows = await tx
         .select({
             id: chatterItems.id,
             kind: contentKindColumn(chatterItems.kind),
         })
         .from(chatterItems)
-        .where(inArray(chatterItems.id, [...ids]))
+        .where(
+            and(
+                inArray(chatterItems.id, [...ids]),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+            ),
+        )
         .orderBy(asc(chatterItems.id));
+    return rows.filter((row) => hasContentKind(row, "kind"));
 }
 
 async function lockItemRefs(tx: Tx, refs: readonly ItemRef[]): Promise<void> {
