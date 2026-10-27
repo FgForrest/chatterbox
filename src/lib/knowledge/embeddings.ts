@@ -12,7 +12,7 @@
  * nothing: neither counts.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials } from "@/db/schema";
 import {
@@ -67,6 +67,8 @@ export interface EmbeddingClientOptions {
 export interface EmbeddingUsage {
     userId: string;
     payerUserId?: string;
+    /** Additional accounts whose card may match the instance embedding credential. */
+    credentialUserIds?: readonly string[];
     recordingId?: string | null;
     actorUserId?: string;
     query?: boolean;
@@ -202,7 +204,12 @@ export class EmbeddingClient {
                 .from(apiCredentials)
                 .where(
                     and(
-                        eq(apiCredentials.userId, context.payerUserId),
+                        inArray(apiCredentials.userId, [
+                            ...new Set([
+                                context.payerUserId,
+                                ...(usage.credentialUserIds ?? []),
+                            ]),
+                        ]),
                         eq(apiCredentials.defaultModel, this.model),
                         isNull(apiCredentials.disabledAt),
                     ),
@@ -216,6 +223,7 @@ export class EmbeddingClient {
                     decrypt(card.apiKey) === (this.options.apiKey ?? ""),
             );
             if (matches.length === 1) {
+                context.payerUserId = matches[0].userId;
                 context.credentialId = matches[0].id;
                 context.provider = matches[0].provider;
                 context.priced = Number(matches[0].inputUsdPerMillion) > 0;
@@ -303,6 +311,7 @@ export class EmbeddingClient {
         } finally {
             if (
                 context &&
+                !cancel?.aborted &&
                 (!query ||
                     context.priced ||
                     (measured.reportedCostUsd ?? 0) > 0)

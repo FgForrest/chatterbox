@@ -276,7 +276,7 @@ export function ModelsSection({ view }: { view: StatisticsView }) {
                     label: steps[i].label,
                     color: steps[i].color,
                     value: modelsBy === "cost" ? part.cost : part.jobs,
-                    detail: `${usd(part.cost)} · ${i18n("{count} jobs", { count: count(part.jobs) })}${part.unknown ? ` · ${i18n("{count} unpriced", { count: count(part.unknown) })}` : ""} · ${i18n("{count} failed", { count: count(part.failed) })}`,
+                    detail: `${usd(part.cost)} · ${i18n("{count} jobs", { count: count(part.jobs) })}${part.unknown ? ` · ${i18n("{count} unpriced", { count: count(part.unknown) })}` : ""}${part.failed ? ` · ${i18n("{count} failed", { count: count(part.failed) })}` : ""}`,
                 })),
             };
         })

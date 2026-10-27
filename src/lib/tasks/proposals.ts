@@ -670,20 +670,38 @@ async function rankedCandidateEntries(
                     : Promise.resolve(),
             ]);
         };
-        if (pending.length > 0) {
+        const contentCount = pending.filter(
+            (request) => request.kind === "content",
+        ).length;
+        const groups = usage?.query
+            ? [pending.slice(0, contentCount), pending.slice(contentCount)]
+            : [pending];
+        let groupStart = 0;
+        for (const group of groups) {
+            if (group.length === 0) continue;
+            const start = groupStart;
             const vectors = await client.embed(
-                pending.map((request) => request.text),
+                group.map((request) => request.text),
                 {
-                    usage,
-                    onBatch: (batch) => acceptBatch(batch.start, batch.vectors),
+                    usage: usage
+                        ? {
+                              ...usage,
+                              query: Boolean(
+                                  usage.query && group[0].kind === "content",
+                              ),
+                          }
+                        : undefined,
+                    onBatch: (batch) =>
+                        acceptBatch(start + batch.start, batch.vectors),
                 },
             );
-            if (vectors.length !== pending.length) {
+            if (vectors.length !== group.length) {
                 throw new Error(
                     "The embedding response does not match the request",
                 );
             }
-            await acceptBatch(0, vectors);
+            await acceptBatch(start, vectors);
+            groupStart += group.length;
         }
         const itemVectors: Float32Array[] = [];
         for (const index of contentChunks.keys()) {
@@ -873,6 +891,8 @@ export async function searchMergeCandidates(
             userId: item.userId,
             recordingId: item.id,
             actorUserId: reviewer.userId,
+            credentialUserIds: [reviewer.userId],
+            query: Boolean(text),
             payerUserId:
                 (item.shared ? reviewer.orgUserId : null) ?? item.userId,
         },
@@ -996,6 +1016,7 @@ export async function loadTasksPromptContext({
             userId: recording.userId,
             recordingId: recording.id,
             actorUserId: reviewer.userId,
+            credentialUserIds: [reviewer.userId],
             payerUserId:
                 (orgView ? reviewer.orgUserId : null) ?? recording.userId,
         },

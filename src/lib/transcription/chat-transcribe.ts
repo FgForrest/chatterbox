@@ -12,6 +12,7 @@ export interface ChatTranscribeArgs {
     audioBuffer: Buffer;
     contentType: string;
     language?: string;
+    attempt?: <T>(run: () => Promise<T>) => Promise<T>;
 }
 
 export interface ChatTranscribeResult {
@@ -81,6 +82,7 @@ export async function chatTranscribe({
     audioBuffer,
     contentType,
     language,
+    attempt = (run) => run(),
 }: ChatTranscribeArgs): Promise<ChatTranscribeResult> {
     const sniffed = sniffAudio(audioBuffer);
     const effectiveType =
@@ -95,58 +97,60 @@ export async function chatTranscribe({
         ? `${TRANSCRIBE_INSTRUCTION} The audio language is ${language}.`
         : TRANSCRIBE_INSTRUCTION;
 
-    const response = await client.chat.completions.create(
-        buildChatCompletionParams({
-            model,
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: prompt },
-                        {
-                            type: "input_audio",
-                            input_audio: { data, format },
-                        } as unknown as {
-                            type: "text";
-                            text: string;
-                        },
-                    ],
-                },
-            ],
-        }),
-        { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
-    );
-
-    if (response.choices?.[0]?.finish_reason === "length") {
-        throw withResponseUsage(
-            new AppError(
-                ErrorCode.TRANSCRIPTION_FAILED,
-                "The transcription provider cut off the transcript at its output limit. No partial transcript was saved. Use a provider or model that can return the full recording.",
-                400,
-            ),
-            response,
+    return attempt(async () => {
+        const response = await client.chat.completions.create(
+            buildChatCompletionParams({
+                model,
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            { type: "text", text: prompt },
+                            {
+                                type: "input_audio",
+                                input_audio: { data, format },
+                            } as unknown as {
+                                type: "text";
+                                text: string;
+                            },
+                        ],
+                    },
+                ],
+            }),
+            { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
         );
-    }
 
-    const text = response.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.trim() === "") {
-        throw withResponseUsage(
-            new Error(
-                "Transcription provider returned an empty response. The model may not support audio input — pick an audio-capable model.",
-            ),
-            response,
-        );
-    }
+        if (response.choices?.[0]?.finish_reason === "length") {
+            throw withResponseUsage(
+                new AppError(
+                    ErrorCode.TRANSCRIPTION_FAILED,
+                    "The transcription provider cut off the transcript at its output limit. No partial transcript was saved. Use a provider or model that can return the full recording.",
+                    400,
+                ),
+                response,
+            );
+        }
 
-    return {
-        text: text.trim(),
-        detectedLanguage: language ?? null,
-        inputTokens: response.usage?.prompt_tokens,
-        outputTokens: response.usage?.completion_tokens,
-        reportedCostUsd: (
-            response.usage as
-                | (typeof response.usage & { cost?: number })
-                | undefined
-        )?.cost,
-    };
+        const text = response.choices?.[0]?.message?.content;
+        if (typeof text !== "string" || text.trim() === "") {
+            throw withResponseUsage(
+                new Error(
+                    "Transcription provider returned an empty response. The model may not support audio input — pick an audio-capable model.",
+                ),
+                response,
+            );
+        }
+
+        return {
+            text: text.trim(),
+            detectedLanguage: language ?? null,
+            inputTokens: response.usage?.prompt_tokens,
+            outputTokens: response.usage?.completion_tokens,
+            reportedCostUsd: (
+                response.usage as
+                    | (typeof response.usage & { cost?: number })
+                    | undefined
+            )?.cost,
+        };
+    });
 }

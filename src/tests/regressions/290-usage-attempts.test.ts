@@ -12,13 +12,31 @@ import {
     recordChatCompletionUsage,
 } from "@/lib/ai/usage-cost";
 import { responseUsage } from "@/lib/ai/usage-values";
+import { learnChatClients } from "@/lib/learn/chat-clients";
 import { chatTranscribe } from "@/lib/transcription/chat-transcribe";
+import { transcodeToMp3 } from "@/lib/transcription/ffmpeg";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
 
 vi.mock("@/lib/ai/provider-fetch", () => ({
     providerFetch: vi.fn(),
     fetchWithoutIdleTimeout: (...args: Parameters<typeof globalThis.fetch>) =>
         globalThis.fetch(...args),
+}));
+vi.mock("@/lib/transcription/ffmpeg", () => ({ transcodeToMp3: vi.fn() }));
+vi.mock("@/lib/profiles/providers", () => ({
+    resolveStepProvider: vi.fn(async () => ({
+        kind: "credential",
+        payerUserId: "payer",
+        organizationCredential: false,
+        reserveCall: async () => undefined,
+        credential: {
+            id: "credential",
+            provider: "Example",
+            apiKey: "test",
+            baseUrl: "https://example.com/v1",
+            defaultModel: "model",
+        },
+    })),
 }));
 vi.mock("@/lib/env", () => ({ env: { WHISPER_REQUEST_TIMEOUT_MS: 60_000 } }));
 vi.mock("@/lib/ai/usage-cost", () => ({
@@ -86,16 +104,17 @@ describe("durable usage attempts", () => {
         );
         try {
             await expect(
-                withUsageFailure(
-                    { ...context, operation: "transcription" },
-                    () =>
-                        geminiTranscribe({
-                            apiKey: "test",
-                            model: "gemini-test",
-                            audioBuffer: Buffer.from("audio"),
-                            contentType: "audio/mpeg",
-                        }),
-                ),
+                geminiTranscribe({
+                    apiKey: "test",
+                    model: "gemini-test",
+                    audioBuffer: Buffer.from("audio"),
+                    contentType: "audio/mpeg",
+                    attempt: (run) =>
+                        withUsageFailure(
+                            { ...context, operation: "transcription" },
+                            run,
+                        ),
+                }),
             ).rejects.toThrow("withheld");
             expect(recordAiUsage).toHaveBeenCalledExactlyOnceWith(
                 expect.anything(),
@@ -124,14 +143,17 @@ describe("durable usage attempts", () => {
         );
         const client = new OpenAI({ apiKey: "test", fetch: usageAttemptFetch });
         await expect(
-            withUsageFailure({ ...context, operation: "transcription" }, () =>
-                chatTranscribe({
-                    client,
-                    model: "audio-model",
-                    audioBuffer: Buffer.from("audio"),
-                    contentType: "audio/mpeg",
-                }),
-            ),
+            chatTranscribe({
+                client,
+                model: "audio-model",
+                audioBuffer: Buffer.from("audio"),
+                contentType: "audio/mpeg",
+                attempt: (run) =>
+                    withUsageFailure(
+                        { ...context, operation: "transcription" },
+                        run,
+                    ),
+            }),
         ).rejects.toThrow("cut off");
         expect(recordAiUsage).toHaveBeenCalledExactlyOnceWith(
             expect.anything(),
@@ -141,6 +163,134 @@ describe("durable usage attempts", () => {
                 reportedCostUsd: 0.2,
                 outcome: "failed",
             }),
+        );
+    });
+
+    it.each([
+        {
+            contentType: "application/octet-stream",
+            model: "gemini-test",
+            size: 5,
+        },
+        { contentType: "audio/mpeg", model: "../bad", size: 5 },
+        {
+            contentType: "audio/mpeg",
+            model: "gemini-test",
+            size: 21 * 1024 * 1024,
+        },
+    ])("does not record Gemini pre-flight failures: %j", async ({
+        contentType,
+        model,
+        size,
+    }) => {
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+        try {
+            await expect(
+                geminiTranscribe({
+                    apiKey: "test",
+                    model,
+                    contentType,
+                    audioBuffer: Buffer.alloc(size),
+                    attempt: (run) => withUsageFailure(context, run),
+                }),
+            ).rejects.toThrow();
+            expect(fetch).not.toHaveBeenCalled();
+            expect(recordAiUsage).not.toHaveBeenCalled();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("does not record a failed local chat transcode", async () => {
+        vi.mocked(transcodeToMp3).mockRejectedValueOnce(
+            new Error("ffmpeg unavailable"),
+        );
+        const client = new OpenAI({ apiKey: "test", fetch: usageAttemptFetch });
+        await expect(
+            chatTranscribe({
+                client,
+                model: "audio-model",
+                audioBuffer: Buffer.from("audio"),
+                contentType: "audio/opus",
+                attempt: (run) => withUsageFailure(context, run),
+            }),
+        ).rejects.toThrow("Conversion to mp3 failed");
+        expect(providerFetch).not.toHaveBeenCalled();
+        expect(recordAiUsage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        "chat",
+        "bridge",
+    ] as const)("does not record caller cancellation of a Learn %s call", async (kind) => {
+        const controller = new AbortController();
+        vi.mocked(providerFetch).mockImplementationOnce(
+            async (_input, init) => {
+                controller.abort();
+                throw init?.signal?.reason;
+            },
+        );
+        const clients = await learnChatClients({
+            actorUserId: "actor",
+            ownerUserId: "owner",
+            recordingId: "item",
+            operation: "learn",
+            schemaName: "learn_output",
+            signal: controller.signal,
+        });
+        const call =
+            kind === "chat"
+                ? clients.chat.complete(
+                      [{ role: "user", content: "test" }],
+                      10,
+                      { retry: false },
+                  )
+                : clients.bridge.complete({
+                      system: "test",
+                      user: "test",
+                      schema: {},
+                      mcp: null,
+                      maxTokens: 10,
+                  });
+        await expect(call).rejects.toBeInstanceOf(OpenAI.APIUserAbortError);
+        expect(providerFetch).toHaveBeenCalledTimes(1);
+        expect(recordAiUsage).not.toHaveBeenCalled();
+        expect(recordChatCompletionUsage).not.toHaveBeenCalled();
+    });
+
+    it("preserves a caller's custom cancellation reason", async () => {
+        const controller = new AbortController();
+        const reason = new Error("superseded");
+        await expect(
+            withUsageFailure(
+                context,
+                async () => {
+                    controller.abort(reason);
+                    throw reason;
+                },
+                controller.signal,
+            ),
+        ).rejects.toBe(reason);
+        expect(recordAiUsage).not.toHaveBeenCalled();
+    });
+
+    it("still records provider timeouts", async () => {
+        const signal = AbortSignal.abort(
+            new DOMException("deadline", "TimeoutError"),
+        );
+        await expect(
+            withUsageFailure(
+                context,
+                async () => {
+                    throw signal.reason;
+                },
+                signal,
+            ),
+        ).rejects.toBe(signal.reason);
+        expect(recordAiUsage).toHaveBeenCalledExactlyOnceWith(
+            context,
+            expect.objectContaining({ outcome: "failed" }),
         );
     });
 

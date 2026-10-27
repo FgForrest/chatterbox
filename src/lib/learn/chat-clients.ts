@@ -106,29 +106,36 @@ export async function learnChatClients(input: {
             complete: async ({ system, user, schema, mcp, maxTokens }) => {
                 signal.throwIfAborted();
                 await resolved.reserveCall();
-                const response = await chatCompletionWithUsage(usage, () =>
-                    bridgeClient.chat.completions.create(
-                        {
-                            ...buildChatCompletionParams({
-                                model,
-                                messages: [
-                                    { role: "system", content: system },
-                                    { role: "user", content: user },
-                                ],
-                                temperature: 0.1,
-                                maxTokens,
-                                maxOutputTokens: credentials.maxOutputTokens,
-                            }),
-                            response_format: {
-                                type: "json_schema",
-                                json_schema: { name: input.schemaName, schema },
-                            },
-                            ...(mcp ? { riffado_mcp: mcp } : {}),
-                        } as Parameters<
-                            typeof openai.chat.completions.create
-                        >[0] & { stream?: false },
-                        { signal },
-                    ),
+                const response = await chatCompletionWithUsage(
+                    usage,
+                    () =>
+                        bridgeClient.chat.completions.create(
+                            {
+                                ...buildChatCompletionParams({
+                                    model,
+                                    messages: [
+                                        { role: "system", content: system },
+                                        { role: "user", content: user },
+                                    ],
+                                    temperature: 0.1,
+                                    maxTokens,
+                                    maxOutputTokens:
+                                        credentials.maxOutputTokens,
+                                }),
+                                response_format: {
+                                    type: "json_schema",
+                                    json_schema: {
+                                        name: input.schemaName,
+                                        schema,
+                                    },
+                                },
+                                ...(mcp ? { riffado_mcp: mcp } : {}),
+                            } as Parameters<
+                                typeof openai.chat.completions.create
+                            >[0] & { stream?: false },
+                            { signal },
+                        ),
+                    signal,
                 );
                 return response.choices[0]?.message?.content?.trim() || "";
             },
@@ -164,6 +171,7 @@ export async function learnChatClients(input: {
                                             : {}),
                                     },
                                 ),
+                            signal,
                         );
                         return (
                             response.choices[0]?.message?.content?.trim() || ""

@@ -16,7 +16,11 @@ import {
     apiCredentials,
     chatterItems,
     mailMessages,
+    recordingFolderAssignments,
+    recordingFolders,
     recordings,
+    recordingTasks,
+    taskMentions,
     users,
 } from "@/db/schema";
 import {
@@ -29,8 +33,21 @@ import {
     recordingAiCost,
 } from "@/lib/ai/usage-cost";
 import { encrypt } from "@/lib/encryption";
+import { encryptText } from "@/lib/encryption/fields";
 import { EmbeddingClient } from "@/lib/knowledge/embeddings";
-import { metricIndex, type StatisticsData } from "@/lib/statistics/data";
+import {
+    knowledgeView,
+    searchByMeaning,
+} from "@/lib/knowledge/knowledge-loader";
+import {
+    metricIndex,
+    type StatisticsData,
+    unpackRanking,
+} from "@/lib/statistics/data";
+import {
+    loadTasksPromptContext,
+    searchMergeCandidates,
+} from "@/lib/tasks/proposals";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 import { insertRecordings } from "@/tests/integration/items";
 import { migrationsThrough } from "@/tests/integration/migrations";
@@ -73,6 +90,10 @@ vi.mock("@/lib/env", () => ({
     env: {
         IS_HOSTED: false,
         SELF_HOST_MODE: "shared",
+        KNOWLEDGE_MEMORY_MB: 1,
+        EMBEDDING_BASE_URL: "https://example.com/v1",
+        EMBEDDING_MODEL: "embed",
+        EMBEDDING_API_KEY: "test-key",
         AUTHZ_MODE: "local",
         ENCRYPTION_KEY:
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -303,6 +324,8 @@ describe.skipIf(!url)("durable usage ledger (PostgreSQL)", () => {
         const data = await loadStatistics("owner", "mine", "UTC");
         expect(total(data, "summaryCost")).toBe(0.4);
         expect(total(data, "summaries")).toBe(0);
+        expect(total(data, "unpriced")).toBe(0);
+        expect(data.modelDays.reduce((sum, row) => sum + row[5], 0)).toBe(0);
         expect(
             data.modelDays.reduce((sum, row) => sum + (row[6] ?? 0), 0),
         ).toBe(2);
@@ -311,6 +334,15 @@ describe.skipIf(!url)("durable usage ledger (PostgreSQL)", () => {
             requestCount: 2,
             unknownCount: 1,
         });
+    });
+
+    it("counts only successful calls with unknown cost as unpriced", async () => {
+        await recordAiUsage(context, { outcome: "failed" });
+        await recordAiUsage(context, { outcome: "succeeded" });
+        const data = await loadStatistics("owner", "mine", "UTC");
+        expect(total(data, "unpriced")).toBe(1);
+        expect(data.modelDays).toHaveLength(1);
+        expect(data.modelDays[0].slice(3)).toEqual([2, 0, 1, 1]);
     });
 
     it("browser persistence records one free call using the recording duration", async () => {
@@ -496,6 +528,280 @@ describe.skipIf(!url)("durable usage ledger (PostgreSQL)", () => {
         });
         expect(await database.db.select().from(aiUsageEvents)).toHaveLength(1);
     });
+
+    it("does not record a cancelled embedding batch or open its breaker", async () => {
+        await embeddingCard();
+        const controller = new AbortController();
+        const reason = new Error("superseded");
+        const embedding = new EmbeddingClient({
+            baseUrl: "https://example.com/v1",
+            model: "embed",
+            apiKey: "test-key",
+            failureThreshold: 1,
+            fetch: async (_url, init) => {
+                controller.abort(reason);
+                throw init?.signal?.reason;
+            },
+        });
+        await expect(
+            embedding.embed(["query"], {
+                signal: controller.signal,
+                usage: { userId: "owner", query: true },
+            }),
+        ).rejects.toBe(reason);
+        expect(embedding.available).toBe(true);
+        expect(await database.db.select().from(aiUsageEvents)).toEqual([]);
+    });
+
+    it("retains completed embedding batches when the next batch is cancelled", async () => {
+        const controller = new AbortController();
+        const reason = new Error("superseded");
+        await expect(
+            client().embed(["one", "two", "three"], {
+                signal: controller.signal,
+                usage: { userId: "owner" },
+                onBatch: () => {
+                    controller.abort(reason);
+                },
+            }),
+        ).rejects.toBe(reason);
+        expect(await database.db.select().from(aiUsageEvents)).toEqual([
+            expect.objectContaining({ outcome: "succeeded", inputTokens: 100 }),
+        ]);
+    });
+
+    it.each([
+        "owner",
+        "org",
+    ])("charges the matching instance embedding credential's account (%s)", async (account) => {
+        await embeddingCard();
+        await database.db
+            .update(apiCredentials)
+            .set({ userId: account })
+            .where(eq(apiCredentials.id, "embedding-card"));
+        await client().embed(["task"], {
+            usage: {
+                userId: "owner",
+                actorUserId: "owner",
+                payerUserId: "org",
+                credentialUserIds: ["owner"],
+            },
+        });
+        expect(await database.db.select().from(aiUsageEvents)).toEqual([
+            expect.objectContaining({
+                userId: "owner",
+                actorUserId: "owner",
+                payerUserId: account,
+                priceSource: "user",
+                costUsd: "0.000200000",
+            }),
+        ]);
+    });
+
+    it("keeps ambiguous embedding credentials unpriced under the scope payer", async () => {
+        await embeddingCard();
+        const [card] = await database.db.select().from(apiCredentials);
+        await database.db
+            .insert(apiCredentials)
+            .values({ ...card, id: "second-card", userId: "org" });
+        await client().embed(["task"], {
+            usage: {
+                userId: "owner",
+                actorUserId: "owner",
+                payerUserId: "org",
+                credentialUserIds: ["owner"],
+            },
+        });
+        expect(await database.db.select().from(aiUsageEvents)).toEqual([
+            expect.objectContaining({
+                payerUserId: "org",
+                priceSource: null,
+                costUsd: null,
+            }),
+        ]);
+    });
+
+    it("attributes shared knowledge query spend to the viewer while retaining its scope payer", async () => {
+        await embeddingCard();
+        await database.db
+            .update(apiCredentials)
+            .set({ userId: "org" })
+            .where(eq(apiCredentials.id, "embedding-card"));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json({
+                    data: [{ index: 0, embedding: [1, 0] }],
+                    usage: { prompt_tokens: 100 },
+                }),
+            ),
+        );
+        try {
+            const view = await knowledgeView({
+                kind: "recording",
+                ownerUserId: "payer",
+                actorUserId: "owner",
+                shared: true,
+            });
+            expect(view).toMatchObject({
+                usageUserId: "org",
+                actorUserId: "owner",
+            });
+            await searchByMeaning(view, "query");
+            expect(await database.db.select().from(aiUsageEvents)).toEqual([
+                expect.objectContaining({
+                    userId: "org",
+                    actorUserId: "owner",
+                    payerUserId: "org",
+                    costUsd: "0.000200000",
+                }),
+            ]);
+            const data = await loadStatistics("owner", "organization", "UTC");
+            expect(total(data, "otherCost")).toBe(0.0002);
+            const actor = data.members.findIndex(([, isCaller]) => isCaller);
+            expect(unpackRanking(data.ranking)).toEqual([
+                [expect.any(Number), actor, 0, 0, 0, 0.0002],
+            ]);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    const reviewer = {
+        userId: "owner",
+        emailHash: "unused",
+        isOrg: false,
+        isCurator: true,
+        orgUserId: "org",
+    };
+    async function sharedTaskScope() {
+        await database.db.insert(recordingFolders).values({
+            id: "org-root",
+            userId: "org",
+            kind: "public",
+            name: encryptText("Organization"),
+            nameHash: "org-root",
+        });
+        await database.db.insert(recordingFolders).values({
+            id: "org-folder",
+            userId: "org",
+            parentId: "org-root",
+            kind: "custom",
+            name: encryptText("Shared"),
+            nameHash: "shared",
+        });
+        await database.db.insert(recordingFolderAssignments).values([
+            { itemId: "audio", userId: "owner", folderId: "org-folder" },
+            { itemId: "mail", userId: "owner", folderId: "org-folder" },
+        ]);
+        await database.db.insert(recordingTasks).values({
+            id: "task",
+            userId: "owner",
+            itemId: "mail",
+            status: "open",
+            source: "manual",
+            text: encryptText("Prepare example brief"),
+        });
+        await database.db.insert(taskMentions).values({
+            taskId: "task",
+            itemId: "mail",
+            userId: "owner",
+            view: "org",
+            statementAt: new Date(),
+            matchDecision: "home",
+        });
+        const fetch = vi.fn(
+            async (_input: RequestInfo | URL, init?: RequestInit) => {
+                const body = JSON.parse(String(init?.body)) as {
+                    input: string[];
+                };
+                return Response.json({
+                    data: body.input.map((_, index) => ({
+                        index,
+                        embedding: [1, 0],
+                    })),
+                    usage: { prompt_tokens: 100 },
+                });
+            },
+        );
+        vi.stubGlobal("fetch", fetch);
+        return fetch;
+    }
+
+    it.each([
+        true,
+        false,
+    ])("logs typed merge queries only when priced, while retaining task-vector usage (priced=%s)", async (priced) => {
+        const fetch = await sharedTaskScope();
+        if (priced) await embeddingCard();
+        try {
+            const result = await searchMergeCandidates(reviewer, "audio", {
+                text: "example brief",
+                offset: 0,
+                limit: 10,
+            });
+            expect(result.candidates.map(({ id }) => id)).toEqual(["task"]);
+            expect(fetch).toHaveBeenCalledTimes(2);
+            let events = await database.db.select().from(aiUsageEvents);
+            expect(events).toHaveLength(priced ? 2 : 1);
+            for (const event of events)
+                expect(event).toMatchObject({
+                    userId: "owner",
+                    actorUserId: "owner",
+                    payerUserId: priced ? "owner" : "org",
+                    costUsd: priced ? "0.000200000" : null,
+                });
+            await searchMergeCandidates(reviewer, "audio", {
+                text: "another brief",
+                offset: 0,
+                limit: 10,
+            });
+            expect(fetch).toHaveBeenCalledTimes(3);
+            events = await database.db.select().from(aiUsageEvents);
+            expect(events).toHaveLength(priced ? 3 : 1);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it.each([
+        "owner",
+        "org",
+    ])("uses the matching embedding payer for Organization task prompt context (%s)", async (account) => {
+        await sharedTaskScope();
+        await embeddingCard();
+        await database.db
+            .update(apiCredentials)
+            .set({ userId: account })
+            .where(eq(apiCredentials.id, "embedding-card"));
+        try {
+            const result = await loadTasksPromptContext({
+                recording: {
+                    id: "audio",
+                    userId: "owner",
+                    occurredAt: new Date(),
+                    timezone: null,
+                    zonemins: null,
+                },
+                transcriptionId: null,
+                orgView: true,
+                reviewer,
+                itemText: "Prepare example brief",
+            });
+            expect([...result.refs.values()]).toEqual(["task"]);
+            expect(await database.db.select().from(aiUsageEvents)).toEqual([
+                expect.objectContaining({
+                    userId: "owner",
+                    actorUserId: "owner",
+                    payerUserId: account,
+                    costUsd: "0.000200000",
+                }),
+            ]);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("does not apply another account's or another key's card", async () => {
         await embeddingCard();
         await client().embed(["text"], { usage: { userId: "payer" } });

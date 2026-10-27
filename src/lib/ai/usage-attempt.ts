@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { APIUserAbortError } from "openai";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 import { providerFetch } from "@/lib/ai/provider-fetch";
 import {
@@ -11,12 +12,24 @@ import { responseUsage } from "@/lib/ai/usage-values";
 interface Attempt {
     context: AiUsageContext;
     failureRecorded: boolean;
+    signal?: AbortSignal;
 }
 
 const attempts = new AsyncLocalStorage<Attempt>();
 
 async function failed(attempt: Attempt, error: unknown) {
     attempt.failureRecorded = true;
+    if (
+        attempt.signal?.aborted &&
+        !(
+            attempt.signal.reason instanceof Error &&
+            attempt.signal.reason.name === "TimeoutError"
+        ) &&
+        (error === attempt.signal.reason ||
+            error instanceof APIUserAbortError ||
+            (error instanceof Error && error.name === "AbortError"))
+    )
+        return;
     try {
         await recordAiUsage(attempt.context, {
             ...responseUsage(error),
@@ -64,15 +77,20 @@ export function createUsageFetch(
     transport: typeof globalThis.fetch,
 ): typeof globalThis.fetch {
     return (input, init) =>
-        withUsageFailure(context, () => fetchAttempt(transport, input, init));
+        withUsageFailure(
+            context,
+            () => fetchAttempt(transport, input, init),
+            init?.signal ?? undefined,
+        );
 }
 
 /** Preserve the provider's original rejection and record failures outside the SDK transport too. */
 export async function withUsageFailure<T>(
     context: AiUsageContext,
     run: () => Promise<T>,
+    signal?: AbortSignal,
 ): Promise<T> {
-    const attempt: Attempt = { context, failureRecorded: false };
+    const attempt: Attempt = { context, failureRecorded: false, signal };
     return attempts.run(attempt, async () => {
         try {
             return await run();
@@ -87,8 +105,9 @@ export async function withUsageFailure<T>(
 export async function chatCompletionWithUsage(
     context: AiUsageContext,
     run: () => Promise<ChatCompletion>,
+    signal?: AbortSignal,
 ): Promise<ChatCompletion> {
-    const response = await withUsageFailure(context, run);
+    const response = await withUsageFailure(context, run, signal);
     await recordChatCompletionUsage(context, response);
     return response;
 }

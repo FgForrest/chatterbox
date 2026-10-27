@@ -225,7 +225,7 @@ export async function loadStatistics(
         usage: sql`select ${day(aiUsageEvents.createdAt)} as day, ${aiUsageEvents.provider} as provider,
                 ${aiUsageEvents.model} as model, ${knownStep} as step, count(*)::int as jobs,
                 coalesce(sum(${aiUsageEvents.costUsd}), 0) as cost,
-                count(*) filter (where ${aiUsageEvents.costUsd} is null)::int as unpriced,
+                count(*) filter (where ${aiUsageEvents.costUsd} is null and ${aiUsageEvents.outcome} = 'succeeded')::int as unpriced,
                 coalesce(sum(${aiUsageEvents.costUsd}) filter (where coalesce(${aiUsageEvents.itemKind}, ${chatterItems.kind}) = 'mail'), 0) as mail_cost,
                 ${aiUsageEvents.actorUserId} as actor,
                 count(*) filter (where ${aiUsageEvents.outcome} = 'failed')::int as failed,

@@ -807,7 +807,12 @@ async function runLearnJob({
         const contentLanguage =
             confirmedLanguage ?? transcript.detectedLanguage;
         const tools: LearnToolContext = {
-            read: { kind: "recording", ownerUserId: run.userId, shared },
+            read: {
+                kind: "recording",
+                ownerUserId: run.userId,
+                actorUserId: run.actorUserId ?? run.userId,
+                shared,
+            },
             budget: { remaining: TOOL_BUDGET },
             language: contentLanguage,
         };
@@ -1364,7 +1369,12 @@ async function runMailLearnJob(
 
         const shared = run.view === "org";
         const tools: LearnToolContext = {
-            read: { kind: "recording", ownerUserId: run.userId, shared },
+            read: {
+                kind: "recording",
+                ownerUserId: run.userId,
+                actorUserId: run.actorUserId ?? run.userId,
+                shared,
+            },
             budget: { remaining: TOOL_BUDGET },
             language: content.language,
             scopeUsage: await itemScopeAlmanacUsage(

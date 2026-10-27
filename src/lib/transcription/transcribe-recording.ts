@@ -10,6 +10,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { fetchWithoutIdleTimeout } from "@/lib/ai/provider-fetch";
 import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
@@ -678,7 +679,7 @@ async function transcribeRecordingInner(
                         provider: "Mynah",
                         model: "parakeet",
                     },
-                    globalThis.fetch,
+                    fetchWithoutIdleTimeout,
                 ),
             });
             await recordAiUsage(
@@ -833,15 +834,14 @@ async function transcribeRecordingInner(
 
             if (transcriptionStyle === "gemini") {
                 await reserveCall();
-                const result = await withUsageFailure(usageContext, () =>
-                    geminiTranscribe({
-                        apiKey,
-                        model,
-                        audioBuffer,
-                        contentType,
-                        language: defaultLanguage,
-                    }),
-                );
+                const result = await geminiTranscribe({
+                    apiKey,
+                    model,
+                    audioBuffer,
+                    contentType,
+                    language: defaultLanguage,
+                    attempt: (run) => withUsageFailure(usageContext, run),
+                });
                 await recordAiUsage(usageContext, {
                     inputTokens: result.inputTokens,
                     outputTokens: result.outputTokens,
@@ -875,17 +875,18 @@ async function transcribeRecordingInner(
             } else if (transcriptionStyle === "speechmatics") {
                 // Batch accepts hours-long uploads, so the Whisper 25 MiB
                 // re-encode is skipped here the same way it is for Scribe.
+                const vocabulary = speechmaticsTakesVocabulary(model)
+                    ? await almanacTerms()
+                    : [];
                 await reserveCall();
-                const result = await withUsageFailure(usageContext, async () =>
+                const result = await withUsageFailure(usageContext, () =>
                     speechmaticsTranscribe({
                         apiKey,
                         model,
                         file: audioFile,
                         language: defaultLanguage,
                         baseUrl: credentials.baseUrl,
-                        vocabulary: speechmaticsTakesVocabulary(model)
-                            ? await almanacTerms()
-                            : [],
+                        vocabulary,
                     }),
                 );
                 await recordAiUsage(usageContext, {
@@ -905,15 +906,14 @@ async function transcribeRecordingInner(
 
                 if (transcriptionStyle === "chat") {
                     await reserveCall();
-                    const result = await withUsageFailure(usageContext, () =>
-                        chatTranscribe({
-                            client: openai,
-                            model,
-                            audioBuffer,
-                            contentType,
-                            language: defaultLanguage,
-                        }),
-                    );
+                    const result = await chatTranscribe({
+                        client: openai,
+                        model,
+                        audioBuffer,
+                        contentType,
+                        language: defaultLanguage,
+                        attempt: (run) => withUsageFailure(usageContext, run),
+                    });
                     await recordAiUsage(usageContext, {
                         inputTokens: result.inputTokens,
                         outputTokens: result.outputTokens,

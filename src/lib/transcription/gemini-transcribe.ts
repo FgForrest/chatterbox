@@ -11,6 +11,7 @@ export interface GeminiTranscribeArgs {
     audioBuffer: Buffer;
     contentType: string;
     language?: string;
+    attempt?: <T>(run: () => Promise<T>) => Promise<T>;
 }
 
 export interface GeminiTranscribeResult {
@@ -122,6 +123,7 @@ export async function geminiTranscribe({
     audioBuffer,
     contentType,
     language,
+    attempt = (run) => run(),
 }: GeminiTranscribeArgs): Promise<GeminiTranscribeResult> {
     const mimeType = MIME_TYPE_MAP[contentType.toLowerCase()];
     if (!mimeType) {
@@ -145,86 +147,89 @@ export async function geminiTranscribe({
         ? `${TRANSCRIBE_INSTRUCTION} The audio language is ${language}.`
         : TRANSCRIBE_INSTRUCTION;
 
-    const response = await fetchWithoutIdleTimeout(
-        `${API_BASE}/${resource}:generateContent`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey,
-            },
-            body: JSON.stringify({
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { text: prompt },
-                            {
-                                inlineData: {
-                                    mimeType,
-                                    data: audioBuffer.toString("base64"),
+    return attempt(async () => {
+        const response = await fetchWithoutIdleTimeout(
+            `${API_BASE}/${resource}:generateContent`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": apiKey,
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inlineData: {
+                                        mimeType,
+                                        data: audioBuffer.toString("base64"),
+                                    },
                                 },
-                            },
-                        ],
-                    },
-                ],
-            }),
-            signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
-        },
-    );
-
-    if (!response.ok) {
-        const failureUsage = await response
-            .clone()
-            .json()
-            .catch(() => null);
-        throw withResponseUsage(
-            new GeminiTranscribeError(
-                response.status,
-                await describeError(response, name),
-            ),
-            failureUsage,
+                            ],
+                        },
+                    ],
+                }),
+                signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
+            },
         );
-    }
 
-    const payload = (await response.json()) as GeminiGenerateContentResponse;
-    const candidate = payload.candidates?.[0];
-    const blocked = blockedReason(payload);
-    if (blocked) {
-        throw withResponseUsage(
-            new GeminiTranscribeError(
-                null,
-                `Google Gemini withheld the transcription: ${blocked}.`,
-            ),
-            payload,
-        );
-    }
+        if (!response.ok) {
+            const failureUsage = await response
+                .clone()
+                .json()
+                .catch(() => null);
+            throw withResponseUsage(
+                new GeminiTranscribeError(
+                    response.status,
+                    await describeError(response, name),
+                ),
+                failureUsage,
+            );
+        }
 
-    const text = (candidate?.content?.parts ?? [])
-        .filter((part) => !part.thought && typeof part.text === "string")
-        .map((part) => part.text)
-        .join("")
-        .trim();
-    if (!text) {
-        throw withResponseUsage(
-            new GeminiTranscribeError(
-                null,
-                "Google Gemini returned an empty transcription. The audio may be silent or the model may not have recognised the content.",
-            ),
-            payload,
-        );
-    }
+        const payload =
+            (await response.json()) as GeminiGenerateContentResponse;
+        const candidate = payload.candidates?.[0];
+        const blocked = blockedReason(payload);
+        if (blocked) {
+            throw withResponseUsage(
+                new GeminiTranscribeError(
+                    null,
+                    `Google Gemini withheld the transcription: ${blocked}.`,
+                ),
+                payload,
+            );
+        }
 
-    const usage = payload.usageMetadata;
-    return {
-        text,
-        detectedLanguage: language ?? null,
-        inputTokens: usage?.promptTokenCount,
-        outputTokens: usage
-            ? (usage.candidatesTokenCount ?? 0) +
-              (usage.thoughtsTokenCount ?? 0)
-            : undefined,
-    };
+        const text = (candidate?.content?.parts ?? [])
+            .filter((part) => !part.thought && typeof part.text === "string")
+            .map((part) => part.text)
+            .join("")
+            .trim();
+        if (!text) {
+            throw withResponseUsage(
+                new GeminiTranscribeError(
+                    null,
+                    "Google Gemini returned an empty transcription. The audio may be silent or the model may not have recognised the content.",
+                ),
+                payload,
+            );
+        }
+
+        const usage = payload.usageMetadata;
+        return {
+            text,
+            detectedLanguage: language ?? null,
+            inputTokens: usage?.promptTokenCount,
+            outputTokens: usage
+                ? (usage.candidatesTokenCount ?? 0) +
+                  (usage.thoughtsTokenCount ?? 0)
+                : undefined,
+        };
+    });
 }
 
 function blockedReason(payload: GeminiGenerateContentResponse): string | null {

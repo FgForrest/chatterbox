@@ -313,6 +313,7 @@ export function startKnowledgeListener(): void {
 /** What one reader may know, merged from the scopes it reads. */
 export interface KnowledgeView {
     usageUserId?: string;
+    actorUserId?: string;
     items: (KnownItem & {
         scope: "personal" | "org";
         /** Its names in the view: its own, aliases and heard-as forms. */
@@ -353,6 +354,10 @@ export async function knowledgeView(
     }
     const own = loaded.find((held) => held.scope === viewerUserId);
     return {
+        actorUserId:
+            context.kind === "pages"
+                ? context.viewerUserId
+                : (context.actorUserId ?? context.ownerUserId),
         usageUserId:
             context.kind === "pages"
                 ? context.viewerUserId
@@ -394,7 +399,11 @@ export async function searchByMeaning(
     try {
         const [query] = await client.embed([text], {
             usage: view.usageUserId
-                ? { userId: view.usageUserId, query: true }
+                ? {
+                      userId: view.usageUserId,
+                      actorUserId: view.actorUserId,
+                      query: true,
+                  }
                 : undefined,
         });
         if (!query) return { available: true, hits: [] };
