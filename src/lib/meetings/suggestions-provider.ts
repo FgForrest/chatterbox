@@ -4,8 +4,7 @@ import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
-import { folderDefaultProfileDetails } from "@/lib/profiles/resolve-for-placement";
-import { getDefaultProfile } from "@/lib/profiles/store";
+import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 
 /** Resolve the agenda folder's summary role without selecting a replacement provider. */
 export async function agendaSuggestionsProvider(userId: string, id: string) {
@@ -19,19 +18,19 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
         : [];
     if (!folder)
         throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
-    const details = await folderDefaultProfileDetails({
-        folderId: folder.id,
-        folderOwnerUserId: folder.userId,
-        actorUserId: userId,
+    const resolution = await resolveProfileForPlacements({
+        ownerUserId: userId,
+        itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
-        organizationOnly: folder.userId === access.viewer.orgUserId,
+        folderIds: [folder.id],
+        view: folder.userId === access.viewer.orgUserId ? "org" : "private",
+        seedProfiles: false,
         executor: db,
+        organizationUserId: access.viewer.orgUserId,
+        ignoreItemAssignment: true,
     });
     const profile =
-        details?.effective ??
-        (await getDefaultProfile(folder.userId, "audio", userId, {
-            seed: false,
-        }));
+        resolution.status === "resolved" ? resolution.profile : null;
     if (!profile)
         throw new AppError(
             ErrorCode.CONFLICT,

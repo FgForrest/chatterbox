@@ -698,6 +698,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             id: "archived-task",
             itemId: "rec",
             userId: "owner",
+            createdByUserId: "owner",
             status: "open",
             source: "manual",
             text: encryptText("Archived task"),

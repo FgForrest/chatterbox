@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -8,12 +8,14 @@ import {
     meetingAgendas,
     recordingFolderAssignments,
     recordingFolders,
+    recordingTasks,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import {
     type ArchiveScope,
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
+import { archivedTaskCondition } from "@/lib/tasks/archive";
 
 const id = z.string().min(1).max(255);
 const date = z.iso.datetime({ offset: true });
@@ -89,7 +91,7 @@ export async function collectArchivedMeetings(
         .where(archivedItemCondition(scope));
     const result: ArchivedMeeting[] = [];
     for (const { agenda } of rows) {
-        const [[item], points, tasks, folders] = await Promise.all([
+        const [[item], points, tasks, folders, sources] = await Promise.all([
             agenda.meetingItemId
                 ? db
                       .select({ title: chatterItems.title })
@@ -112,12 +114,25 @@ export async function collectArchivedMeetings(
                 )
                 .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
             db
-                .select()
+                .select({ task: agendaTasks })
                 .from(agendaTasks)
+                .innerJoin(
+                    recordingTasks,
+                    eq(recordingTasks.id, agendaTasks.taskId),
+                )
+                .innerJoin(
+                    chatterItems,
+                    and(
+                        eq(chatterItems.id, recordingTasks.itemId),
+                        eq(chatterItems.userId, recordingTasks.userId),
+                    ),
+                )
                 .where(
                     and(
                         eq(agendaTasks.agendaId, agenda.id),
                         eq(agendaTasks.userId, agenda.userId),
+                        archivedItemCondition(scope),
+                        archivedTaskCondition(scope),
                     ),
                 )
                 .orderBy(asc(agendaTasks.position)),
@@ -151,6 +166,21 @@ export async function collectArchivedMeetings(
                           ),
                       )
                 : [],
+            db
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(
+                    and(
+                        inArray(
+                            chatterItems.id,
+                            [
+                                agenda.taskSourceItemId,
+                                agenda.snapshotSourceItemId,
+                            ].filter((id): id is string => id !== null),
+                        ),
+                        archivedItemCondition(scope),
+                    ),
+                ),
         ]);
         const {
             calendarSnapshot: _snapshot,
@@ -159,6 +189,16 @@ export async function collectArchivedMeetings(
         } = agenda;
         result.push({
             ...archivedAgenda,
+            taskSourceItemId: sources.some(
+                (source) => source.id === agenda.taskSourceItemId,
+            )
+                ? agenda.taskSourceItemId
+                : null,
+            snapshotSourceItemId: sources.some(
+                (source) => source.id === agenda.snapshotSourceItemId,
+            )
+                ? agenda.snapshotSourceItemId
+                : null,
             title: item ? decryptText(item.title) : "Meeting",
             folderIds: folders.map((folder) => folder.id),
             plannedStart: agenda.plannedStart?.toISOString() ?? null,
@@ -179,7 +219,7 @@ export async function collectArchivedMeetings(
                 createdAt: point.createdAt.toISOString(),
                 updatedAt: point.updatedAt.toISOString(),
             })),
-            tasks: tasks.map((task) => ({
+            tasks: tasks.map(({ task }) => ({
                 ...task,
                 note: task.note ? decryptText(task.note) : null,
                 removedAt: task.removedAt?.toISOString() ?? null,

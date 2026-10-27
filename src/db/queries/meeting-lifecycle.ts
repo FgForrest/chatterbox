@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { meetingFolders } from "@/db/queries/meeting-folders";
 import type { MeetingExecutor } from "@/db/queries/meetings";
 import {
+    agendaPoints,
     chatterItems,
     mailPendingShares,
     meetingAgendas,
@@ -81,6 +82,8 @@ export async function restoreStandaloneAgendaInTx(
         .set({
             recordingItemId: null,
             absorbedAt: null,
+            outcomeUnplanned: null,
+            outcomeSummaryId: null,
             state: held ? "held" : "planned",
             version: sql`${meetingAgendas.version} + 1`,
             updatedAt: at,
@@ -89,6 +92,19 @@ export async function restoreStandaloneAgendaInTx(
             and(
                 eq(meetingAgendas.id, agenda.id),
                 eq(meetingAgendas.userId, agenda.userId),
+            ),
+        );
+    await executor
+        .update(agendaPoints)
+        .set({
+            summaryOutcome: null,
+            version: sql`${agendaPoints.version} + 1`,
+            updatedAt: at,
+        })
+        .where(
+            and(
+                eq(agendaPoints.agendaId, agenda.id),
+                eq(agendaPoints.userId, agenda.userId),
             ),
         );
     if (agenda.meetingItemId)

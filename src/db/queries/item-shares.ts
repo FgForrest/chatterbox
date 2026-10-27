@@ -88,12 +88,25 @@ function receivedFolderItemIds(
     attachmentId?: string,
     since?: Date,
 ) {
-    return sql`select ${recordingFolderAssignments.itemId} from ${recordingFolderAssignments}
-        inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
+    return sql`select ${recordingFolderAssignments.itemId} from (
+        select ${recordingFolders.id} from ${recordingFolders}
+        where ${recordingFolders.userId} = ${receiverUserId}
+            and ${recordingFolders.kind} = 'custom'
+        union
+        select ${recordingFolders.id} from ${folderShares}
+        inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
+            and ${recordingFolders.userId} = ${folderShares.userId}
+        inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
+        where ${folderShares.receiverUserId} = ${receiverUserId}
+            and ${folderShares.state} = 'accepted'
+            and ${activeShareRecipientCondition()}
+            and ${recordingFolders.kind} = 'custom'
+    ) eligible_folders
+        inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = eligible_folders.id
+        inner join ${recordingFolders} on ${recordingFolders.id} = eligible_folders.id
         inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
             and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
         where ${folderItemOwnerCondition(recordingFolders.userId, chatterItems.userId, recordingFolders.id)}
-            and ${folderParticipantCondition(recordingFolders.userId, receiverUserId, recordingFolders.id)}
             and ${chatterItems.userId} <> ${receiverUserId}
             and ${recordingFolders.kind} = 'custom'
             ${
