@@ -55,6 +55,7 @@ import {
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { getCalendarEvent } from "@/lib/integrations/google/calendar-events";
+import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import {
     meetingRecordingRedirect,
     meetingViewer,
@@ -463,6 +464,7 @@ export async function listMeetings(
     return rows.map(({ agenda, item, counts, authorName }) => ({
         id: agenda.id,
         meetingItemId: agenda.meetingItemId,
+        recordingItemId: agenda.recordingItemId,
         title: decryptText(item.title),
         start: agenda.plannedStart,
         end: agenda.plannedEnd,
@@ -634,12 +636,17 @@ export async function getMeeting(userId: string, id: string, since?: number) {
         .select({ id: users.id, name: users.name })
         .from(users)
         .where(inArray(users.id, authorIds));
-    const exportEvent =
-        agenda.calendarEventId && agenda.userId !== userId
-            ? await getCalendarEvent(userId, agenda.calendarEventId).catch(
-                  () => null,
-              )
-            : event;
+    let canExportCalendar: boolean | null = event?.organizer?.self === true;
+    if (agenda.calendarEventId && agenda.userId !== userId) {
+        const connection = await getGoogleConnectionStatus(userId);
+        canExportCalendar =
+            connection?.status === "active" &&
+            connection.email &&
+            event?.organizer?.email
+                ? connection.email.trim().toLowerCase() ===
+                  event.organizer.email.trim().toLowerCase()
+                : null;
+    }
     const invitees = event?.attendees.map(({ name }) => ({ name })) ?? [];
     const tree = points.map((point) => ({
         ...point,
@@ -660,7 +667,7 @@ export async function getMeeting(userId: string, id: string, since?: number) {
         title: decryptText(item.title),
         permissions: access.permissions,
         authors,
-        canExportCalendar: exportEvent?.organizer?.self === true,
+        canExportCalendar,
         redirectTo: await meetingRecordingRedirect(userId, access),
         folders: folders.map((folder) => ({
             ...folder,

@@ -87,16 +87,17 @@ vi.mock("@/lib/authz/curator", () => ({
 vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: async () => undefined,
 }));
-const calendar = vi.hoisted(() => ({ read: vi.fn(), upcoming: vi.fn() }));
+const calendar = vi.hoisted(() => ({
+    read: vi.fn(),
+    upcoming: vi.fn(),
+    connection: vi.fn(),
+}));
 vi.mock("@/lib/integrations/google/calendar-events", () => ({
     getCalendarEvent: calendar.read,
     listUpcomingCalendarEvents: calendar.upcoming,
 }));
 vi.mock("@/lib/integrations/google/connection", () => ({
-    getGoogleConnectionStatus: async () => ({
-        status: "active",
-        scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"],
-    }),
+    getGoogleConnectionStatus: calendar.connection,
 }));
 const eventFor = (userId: string, id: string) => ({
     id,
@@ -181,6 +182,7 @@ import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { requestAdvance } from "@/lib/pipeline/trigger";
 import {
     createRecordingSession,
+    markRecordingSessionCompleted,
     markRecordingSessionCompleting,
 } from "@/lib/recording-sessions/store";
 import { searchApp } from "@/lib/search/app-search";
@@ -218,6 +220,15 @@ suite("meeting planning server (PostgreSQL)", () => {
                 eventFor(userId, id),
             );
         calendar.upcoming.mockReset().mockResolvedValue([]);
+        calendar.connection
+            .mockReset()
+            .mockImplementation(async (userId: string) => ({
+                status: "active",
+                email: `${userId}@example.com`,
+                scopes: [
+                    "https://www.googleapis.com/auth/calendar.events.readonly",
+                ],
+            }));
         await db.delete(users);
         await db.insert(users).values(
             ["owner", "other", "curator", "stranger", "org"].map((id) => ({
@@ -923,7 +934,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             "owner",
         ]);
     });
-    it("reports Calendar export authority from the caller's account", async () => {
+    it("reports Calendar export authority without Google calls on repeated non-author loads", async () => {
         const meeting = await prepareMeeting("owner", {
             folderId: "org-folder",
             calendarEventId: "event",
@@ -934,6 +945,42 @@ suite("meeting planning server (PostgreSQL)", () => {
             throw new Error("Missing detail");
         expect(owner.canExportCalendar).toBe(true);
         expect(colleague.canExportCalendar).toBe(false);
+        await getMeeting("other", meeting.id);
+        await getMeeting("other", meeting.id, colleague.version);
+        expect(calendar.read).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+        [" MAREK@example.com ", "active", true],
+        ["other@example.com", "active", false],
+        [undefined, "active", null],
+        ["marek@example.com", "needs_reconnect", null],
+    ])("uses connected email %s (%s) for cached organizer permission", async (email, status, expected) => {
+        const meeting = await prepareMeeting("owner", {
+            folderId: "org-folder",
+            calendarEventId: "event",
+        });
+        calendar.connection.mockResolvedValue({ email, status });
+        expect(await getMeeting("other", meeting.id)).toMatchObject({
+            canExportCalendar: expected,
+        });
+        expect(await getMeeting("owner", meeting.id)).toMatchObject({
+            canExportCalendar: true,
+        });
+        expect(calendar.read).toHaveBeenCalledTimes(1);
+    });
+    it("defers organizer permission when the snapshot has no organizer email", async () => {
+        calendar.read.mockResolvedValueOnce({
+            ...eventFor("owner", "event"),
+            organizer: { self: true },
+        });
+        const meeting = await prepareMeeting("owner", {
+            folderId: "org-folder",
+            calendarEventId: "event",
+        });
+        expect(await getMeeting("other", meeting.id)).toMatchObject({
+            canExportCalendar: null,
+        });
+        expect(calendar.read).toHaveBeenCalledTimes(1);
     });
     it("merges an empty outline line upward without deleting its children", async () => {
         const meeting = await create();
@@ -1507,6 +1554,11 @@ suite("meeting planning server (PostgreSQL)", () => {
     it.each([
         3,
         "x".repeat(256),
+        "",
+        " ",
+        {},
+        [],
+        false,
     ])("complete rejects malformed agendaId %j", async (agendaId) => {
         const session = await capture();
         const response = await finish(session.id, { agendaId });
@@ -1547,6 +1599,51 @@ suite("meeting planning server (PostgreSQL)", () => {
             (await requireMeetingAccess("owner", candidate.id)).agenda
                 .recordingItemId,
         ).toBeNull();
+    });
+
+    it.each([
+        null,
+        undefined,
+    ])("persists agendaId=%s and respects the choice at finalize and repeated arrival", async (agendaId) => {
+        const candidate = await create();
+        const session = await capture();
+        const response = await finish(
+            session.id,
+            agendaId === undefined ? {} : { agendaId },
+        );
+        expect(response.status).toBe(202);
+        const body = await response.json();
+        expect(body).not.toHaveProperty("agenda");
+        expect(body.metadata).toEqual({
+            channelLayout: ["system"],
+            clientVersion: "0.7.0",
+            ...(agendaId === null ? { agendaId: null } : {}),
+        });
+        expect(
+            (await finish(session.id, { agendaId: candidate.id })).status,
+        ).toBe(200);
+        const fileId = `meeting-${session.clientRecordingId}`;
+        await recording("finalized");
+        await db
+            .update(recordings)
+            .set({ plaudFileId: fileId })
+            .where(eq(recordings.id, "finalized"));
+        expect(await agendaCandidates("owner", "finalized")).toHaveLength(1);
+        await db.transaction((tx) =>
+            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+        );
+        expect(
+            (await requireMeetingAccess("owner", candidate.id)).agenda
+                .recordingItemId,
+        ).toBe(agendaId === null ? null : "finalized");
+        await markRecordingSessionCompleted(session.id, "owner", "finalized");
+        await db.transaction((tx) =>
+            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+        );
+        expect(
+            (await requireMeetingAccess("owner", candidate.id)).agenda
+                .recordingItemId,
+        ).toBe(agendaId === null ? null : "finalized");
     });
 
     it("detaching an Organization agenda withdraws attach-created publication and cancels its intent", async () => {

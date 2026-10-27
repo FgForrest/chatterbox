@@ -128,6 +128,7 @@ export function row(overrides: Partial<MeetingRowData> = {}): MeetingRowData {
     return {
         id: "agenda",
         meetingItemId: "meeting",
+        recordingItemId: null,
         title: "Acme planning",
         start: at,
         end: "2026-11-03T11:00:00.000Z",

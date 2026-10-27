@@ -22,10 +22,10 @@ export function MeetingRow({
     const format = useFormatter();
     const [now, setNow] = useState(Date.now());
     useEffect(() => {
-        if (meeting.state !== "live") return;
+        if (meeting.recordingItemId || meeting.state !== "live") return;
         const timer = setInterval(() => setNow(Date.now()), 60000);
         return () => clearInterval(timer);
-    }, [meeting.state]);
+    }, [meeting.state, meeting.recordingItemId]);
     const liveMinutes = meeting.liveStartedAt
         ? Math.max(
               0,
@@ -62,12 +62,15 @@ export function MeetingRow({
                             : i18n("No scheduled time")}
                     </span>
                     <span className="rounded-full bg-meeting/10 px-2 py-0.5 text-meeting">
-                        {meeting.state === "live"
-                            ? i18n("In progress")
-                            : meeting.state === "held"
-                              ? i18n("Without recording")
-                              : i18n("Preparing")}
-                        {meeting.state === "live" &&
+                        {meeting.recordingItemId
+                            ? i18n("Recorded")
+                            : meeting.state === "live"
+                              ? i18n("In progress")
+                              : meeting.state === "held"
+                                ? i18n("Without recording")
+                                : i18n("Preparing")}
+                        {!meeting.recordingItemId &&
+                            meeting.state === "live" &&
                             meeting.liveStartedAt &&
                             ` · ${String(Math.floor(liveMinutes / 60)).padStart(2, "0")}:${String(liveMinutes % 60).padStart(2, "0")}`}
                     </span>

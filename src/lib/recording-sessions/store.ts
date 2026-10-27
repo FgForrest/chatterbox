@@ -467,7 +467,7 @@ export async function markRecordingSessionCompleting(input: {
     expectedChunkCount: number;
     folderId?: string | null;
     truncatedAtChunk: number | null;
-    agendaId?: string;
+    agendaId?: string | null;
 }): Promise<RecordingSessionRow | null> {
     const viewer = input.agendaId ? await meetingViewer(input.userId) : null;
     return db.transaction(async (tx) => {
@@ -527,20 +527,22 @@ export async function markRecordingSessionCompleting(input: {
                 ...(input.folderId !== undefined
                     ? { folderId: input.folderId }
                     : {}),
-                ...(input.agendaId
+                ...(input.agendaId !== undefined
                     ? {
-                          metadata: sql`(${recordingSessions.metadata} - 'agendaId') || ${JSON.stringify(
-                              {
-                                  ...(agendaAvailable
-                                      ? { agendaId: input.agendaId }
-                                      : {}),
-                                  agendaOutcome: agendaAvailable
-                                      ? { attached: true }
-                                      : {
-                                            attached: false,
-                                            reason: "unavailable",
-                                        },
-                              },
+                          metadata: sql`(${recordingSessions.metadata} - 'agendaId' - 'agendaOutcome') || ${JSON.stringify(
+                              input.agendaId === null
+                                  ? { agendaId: null }
+                                  : {
+                                        ...(agendaAvailable
+                                            ? { agendaId: input.agendaId }
+                                            : {}),
+                                        agendaOutcome: agendaAvailable
+                                            ? { attached: true }
+                                            : {
+                                                  attached: false,
+                                                  reason: "unavailable",
+                                              },
+                                    },
                           )}::jsonb`,
                       }
                     : {}),

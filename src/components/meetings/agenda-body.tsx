@@ -12,7 +12,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
@@ -83,9 +83,10 @@ export function AgendaBody({
     const [olderError, setOlderError] = useState<string | null>(null);
     const [attachOpen, setAttachOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
-    const live = variant === "live" || detail?.state === "live";
+    const suggestionsReasonId = useId();
     const readOnly =
         variant === "recording" || Boolean(detail?.recordingItemId);
+    const live = !readOnly && (variant === "live" || detail?.state === "live");
     useEffect(() => {
         if (!live || !active) return;
         const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -133,6 +134,34 @@ export function AgendaBody({
             </Card>
         );
     const canEdit = detail.permissions.edit && !readOnly;
+    const suggestionsErrorCode =
+        "errorCode" in detail.aiSuggestions
+            ? detail.aiSuggestions.errorCode
+            : undefined;
+    const suggestionsReason = detail.aiSuggestions.available
+        ? null
+        : detail.aiSuggestions.reason ===
+            "Choose a default processing profile before running this step"
+          ? i18n("Choose a default processing profile to suggest points.")
+          : suggestionsErrorCode === "CONFLICT"
+            ? i18n(
+                  "The selected summary provider is disabled. Enable it or update the processing profile.",
+              )
+            : suggestionsErrorCode === "FORBIDDEN"
+              ? i18n(
+                    "Your Organization access does not permit using the selected summary provider.",
+                )
+              : suggestionsErrorCode === "NOT_FOUND"
+                ? i18n(
+                      "The meeting folder or selected summary provider is unavailable. Check the folder and processing profile.",
+                  )
+                : suggestionsErrorCode === "INVALID_INPUT"
+                  ? i18n(
+                        "Choose a chat provider for summaries in the processing profile to suggest points.",
+                    )
+                  : i18n(
+                        "Configure the processing profile’s summary provider and its default model to suggest points.",
+                    );
     const groups = groupAgendaTasks(
         detail.tasks.filter((task) => !task.removedAt),
         detail.invitees,
@@ -678,7 +707,12 @@ export function AgendaBody({
                         <Button
                             variant="outline"
                             size="sm"
-                            disabled={busy}
+                            disabled={busy || !detail.aiSuggestions.available}
+                            aria-describedby={
+                                suggestionsReason
+                                    ? suggestionsReasonId
+                                    : undefined
+                            }
                             onClick={() =>
                                 void mutate(
                                     "/suggestions",
@@ -692,6 +726,14 @@ export function AgendaBody({
                         </Button>
                     )}
                 </div>
+                {canEdit && !live && suggestionsReason && (
+                    <p
+                        id={suggestionsReasonId}
+                        className="text-xs text-muted-foreground"
+                    >
+                        {suggestionsReason}
+                    </p>
+                )}
             </CardHeader>
             <CardContent>
                 <OutlineEditor
@@ -937,11 +979,13 @@ export function AgendaBody({
                                 .join(", ")}
                         </span>
                         <span className="rounded-full bg-meeting/10 px-2 py-1 text-meeting">
-                            {live
-                                ? i18n("In progress")
-                                : detail.state === "held"
-                                  ? i18n("Without recording")
-                                  : i18n("Preparing")}
+                            {detail.recordingItemId
+                                ? i18n("Recorded")
+                                : live
+                                  ? i18n("In progress")
+                                  : detail.state === "held"
+                                    ? i18n("Without recording")
+                                    : i18n("Preparing")}
                         </span>
                     </div>
                     {live && (
@@ -961,7 +1005,7 @@ export function AgendaBody({
                             </span>
                         </div>
                     )}
-                    {detail.state === "held" && (
+                    {!readOnly && detail.state === "held" && (
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
                             <p className="max-w-xl text-muted-foreground">
                                 {i18n(
@@ -1004,6 +1048,13 @@ export function AgendaBody({
                         className={cn("size-4", !collapsed && "rotate-180")}
                     />
                 </button>
+            )}
+            {detail.attachedRecording?.visible === false && (
+                <output className="block rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    {i18n(
+                        "This agenda went with the recording. You'll see the recording once its author shares it.",
+                    )}
+                </output>
             )}
             {agenda.colleagueChange && (
                 <output className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">

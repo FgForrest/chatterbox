@@ -115,6 +115,17 @@ describe("parseCreateRecordingSessionBody", () => {
 });
 
 describe("parseCompleteRecordingSessionBody", () => {
+    it("distinguishes an explicit no-agenda decision from no decision", () => {
+        expect(
+            parseCompleteRecordingSessionBody({
+                chunkCount: 1,
+                agendaId: null,
+            }),
+        ).toHaveProperty("agendaId", null);
+        expect(
+            parseCompleteRecordingSessionBody({ chunkCount: 1 }),
+        ).not.toHaveProperty("agendaId");
+    });
     it("accepts a valid body and defaults stop reason", () => {
         const parsed = parseCompleteRecordingSessionBody({ chunkCount: 3 });
         expect(parsed.chunkCount).toBe(3);
@@ -213,6 +224,12 @@ describe("buildMeetingTitle", () => {
 });
 
 describe("readRecordingSessionMetadata", () => {
+    it("retains an explicit no-agenda decision from durable metadata", () => {
+        expect(readRecordingSessionMetadata({ agendaId: null })).toEqual({
+            channelLayout: [],
+            agendaId: null,
+        });
+    });
     it("recovers a stored shape and tolerates missing fields", () => {
         expect(
             readRecordingSessionMetadata({

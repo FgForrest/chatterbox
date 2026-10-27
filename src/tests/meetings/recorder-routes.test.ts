@@ -132,7 +132,10 @@ describe("recorder agenda API", () => {
             parseCompleteRecordingSessionBody({ ...base, agendaId: "agenda" })
                 .agendaId,
         ).toBe("agenda");
-        for (const agendaId of [null, "", 4, "x".repeat(256)])
+        expect(
+            parseCompleteRecordingSessionBody({ ...base, agendaId: null }),
+        ).toHaveProperty("agendaId", null);
+        for (const agendaId of ["", 4, "x".repeat(256)])
             expect(() =>
                 parseCompleteRecordingSessionBody({ ...base, agendaId }),
             ).toThrow();

@@ -369,10 +369,14 @@ export async function attachArrivingRecordingInTx(
                           recordingSessions.clientRecordingId,
                           fileId.slice("meeting-".length),
                       ),
-                      eq(recordingSessions.status, "completing"),
+                      inArray(recordingSessions.status, [
+                          "completing",
+                          "completed",
+                      ]),
                   ),
               )
         : [];
+    if (session?.metadata.agendaId === null) return;
     const agendaOutcome = session?.metadata.agendaOutcome;
     if (
         agendaOutcome &&

@@ -137,7 +137,10 @@ export function AgendaExport({
                     {detail.calendarEventId && (
                         <>
                             <DropdownMenuItem
-                                disabled={disabled || !detail.canExportCalendar}
+                                disabled={
+                                    disabled ||
+                                    detail.canExportCalendar === false
+                                }
                                 onSelect={() => setOpen(true)}
                             >
                                 <Calendar />
@@ -149,7 +152,7 @@ export function AgendaExport({
                                           "Write to the Google Calendar event…",
                                       )}
                             </DropdownMenuItem>
-                            {!detail.canExportCalendar && (
+                            {detail.canExportCalendar === false && (
                                 <p className="px-2 pb-2 text-xs text-muted-foreground">
                                     {detail.calendar?.organizer?.name
                                         ? i18n(
@@ -162,6 +165,13 @@ export function AgendaExport({
                                         : i18n(
                                               "Only the event organizer can do this. Send them the Markdown.",
                                           )}
+                                </p>
+                            )}
+                            {detail.canExportCalendar === null && (
+                                <p className="px-2 pb-2 text-xs text-muted-foreground">
+                                    {i18n(
+                                        "Organizer access will be checked when you export.",
+                                    )}
                                 </p>
                             )}
                             {written && (

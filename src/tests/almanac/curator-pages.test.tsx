@@ -19,7 +19,6 @@ import { listOwnTypes } from "@/lib/knowledge/vocabulary";
 
 const viewer = vi.hoisted(() => ({ id: "curator" }));
 
-vi.mock("@/lib/pipeline/trigger", () => ({ requestAdvanceInTx: vi.fn() }));
 vi.mock("@/lib/identity/factory", () => ({ isIdpAuthorization: () => false }));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),

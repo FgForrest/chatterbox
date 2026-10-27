@@ -13,7 +13,7 @@ import {
 export interface RecordingSessionMetadata {
     /** Label per audio channel, in channel order, e.g. `["microphone", "system"]`. */
     channelLayout: string[];
-    agendaId?: string;
+    agendaId?: string | null;
     /** Where the meeting ran, when the client could tell: `google-meet`, `zoom`, `teams`. */
     platformHint?: string;
     clientVersion?: string;
@@ -31,7 +31,7 @@ export interface CreateRecordingSessionInput {
 }
 
 export interface CompleteRecordingSessionInput {
-    agendaId?: string;
+    agendaId?: string | null;
     folderId?: string | null;
     chunkCount: number;
     truncatedAtChunk: number | null;
@@ -251,17 +251,18 @@ export function parseCompleteRecordingSessionBody(
 
     if (
         raw.agendaId !== undefined &&
+        raw.agendaId !== null &&
         (typeof raw.agendaId !== "string" ||
             !raw.agendaId.trim() ||
             raw.agendaId.length > 255)
     )
         throw invalid(
-            "agendaId must be a non-empty string of at most 255 characters",
+            "agendaId must be null or a non-empty string of at most 255 characters",
             "agendaId",
         );
     return {
         ...(raw.agendaId !== undefined
-            ? { agendaId: raw.agendaId as string }
+            ? { agendaId: raw.agendaId as string | null }
             : {}),
         ...(raw.folderId !== undefined
             ? { folderId: parseFolderId(raw.folderId) }
@@ -356,7 +357,8 @@ export function readRecordingSessionMetadata(
           )
         : [];
     const metadata: RecordingSessionMetadata = { channelLayout };
-    if (typeof raw.agendaId === "string") metadata.agendaId = raw.agendaId;
+    if (raw.agendaId === null || typeof raw.agendaId === "string")
+        metadata.agendaId = raw.agendaId;
     if (typeof raw.platformHint === "string") {
         metadata.platformHint = raw.platformHint;
     }

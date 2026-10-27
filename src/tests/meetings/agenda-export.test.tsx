@@ -110,12 +110,15 @@ describe("export visibility", () => {
             expect.stringContaining("Review dates"),
         );
     });
-    it("previews without tasks by default and hands off consent without retrying the write", async () => {
+    it.each([
+        true,
+        null,
+    ])("previews without tasks and hands off consent with organizer permission %s", async (canExportCalendar) => {
         render(
             <AgendaExport
                 detail={detail({
                     calendarEventId: "event",
-                    canExportCalendar: true,
+                    canExportCalendar,
                     calendar: {
                         organizer: { self: true, name: undefined },
                         htmlLink: "https://calendar.google.com",
@@ -126,6 +129,17 @@ describe("export visibility", () => {
             />,
         );
         await openMenu();
+        expect(
+            screen
+                .getByRole("menuitem", { name: /Google Calendar/ })
+                .getAttribute("aria-disabled"),
+        ).not.toBe("true");
+        if (canExportCalendar === null)
+            expect(
+                screen.getByText(
+                    "Organizer access will be checked when you export.",
+                ),
+            ).toBeTruthy();
         await act(async () =>
             fireEvent.click(
                 screen.getByRole("menuitem", { name: /Google Calendar/ }),
@@ -167,5 +181,44 @@ describe("export visibility", () => {
                 ),
             ),
         ).toEqual({ includeTasks: false, locale: "en" });
+    });
+    it("shows the fresh organizer refusal when cached permission was unknown", async () => {
+        render(
+            <AgendaExport
+                detail={detail({
+                    calendarEventId: "event",
+                    canExportCalendar: null,
+                })}
+            />,
+        );
+        await openMenu();
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("menuitem", { name: /Google Calendar/ }),
+            ),
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByRole("button", { name: "Write to event" }),
+            ).toHaveProperty("disabled", false),
+        );
+        fetchMock.mockResolvedValueOnce(
+            Response.json(
+                {
+                    error: "Only the event organizer can export the agenda",
+                    code: "FORBIDDEN",
+                },
+                { status: 403 },
+            ),
+        );
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("button", { name: "Write to event" }),
+            ),
+        );
+        expect(toast.error).toHaveBeenCalledWith(
+            "Only the event organizer can export the agenda",
+        );
+        expect(screen.getByRole("dialog")).toBeTruthy();
     });
 });

@@ -16,6 +16,7 @@ import {
 } from "@/components/meetings/agenda-body";
 import { MeetingRow } from "@/components/meetings/meeting-row";
 import type { MeetingDetail } from "@/components/meetings/types";
+import type { ErrorCode } from "@/lib/errors";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { at, detail, point, row, task } from "./ui-fixtures";
 
@@ -120,12 +121,36 @@ it.each([
     );
 });
 
+it.each([
+    "planned",
+    "live",
+    "held",
+] as const)("labels an absorbed %s row as recorded and opens its meeting link", (state) => {
+    const onSelect = vi.fn();
+    render(
+        <MeetingRow
+            meeting={row({
+                state,
+                recordingItemId: "recording",
+                liveStartedAt: at,
+            })}
+            selected={false}
+            onSelect={onSelect}
+        />,
+    );
+    expect(screen.getByText("Recorded")).toBeTruthy();
+    for (const label of ["Preparing", "In progress", "Without recording"])
+        expect(screen.queryByText(label)).toBeNull();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onSelect).toHaveBeenCalledWith("agenda");
+});
+
 describe.each([
     "meeting",
     "live",
     "recording",
 ] as const)("shared agenda body: %s", (variant: AgendaVariant) => {
-    async function mount() {
+    async function mount(overrides: Partial<MeetingDetail> = {}) {
         server = detail({
             state: variant === "live" ? "live" : "planned",
             liveStartedAt: variant === "live" ? at : null,
@@ -144,6 +169,7 @@ describe.each([
                 }),
             ],
             points: [point("Discuss this")],
+            ...overrides,
         });
         const view = render(
             <AgendaBody
@@ -236,16 +262,128 @@ describe.each([
             }),
         );
     });
+    it.each([
+        "planned",
+        "live",
+        "held",
+    ] as const)("shows an unpublished recording notice and a read-only %s agenda", async (state) => {
+        await mount({
+            state,
+            recordingItemId: "recording",
+            attachedRecording: { visible: false },
+            redirectTo: null,
+            permissions: { view: true, edit: false, manage: false },
+            aiSuggestions: { available: false, reason: null },
+        });
+        expect(
+            screen.getByText(
+                "This agenda went with the recording. You'll see the recording once its author shares it.",
+            ),
+        ).toBeTruthy();
+        expect(screen.getByText("Discuss this")).toBeTruthy();
+        expect(screen.getByLabelText("Discussed: Discuss this")).toHaveProperty(
+            "disabled",
+            true,
+        );
+        for (const name of [
+            "Start meeting",
+            "End meeting",
+            "Suggest points",
+            "Attach recording…",
+            "Done",
+        ])
+            expect(screen.queryByRole("button", { name })).toBeNull();
+        expect(screen.queryByLabelText("Discussion point")).toBeNull();
+        expect(
+            screen.queryByText(/The meeting ended without a recording/),
+        ).toBeNull();
+        expect(replace).not.toHaveBeenCalled();
+    });
+    it("opens a visible recording through the server redirect", async () => {
+        await mount({
+            recordingItemId: "recording",
+            attachedRecording: { visible: true },
+            redirectTo: "/dashboard?recording=recording&view=org",
+            permissions: { view: true, edit: false, manage: false },
+        });
+        if (variant === "recording") expect(replace).not.toHaveBeenCalled();
+        else
+            expect(replace).toHaveBeenCalledWith(
+                "/dashboard?recording=recording&view=org",
+            );
+        expect(
+            screen.queryByText(/This agenda went with the recording/),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Suggest points" }),
+        ).toBeNull();
+    });
 });
 it("shows the server's unavailable AI suggestions error as a toast", async () => {
     render(<AgendaBody id="agenda" initial={server} userId="owner" />);
     await act(async () => {});
+    expect(
+        screen.getByRole("button", { name: "Suggest points" }),
+    ).toHaveProperty("disabled", false);
     await act(async () =>
         fireEvent.click(screen.getByRole("button", { name: "Suggest points" })),
     );
     expect(toastError).toHaveBeenCalledWith(
         "Agenda suggestions are not available yet",
     );
+});
+it.each([
+    [
+        "CONFLICT",
+        "Choose a default processing profile before running this step",
+        "Choose a default processing profile to suggest points.",
+    ],
+    [
+        "CONFLICT",
+        "The profile pin is disabled",
+        "The selected summary provider is disabled. Enable it or update the processing profile.",
+    ],
+    [
+        "AI_PROVIDER_NOT_CONFIGURED",
+        "No AI provider configured",
+        "Configure the processing profile’s summary provider and its default model to suggest points.",
+    ],
+    [
+        "FORBIDDEN",
+        "Provider access denied",
+        "Your Organization access does not permit using the selected summary provider.",
+    ],
+    [
+        "NOT_FOUND",
+        "Folder not found",
+        "The meeting folder or selected summary provider is unavailable. Check the folder and processing profile.",
+    ],
+    [
+        "INVALID_INPUT",
+        "Provider cannot run summary",
+        "Choose a chat provider for summaries in the processing profile to suggest points.",
+    ],
+] as const)("disables suggestions with visible localized help for %s: %s", async (errorCode, reason, help) => {
+    server = detail({
+        aiSuggestions: {
+            available: false,
+            reason,
+            errorCode: errorCode as ErrorCode,
+        },
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="owner" />);
+    await act(async () => {});
+    const button = screen.getByRole("button", { name: "Suggest points" });
+    expect(button).toHaveProperty("disabled", true);
+    const helper = screen.getByText(help);
+    expect(helper.hidden).toBe(false);
+    expect(button.getAttribute("aria-describedby")).toBe(helper.id);
+    fireEvent.click(button);
+    expect(
+        fetchMock.mock.calls.some(([url]) =>
+            String(url).endsWith("/suggestions"),
+        ),
+    ).toBe(false);
 });
 it("does not let a non-manager start or end a meeting", async () => {
     server = detail({ permissions: { view: true, edit: true, manage: false } });
