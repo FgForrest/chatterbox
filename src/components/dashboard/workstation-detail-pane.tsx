@@ -373,7 +373,7 @@ export function WorkstationDetailPane({
                                             {nextMeeting}
                                             {agenda}
                                         </>
-                                    )}{" "}
+                                    )}
                                 </>
                             )}
                         </RecordingAgenda>

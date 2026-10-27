@@ -2,7 +2,7 @@
 
 import { Settings2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -32,14 +32,20 @@ export function MeetingSettings({
     recordings?: Recording[];
     onSave: (
         change: {
-            title: string;
-            start: string | null;
-            end: string | null;
+            title?: string;
+            start?: string | null;
+            end?: string | null;
             calendarEventId?: string | null;
+            previous: {
+                title?: string;
+                start?: string | null;
+                end?: string | null;
+                calendarEventId?: string | null;
+            };
         },
         optimistic: Partial<MeetingDetail>,
-    ) => Promise<unknown>;
-    onDelete: () => Promise<unknown>;
+    ) => Promise<boolean>;
+    onDelete: () => Promise<boolean>;
 }) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
@@ -50,8 +56,18 @@ export function MeetingSettings({
     const [events, setEvents] = useState<CalendarChoices | null>(null);
     const [busy, setBusy] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const latest = useRef(detail);
+    latest.current = detail;
+    const original = useRef(detail);
+    const edited = useRef(new Set<string>());
+    const [notice, setNotice] = useState(false);
     useEffect(() => {
         if (!open) return;
+        const detail = latest.current;
+        original.current = detail;
+        edited.current.clear();
+        setNotice(false);
+        setEvents(null);
         setTitle(detail.title);
         setStart(localTime(detail.plannedStart));
         setEnd(localTime(detail.plannedEnd));
@@ -71,7 +87,7 @@ export function MeetingSettings({
                 })
                 .catch(() => {});
         return () => controller.abort();
-    }, [open, detail]);
+    }, [open]);
     return (
         <>
             <Button
@@ -98,7 +114,10 @@ export function MeetingSettings({
                             value={title}
                             maxLength={500}
                             className="rounded border bg-background p-2"
-                            onChange={(event) => setTitle(event.target.value)}
+                            onChange={(event) => {
+                                edited.current.add("title");
+                                setTitle(event.target.value);
+                            }}
                         />
                     </label>
                     <label className="grid gap-1 text-sm">
@@ -107,7 +126,10 @@ export function MeetingSettings({
                             type="datetime-local"
                             value={start}
                             className="rounded border bg-background p-2"
-                            onChange={(event) => setStart(event.target.value)}
+                            onChange={(event) => {
+                                edited.current.add("start");
+                                setStart(event.target.value);
+                            }}
                         />
                     </label>
                     <label className="grid gap-1 text-sm">
@@ -117,7 +139,10 @@ export function MeetingSettings({
                             value={end}
                             min={start || undefined}
                             className="rounded border bg-background p-2"
-                            onChange={(event) => setEnd(event.target.value)}
+                            onChange={(event) => {
+                                edited.current.add("end");
+                                setEnd(event.target.value);
+                            }}
                         />
                     </label>
                     {(detail.calendarEventId || (events && !events.reason)) && (
@@ -126,9 +151,10 @@ export function MeetingSettings({
                             <select
                                 value={eventId}
                                 className="rounded border bg-background p-2"
-                                onChange={(event) =>
-                                    setEventId(event.target.value)
-                                }
+                                onChange={(event) => {
+                                    edited.current.add("calendarEventId");
+                                    setEventId(event.target.value);
+                                }}
                             >
                                 <option value="">
                                     {i18n("Without a calendar event")}
@@ -164,6 +190,13 @@ export function MeetingSettings({
                             </select>
                         </label>
                     )}
+                    {notice && (
+                        <p role="alert">
+                            {i18n(
+                                "Your changes were not saved. Your input is kept. Review the current meeting and try again.",
+                            )}
+                        </p>
+                    )}
                     {deleting && (
                         <p className="text-sm">
                             {i18n(
@@ -181,10 +214,12 @@ export function MeetingSettings({
                                     return;
                                 }
                                 setBusy(true);
-                                void onDelete().finally(() => {
-                                    setBusy(false);
-                                    setOpen(false);
-                                });
+                                void onDelete()
+                                    .then((saved) => {
+                                        if (saved) setOpen(false);
+                                        else setNotice(true);
+                                    })
+                                    .finally(() => setBusy(false));
                             }}
                         >
                             {deleting
@@ -210,30 +245,79 @@ export function MeetingSettings({
                                 const plannedEnd = end
                                     ? new Date(end).toISOString()
                                     : null;
+                                const before = notice
+                                    ? latest.current
+                                    : original.current;
+                                const change = {
+                                    ...(edited.current.has("title") &&
+                                    title.trim() !== before.title
+                                        ? { title: title.trim() }
+                                        : {}),
+                                    ...(edited.current.has("start") &&
+                                    start !== localTime(before.plannedStart)
+                                        ? { start: plannedStart }
+                                        : {}),
+                                    ...(edited.current.has("end") &&
+                                    end !== localTime(before.plannedEnd)
+                                        ? { end: plannedEnd }
+                                        : {}),
+                                    ...(edited.current.has("calendarEventId") &&
+                                    eventId !== (before.calendarEventId ?? "")
+                                        ? { calendarEventId: eventId || null }
+                                        : {}),
+                                };
+                                const previous = {
+                                    ...("title" in change
+                                        ? { title: before.title }
+                                        : {}),
+                                    ...("start" in change
+                                        ? { start: before.plannedStart }
+                                        : {}),
+                                    ...("end" in change
+                                        ? { end: before.plannedEnd }
+                                        : {}),
+                                    ...("calendarEventId" in change
+                                        ? {
+                                              calendarEventId:
+                                                  before.calendarEventId,
+                                          }
+                                        : {}),
+                                };
+                                if (!Object.keys(change).length) {
+                                    setOpen(false);
+                                    return;
+                                }
                                 setBusy(true);
                                 void onSave(
+                                    { ...change, previous },
                                     {
-                                        title: title.trim(),
-                                        start: plannedStart,
-                                        end: plannedEnd,
-                                        ...(eventId !==
-                                        (detail.calendarEventId ?? "")
+                                        ...("title" in change
+                                            ? { title: title.trim() }
+                                            : {}),
+                                        ...("start" in change
+                                            ? {
+                                                  plannedStart,
+                                                  timeSet: Boolean(start),
+                                              }
+                                            : {}),
+                                        ...("end" in change
+                                            ? { plannedEnd }
+                                            : {}),
+                                        ...("calendarEventId" in change
                                             ? {
                                                   calendarEventId:
                                                       eventId || null,
                                               }
                                             : {}),
                                     },
-                                    {
-                                        title: title.trim(),
-                                        plannedStart,
-                                        plannedEnd,
-                                        timeSet: Boolean(start),
-                                    },
-                                ).finally(() => {
-                                    setBusy(false);
-                                    setOpen(false);
-                                });
+                                )
+                                    .then((saved) => {
+                                        if (saved) setOpen(false);
+                                        else {
+                                            setNotice(true);
+                                        }
+                                    })
+                                    .finally(() => setBusy(false));
                             }}
                         >
                             {i18n("Save")}

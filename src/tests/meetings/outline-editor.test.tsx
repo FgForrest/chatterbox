@@ -229,3 +229,157 @@ describe("outline keyboard", () => {
         );
     });
 });
+
+it("saves the version captured at focus and preserves a refused draft through readback", async () => {
+    const onPatch = vi.fn().mockResolvedValue(false);
+    const { props, rerender } = editor([point("Root")], { onPatch });
+    const input = screen.getByLabelText("Discussion point");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "My change" } });
+    const remote = detail({
+        points: [point("Root", { text: "Their change", version: 4 })],
+    });
+    rerender(<OutlineEditor {...props} detail={remote} />);
+    await act(async () => input.blur());
+    expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ version: 0 }),
+        { text: "My change" },
+    );
+    rerender(<OutlineEditor {...props} detail={{ ...remote, version: 8 }} />);
+    expect(input).toHaveProperty("value", "My change");
+    expect(screen.getByRole("alert").textContent).toContain(
+        "Your text is kept",
+    );
+    act(() => input.focus());
+    await act(async () => input.blur());
+    expect(onPatch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ version: 4 }),
+        { text: "My change" },
+    );
+});
+it("queues Enter while another write is pending, preserving both points in order", async () => {
+    let finish: (value: boolean) => void = () => {};
+    const onAdd = vi
+        .fn()
+        .mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    finish = resolve;
+                }),
+        )
+        .mockResolvedValue(true);
+    const { props, rerender } = editor([], { pending: true, onAdd });
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const input = screen.getByLabelText("New discussion point");
+    fireEvent.change(input, { target: { value: "First queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAdd).not.toHaveBeenCalled();
+    rerender(<OutlineEditor {...props} pending={false} />);
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith("First queued", null, 0);
+    fireEvent.change(input, { target: { value: "Second queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    await act(async () => finish(true));
+    expect(onAdd).toHaveBeenCalledTimes(2);
+    expect(onAdd).toHaveBeenLastCalledWith("Second queued", null, 1);
+});
+it.each([
+    false,
+    true,
+])("Escape releases Tab in the %s draft field", async (draft) => {
+    editor();
+    if (draft)
+        fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const input = screen.getAllByLabelText(
+        draft ? "New discussion point" : "Discussion point",
+    )[0];
+    act(() => input.focus());
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.activeElement).toBe(
+        screen.getByText(/Escape, then Tab: leave editor/),
+    );
+    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
+    expect(screen.getByText(/Escape, then Tab: leave editor/)).toBeTruthy();
+});
+it("does not send a note for a pending point and respects composition on saved notes", async () => {
+    const { props, rerender } = editor([point("pending-new")], {
+        live: true,
+        pending: true,
+    });
+    expect(screen.queryByLabelText("Point note")).toBeNull();
+    rerender(
+        <OutlineEditor
+            {...props}
+            live
+            pending={false}
+            detail={detail({ points: [point("saved")] })}
+        />,
+    );
+    const note = screen.getByLabelText("Point note");
+    act(() => note.focus());
+    fireEvent.change(note, { target: { value: "Příští krok" } });
+    fireEvent.keyDown(note, { key: "Enter", isComposing: true });
+    expect(document.activeElement).toBe(note);
+    expect(props.onPatch).not.toHaveBeenCalled();
+    await act(async () => fireEvent.keyDown(note, { key: "Enter" }));
+    expect(props.onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "saved" }),
+        { note: "Příští krok" },
+    );
+});
+
+it("keeps focus at the end of the outline after Escape queues a filled draft", async () => {
+    const { props } = editor();
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const input = screen.getByLabelText("New discussion point");
+    fireEvent.change(input, { target: { value: "Save and leave" } });
+    await act(async () => fireEvent.keyDown(input, { key: "Escape" }));
+    expect(props.onAdd).toHaveBeenCalledExactlyOnceWith(
+        "Save and leave",
+        null,
+        2,
+    );
+    expect(document.activeElement).toBe(
+        screen.getByText(/Escape, then Tab: leave editor/),
+    );
+});
+
+it("keeps a failed queued point without overwriting text typed during the request", async () => {
+    let finish: (saved: boolean) => void = () => {};
+    const onAdd = vi
+        .fn()
+        .mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    finish = resolve;
+                }),
+        )
+        .mockResolvedValue(true);
+    editor([], { onAdd });
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const input = screen.getByLabelText("New discussion point");
+    fireEvent.change(input, { target: { value: "Failed point" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "Still typing" } });
+    await act(async () => finish(false));
+    expect(input).toHaveProperty("value", "Still typing");
+    expect(screen.getByText("Failed point")).toBeTruthy();
+    await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: "Try again" })),
+    );
+    expect(onAdd).toHaveBeenLastCalledWith("Failed point", null, 0);
+});
+
+it("saves text and indentation in one versioned patch when Tab leaves an edited point", async () => {
+    const { props } = editor(undefined, {
+        onPatch: vi.fn().mockResolvedValue(true),
+    });
+    const field = screen.getAllByLabelText("Discussion point")[1];
+    act(() => field.focus());
+    fireEvent.change(field, { target: { value: "Edited second point" } });
+    await act(async () => fireEvent.keyDown(field, { key: "Tab" }));
+    expect(props.onPatch).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: "Second", version: 0 }),
+        { text: "Edited second point", parentId: "Root" },
+    );
+});

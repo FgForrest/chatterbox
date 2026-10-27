@@ -381,52 +381,62 @@ export function RecordingList({
         searchScopes,
     ]);
 
-    const visibleMeetings = meetings.filter(
-        (meeting) =>
-            kindShown === "all" &&
-            !needsReviewOnly &&
-            meeting.title
-                .toLocaleLowerCase()
-                .includes(query.trim().toLocaleLowerCase()),
+    const visibleMeetings = useMemo(
+        () =>
+            meetings.filter(
+                (meeting) =>
+                    kindShown === "all" &&
+                    !needsReviewOnly &&
+                    meeting.title
+                        .toLocaleLowerCase()
+                        .includes(query.trim().toLocaleLowerCase()),
+            ),
+        [meetings, kindShown, needsReviewOnly, query],
     );
-    const entries = [
-        ...filtered.map((recording) => ({
-            id: recording.id,
-            startTime: recording.startTime,
-            filename: recording.filename,
-            duration: recording.duration,
-            filesize: recording.filesize,
-            recording,
-            meeting: null as MeetingRowData | null,
-        })),
-        ...visibleMeetings.map((meeting) => ({
-            id: meeting.id,
-            startTime: meeting.start ?? meeting.createdAt,
-            filename: meeting.title,
-            duration: 0,
-            filesize: 0,
-            recording: null as Recording | null,
-            meeting,
-        })),
-    ].sort((a, b) => {
-        const aFuture = Boolean(
-            a.meeting?.timeSet && Date.parse(a.startTime) > Date.now(),
-        );
-        const bFuture = Boolean(
-            b.meeting?.timeSet && Date.parse(b.startTime) > Date.now(),
-        );
-        if (aFuture !== bFuture) return aFuture ? -1 : 1;
-        if (aFuture) return Date.parse(a.startTime) - Date.parse(b.startTime);
-        if (sortOrder === "name") return a.filename.localeCompare(b.filename);
-        if (sortOrder === "duration")
-            return b.duration - a.duration || a.id.localeCompare(b.id);
-        if (sortOrder === "size")
-            return b.filesize - a.filesize || a.id.localeCompare(b.id);
-        return (
-            (sortOrder === "oldest" ? 1 : -1) *
-            (Date.parse(a.startTime) - Date.parse(b.startTime))
-        );
-    });
+    const entries = useMemo(
+        () =>
+            [
+                ...filtered.map((recording) => ({
+                    id: recording.id,
+                    startTime: recording.startTime,
+                    filename: recording.filename,
+                    duration: recording.duration,
+                    filesize: recording.filesize,
+                    recording,
+                    meeting: null as MeetingRowData | null,
+                })),
+                ...visibleMeetings.map((meeting) => ({
+                    id: meeting.id,
+                    startTime: meeting.start ?? meeting.createdAt,
+                    filename: meeting.title,
+                    duration: 0,
+                    filesize: 0,
+                    recording: null as Recording | null,
+                    meeting,
+                })),
+            ].sort((a, b) => {
+                const aFuture = Boolean(
+                    a.meeting?.timeSet && Date.parse(a.startTime) > Date.now(),
+                );
+                const bFuture = Boolean(
+                    b.meeting?.timeSet && Date.parse(b.startTime) > Date.now(),
+                );
+                if (aFuture !== bFuture) return aFuture ? -1 : 1;
+                if (aFuture)
+                    return Date.parse(a.startTime) - Date.parse(b.startTime);
+                if (sortOrder === "name")
+                    return a.filename.localeCompare(b.filename);
+                if (sortOrder === "duration")
+                    return b.duration - a.duration || a.id.localeCompare(b.id);
+                if (sortOrder === "size")
+                    return b.filesize - a.filesize || a.id.localeCompare(b.id);
+                return (
+                    (sortOrder === "oldest" ? 1 : -1) *
+                    (Date.parse(a.startTime) - Date.parse(b.startTime))
+                );
+            }),
+        [filtered, visibleMeetings, sortOrder],
+    );
     const selectEntry = useCallback(
         (entry: (typeof entries)[number]) => {
             if (entry.meeting) onSelectMeeting?.(entry.id);

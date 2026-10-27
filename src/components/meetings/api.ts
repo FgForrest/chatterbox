@@ -21,6 +21,7 @@ export async function meetingRequest<T>(
         const error = await parseApiError(response);
         throw Object.assign(new Error(error.error), {
             status: response.status,
+            code: error.code,
         });
     }
     return response.status === 204

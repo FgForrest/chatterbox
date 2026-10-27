@@ -329,7 +329,7 @@ it("shows the server's unavailable AI suggestions error as a toast", async () =>
         fireEvent.click(screen.getByRole("button", { name: "Suggest points" })),
     );
     expect(toastError).toHaveBeenCalledWith(
-        "Agenda suggestions are not available yet",
+        "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
     );
 });
 it.each([
@@ -455,4 +455,32 @@ it.each([
             { count, done },
         ),
     ).toBe(expected);
+});
+
+it.each([
+    [1, "1 bod", "1 pozvaný", "1 nahrávka ve složce"],
+    [3, "3 body", "3 pozvaní", "3 nahrávky ve složce"],
+    [5, "5 bodů", "5 pozvaných", "5 nahrávek ve složce"],
+])("uses Czech forms in all meeting counts for %s", (count, points, invitees, recordings) => {
+    expect(
+        translatedSourceMessage(
+            "cs-CZ",
+            "{count, plural, one {# point} other {# points}}",
+            { count },
+        ),
+    ).toBe(points);
+    expect(
+        translatedSourceMessage(
+            "cs-CZ",
+            "{count, plural, one {# invitee} other {# invitees}}",
+            { count },
+        ),
+    ).toBe(invitees);
+    expect(
+        translatedSourceMessage(
+            "cs-CZ",
+            "{count, plural, one {# recording in this folder} other {# recordings in this folder}}",
+            { count },
+        ),
+    ).toBe(recordings);
 });

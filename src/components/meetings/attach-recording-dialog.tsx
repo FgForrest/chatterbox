@@ -58,12 +58,8 @@ export function AttachRecordingDialog({
             });
             onAttached(selected);
             onOpenChange(false);
-        } catch (err) {
-            toast.error(
-                err instanceof Error
-                    ? err.message
-                    : i18n("Could not attach the recording"),
-            );
+        } catch {
+            toast.error(i18n("Could not attach the recording"));
         } finally {
             setBusy(false);
         }

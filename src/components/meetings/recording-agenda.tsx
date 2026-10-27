@@ -3,7 +3,13 @@
 import { CalendarClock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+    type ReactNode,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +18,10 @@ import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
 import { meetingRequest, meetingUrl } from "./api";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
+import {
+    type AgendaSummaryState,
+    RecordingAgendaContext,
+} from "./recording-agenda-context";
 import type { AgendaCandidate, MeetingDetail, NextMeeting } from "./types";
 
 export function RecordingAgenda({
@@ -36,6 +46,22 @@ export function RecordingAgenda({
     const i18n = useExtracted();
     const format = useFormatter();
     const router = useRouter();
+    const [summaryState, setSummaryState] = useState<AgendaSummaryState | null>(
+        null,
+    );
+    const reportSummary = useCallback((state: AgendaSummaryState | null) => {
+        setSummaryState(
+            (previous) =>
+                state ?? (previous ? { ...previous, disabled: true } : null),
+        );
+    }, []);
+    const presence =
+        summaryState?.itemId === recording.id
+            ? summaryState.presence
+            : undefined;
+    const hasAgenda = presence?.hasAgenda ?? recording.hasAgenda ?? false;
+    const candidateCount =
+        presence?.agendaCandidateCount ?? recording.agendaCandidateCount ?? 0;
     const [attached, setAttached] = useState<MeetingDetail | null>(null);
     const [candidates, setCandidates] = useState<AgendaCandidate[]>([]);
     const [next, setNext] = useState<NextMeeting["event"]>(null);
@@ -48,16 +74,19 @@ export function RecordingAgenda({
         recording.view !== "received" &&
         recording.view !== "org";
     const load = useCallback(
-        async (signal?: AbortSignal) => {
+        async (signal?: AbortSignal, attachedOverride?: boolean) => {
+            const loadAttached = attachedOverride ?? hasAgenda;
             const [agendaResult, candidatesResult, nextResult] =
                 await Promise.allSettled([
-                    meetingRequest<{ agenda: MeetingDetail | null }>(
-                        `/api/recordings/${encodeURIComponent(recording.id)}/agenda`,
-                        "GET",
-                        undefined,
-                        signal,
-                    ),
-                    own
+                    loadAttached
+                        ? meetingRequest<{ agenda: MeetingDetail | null }>(
+                              `/api/recordings/${encodeURIComponent(recording.id)}/agenda`,
+                              "GET",
+                              undefined,
+                              signal,
+                          )
+                        : Promise.resolve({ agenda: null }),
+                    own && !loadAttached && candidateCount > 0
                         ? meetingRequest<{ candidates: AgendaCandidate[] }>(
                               `/api/recordings/${encodeURIComponent(recording.id)}/agenda-candidates`,
                               "GET",
@@ -65,12 +94,14 @@ export function RecordingAgenda({
                               signal,
                           )
                         : Promise.resolve({ candidates: [] }),
-                    meetingRequest<NextMeeting>(
-                        `/api/recordings/${encodeURIComponent(recording.id)}/next-meeting`,
-                        "GET",
-                        undefined,
-                        signal,
-                    ),
+                    loadAttached
+                        ? meetingRequest<NextMeeting>(
+                              `/api/recordings/${encodeURIComponent(recording.id)}/next-meeting`,
+                              "GET",
+                              undefined,
+                              signal,
+                          )
+                        : Promise.resolve({ event: null }),
                 ]);
             if (signal?.aborted) return;
             setAttached(
@@ -90,13 +121,20 @@ export function RecordingAgenda({
                     : null,
             );
         },
-        [recording.id, own],
+        [recording.id, own, hasAgenda, candidateCount],
     );
     useEffect(() => {
         const controller = new AbortController();
         void load(controller.signal);
         return () => controller.abort();
     }, [load]);
+    const summaryWasWorking = useRef(false);
+    useEffect(() => {
+        if (summaryState?.working === undefined) return;
+        if (summaryWasWorking.current && !summaryState.working && hasAgenda)
+            void load();
+        summaryWasWorking.current = summaryState.working;
+    }, [summaryState?.working, hasAgenda, load]);
     async function attach() {
         if (!chosen) return;
         const previous = candidates;
@@ -106,15 +144,11 @@ export function RecordingAgenda({
             await meetingRequest(meetingUrl(chosen, "/attach"), "POST", {
                 recordingItemId: recording.id,
             });
-            await load();
+            await load(undefined, true);
             onChanged();
-        } catch (err) {
+        } catch {
             setCandidates(previous);
-            toast.error(
-                err instanceof Error
-                    ? err.message
-                    : i18n("Could not attach the agenda"),
-            );
+            toast.error(i18n("Could not attach the agenda"));
         } finally {
             setBusy(false);
         }
@@ -129,14 +163,10 @@ export function RecordingAgenda({
                 "POST",
             );
             onChanged();
-            await load();
-        } catch (err) {
+            await load(undefined, false);
+        } catch {
             setAttached(previous);
-            toast.error(
-                err instanceof Error
-                    ? err.message
-                    : i18n("Could not detach the agenda"),
-            );
+            toast.error(i18n("Could not detach the agenda"));
         } finally {
             setBusy(false);
         }
@@ -268,6 +298,23 @@ export function RecordingAgenda({
     const card = attached && (
         <Card>
             <CardContent>
+                {summaryState?.hasSummary && !attached.outcomeSummaryId && (
+                    <p className="mb-3 text-xs text-muted-foreground">
+                        {i18n(
+                            "This summary was made before the agenda was attached.",
+                        )}{" "}
+                        {summaryState && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={summaryState.disabled}
+                                onClick={summaryState.run}
+                            >
+                                {i18n("Re-summarize")}
+                            </Button>
+                        )}
+                    </p>
+                )}
                 <AgendaBody
                     key={attached.id}
                     id={attached.id}
@@ -305,7 +352,7 @@ export function RecordingAgenda({
         </div>
     );
     return (
-        <>
+        <RecordingAgendaContext.Provider value={reportSummary}>
             {children ? (
                 children({ notice, agenda: card, nextMeeting })
             ) : (
@@ -330,6 +377,6 @@ export function RecordingAgenda({
                     }}
                 />
             )}
-        </>
+        </RecordingAgendaContext.Provider>
     );
 }

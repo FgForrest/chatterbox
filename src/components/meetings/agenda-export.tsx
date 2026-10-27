@@ -115,8 +115,10 @@ export function AgendaExport({
             }
         } catch (err) {
             toast.error(
-                err instanceof Error
-                    ? err.message
+                err instanceof Error &&
+                    "code" in err &&
+                    err.code === "FORBIDDEN"
+                    ? i18n("Only the event organizer can export the agenda")
                     : i18n("Could not export the agenda"),
             );
         } finally {

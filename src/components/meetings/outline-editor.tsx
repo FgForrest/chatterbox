@@ -24,18 +24,29 @@ function PointField({
     onSave,
     onEnter,
     onEmpty,
-    onIndent,
+    pending,
+    onRelease,
 }: {
     point: MeetingPoint;
     editable: boolean;
-    onSave: (text: string) => void;
+    onSave: (edit: {
+        text?: string;
+        version: number;
+        outdent?: boolean;
+    }) => Promise<boolean> | undefined;
     onEnter: () => void;
     onEmpty: () => void;
-    onIndent: (outdent: boolean) => void;
+    pending: boolean;
+    onRelease: () => void;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(point.text);
     const focused = useRef(false);
+    const editing = useRef(point);
+    const dirty = useRef(false);
+    const saving = useRef<Promise<void> | null>(null);
+    const [failed, setFailed] = useState(false);
+    const released = useRef(false);
     const input = useRef<HTMLTextAreaElement>(null);
     useEffect(() => {
         const field = input.current;
@@ -58,10 +69,40 @@ function PointField({
         return () => observer?.disconnect();
     }, [draft, editable]);
     useEffect(() => {
-        if (!focused.current) setDraft(point.text);
+        if (!focused.current && !dirty.current) setDraft(point.text);
     }, [point.text]);
-    const save = () => {
-        if (draft.trim() && draft.trim() !== point.text) onSave(draft.trim());
+    const save = (outdent?: boolean) => {
+        if (saving.current) return;
+        const text = draft.trim();
+        if (!text && outdent === undefined) return;
+        const changed =
+            Boolean(text) && dirty.current && text !== editing.current.text;
+        if (!changed && outdent === undefined) {
+            dirty.current = false;
+            if (!focused.current) setDraft(point.text);
+            return;
+        }
+        const operation = onSave({
+            version: editing.current.version,
+            ...(changed ? { text } : {}),
+            ...(outdent !== undefined ? { outdent } : {}),
+        });
+        if (!operation) return;
+        saving.current = operation
+            .then((saved) => {
+                setFailed(!saved);
+                if (saved && input.current?.value.trim() === text) {
+                    dirty.current = false;
+                    editing.current = {
+                        ...editing.current,
+                        text,
+                        version: editing.current.version + 1,
+                    };
+                }
+            })
+            .finally(() => {
+                saving.current = null;
+            });
     };
     if (!editable)
         return (
@@ -70,42 +111,61 @@ function PointField({
             </span>
         );
     return (
-        <textarea
-            ref={input}
-            rows={1}
-            aria-label={i18n("Discussion point")}
-            maxLength={2000}
-            value={draft}
-            className="min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
-            onChange={(event) =>
-                setDraft(event.target.value.replace(/[\r\n]/gu, " "))
-            }
-            onFocus={() => {
-                focused.current = true;
-            }}
-            onBlur={() => {
-                focused.current = false;
-                if (!draft.trim()) setDraft(point.text);
-                else save();
-            }}
-            onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === "Enter") {
-                    event.preventDefault();
-                    save();
-                    onEnter();
-                }
-                if (event.key === "Tab") {
-                    event.preventDefault();
-                    save();
-                    onIndent(event.shiftKey);
-                }
-                if (event.key === "Backspace" && !draft) {
-                    event.preventDefault();
-                    onEmpty();
-                }
-            }}
-        />
+        <>
+            <textarea
+                ref={input}
+                rows={1}
+                aria-label={i18n("Discussion point")}
+                maxLength={2000}
+                value={draft}
+                className="min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
+                onChange={(event) => {
+                    dirty.current = true;
+                    setDraft(event.target.value.replace(/[\r\n]/gu, " "));
+                }}
+                onFocus={() => {
+                    focused.current = true;
+                    editing.current = point;
+                    released.current = false;
+                }}
+                onBlur={() => {
+                    focused.current = false;
+                    if (!draft.trim()) setDraft(point.text);
+                    else save();
+                }}
+                onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        released.current = true;
+                        save();
+                        onRelease();
+                        return;
+                    }
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        released.current = false;
+                        save();
+                        onEnter();
+                    }
+                    if (event.key === "Tab" && !released.current) {
+                        event.preventDefault();
+                        save(pending ? undefined : event.shiftKey);
+                    }
+                    if (event.key === "Backspace" && !draft) {
+                        event.preventDefault();
+                        onEmpty();
+                    }
+                }}
+            />
+            {failed && (
+                <span role="alert" className="text-xs text-muted-foreground">
+                    {i18n(
+                        "Your point was not saved. Your text is kept; focus it again to review and re-apply it.",
+                    )}
+                </span>
+            )}
+        </>
     );
 }
 function PointNote({
@@ -115,14 +175,20 @@ function PointNote({
 }: {
     point: MeetingPoint;
     editable: boolean;
-    onSave: (note: string | null) => void;
+    onSave: (
+        note: string | null,
+        version: number,
+    ) => Promise<boolean> | undefined;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
     const [draft, setDraft] = useState(point.note ?? "");
     const focused = useRef(false);
+    const dirty = useRef(false);
+    const editing = useRef(point);
+    const input = useRef<HTMLInputElement>(null);
     useEffect(() => {
-        if (!focused.current) setDraft(point.note ?? "");
+        if (!focused.current && !dirty.current) setDraft(point.note ?? "");
     }, [point.note]);
     return (
         <div className="ml-7 flex items-center gap-2 text-xs text-muted-foreground">
@@ -136,6 +202,7 @@ function PointNote({
             )}
             {editable ? (
                 <input
+                    ref={input}
                     aria-label={i18n("Point note")}
                     placeholder={i18n("Note")}
                     maxLength={2000}
@@ -143,14 +210,28 @@ function PointNote({
                     className="min-w-0 flex-1 rounded border border-transparent bg-transparent p-1 focus:border-input focus:outline-none"
                     onFocus={() => {
                         focused.current = true;
+                        editing.current = point;
                     }}
-                    onChange={(event) => setDraft(event.target.value)}
+                    onChange={(event) => {
+                        dirty.current = true;
+                        setDraft(event.target.value);
+                    }}
                     onBlur={() => {
                         focused.current = false;
-                        if ((draft.trim() || null) !== point.note)
-                            onSave(draft.trim() || null);
+                        if (!dirty.current) return;
+                        const note = draft.trim() || null;
+                        void Promise.resolve(
+                            onSave(note, editing.current.version),
+                        ).then((saved) => {
+                            if (
+                                saved !== false &&
+                                (input.current?.value.trim() || null) === note
+                            )
+                                dirty.current = false;
+                        });
                     }}
                     onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return;
                         if (event.key === "Enter") event.currentTarget.blur();
                     }}
                 />
@@ -175,7 +256,10 @@ export function OutlineEditor({
     readOnly?: boolean;
     live?: boolean;
     pending: boolean;
-    onPatch: (point: MeetingPoint, patch: PointPatch) => void;
+    onPatch: (
+        point: MeetingPoint,
+        patch: PointPatch,
+    ) => Promise<boolean> | undefined;
     onRemove: (point: MeetingPoint, mergeUp?: boolean) => void;
     onAdd: (
         text: string,
@@ -190,9 +274,12 @@ export function OutlineEditor({
         position: number;
     } | null>(null);
     const [newText, setNewText] = useState("");
+    const newDraft = useRef("");
     const newInput = useRef<HTMLInputElement>(null);
+    const exit = useRef<HTMLParagraphElement>(null);
+    const draftReleased = useRef(false);
     useEffect(() => {
-        if (insertion) newInput.current?.focus();
+        if (insertion && !draftReleased.current) newInput.current?.focus();
     }, [insertion]);
     const rows = outlineRows(detail.points);
     const displayRows = outlineRows<TreePoint>([
@@ -200,8 +287,15 @@ export function OutlineEditor({
         ...(insertion ? [{ id: "draft", ...insertion }] : []),
     ]);
     const submitting = useRef(false);
+    const [queued, setQueued] = useState<
+        { text: string; parentId: string | null; position: number }[]
+    >([]);
+    const [failedAdds, setFailedAdds] = useState<
+        { text: string; parentId: string | null; position: number }[]
+    >([]);
     const canAdd = !readOnly && detail.permissions.edit;
     const insert = (point?: MeetingPoint) => {
+        draftReleased.current = false;
         setInsertion({
             parentId: point?.parentId ?? null,
             position: point
@@ -211,25 +305,43 @@ export function OutlineEditor({
                       ...detail.points.map((entry) => entry.position),
                   ) + 1,
         });
+        newDraft.current = "";
         setNewText("");
     };
-    const submit = async () => {
-        if (!newText.trim() || !insertion || pending || submitting.current)
-            return;
-        submitting.current = true;
-        const text = newText.trim();
+    const submit = () => {
+        if (!newDraft.current.trim() || !insertion) return;
+        const text = newDraft.current.trim();
+        newDraft.current = "";
         setNewText("");
-        const saved = await onAdd(text, insertion.parentId, insertion.position);
-        submitting.current = false;
-        if (!saved) {
-            setNewText(text);
-            return;
-        }
+        setQueued((value) => [...value, { text, ...insertion }]);
         setInsertion((value) =>
             value ? { ...value, position: value.position + 1 } : value,
         );
-        newInput.current?.focus();
     };
+    useEffect(() => {
+        if (!canAdd || pending || submitting.current || !queued.length) return;
+        const next = queued[0];
+        submitting.current = true;
+        void onAdd(next.text, next.parentId, next.position)
+            .then((saved) => {
+                if (!saved) {
+                    if (newDraft.current)
+                        setFailedAdds((value) => [...value, next]);
+                    else {
+                        newDraft.current = next.text;
+                        setNewText(next.text);
+                        setInsertion({
+                            parentId: next.parentId,
+                            position: next.position,
+                        });
+                    }
+                }
+                setQueued((value) => value.slice(1));
+            })
+            .finally(() => {
+                submitting.current = false;
+            });
+    }, [canAdd, pending, queued, onAdd]);
     const draftRow = insertion && canAdd && (
         <div
             className="flex items-center gap-2 py-1"
@@ -245,7 +357,13 @@ export function OutlineEditor({
                 value={newText}
                 maxLength={2000}
                 className="min-w-0 flex-1 rounded border bg-background px-2 py-1"
-                onChange={(event) => setNewText(event.target.value)}
+                onFocus={() => {
+                    draftReleased.current = false;
+                }}
+                onChange={(event) => {
+                    newDraft.current = event.target.value;
+                    setNewText(event.target.value);
+                }}
                 onBlur={() => {
                     void submit();
                 }}
@@ -255,14 +373,17 @@ export function OutlineEditor({
                         event.preventDefault();
                         void submit();
                     }
-                    if (
-                        event.key === "Escape" ||
-                        (event.key === "Backspace" && !newText)
-                    ) {
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        draftReleased.current = true;
+                        submit();
+                        exit.current?.focus();
+                    }
+                    if (event.key === "Backspace" && !newText) {
                         event.preventDefault();
                         setInsertion(null);
                     }
-                    if (event.key === "Tab") {
+                    if (event.key === "Tab" && !draftReleased.current) {
                         event.preventDefault();
                         const temporary = { id: "draft", ...insertion };
                         const move = outlineMove(
@@ -332,7 +453,11 @@ export function OutlineEditor({
                                             point: point.text,
                                         })}
                                         checked={Boolean(point.discussedAt)}
-                                        disabled={!canAdd || pending}
+                                        disabled={
+                                            !canAdd ||
+                                            pending ||
+                                            point.id.startsWith("pending-")
+                                        }
                                         onChange={(event) =>
                                             onPatch(point, {
                                                 discussed: event.target.checked,
@@ -346,8 +471,28 @@ export function OutlineEditor({
                                 <PointField
                                     point={point}
                                     editable={editable}
-                                    onSave={(text) => onPatch(point, { text })}
+                                    pending={pending}
+                                    onSave={(edit) => {
+                                        const move =
+                                            edit.outdent === undefined
+                                                ? null
+                                                : edit.outdent
+                                                  ? outdent
+                                                  : indent;
+                                        const patch = {
+                                            ...(edit.text !== undefined
+                                                ? { text: edit.text }
+                                                : {}),
+                                            ...(move ?? {}),
+                                        };
+                                        if (!Object.keys(patch).length) return;
+                                        return onPatch(
+                                            { ...point, version: edit.version },
+                                            patch,
+                                        );
+                                    }}
                                     onEnter={() => insert(point)}
+                                    onRelease={() => exit.current?.focus()}
                                     onEmpty={() => {
                                         if (canRemove && !pending) {
                                             onRemove(point, true);
@@ -367,11 +512,6 @@ export function OutlineEditor({
                                                     ?.querySelector("textarea")
                                                     ?.focus();
                                         }
-                                    }}
-                                    onIndent={(out) => {
-                                        const move = out ? outdent : indent;
-                                        if (move && !pending)
-                                            onPatch(point, move);
                                     }}
                                 />
                                 {point.discussedAt && (
@@ -443,14 +583,40 @@ export function OutlineEditor({
                             {(live || point.note) && (
                                 <PointNote
                                     point={point}
-                                    editable={canAdd}
-                                    onSave={(note) => onPatch(point, { note })}
+                                    editable={
+                                        canAdd &&
+                                        !point.id.startsWith("pending-")
+                                    }
+                                    onSave={(note, version) =>
+                                        onPatch({ ...point, version }, { note })
+                                    }
                                 />
                             )}
                         </div>
                     </div>
                 );
             })}
+            {canAdd &&
+                failedAdds.map((entry) => (
+                    <div
+                        key={`${entry.parentId}:${entry.position}:${entry.text}`}
+                        className="flex items-center gap-2 rounded border p-2"
+                    >
+                        <span>{entry.text}</span>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                                setFailedAdds((value) =>
+                                    value.filter((value) => value !== entry),
+                                );
+                                setQueued((value) => [...value, entry]);
+                            }}
+                        >
+                            {i18n("Try again")}
+                        </Button>
+                    </div>
+                ))}
             {canAdd && (
                 <>
                     <Button
@@ -464,9 +630,13 @@ export function OutlineEditor({
                     >
                         {i18n("Add a point…")}
                     </Button>
-                    <p className="pt-2 text-xs text-muted-foreground">
+                    <p
+                        ref={exit}
+                        tabIndex={-1}
+                        className="pt-2 text-xs text-muted-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
                         {i18n(
-                            "Enter: new point · Tab: indent · Shift+Tab: outdent · up to 3 levels",
+                            "Enter: new point · Tab: indent · Shift+Tab: outdent · Escape, then Tab: leave editor · up to 3 levels",
                         )}
                     </p>
                 </>

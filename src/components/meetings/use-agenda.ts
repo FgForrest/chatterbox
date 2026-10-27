@@ -6,12 +6,20 @@ import { toast } from "sonner";
 import { meetingRequest, meetingUrl, takePrewarmedAgenda } from "./api";
 import type { MeetingDetail } from "./types";
 
-export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
+export function useAgenda(
+    id: string,
+    initial?: MeetingDetail,
+    active = true,
+    pollEnabled = true,
+) {
     const i18n = useExtracted();
     const [detail, setDetail] = useState<MeetingDetail | null>(initial ?? null);
     const [error, setError] = useState<string | null>(null);
     const [pending, setPending] = useState(0);
     const [colleagueChange, setColleagueChange] = useState(false);
+    const loadError = i18n("Could not load the agenda");
+    const loading = useRef(false);
+    const [conflict, setConflict] = useState(false);
     const current = useRef(detail);
     const revision = useRef(0);
     const outstanding = useRef(0);
@@ -26,34 +34,39 @@ export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
     const reload = useCallback(
         async (signal?: AbortSignal, poll = false) => {
             const before = revision.current;
-            if (outstanding.current) return;
-            const cursor =
-                poll && current.current
-                    ? `?since=${current.current.version}`
-                    : "";
-            const warmed =
-                !poll && !current.current ? takePrewarmedAgenda(id) : null;
-            const next = warmed
-                ? await warmed
-                : await meetingRequest<
-                      MeetingDetail | { unchanged: true; version: number }
-                  >(meetingUrl(id, cursor), "GET", undefined, signal);
-            if (
-                before !== revision.current ||
-                signal?.aborted ||
-                next.unchanged
-            )
-                return;
-            if (
-                poll &&
-                current.current &&
-                next.version !== current.current.version
-            )
-                setColleagueChange(true);
-            base.current = next;
-            current.current = next;
-            setDetail(next);
-            setError(null);
+            if (outstanding.current || loading.current) return;
+            loading.current = true;
+            try {
+                const cursor =
+                    poll && current.current
+                        ? `?since=${encodeURIComponent(current.current.cursor ?? String(current.current.version))}`
+                        : "";
+                const warmed =
+                    !poll && !current.current ? takePrewarmedAgenda(id) : null;
+                const next = warmed
+                    ? await warmed
+                    : await meetingRequest<
+                          MeetingDetail | { unchanged: true; version: number }
+                      >(meetingUrl(id, cursor), "GET", undefined, signal);
+                if (
+                    before !== revision.current ||
+                    signal?.aborted ||
+                    next.unchanged
+                )
+                    return;
+                if (
+                    poll &&
+                    current.current &&
+                    next.version !== current.current.version
+                )
+                    setColleagueChange(true);
+                base.current = next;
+                current.current = next;
+                setDetail(next);
+                setError(null);
+            } finally {
+                loading.current = false;
+            }
         },
         [id],
     );
@@ -62,22 +75,22 @@ export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
         const controller = new AbortController();
         if (active && seeded.current) seeded.current = false;
         else if (active)
-            void reload(controller.signal).catch((err: Error) => {
-                if (!controller.signal.aborted) setError(err.message);
+            void reload(controller.signal).catch(() => {
+                if (!controller.signal.aborted) setError(loadError);
             });
         const poll = () => {
-            if (active && document.visibilityState === "visible")
+            if (active && pollEnabled && document.visibilityState === "visible")
                 void reload(controller.signal, true).catch(() => {});
         };
-        const timer = setInterval(poll, 15000);
-        document.addEventListener("visibilitychange", poll);
+        const timer = active && pollEnabled ? setInterval(poll, 15000) : null;
+        if (timer !== null) document.addEventListener("visibilitychange", poll);
         return () => {
             mounted.current = false;
             controller.abort();
-            clearInterval(timer);
+            if (timer !== null) clearInterval(timer);
             document.removeEventListener("visibilitychange", poll);
         };
-    }, [active, reload]);
+    }, [active, reload, pollEnabled, loadError]);
     const mutate = useCallback(
         (
             path: string,
@@ -104,13 +117,22 @@ export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
                         payload,
                     );
                     saved = true;
+                    if (mounted.current) setConflict(false);
                 } catch (err) {
-                    if (mounted.current)
+                    if (mounted.current) {
+                        const conflicted =
+                            err instanceof Error &&
+                            "status" in err &&
+                            err.status === 409;
+                        setConflict(conflicted);
                         toast.error(
-                            err instanceof Error
-                                ? err.message
+                            conflicted
+                                ? i18n(
+                                      "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
+                                  )
                                 : i18n("Could not save the agenda"),
                         );
+                    }
                 }
                 try {
                     const next = await meetingRequest<
@@ -119,7 +141,7 @@ export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
                         meetingUrl(
                             id,
                             base.current
-                                ? `?since=${base.current.version}`
+                                ? `?since=${encodeURIComponent(base.current.cursor ?? String(base.current.version))}`
                                 : "",
                         ),
                     );
@@ -166,6 +188,7 @@ export function useAgenda(id: string, initial?: MeetingDetail, active = true) {
         error,
         pending,
         colleagueChange,
+        conflict,
         dismissChange: () => setColleagueChange(false),
         reload,
         mutate,

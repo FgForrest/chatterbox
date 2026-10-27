@@ -6,11 +6,13 @@ import {
     render,
     screen,
 } from "@testing-library/react";
+import { useContext, useEffect } from "react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AttachRecordingDialog } from "@/components/meetings/attach-recording-dialog";
 import { CreateMeetingDialog } from "@/components/meetings/create-meeting-dialog";
 import { RecordingAgenda } from "@/components/meetings/recording-agenda";
+import { RecordingAgendaContext } from "@/components/meetings/recording-agenda-context";
 import type {
     CalendarChoices,
     MeetingDetail,
@@ -206,7 +208,7 @@ it("shows a widening-sharing audience, attaches explicitly and reads back the ab
     const changed = vi.fn();
     render(
         <RecordingAgenda
-            recording={recording}
+            recording={{ ...recording, agendaCandidateCount: 1 }}
             folders={[folder]}
             onChanged={changed}
         />,
@@ -243,10 +245,7 @@ it("keeps ordinary recordings free of agenda UI and uses the optional lookup", a
     );
     await act(async () => {});
     expect(container.textContent).toBe("");
-    expect(fetchMock).toHaveBeenCalledWith(
-        "/api/recordings/recording/agenda",
-        expect.objectContaining({ method: "GET" }),
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(
         fetchMock.mock.calls.some(([url]) => url.startsWith("/api/meetings/")),
     ).toBe(false);
@@ -272,7 +271,7 @@ it("offers prepare next only when the route returns an instance", async () => {
     );
     render(
         <RecordingAgenda
-            recording={recording}
+            recording={{ ...recording, hasAgenda: true }}
             folders={[folder]}
             onChanged={vi.fn()}
         />,
@@ -304,4 +303,269 @@ it("held attachment offers owned recordings, correct minutes and the upload hand
         }),
     );
     window.removeEventListener("meeting-upload", upload);
+});
+
+it.each([
+    null,
+    "folder",
+    "organization",
+    "organization-root",
+])("preselects only invocation context %s, defaulting to Private", async (folderId) => {
+    const privateRoot: RecordingFolder = {
+        ...folder,
+        id: "private",
+        name: "Private",
+        kind: "private",
+    };
+    const organization: RecordingFolder = {
+        ...folder,
+        id: "organization",
+        scope: "org",
+    };
+    const organizationRoot: RecordingFolder = {
+        ...organization,
+        id: "organization-root",
+        kind: "public",
+    };
+    render(
+        <CreateMeetingDialog
+            folders={[organization, organizationRoot, privateRoot, folder]}
+            folderId={folderId}
+            open
+            onOpenChange={vi.fn()}
+            onCreated={vi.fn()}
+        />,
+    );
+    await act(async () => {});
+    expect(screen.getByRole("combobox")).toHaveProperty(
+        "value",
+        folderId ?? "private",
+    );
+    if (!folderId || folderId === "organization-root") {
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Prepare" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+    }
+});
+function SummaryReporter({
+    hasAgenda,
+    count = 0,
+    run = () => {},
+    working = false,
+}: {
+    hasAgenda: boolean;
+    count?: number;
+    run?: () => void;
+    working?: boolean;
+}) {
+    const report = useContext(RecordingAgendaContext);
+    useEffect(() => {
+        report?.({
+            itemId: "recording",
+            presence: { hasAgenda, agendaCandidateCount: count },
+            hasSummary: true,
+            working,
+            disabled: working,
+            run,
+        });
+        return () => report?.(null);
+    }, [report, hasAgenda, count, run, working]);
+    return null;
+}
+it("uses summary presence for attached reads and offers manual re-summary only without an outcome", async () => {
+    const run = vi.fn();
+    fetchMock.mockImplementation(async (url: string) =>
+        Response.json(
+            url.endsWith("/agenda")
+                ? { agenda: detail({ recordingItemId: "recording" }) }
+                : { event: null },
+        ),
+    );
+    render(
+        <RecordingAgenda
+            recording={recording}
+            folders={[folder]}
+            onChanged={vi.fn()}
+        >
+            {({ agenda }) => (
+                <>
+                    <SummaryReporter hasAgenda run={run} />
+                    {agenda}
+                </>
+            )}
+        </RecordingAgenda>,
+    );
+    const action = await screen.findByRole("button", { name: "Re-summarize" });
+    expect(
+        screen.getByText(
+            "This summary was made before the agenda was attached.",
+        ),
+    ).toBeTruthy();
+    expect(run).not.toHaveBeenCalled();
+    fireEvent.click(action);
+    expect(run).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        "/api/recordings/recording/agenda",
+        "/api/recordings/recording/next-meeting",
+    ]);
+});
+it.each([
+    0, 2,
+])("uses summary candidate count %s without loading next-meeting or agenda", async (count) => {
+    fetchMock.mockResolvedValue(Response.json({ candidates: [] }));
+    const run = vi.fn();
+    render(
+        <RecordingAgenda
+            recording={recording}
+            folders={[folder]}
+            onChanged={vi.fn()}
+        >
+            {() => (
+                <SummaryReporter hasAgenda={false} count={count} run={run} />
+            )}
+        </RecordingAgenda>,
+    );
+    await act(async () => {});
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
+        count > 0 ? ["/api/recordings/recording/agenda-candidates"] : [],
+    );
+});
+it("keeps the late-attach hint out when an outcome already exists", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+        Response.json(
+            url.endsWith("/agenda")
+                ? {
+                      agenda: detail({
+                          recordingItemId: "recording",
+                          outcomeSummaryId: "summary",
+                      }),
+                  }
+                : { event: null },
+        ),
+    );
+    const run = vi.fn();
+    render(
+        <RecordingAgenda
+            recording={{ ...recording, hasAgenda: true }}
+            folders={[folder]}
+            onChanged={vi.fn()}
+        >
+            {({ agenda }) => (
+                <>
+                    <SummaryReporter hasAgenda run={run} />
+                    {agenda}
+                </>
+            )}
+        </RecordingAgenda>,
+    );
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "Re-summarize" })).toBeNull();
+});
+
+it("refreshes agenda outcomes once a manual summary settles, without polling", async () => {
+    let outcomeSummaryId: string | null = null;
+    fetchMock.mockImplementation(async (url: string) =>
+        Response.json(
+            url.endsWith("/agenda")
+                ? {
+                      agenda: detail({
+                          recordingItemId: "recording",
+                          outcomeSummaryId,
+                      }),
+                  }
+                : { event: null },
+        ),
+    );
+    const run = vi.fn();
+    function frame(working: boolean) {
+        return (
+            <RecordingAgenda
+                recording={{ ...recording, hasAgenda: true }}
+                folders={[folder]}
+                onChanged={vi.fn()}
+            >
+                {({ agenda }) => (
+                    <>
+                        <SummaryReporter
+                            hasAgenda
+                            run={run}
+                            working={working}
+                        />
+                        {agenda}
+                    </>
+                )}
+            </RecordingAgenda>
+        );
+    }
+    const { rerender } = render(frame(false));
+    await screen.findByRole("button", { name: "Re-summarize" });
+    fetchMock.mockClear();
+    rerender(frame(true));
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+    outcomeSummaryId = "new-summary";
+    rerender(frame(false));
+    await act(async () => {});
+    expect(
+        screen.queryByText(
+            "This summary was made before the agenda was attached.",
+        ),
+    ).toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        "/api/recordings/recording/agenda",
+        "/api/recordings/recording/next-meeting",
+    ]);
+    expect(run).not.toHaveBeenCalled();
+});
+
+it("retains meeting presence while the summary widget refreshes or is hidden", async () => {
+    fetchMock.mockResolvedValue(
+        Response.json({
+            candidates: [
+                {
+                    id: "agenda",
+                    title: "Prepared agenda",
+                    start: at,
+                    end: null,
+                    folder: { id: "folder", name: "Acme" },
+                    overlapMs: 60000,
+                    widensSharing: false,
+                },
+            ],
+        }),
+    );
+    const run = vi.fn();
+    function frame(show: boolean) {
+        return (
+            <RecordingAgenda
+                recording={recording}
+                folders={[folder]}
+                onChanged={vi.fn()}
+            >
+                {({ notice }) => (
+                    <>
+                        {show && (
+                            <SummaryReporter
+                                hasAgenda={false}
+                                count={1}
+                                run={run}
+                            />
+                        )}
+                        {notice}
+                    </>
+                )}
+            </RecordingAgenda>
+        );
+    }
+    const { rerender } = render(frame(true));
+    await screen.findByText("Attach an agenda?");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    rerender(frame(false));
+    await act(async () => {});
+    expect(screen.getByText("Attach an agenda?")).toBeTruthy();
+    rerender(frame(true));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledOnce();
 });

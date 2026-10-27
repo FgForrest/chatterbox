@@ -4,6 +4,7 @@ import {
     CalendarClock,
     ChevronDown,
     Folder,
+    Loader2,
     Play,
     Square,
     Users,
@@ -75,7 +76,7 @@ export function AgendaBody({
     const i18n = useExtracted();
     const format = useFormatter();
     const router = useRouter();
-    const agenda = useAgenda(id, initial, active);
+    const agenda = useAgenda(id, initial, active, variant !== "recording");
     const { detail, mutate } = agenda;
     const [collapsed, setCollapsed] = useState(variant === "recording");
     const [olderOpen, setOlderOpen] = useState(false);
@@ -85,6 +86,7 @@ export function AgendaBody({
     const [attachOpen, setAttachOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
+    const loadTasksError = i18n("Could not load tasks");
     const sourceRecordings = useMemo(
         () => [
             ...new Map(
@@ -121,11 +123,11 @@ export function AgendaBody({
             .then((result) => {
                 if (!controller.signal.aborted) setOlder(result.tasks);
             })
-            .catch((err: Error) => {
-                if (!controller.signal.aborted) setOlderError(err.message);
+            .catch(() => {
+                if (!controller.signal.aborted) setOlderError(loadTasksError);
             });
         return () => controller.abort();
-    }, [id, olderOpen, scope]);
+    }, [id, olderOpen, scope, loadTasksError]);
     if (!detail)
         return (
             <Card>
@@ -133,6 +135,13 @@ export function AgendaBody({
                     <p role={agenda.error ? "alert" : "status"}>
                         {agenda.error ?? i18n("Loading agenda…")}
                     </p>
+                    {agenda.conflict && (
+                        <p role="alert" className="text-sm">
+                            {i18n(
+                                "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
+                            )}
+                        </p>
+                    )}
                     {agenda.error && (
                         <Button
                             variant="outline"
@@ -196,16 +205,18 @@ export function AgendaBody({
     const changedCount = tasks.filter(taskChanged).length;
     const discussed = detail.points.filter((point) => point.discussedAt).length;
     const busy = agenda.pending > 0;
+    const job = detail.aiSuggestions.job;
+    const suggesting = job?.state === "queued" || job?.state === "running";
+    const suggest = () =>
+        void mutate("/suggestions", "POST", {}, (value) => ({
+            ...value,
+            aiSuggestions: { ...value.aiSuggestions, job: { state: "queued" } },
+        }));
     const patchPoint = (point: MeetingPoint, patch: PointPatch) => {
-        void mutate(
+        return mutate(
             `/points/${encodeURIComponent(point.id)}`,
             "PATCH",
-            (value: MeetingDetail) => ({
-                ...patch,
-                version:
-                    value.points.find((entry) => entry.id === point.id)
-                        ?.version ?? point.version,
-            }),
+            { ...patch, version: point.version },
             (value) => ({
                 ...value,
                 points: value.points.map((entry) =>
@@ -280,22 +291,17 @@ export function AgendaBody({
             }),
         );
     const changeState = (state: "live" | "held") =>
-        void mutate(
-            "",
-            "PATCH",
-            (value: MeetingDetail) => ({ state, version: value.version }),
-            (value) => ({
-                ...value,
-                state,
-                ...(state === "live"
-                    ? {
-                          liveStartedAt:
-                              value.liveStartedAt ?? new Date().toISOString(),
-                          liveEndedAt: null,
-                      }
-                    : { liveEndedAt: new Date().toISOString() }),
-            }),
-        ).then(() => onChanged?.());
+        void mutate("", "PATCH", { state }, (value) => ({
+            ...value,
+            state,
+            ...(state === "live"
+                ? {
+                      liveStartedAt:
+                          value.liveStartedAt ?? new Date().toISOString(),
+                      liveEndedAt: null,
+                  }
+                : { liveEndedAt: new Date().toISOString() }),
+        })).then(() => onChanged?.());
     const taskCard = (
         <Card className={cn(live && "order-2 sm:order-1")}>
             <CardHeader>
@@ -344,10 +350,13 @@ export function AgendaBody({
                                     void mutate(
                                         "",
                                         "PATCH",
-                                        (value: MeetingDetail) => ({
+                                        {
                                             taskSourceItemId,
-                                            version: value.version,
-                                        }),
+                                            previous: {
+                                                taskSourceItemId:
+                                                    detail.taskSourceItemId,
+                                            },
+                                        },
                                         (value) => ({
                                             ...value,
                                             taskSourceItemId,
@@ -713,25 +722,58 @@ export function AgendaBody({
                         <Button
                             variant="outline"
                             size="sm"
-                            disabled={busy || !detail.aiSuggestions.available}
+                            disabled={
+                                busy ||
+                                suggesting ||
+                                !detail.aiSuggestions.available
+                            }
                             aria-describedby={
                                 suggestionsReason
                                     ? suggestionsReasonId
                                     : undefined
                             }
-                            onClick={() =>
-                                void mutate(
-                                    "/suggestions",
-                                    "POST",
-                                    {},
-                                    (value) => value,
-                                )
-                            }
+                            onClick={suggest}
                         >
                             {i18n("Suggest points")}
                         </Button>
                     )}
                 </div>
+                {canEdit && suggesting && (
+                    <output className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                        {job.state === "queued"
+                            ? i18n("Suggestions queued…")
+                            : i18n("Suggesting points…")}
+                    </output>
+                )}
+                {canEdit && job?.state === "failed" && (
+                    <div
+                        role="alert"
+                        className="flex items-center gap-2 text-sm"
+                    >
+                        <span>
+                            {job.errorCode === "INVALID_INPUT"
+                                ? i18n(
+                                      "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the meeting context.",
+                                  )
+                                : job.errorCode === "AI_PROVIDER_API_ERROR"
+                                  ? i18n(
+                                        "The provider returned invalid agenda suggestions. Try again.",
+                                    )
+                                  : i18n(
+                                        "Could not suggest points. Check the processing profile and try again.",
+                                    )}
+                        </span>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy || !detail.aiSuggestions.available}
+                            onClick={suggest}
+                        >
+                            {i18n("Try again")}
+                        </Button>
+                    </div>
+                )}
                 {canEdit && !live && suggestionsReason && (
                     <p
                         id={suggestionsReasonId}
@@ -878,15 +920,15 @@ export function AgendaBody({
                                         mutate(
                                             "",
                                             "PATCH",
-                                            (value: MeetingDetail) => ({
-                                                ...change,
-                                                version: value.version,
-                                            }),
+                                            change,
                                             (value) => ({
                                                 ...value,
                                                 ...optimistic,
                                             }),
-                                        ).then(() => onChanged?.())
+                                        ).then((saved) => {
+                                            if (saved) onChanged?.();
+                                            return saved;
+                                        })
                                     }
                                     onDelete={() =>
                                         mutate(
@@ -899,6 +941,7 @@ export function AgendaBody({
                                                 onDeleted?.();
                                                 onChanged?.();
                                             }
+                                            return saved;
                                         })
                                     }
                                 />
@@ -1077,6 +1120,13 @@ export function AgendaBody({
                     </Button>
                 </output>
             )}
+            {agenda.conflict && (
+                <p role="alert" className="text-sm">
+                    {i18n(
+                        "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
+                    )}
+                </p>
+            )}
             {agenda.error && (
                 <p role="alert" className="text-sm">
                     {agenda.error}
@@ -1113,35 +1163,29 @@ export function AgendaBody({
                                                 variant="ghost"
                                                 disabled={busy}
                                                 onClick={() => {
-                                                    void Promise.all(
-                                                        offered.map(
-                                                            (suggestion) =>
-                                                                mutate(
-                                                                    `/suggestions/${encodeURIComponent(suggestion.id)}`,
-                                                                    "PATCH",
-                                                                    {
-                                                                        state: "dismissed",
-                                                                    },
-                                                                    (
-                                                                        value,
-                                                                    ) => ({
-                                                                        ...value,
-                                                                        suggestions:
-                                                                            value.suggestions.map(
-                                                                                (
-                                                                                    entry,
-                                                                                ) =>
-                                                                                    entry.id ===
-                                                                                    suggestion.id
-                                                                                        ? {
-                                                                                              ...entry,
-                                                                                              state: "dismissed",
-                                                                                          }
-                                                                                        : entry,
-                                                                            ),
-                                                                    }),
+                                                    void mutate(
+                                                        "/suggestions",
+                                                        "PATCH",
+                                                        {
+                                                            state: "dismissed",
+                                                            kind: "ai",
+                                                        },
+                                                        (value) => ({
+                                                            ...value,
+                                                            suggestions:
+                                                                value.suggestions.map(
+                                                                    (entry) =>
+                                                                        entry.kind ===
+                                                                            "ai" &&
+                                                                        entry.state ===
+                                                                            "open"
+                                                                            ? {
+                                                                                  ...entry,
+                                                                                  state: "dismissed",
+                                                                              }
+                                                                            : entry,
                                                                 ),
-                                                        ),
+                                                        }),
                                                     );
                                                 }}
                                             >
@@ -1316,6 +1360,7 @@ function AgendaTaskNote({
                     onSave(draft.trim() || null);
             }}
             onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter") event.currentTarget.blur();
             }}
         />

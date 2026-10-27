@@ -39,11 +39,17 @@ export function CreateMeetingDialog({
     const format = useFormatter();
     const label = useFolderLabel();
     const available = folders.filter(
-        (folder) => folder.kind === "custom" && !folder.receivedFolder,
+        (folder) =>
+            (folder.kind === "custom" || folder.parentId === null) &&
+            !folder.receivedFolder,
     );
     const [chosenFolder, setChosenFolder] = useState(
         available.find((folder) => folder.id === folderId)?.id ??
-            available[0]?.id ??
+            available.find(
+                (folder) =>
+                    folder.kind === "private" && folder.scope === "personal",
+            )?.id ??
+            available.find((folder) => folder.scope === "personal")?.id ??
             "",
     );
     const [choices, setChoices] = useState<CalendarChoices | null>(null);
@@ -54,8 +60,12 @@ export function CreateMeetingDialog({
     const [end, setEnd] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const calendarError = i18n("Could not load calendar events");
+    const hasDestination = available.some(
+        (folder) => folder.id === chosenFolder && folder.kind === "custom",
+    );
     useEffect(() => {
-        if (!open || !chosenFolder) return;
+        if (!open || !hasDestination) return;
         const controller = new AbortController();
         setChoices(null);
         setError(null);
@@ -71,14 +81,14 @@ export function CreateMeetingDialog({
                     if (data.reason) setManual(true);
                 }
             })
-            .catch((err: Error) => {
+            .catch(() => {
                 if (!controller.signal.aborted) {
                     setManual(true);
-                    setError(err.message);
+                    setError(calendarError);
                 }
             });
         return () => controller.abort();
-    }, [open, chosenFolder]);
+    }, [open, chosenFolder, hasDestination, calendarError]);
     const events = [...(choices?.recurring ?? []), ...(choices?.other ?? [])];
     const chosenEvent = events.find((event) => event.id === selected);
     async function prepare() {
@@ -106,12 +116,8 @@ export function CreateMeetingDialog({
             });
             onCreated(result.id, result.meeting);
             onOpenChange(false);
-        } catch (err) {
-            toast.error(
-                err instanceof Error
-                    ? err.message
-                    : i18n("Could not prepare the meeting"),
-            );
+        } catch {
+            toast.error(i18n("Could not prepare the meeting"));
         } finally {
             setBusy(false);
         }
@@ -138,6 +144,9 @@ export function CreateMeetingDialog({
                             setSelected("");
                         }}
                     >
+                        {!chosenFolder && (
+                            <option value="">{i18n("Private")}</option>
+                        )}
                         {available.map((folder) => (
                             <option key={folder.id} value={folder.id}>
                                 {folderDisplayPath(folder, byId, label)}
@@ -155,7 +164,11 @@ export function CreateMeetingDialog({
                         {error}
                     </p>
                 )}
-                {!manual ? (
+                {!hasDestination ? (
+                    <p className="text-sm text-muted-foreground">
+                        {i18n("Choose a folder to prepare the meeting.")}
+                    </p>
+                ) : !manual ? (
                     <>
                         {!choices && !error && (
                             <output>{i18n("Loading calendar…")}</output>
@@ -358,7 +371,7 @@ export function CreateMeetingDialog({
                     <Button
                         disabled={
                             busy ||
-                            !chosenFolder ||
+                            !hasDestination ||
                             (manual
                                 ? !title.trim() ||
                                   Boolean(end && (!start || end <= start))

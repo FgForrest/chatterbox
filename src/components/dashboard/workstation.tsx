@@ -34,7 +34,7 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { AgendaBody } from "@/components/meetings/agenda-body";
-import { meetingRequest, meetingUrl } from "@/components/meetings/api";
+import { meetingRequest } from "@/components/meetings/api";
 import { CreateMeetingDialog } from "@/components/meetings/create-meeting-dialog";
 import type { MeetingRowData } from "@/components/meetings/types";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
@@ -1004,22 +1004,9 @@ export function Workstation({
             const meetingTarget = meetingUploads.current.get(uploadId);
             meetingUploads.current.delete(uploadId);
             if (meetingTarget) {
-                const target = meetingTarget;
-                void meetingRequest(
-                    meetingUrl(target.agendaId, "/attach"),
-                    "POST",
-                    { recordingItemId: recordingId },
-                )
-                    .then(() => {
-                        reloadMeetings();
-                        const params = new URLSearchParams({
-                            recording: recordingId,
-                        });
-                        window.location.assign(`/dashboard?${params}`);
-                    })
-                    .catch((err: Error) => {
-                        toast.error(err.message);
-                    });
+                reloadMeetings();
+                const params = new URLSearchParams({ recording: recordingId });
+                window.location.assign(`/dashboard?${params}`);
                 return;
             }
             const selectUploadedRecording = (
@@ -2422,7 +2409,10 @@ export function Workstation({
                 onOpenChange={(open) => {
                     if (!open) cancelUpload();
                 }}
-                onUpload={(folderId) => void confirmUpload(folderId)}
+                onUpload={(folderId) => {
+                    const agendaId = meetingUpload.current?.agendaId;
+                    void confirmUpload(folderId, agendaId);
+                }}
                 selectedFolderId={selectedFolderId}
             />
 
