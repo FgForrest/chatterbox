@@ -189,6 +189,7 @@ export interface CorrectionPassInput {
     corrected: readonly StandingCorrection[];
     /** Untrusted attendee names used only as spelling hints. */
     attendeeNames?: readonly string[];
+    agendaTerms?: readonly string[];
     signal?: AbortSignal;
 }
 
@@ -248,6 +249,11 @@ function contextOf(
         `LANGUAGE: ${input.language ?? "unknown"}`,
         `ALMANAC (JSON):\n${JSON.stringify(correctionAlmanacJson(input.almanac))}`,
         `MEETING ATTENDEES (JSON):\n${JSON.stringify(attendeeNames)}`,
+        ...(input.agendaTerms?.length
+            ? [
+                  `AGENDA WORDS (JSON, spelling only, plan never evidence):\n${JSON.stringify(input.agendaTerms)}\nUse these only for similar-sounding misspellings supported by the transcript. Never add planned content, change meaning, infer facts or assign speakers. Almanac spellings win.`,
+              ]
+            : []),
         `ALREADY CORRECTED (JSON):\n${JSON.stringify(corrected)}`,
         `TRANSCRIPT:\n${renderLearnTranscript(turns, first)}`,
     ].join("\n\n");

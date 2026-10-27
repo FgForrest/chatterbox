@@ -1,6 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
+import {
+    type AgendaSummaryWrite,
+    lockSummaryAgenda,
+    writeSummaryAgenda,
+} from "@/db/queries/agenda-pipeline";
 import {
     aiEnhancements,
     asyncJobs,
@@ -174,6 +180,7 @@ export interface UpsertEnhancementArgs {
      * transaction: they replace the ones its source made before.
      */
     tasks?: TaskProposals | null;
+    agenda?: AgendaSummaryWrite;
     /** Demo/restore writes remain on the synthesized legacy pipeline state. */
     pipeline?: "trigger" | "legacy";
 }
@@ -653,6 +660,12 @@ export async function upsertEnhancement(
                 }
             }
 
+            if (
+                args.agenda &&
+                !(await lockSummaryAgenda(tx, recordingId, args.agenda))
+            ) {
+                return { advance: null, outdated: true };
+            }
             const [existing] = await tx
                 .select({ id: aiEnhancements.id })
                 .from(aiEnhancements)
@@ -685,6 +698,7 @@ export async function upsertEnhancement(
             const encryptedKeyPoints = encryptJsonField(keyPoints);
             const encryptedActionItems = encryptJsonField(actionItems);
 
+            const summaryId = existing?.id ?? nanoid();
             if (existing) {
                 await tx
                     .update(aiEnhancements)
@@ -708,6 +722,7 @@ export async function upsertEnhancement(
                     );
             } else {
                 await tx.insert(aiEnhancements).values({
+                    id: summaryId,
                     itemId: recordingId,
                     userId,
                     transcriptionId,
@@ -722,6 +737,8 @@ export async function upsertEnhancement(
                     ...runRecordColumns,
                 });
             }
+            if (args.agenda && summaryId)
+                await writeSummaryAgenda(tx, args.agenda, summaryId);
             if (args.tasks) {
                 await writeTaskProposalsInTx(tx, {
                     recordingId,

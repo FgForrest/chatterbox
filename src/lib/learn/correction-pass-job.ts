@@ -63,6 +63,10 @@ import { chooseLearnPath } from "@/lib/learn/provider";
 import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
 import { issueCorrectionPassToken } from "@/lib/learn/run-token";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
+import {
+    agendaSpellingTerms,
+    loadRecordingAgenda,
+} from "@/lib/meetings/pipeline-context";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
@@ -295,6 +299,7 @@ async function runPass({
                     ? learnRun.inputs.calendarEventId
                     : undefined,
         });
+        const agenda = await loadRecordingAgenda(actorUserId, pass.recordingId);
         const result = await runCorrectionPass({
             path,
             bridge,
@@ -305,6 +310,7 @@ async function runPass({
             reviewLocale,
             almanac,
             corrected,
+            agendaTerms: agendaSpellingTerms(agenda),
             attendeeNames:
                 roster?.attendees.map((attendee) => attendee.name) ?? [],
             signal,

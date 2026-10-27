@@ -95,6 +95,10 @@ import {
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
+import {
+    agendaPlanBlock,
+    loadRecordingAgenda,
+} from "@/lib/meetings/pipeline-context";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import {
@@ -830,6 +834,13 @@ async function runLearnJob({
             await chatFor(run, signal, profile.settings.steps.learn.provider);
         const mayChooseEvent =
             run.view === "private" && run.actorUserId === run.userId;
+        const agenda = await loadRecordingAgenda(
+            run.actorUserId ?? run.userId,
+            run.itemId,
+        );
+        const agendaPlan = agenda
+            ? agendaPlanBlock({ ...agenda, tasks: [] })
+            : undefined;
         const storedEventId =
             typeof run.inputs?.calendarEventId === "string"
                 ? run.inputs.calendarEventId
@@ -845,6 +856,7 @@ async function runLearnJob({
         } else if (storedAutoSelected) {
             selectedEventId = storedEventId;
         }
+        selectedEventId = agenda?.calendarEventId ?? selectedEventId;
         const eventAutoSelected =
             selectedEventId === undefined ||
             (chosenEventId === undefined && storedAutoSelected);
@@ -928,6 +940,7 @@ async function runLearnJob({
                       knownPeople,
                       answeredSpeakers,
                       knownFacts,
+                      agendaPlan,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),
@@ -950,6 +963,7 @@ async function runLearnJob({
                       knownPeople,
                       answeredSpeakers,
                       knownFacts,
+                      agendaPlan,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),

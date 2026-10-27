@@ -32,6 +32,7 @@ import {
 import { decodeVector, encodeVector } from "@/lib/knowledge/vector-search";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
 import { secretAddressMasker } from "@/lib/mail/redact";
+import type { AgendaReviewedTask } from "@/lib/meetings/pipeline-context";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
     ANY_TASK_ITEM,
@@ -904,6 +905,7 @@ export async function loadTasksPromptContext({
     language = null,
     participants = [],
     itemText = "",
+    agendaTasks = [],
 }: {
     recording: RecordingRow;
     /** The transcript its speakers are confirmed on; null for a mail. */
@@ -918,6 +920,7 @@ export async function loadTasksPromptContext({
     >[];
     /** Plain item content used only to rank visible candidate tasks. */
     itemText?: string;
+    agendaTasks?: readonly AgendaReviewedTask[];
 }): Promise<TasksPromptContext> {
     const decidedRows = await db
         .select({ text: recordingTasks.text })
@@ -970,11 +973,22 @@ export async function loadTasksPromptContext({
         scopeFolderIds.length > 0
             ? await scopedCandidates(recording, reviewer, scopeFolderIds)
             : await unfiledCandidates(recording, reviewer, [...labelOf.keys()]);
-    const rows = await rankedCandidates(
-        eligible,
+    const reviewedIds = new Set(agendaTasks.map((task) => task.id));
+    const ranked = await rankedCandidates(
+        eligible.filter((task) => !reviewedIds.has(task.id)),
         itemText,
         participantPersonIds,
     );
+    const rows = [
+        ...agendaTasks
+            .filter(
+                (task) =>
+                    !task.changedDuringMeeting &&
+                    ["open", "done"].includes(task.status),
+            )
+            .map((task) => ({ ...task })),
+        ...ranked,
+    ].slice(0, TASK_CANDIDATE_LIMIT);
     rows.forEach((row, index) => {
         const ref = `T${index + 1}`;
         refs.set(ref, row.id);
@@ -988,6 +1002,7 @@ export async function loadTasksPromptContext({
                 ? decryptText(row.assigneeName)
                 : null,
             dueDate: row.dueDate,
+            ...("status" in row ? { status: row.status } : {}),
         });
     });
 
@@ -999,7 +1014,12 @@ export async function loadTasksPromptContext({
             recording.zonemins,
         ),
         language,
-        decided: decidedRows.map((row) => decryptText(row.text)),
+        decided: [
+            ...decidedRows.map((row) => decryptText(row.text)),
+            ...agendaTasks
+                .filter((task) => task.changedDuringMeeting)
+                .map((task) => task.text),
+        ],
         open,
     });
     const mask = await secretAddressMasker([text]);

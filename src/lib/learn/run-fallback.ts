@@ -133,6 +133,7 @@ export interface FallbackInput {
     /** What the turns are: a recording's transcript, or a mail's parts. */
     framing?: "transcript" | "mail";
     signal?: AbortSignal;
+    agendaPlan?: string;
 }
 
 export interface FallbackResult {
@@ -636,6 +637,7 @@ export async function runFallbackPass(
                 input.answeredSpeakers ??
                 [],
             knownFacts: speakerContext?.knownFacts ?? input.knownFacts ?? [],
+            ...(input.agendaPlan ? { agendaPlan: input.agendaPlan } : {}),
         };
         const messages: LearnChatMessage[] = [
             { role: "system", content: answerSystem },
