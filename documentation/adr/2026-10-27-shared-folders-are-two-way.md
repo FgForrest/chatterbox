@@ -1,11 +1,11 @@
 ---
 title: Person-shared folders accept every participant's own items while processing and exports follow ownership
 date: 2026-10-27
-updated: 2026-10-27 14:51
+updated: 2026-10-27 18:22
 status: proposed
 kind: feature
 issues: []
-prs: []
+prs: [293]
 areas: [src/db/queries/folder-participants.ts, src/db/queries/item-shares.ts, src/lib/folders, src/lib/sharing/folder-shares.ts, src/lib/meetings, src/lib/pipeline, src/lib/profiles, src/lib/export, src/components/recordings, src/app/api/v1/recorder/folders, extensions/recorder/popup]
 supersedes: [2026-10-22-person-to-person-sharing]
 superseded-by: []

@@ -1,11 +1,11 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 14:30
+updated: 2026-10-27 18:22
 status: partially-implemented
 kind: feature
 issues: []
-prs: []
+prs: [293]
 areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
 supersedes: []
 superseded-by: []
