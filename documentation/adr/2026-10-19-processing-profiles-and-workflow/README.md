@@ -1,14 +1,14 @@
 ---
 title: Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
 date: 2026-10-19
-updated: 2026-10-22 22:30
+updated: 2026-10-27 10:06
 status: superseded
 kind: feature
 issues: []
 prs: [134, 135, 138, 139, 140, 141, 145, 156, 159]
 areas: [src/lib/pipeline, src/lib/profiles, src/components/pipeline, src/hooks/use-item-processing.ts, src/lib/tasks, src/lib/recordings/title-after-summary.ts, src/lib/folders/permissions.ts, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries, 2026-09-23-shared-organization-scope, 2026-10-18-inbound-mail]
-superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs]
+superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-10-27-meeting-agendas]
 relates: [2026-09-13-durable-job-queue, 2026-10-02-almanac-guided-transcript-correction, 2026-10-14-identity-provider-authorization, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
@@ -33,6 +33,8 @@ kept by [owner reviews tasks, sharing ungated](../2026-10-22-owner-reviews-tasks
 and steps settle their jobs through one binding and one reconciler instead of per-handler writes and
 sweeps ([pipeline steps settle their jobs](../2026-10-22-pipeline-steps-settle-their-jobs.md)). The
 rest of the campaign still holds.
+
+**Superseded in part on 2026-10-27.** [Meeting agendas](../2026-10-27-meeting-agendas.md) permit an explicit attachment by the recording owner to publish into the agenda’s Organization folder before processing or speaker review. Ordinary intended placements and share gates still apply; automatic attachment never publishes. All other rules remain in force except as superseded above.
 
 ## Why
 
@@ -218,6 +220,8 @@ else") shipped as extensions; a "reopen" outcome did not.
   open task in scope.
 
 ## Related work
+
+- [Meeting agendas](../2026-10-27-meeting-agendas.md): supersedes the wait-for-review rule only for an explicitly attached owned recording in an Organization agenda.
 
 - [2026-09-13-durable-job-queue](../2026-09-13-durable-job-queue.md): the driver and steps are jobs on
   that queue, and the one-live-job index is why triggers carry request counters.

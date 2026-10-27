@@ -506,7 +506,9 @@ export const plaudDevices = pgTable(
 );
 
 /** What an item of the Chatter pile is: a recording, or a mail message. */
-export type ChatterItemKind = "audio" | "mail";
+export type ContentItemKind = "audio" | "mail";
+
+export type ChatterItemKind = ContentItemKind | "meeting";
 
 /**
  * How far to trust where a task proposal was read in a mail: in a quoted
@@ -584,7 +586,7 @@ export const chatterItems = pgTable(
             .where(sql`${table.summaryDueAt} is not null`),
         kindCheck: check(
             "chatter_items_kind_check",
-            sql`${table.kind} in ('audio', 'mail')`,
+            sql`${table.kind} in ('audio', 'mail', 'meeting')`,
         ),
     }),
 );
@@ -748,6 +750,8 @@ export const recordings = pgTable(
             .$type<"audio">()
             .notNull()
             .default("audio"),
+        calendarEventId: text("calendar_event_id"),
+        calendarSeriesId: text("calendar_series_id"),
         deviceSn: varchar("device_sn", { length: 255 }).notNull(),
         // Unique ID from Plaud API, scoped per Riffado user.
         plaudFileId: varchar("plaud_file_id", { length: 255 }).notNull(),
@@ -5079,6 +5083,214 @@ export const taskStatusTransitions = pgTable(
         statusCheck: check(
             "task_status_transitions_status_check",
             sql`${table.toStatus} in ('proposed', 'open', 'done', 'dropped') and (${table.fromStatus} is null or (${table.fromStatus} in ('proposed', 'open', 'done', 'dropped') and ${table.fromStatus} <> ${table.toStatus}))`,
+        ),
+    }),
+);
+
+export const meetingAgendas = pgTable(
+    "meeting_agendas",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        meetingItemId: text("meeting_item_id")
+            .unique()
+            .references(() => chatterItems.id, { onDelete: "set null" }),
+        recordingItemId: text("recording_item_id")
+            .unique()
+            .references(() => chatterItems.id, { onDelete: "set null" }),
+        calendarEventId: text("calendar_event_id"),
+        calendarSeriesId: text("calendar_series_id"),
+        plannedStart: timestamp("planned_start"),
+        plannedEnd: timestamp("planned_end"),
+        timeSet: boolean("time_set").notNull().default(false),
+        state: varchar("state", { length: 16 })
+            .$type<"planned" | "live" | "held">()
+            .notNull()
+            .default("planned"),
+        liveStartedAt: timestamp("live_started_at"),
+        liveEndedAt: timestamp("live_ended_at"),
+        absorbedAt: timestamp("absorbed_at"),
+        taskSourceItemId: text("task_source_item_id").references(
+            () => chatterItems.id,
+            { onDelete: "set null" },
+        ),
+        snapshotSourceItemId: text("snapshot_source_item_id").references(
+            () => chatterItems.id,
+            { onDelete: "set null" },
+        ),
+        outcomeUnplanned: jsonb("outcome_unplanned"),
+        outcomeSummaryId: text("outcome_summary_id").references(
+            () => aiEnhancements.id,
+            { onDelete: "set null" },
+        ),
+        version: integer("version").notNull().default(0),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        ownerStartIdx: index("meeting_agendas_owner_start_idx").on(
+            table.userId,
+            table.plannedStart,
+        ),
+        eventIdx: index("meeting_agendas_event_idx").on(table.calendarEventId),
+        seriesIdx: index("meeting_agendas_series_idx").on(
+            table.calendarSeriesId,
+        ),
+        heldDueIdx: index("meeting_agendas_held_due_idx")
+            .on(table.plannedStart)
+            .where(
+                sql`${table.recordingItemId} is null and ${table.state} <> 'held'`,
+            ),
+        stateCheck: check(
+            "meeting_agendas_state_check",
+            sql`${table.state} in ('planned', 'live', 'held')`,
+        ),
+        timeCheck: check(
+            "meeting_agendas_time_check",
+            sql`(not ${table.timeSet} or ${table.plannedStart} is not null) and (${table.plannedEnd} is null or ${table.plannedEnd} > ${table.plannedStart})`,
+        ),
+    }),
+);
+
+export const agendaPoints = pgTable(
+    "agenda_points",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        agendaId: text("agenda_id")
+            .notNull()
+            .references(() => meetingAgendas.id, { onDelete: "cascade" }),
+        parentId: text("parent_id").references(
+            (): AnyPgColumn => agendaPoints.id,
+            { onDelete: "cascade" },
+        ),
+        position: integer("position").notNull().default(0),
+        text: text("text").notNull(),
+        authorUserId: text("author_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        discussedAt: timestamp("discussed_at"),
+        discussedByUserId: text("discussed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        note: text("note"),
+        noteAt: timestamp("note_at"),
+        summaryOutcome: varchar("summary_outcome", { length: 16 }).$type<
+            "covered" | "not_covered"
+        >(),
+        origin: varchar("origin", { length: 16 })
+            .$type<"manual" | "carry_over" | "ai" | "live">()
+            .notNull()
+            .default("manual"),
+        originPointId: text("origin_point_id").references(
+            (): AnyPgColumn => agendaPoints.id,
+            { onDelete: "set null" },
+        ),
+        version: integer("version").notNull().default(0),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        agendaIdx: index("agenda_points_agenda_idx").on(
+            table.agendaId,
+            table.position,
+        ),
+        parentIdx: index("agenda_points_parent_idx").on(table.parentId),
+        originCheck: check(
+            "agenda_points_origin_check",
+            sql`${table.origin} in ('manual', 'carry_over', 'ai', 'live')`,
+        ),
+        outcomeCheck: check(
+            "agenda_points_outcome_check",
+            sql`${table.summaryOutcome} in ('covered', 'not_covered')`,
+        ),
+    }),
+);
+
+export const agendaTasks = pgTable(
+    "agenda_tasks",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        agendaId: text("agenda_id")
+            .notNull()
+            .references(() => meetingAgendas.id, { onDelete: "cascade" }),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        origin: varchar("origin", { length: 16 })
+            .$type<"last_meeting" | "older">()
+            .notNull(),
+        removedAt: timestamp("removed_at"),
+        position: integer("position").notNull().default(0),
+        note: text("note"),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.agendaId, table.taskId] }),
+        taskIdx: index("agenda_tasks_task_idx").on(table.taskId),
+        originCheck: check(
+            "agenda_tasks_origin_check",
+            sql`${table.origin} in ('last_meeting', 'older')`,
+        ),
+    }),
+);
+
+export const agendaSuggestions = pgTable(
+    "agenda_suggestions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        agendaId: text("agenda_id")
+            .notNull()
+            .references(() => meetingAgendas.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 16 })
+            .$type<"carry_over" | "ai">()
+            .notNull(),
+        text: text("text").notNull(),
+        parentPointId: text("parent_point_id").references(
+            () => agendaPoints.id,
+            { onDelete: "set null" },
+        ),
+        sources: jsonb("sources")
+            .$type<{ itemIds: string[]; taskIds: string[] }>()
+            .notNull(),
+        originPointId: text("origin_point_id").references(
+            () => agendaPoints.id,
+            { onDelete: "set null" },
+        ),
+        state: varchar("state", { length: 16 })
+            .$type<"open" | "added" | "dismissed">()
+            .notNull()
+            .default("open"),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        agendaIdx: index("agenda_suggestions_agenda_idx").on(table.agendaId),
+        kindCheck: check(
+            "agenda_suggestions_kind_check",
+            sql`${table.kind} in ('carry_over', 'ai')`,
+        ),
+        stateCheck: check(
+            "agenda_suggestions_state_check",
+            sql`${table.state} in ('open', 'added', 'dismissed')`,
         ),
     }),
 );

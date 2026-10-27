@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import { chatterItems, itemShares, recordingFolders, users } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
@@ -182,7 +183,7 @@ export async function listMyInvitations(userId: string) {
         .select({
             id: itemShares.id,
             itemId: itemShares.itemId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             ownerName: users.name,
             ownerEmail: users.email,

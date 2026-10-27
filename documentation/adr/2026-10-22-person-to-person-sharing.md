@@ -1,20 +1,22 @@
 ---
 title: Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 date: 2026-10-22
-updated: 2026-10-23 04:03
-status: accepted
+updated: 2026-10-27 09:57
+status: superseded
 kind: feature
 issues: [260]
 prs: [262, 265]
 areas: [src/lib/sharing, src/db/queries/item-shares.ts, src/db/queries/task-visibility.ts, src/components/sharing, src/lib/mcp, src/lib/export, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries]
-superseded-by: []
+superseded-by: [2026-10-27-meeting-agendas]
 relates: [2026-09-23-shared-organization-scope, 2026-10-07-backup-scope]
 ---
 
 # Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 
 An owner can invite specific colleagues to a private recording or mail item. Acceptance grants reading and completion of tasks assigned to the receiver, without publishing anything to the Organization or the receiver's Almanac. One record covers both individual invitations and live shares of the items directly in a private folder.
+
+**Superseded in part.** [Meeting agendas](2026-10-27-meeting-agendas.md) allow a co-editor to explicitly attach their own recording into the agenda author’s shared folder. That validated attachment extends direct folder membership beyond items owned by the folder owner. Ordinary filing and receiver restrictions, accepted invitations, revocation and export ownership still hold.
 
 ## Why
 
@@ -82,6 +84,8 @@ Use versioned direct invitations with pending, accepted, declined and removed st
 - General archive import remains separate work. The item and folder share restore endpoints are available for importers and report skipped entries rather than creating accounts or silently granting access.
 
 ## Related work
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): supersedes only the same-owner direct-folder membership rule for an explicitly attached recording.
 
 - [Shared Organization scope](2026-09-23-shared-organization-scope/README.md): defines the broad shared scope that person shares must never widen.
 - [Tasks from summaries](2026-10-07-tasks-from-summaries.md): superseded only in its rule that colleagues receive tasks solely through the Organization; task ownership and other lifecycle rules remain.

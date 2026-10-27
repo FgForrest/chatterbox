@@ -137,8 +137,9 @@ export async function loadPrivateCategorizationPanel(
             ),
         )
         .limit(1);
-    if (!item) return null;
+    if (!item || item.kind === "meeting") return null;
 
+    const channel = item.kind;
     const [orgUserId] = await Promise.all([
         getOrgUserId(),
         ensureProfiles(ownerUserId),
@@ -165,7 +166,7 @@ export async function loadPrivateCategorizationPanel(
                 listProfiles({
                     ownerUserId: profileOwnerUserId,
                     actorUserId: ownerUserId,
-                    channel: item.kind,
+                    channel,
                     limit: 100,
                 }),
             ),
@@ -243,7 +244,7 @@ export async function loadPrivateCategorizationPanel(
               await resolveProfileForPlacements({
                   ownerUserId,
                   itemId,
-                  channel: item.kind,
+                  channel,
                   folderIds: selectedFolderIds,
                   view: "private",
                   seedProfiles: false,

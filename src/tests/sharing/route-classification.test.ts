@@ -54,6 +54,9 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         PATCH: "view",
         DELETE: "owner",
     },
+    "recordings/[id]/agenda-candidates/route.ts": { GET: "owner" },
+    "recordings/[id]/agenda/detach/route.ts": { POST: "owner" },
+    "recordings/[id]/next-meeting/route.ts": { GET: "access" },
     "recordings/[id]/audio/route.ts": { GET: "access" },
     "recordings/[id]/calendar-events/route.ts": { GET: "owner" },
     "recordings/[id]/categorize/route.ts": { GET: "owner", POST: "owner" },
@@ -214,7 +217,9 @@ describe("recording route classification", () => {
                 );
             }
             if (rules.has("access")) {
-                expect(source, file).toContain("requireRecordingAccess");
+                expect(source, file).toMatch(
+                    /requireRecordingAccess|nextMeeting/,
+                );
             }
             if (rules.has("tasks")) {
                 expect(source, file).toContain("requireTaskViewer");

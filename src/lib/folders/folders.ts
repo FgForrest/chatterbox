@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
+import { folderItemOwnerCondition } from "@/db/queries/meeting-folder-access";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
@@ -8,6 +9,7 @@ import {
     asyncJobs,
     chatterItems,
     folderExportConfigurations,
+    meetingAgendas,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -55,7 +57,7 @@ import {
     publishSpeakerNamesInTx,
     publishTaskAssigneesInTx,
 } from "@/lib/sharing/share-names";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
 import {
     lockItemTaskGraphInTx,
     withdrawItemTaskHomesInTx,
@@ -658,9 +660,11 @@ async function listTreeOrganization(
                     eq(recordingFolders.userId, ownerId),
                     isNull(chatterItems.deletedAt),
                     assignmentUserId
-                        ? eq(
+                        ? folderItemOwnerCondition(
+                              recordingFolders.userId,
                               recordingFolderAssignments.userId,
-                              assignmentUserId,
+                              recordingFolders.id,
+                              recordingFolderAssignments.itemId,
                           )
                         : undefined,
                 ),
@@ -1156,7 +1160,7 @@ async function requireOwnedRecording(
     executor: Pick<typeof db, "select">,
     userId: string,
     recordingId: string,
-): Promise<"audio" | "mail"> {
+): Promise<"audio" | "mail" | "meeting"> {
     const [item] = await executor
         .select({ kind: chatterItems.kind })
         .from(chatterItems)
@@ -1251,6 +1255,7 @@ export async function shareItemToOrganizationFolderInTx(
         itemId: string;
         folderId: string;
         orgUserId: string;
+        explicitAgendaId?: string;
     },
 ): Promise<ShareGateProblem[]> {
     await lockOrgTree(tx);
@@ -1278,16 +1283,64 @@ export async function shareItemToOrganizationFolderInTx(
         input.ownerUserId,
         input.itemId,
     );
+    if (kind === "meeting") {
+        await tx
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: input.ownerUserId,
+                itemId: input.itemId,
+                folderId: folder.id,
+            })
+            .onConflictDoNothing();
+        await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+        await notifyFolderReceiversInTx(tx, input.ownerUserId, input.itemId);
+        return [];
+    }
     const wasShared = await isRecordingShared(
         input.itemId,
         input.orgUserId,
         tx,
     );
-    const problems = wasShared
-        ? []
-        : kind === "mail"
-          ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
-          : await loadShareGate(tx, input.itemId, input.ownerUserId);
+    let explicitAgenda = false;
+    if (input.explicitAgendaId && kind === "audio") {
+        const [agenda] = await tx
+            .select({ id: meetingAgendas.id })
+            .from(meetingAgendas)
+            .innerJoin(
+                chatterItems,
+                eq(chatterItems.id, meetingAgendas.meetingItemId),
+            )
+            .innerJoin(
+                recordingFolderAssignments,
+                and(
+                    eq(recordingFolderAssignments.itemId, chatterItems.id),
+                    eq(recordingFolderAssignments.userId, chatterItems.userId),
+                ),
+            )
+            .where(
+                and(
+                    eq(meetingAgendas.id, input.explicitAgendaId),
+                    isNull(meetingAgendas.recordingItemId),
+                    isNull(chatterItems.deletedAt),
+                    eq(recordingFolderAssignments.folderId, input.folderId),
+                    sharedItemCondition(input.orgUserId),
+                ),
+            )
+            .limit(1);
+        explicitAgenda = !!agenda;
+        if (!explicitAgenda)
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Explicit agenda sharing requires a visible Organization agenda",
+                403,
+            );
+    }
+    const problems =
+        wasShared || explicitAgenda
+            ? []
+            : kind === "mail"
+              ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
+              : await loadShareGate(tx, input.itemId, input.ownerUserId);
     if (problems.length > 0) return problems;
 
     if (kind === "mail") {

@@ -54,6 +54,7 @@ export async function incrementProcessingRequestInTx(
         from chatter_items
         where chatter_items.id = ${itemId}
           and chatter_items.user_id = ${userId}
+          and chatter_items.kind in ('audio', 'mail')
           and chatter_items.deleted_at is null
         on conflict (item_id, view) do update
         set requested_generation = item_processing.requested_generation + 1,
@@ -132,6 +133,7 @@ export async function updateProcessingPhaseInTx(
         from chatter_items
         where chatter_items.id = ${itemId}
           and chatter_items.user_id = ${userId}
+          and chatter_items.kind in ('audio', 'mail')
           and chatter_items.deleted_at is null
         on conflict (item_id, view) do update
         set phases = jsonb_set(
@@ -253,6 +255,7 @@ export async function listAutomaticTranscriptionRetryRows(
         where item_processing.view = 'private'
           and (${scope?.userId ?? null}::text is null or item_processing.user_id = ${scope?.userId ?? null})
           and (${scope?.itemId ?? null}::text is null or item_processing.item_id = ${scope?.itemId ?? null})
+          and chatter_items.kind in ('audio', 'mail')
           and chatter_items.deleted_at is null
           and chatter_items.content_reaped_at is null
           and recordings.deleted_at is null

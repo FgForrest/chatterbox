@@ -123,8 +123,7 @@ export async function gatherFacts(
             .limit(1),
     ]);
 
-    const missing = !item;
-    if (missing) {
+    if (!item || item.kind === "meeting") {
         return {
             item: {
                 exists: false,

@@ -14,6 +14,8 @@ const WRITE_TOOLS = new Set([
     "create_task",
     "follow_task",
     "merge_tasks",
+    "prepare_meeting",
+    "edit_agenda",
 ]);
 
 const everything: McpCaller = {
@@ -66,7 +68,9 @@ describe("the MCP tool registry", () => {
     )("%s writes only with tasks:write", (name, tool) => {
         expect(tool.anyOf).toEqual(["tasks:write"]);
         expect(tool.annotations.destructiveHint).toBe(
-            name === "merge_tasks" || name === "update_task",
+            name === "merge_tasks" ||
+                name === "update_task" ||
+                name === "edit_agenda",
         );
     });
 

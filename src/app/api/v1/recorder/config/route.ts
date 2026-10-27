@@ -18,7 +18,8 @@ export const GET = apiHandler(async (request: Request) => {
     const gate = await gateRecordingSessionRequest(request);
     if (gate.response) return gate.response;
 
-    return NextResponse.json(
-        serializeRecorderServerConfig(getRecorderServerConfig()),
-    );
+    return NextResponse.json({
+        ...serializeRecorderServerConfig(getRecorderServerConfig()),
+        features: { agendas: true },
+    });
 });

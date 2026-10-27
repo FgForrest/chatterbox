@@ -12,6 +12,7 @@ import {
     taskMentions,
     taskVectors,
 } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { readItemContent } from "@/lib/content/read-item-content";
 import type { ItemContent } from "@/lib/content/types";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -191,7 +192,7 @@ async function scopedCandidates(
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: candidateHomeItem.id,
-            homeItemKind: candidateHomeItem.kind,
+            homeItemKind: contentKindColumn(candidateHomeItem.kind),
             homeItemTitle: candidateHomeItem.title,
             shared: sql<boolean>`${taskRecordingShared(reviewer, {
                 id: candidateHomeItem.id,
@@ -332,7 +333,7 @@ async function unfiledCandidates(
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: chatterItems.id,
-            homeItemKind: chatterItems.kind,
+            homeItemKind: contentKindColumn(chatterItems.kind),
             homeItemTitle: chatterItems.title,
             shared: sql<boolean>`${taskRecordingShared(
                 reviewer,
@@ -767,7 +768,7 @@ export async function searchMergeCandidates(
         .select({
             id: chatterItems.id,
             userId: chatterItems.userId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             occurredAt: chatterItems.occurredAt,
             shared: sql<boolean>`${taskRecordingShared(
@@ -1358,7 +1359,7 @@ export async function searchAssignedMergeCandidates(
             assigneePersonId: recordingTasks.assigneePersonId,
             assigneeName: people.displayName,
             itemId: chatterItems.id,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
         })
         .from(recordingTasks)

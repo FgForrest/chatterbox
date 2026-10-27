@@ -1,7 +1,7 @@
 ---
 title: Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
 date: 2026-10-12
-updated: 2026-10-23 09:11
+updated: 2026-10-27 09:57
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [105, 106, 107, 117]
 areas: [src/lib/integrations/google, src/app/api/recordings/[id]/calendar-events/route.ts, src/lib/learn/run-fallback.ts, src/lib/learn/learn-job-handler.ts, src/components/learn/learn-widget.tsx]
 supersedes: []
 superseded-by: [2026-10-22-calendar-speaker-guesses-in-automatic-runs]
-relates: [2026-09-14-speaker-identity-without-biometrics, 2026-09-30-learn, 2026-09-28-google-drive-export]
+relates: [2026-09-14-speaker-identity-without-biometrics, 2026-09-30-learn, 2026-09-28-google-drive-export, 2026-10-27-meeting-agendas]
 ---
 
 # Calendar invitees and Meet participants reach Learn only as speaker candidates, never as proof
@@ -139,6 +139,8 @@ is implemented in issue #256 under the successor’s scope, hashing and ambiguit
 reading that it had been ruled out was corrected by the maintainer on 2026-10-22).
 
 ## Related work
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): planned discussion points, frozen task reviews, safe recording attachment and explicit Calendar export extend this area.
 
 - [2026-09-14-speaker-identity-without-biometrics](2026-09-14-speaker-identity-without-biometrics.md): why identity comes from Calendar and Meet at all.
 - [2026-09-30-learn](2026-09-30-learn/README.md): the Learn passes and evaluation these candidates feed.

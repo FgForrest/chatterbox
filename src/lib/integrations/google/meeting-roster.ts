@@ -87,7 +87,11 @@ export async function resolveMeetingRoster(input: {
     try {
         if (input.calendarEventId === "") return null;
         const [recording] = await db
-            .select({ start: chatterItems.occurredAt, end: recordings.endTime })
+            .select({
+                start: chatterItems.occurredAt,
+                end: recordings.endTime,
+                calendarEventId: recordings.calendarEventId,
+            })
             .from(recordings)
             .innerJoin(chatterItems, recordingItemJoin)
             .where(
@@ -109,9 +113,21 @@ export async function resolveMeetingRoster(input: {
             }),
             recording.start,
             recording.end,
-            input.calendarEventId,
+            input.calendarEventId ?? recording.calendarEventId ?? undefined,
         );
         if (!event) return null;
+        await db
+            .update(recordings)
+            .set({
+                calendarEventId: event.id,
+                calendarSeriesId: event.recurringEventId ?? null,
+            })
+            .where(
+                and(
+                    eq(recordings.id, input.itemId),
+                    eq(recordings.userId, input.ownerUserId),
+                ),
+            );
         const joined = await getMeetSpeakerCandidates({
             userId: input.ownerUserId,
             event,

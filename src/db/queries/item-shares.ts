@@ -1,6 +1,10 @@
 import { type AnyColumn, and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    authorAgendaRecordingIds,
+    folderItemOwnerCondition,
+} from "@/db/queries/meeting-folder-access";
+import {
     chatterItems,
     folderShares,
     itemShares,
@@ -49,6 +53,8 @@ export function receivedItemCondition(
           and ${activeShareRecipientCondition()}
         union all
         ${receivedFolderItemIds(receiverUserId)}
+        union all
+        ${authorAgendaRecordingIds(receiverUserId)}
     )`;
 }
 
@@ -103,9 +109,9 @@ function receivedFolderItemIds(
         inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
             and ${recordingFolders.userId} = ${folderShares.userId}
         inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
-            and ${recordingFolderAssignments.userId} = ${folderShares.userId}
+            and ${folderItemOwnerCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId, recordingFolderAssignments.itemId)}
         inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
-            and ${chatterItems.userId} = ${folderShares.userId}
+            and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
         inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
         ${attachmentId ? sql`inner join ${receivedFolderAttachments} on ${receivedFolderAttachments.shareId} = ${folderShares.id} and ${receivedFolderAttachments.userId} = ${receiverUserId}` : sql``}
         where ${folderShares.receiverUserId} = ${receiverUserId}
@@ -128,10 +134,10 @@ export function outgoingItemShareCondition(ownerUserId: string) {
         inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
             and ${recordingFolders.userId} = ${folderShares.userId}
         inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
-            and ${recordingFolderAssignments.userId} = ${folderShares.userId}
+            and ${folderItemOwnerCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId, recordingFolderAssignments.itemId)}
         inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
-            and ${chatterItems.userId} = ${folderShares.userId}
-        where ${folderShares.userId} = ${ownerUserId}
+            and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
+        where ${chatterItems.userId} = ${ownerUserId}
             and ${folderShares.state} in ('pending', 'accepted')
             and ${recordingFolders.kind} = 'custom'
     )`;
@@ -168,12 +174,12 @@ export async function notifyFolderReceiversInTx(
               inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
                 and ${recordingFolderAssignments.userId} = ${ownerUserId}
               inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
-                and ${recordingFolders.userId} = ${ownerUserId}
+                and ${recordingFolders.userId} = ${folderShares.userId}
+                and ${folderItemOwnerCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId, recordingFolderAssignments.itemId)}
               inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
                 and ${chatterItems.userId} = ${ownerUserId}
               inner join ${users} on ${users.id} = ${folderShares.receiverUserId}
-              where ${folderShares.userId} = ${ownerUserId}
-                and ${folderShares.state} = 'accepted'
+              where ${folderShares.state} = 'accepted'
                 and ${recordingFolderAssignments.itemId} = ${itemId}
                 and ${recordingFolders.kind} = 'custom'
                 ${folderId ? sql`and ${folderShares.folderId} = ${folderId}` : sql``}

@@ -26,6 +26,7 @@ import {
     taskUpdateProposals,
     users,
 } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { decryptText } from "@/lib/encryption/fields";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
 import { hasAudio } from "@/lib/recordings/audio-availability";
@@ -176,7 +177,7 @@ async function loadTaskMentions(
                 id: taskMentions.id,
                 taskId: taskMentions.taskId,
                 itemId: taskMentions.itemId,
-                kind: chatterItems.kind,
+                kind: contentKindColumn(chatterItems.kind),
                 title: chatterItems.title,
                 audioId: recordings.id,
                 audioReapedAt: recordings.audioReapedAt,
@@ -360,7 +361,10 @@ async function taskGraphItemRefs(
         }
     }
     return tx
-        .select({ id: chatterItems.id, kind: chatterItems.kind })
+        .select({
+            id: chatterItems.id,
+            kind: contentKindColumn(chatterItems.kind),
+        })
         .from(chatterItems)
         .where(inArray(chatterItems.id, [...ids]))
         .orderBy(asc(chatterItems.id));

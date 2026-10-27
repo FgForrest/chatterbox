@@ -1,7 +1,7 @@
 ---
 title: Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog
 date: 2026-10-22
-updated: 2026-10-22 19:55
+updated: 2026-10-27 09:57
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [249]
 areas: [extensions/recorder/service-worker.js, extensions/recorder/lib/platforms.js, extensions/recorder/manifest.json, extensions/recorder/popup/folder-combobox.js, extensions/recorder/PRIVACY.md]
 supersedes: []
 superseded-by: []
-relates: [2026-10-21-meeting-recorder-extension]
+relates: [2026-10-21-meeting-recorder-extension, 2026-10-27-meeting-agendas]
 ---
 
 # Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog
@@ -117,6 +117,8 @@ notification clicks (see open follow-ups).
 - Users who never opt in keep the notification path and its dialog.
 
 ## Related work
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): planned discussion points, frozen task reviews, safe recording attachment and explicit Calendar export extend this area.
 
 - [2026-10-21-meeting-recorder-extension](2026-10-21-meeting-recorder-extension/README.md): the
   extension's earlier decisions (encrypted buffering, compatibility with released servers, current-tab

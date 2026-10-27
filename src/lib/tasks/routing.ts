@@ -20,6 +20,7 @@ import {
     taskUpdateProposals,
     users,
 } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -784,7 +785,7 @@ export async function listRoutedTaskProposals(
             evidenceCharStart: taskUpdateProposals.evidenceCharStart,
             evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             version: taskUpdateProposals.version,
-            sourceItemKind: routedSourceItem.kind,
+            sourceItemKind: contentKindColumn(routedSourceItem.kind),
             sourceItemTitle: routedSourceItem.title,
             sourceAudioId: recordings.id,
             sourceAudioReapedAt: recordings.audioReapedAt,

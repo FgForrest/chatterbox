@@ -106,7 +106,8 @@ export async function updateTitleAfterSummary(input: {
             ),
         )
         .limit(1);
-    if (!item) return { kind: "skipped", reason: "gone" };
+    if (!item || item.kind === "meeting")
+        return { kind: "skipped", reason: "gone" };
     if (item.titleEditedAt) {
         await settleSkipped("first_summary_title_edited");
         return { kind: "skipped", reason: "first_summary_title_edited" };

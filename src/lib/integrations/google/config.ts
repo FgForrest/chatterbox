@@ -5,6 +5,9 @@ export const GOOGLE_DRIVE_FILE_SCOPE =
 export const GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE =
     "https://www.googleapis.com/auth/calendar.events.readonly";
 
+export const GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE =
+    "https://www.googleapis.com/auth/calendar.events";
+
 /** Scopes asked for on connect. Later integrations add theirs incrementally. */
 export const GOOGLE_CONNECT_SCOPES = [
     "openid",

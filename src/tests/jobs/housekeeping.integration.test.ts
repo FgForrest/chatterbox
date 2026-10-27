@@ -261,6 +261,7 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
             ]);
 
         expect(await runHousekeeping()).toEqual({
+            meeting_agendas: 0,
             async_jobs: 2,
             webhook_deliveries: 2,
             api_rate_limit_buckets: 1,

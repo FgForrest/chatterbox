@@ -37,6 +37,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { type Keyset, keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -310,7 +311,7 @@ const taskColumns = {
     evidenceCharStart: recordingTasks.evidenceCharStart,
     evidenceCharEnd: recordingTasks.evidenceCharEnd,
     evidenceProvenance: recordingTasks.evidenceProvenance,
-    homeItemKind: chatterItems.kind,
+    homeItemKind: contentKindColumn(chatterItems.kind),
     source: recordingTasks.source,
     ticked: recordingTasks.ticked,
     version: recordingTasks.version,
@@ -320,9 +321,13 @@ const taskColumns = {
 };
 
 type TaskSelect = {
-    [K in keyof typeof taskColumns]:
-        | (typeof taskColumns)[K]["_"]["data"]
-        | null;
+    [K in keyof typeof taskColumns]: (typeof taskColumns)[K] extends {
+        _: { data: infer D };
+    }
+        ? D | null
+        : (typeof taskColumns)[K] extends SQL<infer D>
+          ? D | null
+          : never;
 };
 
 function toView(
@@ -466,7 +471,7 @@ export async function listRecordingTasks(
             )}`,
             id: chatterItems.id,
             ownerUserId: chatterItems.userId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             audioId: recordings.id,
             audioReapedAt: recordings.audioReapedAt,
@@ -734,7 +739,7 @@ async function listSuggestedMatches(
             assigneePersonId: recordingTasks.assigneePersonId,
             assigneeName: people.displayName,
             homeItemId: matchCandidateHome.id,
-            homeItemKind: matchCandidateHome.kind,
+            homeItemKind: contentKindColumn(matchCandidateHome.kind),
             homeItemTitle: matchCandidateHome.title,
             homeAudioId: taskAudio.id,
             homeAudioReapedAt: taskAudio.audioReapedAt,
@@ -1055,7 +1060,7 @@ async function taskItemKind(
     taskId: string,
 ): Promise<"audio" | "mail" | null> {
     const [row] = await tx
-        .select({ kind: chatterItems.kind })
+        .select({ kind: contentKindColumn(chatterItems.kind) })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .where(eq(recordingTasks.id, taskId))
@@ -1573,7 +1578,7 @@ async function lockMergeTasks(
         .select({
             taskId: recordingTasks.id,
             itemId: recordingTasks.itemId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
         })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
@@ -1597,7 +1602,10 @@ async function lockMergeTasks(
         ),
     ];
     const refs = await tx
-        .select({ itemId: chatterItems.id, kind: chatterItems.kind })
+        .select({
+            itemId: chatterItems.id,
+            kind: contentKindColumn(chatterItems.kind),
+        })
         .from(chatterItems)
         .where(inArray(chatterItems.id, graphItemIds));
     let itemRefs: { itemId: string; kind: "audio" | "mail" }[] = [
@@ -1641,7 +1649,10 @@ async function lockMergeTasks(
     ];
     if (driftedItemIds.length > 0) {
         const driftedRefs = await tx
-            .select({ itemId: chatterItems.id, kind: chatterItems.kind })
+            .select({
+                itemId: chatterItems.id,
+                kind: contentKindColumn(chatterItems.kind),
+            })
             .from(chatterItems)
             .where(inArray(chatterItems.id, driftedItemIds))
             .orderBy(asc(chatterItems.id));
@@ -3063,7 +3074,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     const rows = await db
         .select({
             recordingId: chatterItems.id,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
         })
         .from(chatterItems)
@@ -3353,6 +3364,25 @@ export async function getVisibleTask(
     return task ?? null;
 }
 
+/** Read an explicitly requested set of currently visible accepted tasks in one batch. */
+export async function getVisibleTasks(
+    viewer: TaskViewer,
+    taskIds: readonly string[],
+): Promise<TaskListItem[]> {
+    if (!taskIds.length) return [];
+    return loadTaskListItems(
+        viewer,
+        [
+            ne(recordingTasks.status, "proposed"),
+            isNull(chatterItems.deletedAt),
+            taskVisible(viewer, ANY_TASK_ITEM, true),
+            inArray(recordingTasks.id, [...new Set(taskIds)]),
+        ],
+        [],
+        taskIds.length,
+    );
+}
+
 async function loadTaskListItems(
     viewer: TaskViewer,
     conditions: readonly (SQL | undefined)[],
@@ -3367,7 +3397,7 @@ async function loadTaskListItems(
             recordingOwner: chatterItems.userId,
             recordingTitle: chatterItems.title,
             recordingStart: chatterItems.occurredAt,
-            recordingKind: chatterItems.kind,
+            recordingKind: contentKindColumn(chatterItems.kind),
         })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))

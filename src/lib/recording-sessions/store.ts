@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { requireMeetingAccess } from "@/lib/meetings/access";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import type { StorageProvider } from "@/lib/storage/types";
 import { MAX_SESSION_BYTES } from "./constants";
@@ -466,8 +467,18 @@ export async function markRecordingSessionCompleting(input: {
     expectedChunkCount: number;
     folderId?: string | null;
     truncatedAtChunk: number | null;
+    agendaId?: string;
 }): Promise<RecordingSessionRow | null> {
+    const agendaAccess = input.agendaId
+        ? await requireMeetingAccess(input.userId, input.agendaId, "edit")
+        : null;
     return db.transaction(async (tx) => {
+        if (input.agendaId && agendaAccess)
+            await requireMeetingAccess(input.userId, input.agendaId, "edit", {
+                viewer: agendaAccess.viewer,
+                executor: tx,
+                lock: true,
+            });
         const [session] = await tx
             .select({ status: recordingSessions.status })
             .from(recordingSessions)
@@ -505,6 +516,11 @@ export async function markRecordingSessionCompleting(input: {
             .set({
                 ...(input.folderId !== undefined
                     ? { folderId: input.folderId }
+                    : {}),
+                ...(input.agendaId
+                    ? {
+                          metadata: sql`${recordingSessions.metadata} || ${JSON.stringify({ agendaId: input.agendaId })}::jsonb`,
+                      }
                     : {}),
                 status: "completing",
                 endedAt: input.endedAt,

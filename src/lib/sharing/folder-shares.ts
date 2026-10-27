@@ -4,6 +4,7 @@ import {
     activeShareRecipientCondition,
     activeShareRecipientExistsCondition,
 } from "@/db/queries/item-shares";
+import { folderItemOwnerCondition } from "@/db/queries/meeting-folder-access";
 import {
     chatterItems,
     folderShares,
@@ -489,14 +490,19 @@ export async function listReceivedFolderOrganization(
             recordingFolderAssignments,
             and(
                 eq(recordingFolderAssignments.folderId, folderShares.folderId),
-                eq(recordingFolderAssignments.userId, folderShares.userId),
+                folderItemOwnerCondition(
+                    folderShares.userId,
+                    recordingFolderAssignments.userId,
+                    folderShares.folderId,
+                    recordingFolderAssignments.itemId,
+                ),
             ),
         )
         .innerJoin(
             chatterItems,
             and(
                 eq(chatterItems.id, recordingFolderAssignments.itemId),
-                eq(chatterItems.userId, folderShares.userId),
+                eq(chatterItems.userId, recordingFolderAssignments.userId),
             ),
         )
         .where(

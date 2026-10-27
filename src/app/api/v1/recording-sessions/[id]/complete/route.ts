@@ -100,6 +100,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     }
 
     const completing = await markRecordingSessionCompleting({
+        agendaId: input.agendaId,
         folderId: input.folderId,
         sessionId: session.id,
         userId: authn.user.id,

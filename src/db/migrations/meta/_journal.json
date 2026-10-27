@@ -1009,6 +1009,20 @@
       "when": 1793032928621,
       "tag": "0143_shallow_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1793092919591,
+      "tag": "0144_parched_rogue",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1793094173768,
+      "tag": "0145_unusual_sheva_callister",
+      "breakpoints": true
     }
   ]
 }

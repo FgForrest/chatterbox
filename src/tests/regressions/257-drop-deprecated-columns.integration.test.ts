@@ -205,7 +205,7 @@ describeWithDatabase("#257 deprecated recording column removal", () => {
         expect(audio).toHaveLength(1);
     });
 
-    it("exports the migrated item through the existing 2.4 archive format", async () => {
+    it("exports the migrated item through the current archive format", async () => {
         let archive = Buffer.alloc(0);
         const storage: StorageProvider = {
             exists: vi.fn().mockResolvedValue(false),
@@ -233,7 +233,7 @@ describeWithDatabase("#257 deprecated recording column removal", () => {
         const file = zip.files.find((entry) => entry.path === "manifest.json");
         if (!file) throw new Error("archive has no manifest");
         const manifest = JSON.parse((await file.buffer()).toString("utf8"));
-        expect(manifest.version).toBe("2.4");
+        expect(manifest.version).toBe("2.5");
         expect(manifest.recordings).toHaveLength(1);
         expect(manifest.recordings[0]).toMatchObject({
             id: RECORDING_ID,
