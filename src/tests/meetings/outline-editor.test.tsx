@@ -5,6 +5,7 @@ import {
     fireEvent,
     render,
     screen,
+    within,
 } from "@testing-library/react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +32,7 @@ function editor(
     const props = {
         detail: detail({ points }),
         userId: "owner",
-        pending: false,
+        pendingPaths: [] as string[],
         onPatch: vi.fn(),
         onRemove: vi.fn(),
         onAdd: vi.fn().mockResolvedValue(true),
@@ -182,7 +183,9 @@ describe("outline keyboard", () => {
             point("Second", { position: 1 }),
             point("pending-new", { text: "New topic", position: 2 }),
         ];
-        const { props, rerender } = editor(points, { pending: true });
+        const { props, rerender } = editor(points, {
+            pendingPaths: ["/points/Second"],
+        });
         expect(screen.getAllByLabelText("Discussion point")).toHaveLength(2);
         expect(screen.getByText("New topic")).toBeTruthy();
         const second = screen.getAllByLabelText("Discussion point")[1];
@@ -194,7 +197,7 @@ describe("outline keyboard", () => {
         rerender(
             <OutlineEditor
                 {...props}
-                pending={false}
+                pendingPaths={[]}
                 detail={detail({
                     points: [
                         points[0],
@@ -268,14 +271,17 @@ it("queues Enter while another write is pending, preserving both points in order
                 }),
         )
         .mockResolvedValue(true);
-    const { props, rerender } = editor([], { pending: true, onAdd });
+    const { props, rerender } = editor([], {
+        pendingPaths: ["/points"],
+        onAdd,
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
     const input = screen.getByLabelText("New discussion point");
     fireEvent.change(input, { target: { value: "First queued" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAdd).not.toHaveBeenCalled();
     expect(screen.getByText("First queued")).toBeTruthy();
-    rerender(<OutlineEditor {...props} pending={false} />);
+    rerender(<OutlineEditor {...props} pendingPaths={[]} />);
     expect(onAdd).toHaveBeenCalledExactlyOnceWith("First queued", null, 0);
     fireEvent.change(input, { target: { value: "Second queued" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -306,14 +312,14 @@ it.each([
 it("does not send a note for a pending point and respects composition on saved notes", async () => {
     const { props, rerender } = editor([point("pending-new")], {
         live: true,
-        pending: true,
+        pendingPaths: ["/points"],
     });
     expect(screen.queryByLabelText("Point note")).toBeNull();
     rerender(
         <OutlineEditor
             {...props}
             live
-            pending={false}
+            pendingPaths={[]}
             detail={detail({ points: [point("saved")] })}
         />,
     );
@@ -384,4 +390,75 @@ it("saves text and indentation in one versioned patch when Tab leaves an edited 
         expect.objectContaining({ id: "Second", version: 0 }),
         { text: "Edited second point", parentId: "Root" },
     );
+});
+
+it.each([
+    "/points/Other",
+    "/api/tasks/task",
+    "/tasks/task",
+])("keeps unrelated outline controls and Add enabled during %s", async (path) => {
+    const points = [
+        point("Root"),
+        point("Child", { parentId: "Root", position: 1 }),
+        point("Other", { position: 2 }),
+    ];
+    const { props } = editor(points, { pendingPaths: [path] });
+    const child = document.getElementById("point-Child");
+    if (!child) throw new Error("Missing child");
+    for (const name of ["Indent point", "Outdent point", "Remove point"])
+        expect(within(child).getByRole("button", { name })).toHaveProperty(
+            "disabled",
+            name === "Indent point",
+        );
+    fireEvent.click(
+        within(child).getByRole("button", { name: "Outdent point" }),
+    );
+    expect(props.onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "Child" }),
+        { parentId: null, position: 1 },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    fireEvent.change(screen.getByLabelText("New discussion point"), {
+        target: { value: "Independent topic" },
+    });
+    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty(
+        "disabled",
+        false,
+    );
+    await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: "Add" })),
+    );
+    expect(props.onAdd).toHaveBeenCalledWith("Independent topic", null, 3);
+});
+
+it.each([
+    "/points/Child",
+    "/points/Child?version=0&mergeUp=false",
+])("blocks a point's structural controls while its subtree has a pending write %s", (path) => {
+    editor(
+        [
+            point("Root"),
+            point("Child", { parentId: "Root", position: 1 }),
+            point("Other", { position: 2 }),
+        ],
+        { pendingPaths: [path] },
+    );
+    for (const id of ["Root", "Child"]) {
+        const element = document.getElementById(`point-${id}`);
+        if (!element) throw new Error("Missing point");
+        expect(
+            within(element).getByRole("button", { name: "Remove point" }),
+        ).toHaveProperty("disabled", true);
+        expect(
+            within(element).getByRole("button", { name: "Outdent point" }),
+        ).toHaveProperty("disabled", true);
+    }
+    const other = document.getElementById("point-Other");
+    if (!other) throw new Error("Missing unrelated point");
+    expect(
+        within(other).getByRole("button", { name: "Remove point" }),
+    ).toHaveProperty("disabled", false);
+    expect(
+        within(other).getByRole("button", { name: "Indent point" }),
+    ).toHaveProperty("disabled", false);
 });

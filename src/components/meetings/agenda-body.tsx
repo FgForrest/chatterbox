@@ -813,7 +813,7 @@ export function AgendaBody({
                     userId={userId}
                     readOnly={readOnly}
                     live={live}
-                    pending={busy}
+                    pendingPaths={agenda.pendingPaths}
                     onPatch={patchPoint}
                     onRemove={(point, mergeUp = false) => {
                         const descendants = new Set([point.id]);

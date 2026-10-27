@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { decryptText } from "@/lib/encryption/fields";
+import { AppError } from "@/lib/errors";
+import { createFolderCategorizationCheck } from "@/lib/folders/folders";
 import { normalizeName } from "@/lib/knowledge/name-match";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { parseKeyset } from "@/lib/mcp/cursor";
@@ -64,9 +66,29 @@ const listFolders = defineTool({
                 Number(a.scope === "org") - Number(b.scope === "org") ||
                 a.sortOrder - b.sortOrder,
         );
+        const check =
+            context.caller.kind === "user"
+                ? createFolderCategorizationCheck(context.caller.userId)
+                : null;
+        const canFile = await Promise.all(
+            folders.map(async (folder) => {
+                if (!check) return false;
+                try {
+                    await check(folder);
+                    return true;
+                } catch (error) {
+                    if (
+                        error instanceof AppError &&
+                        (error.statusCode === 400 || error.statusCode === 403)
+                    )
+                        return false;
+                    throw error;
+                }
+            }),
+        );
         context.touched.push(...folders.map((folder) => folder.id));
         return {
-            folders: folders.map((folder) => ({
+            folders: folders.map((folder, index) => ({
                 id: folder.id,
                 parent_id: folder.parentId,
                 name: folder.name,
@@ -76,8 +98,7 @@ const listFolders = defineTool({
                     folder.receivedFolder || folder.sharedWithPeople,
                 ),
                 read_only: Boolean(folder.receivedFolder),
-                can_file_own_items:
-                    context.caller.kind === "user" && folder.kind !== "private",
+                can_file_own_items: canFile[index],
             })),
         };
     },

@@ -2,16 +2,27 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { agendaMailDerivedContent } from "@/db/queries/agenda-mail-sources";
 import { agendaSuggestionInputs } from "@/db/queries/agenda-suggestions";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
-import { addRecordingToFolder } from "@/lib/folders/folders";
+import * as meetingQueries from "@/db/queries/meetings";
+import {
+    archivedMeetingSchema,
+    collectArchivedMeetings,
+} from "@/lib/export/meetings";
+import {
+    addRecordingToFolder,
+    assertCategorizableFolders,
+    moveRecordingBetweenFolders,
+} from "@/lib/folders/folders";
 import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import type { McpCaller } from "@/lib/mcp/caller";
 import { MEETING_TOOLS } from "@/lib/mcp/tools/meetings";
+import { RECORDING_TOOLS } from "@/lib/mcp/tools/recordings";
 import { exportMeetingCalendar, meetingMarkdown } from "@/lib/meetings/export";
 import {
     agendaPlanBlock,
     loadRecordingAgenda,
 } from "@/lib/meetings/pipeline-context";
+import { restoreMeetings } from "@/lib/meetings/restore";
 import { changeFolderShare } from "@/lib/sharing/folder-shares";
 import { taskViewerById } from "@/lib/tasks/access";
 import { upsertEnhancement } from "@/lib/transcription/persist";
@@ -69,6 +80,7 @@ import {
     meetingAgendas,
     processingProfileRevisions,
     processingProfiles,
+    receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -78,6 +90,7 @@ import {
     users,
 } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { insertRecordings } from "@/tests/integration/items";
 import {
@@ -120,6 +133,7 @@ vi.mock("@/lib/env", () => ({
         BETTER_AUTH_SECRET: "meeting-test",
         AUTHZ_MODE: "local",
         IS_HOSTED: false,
+        SELF_HOST_MODE: "shared",
         GOOGLE_CLIENT_ID: "test",
         GOOGLE_CLIENT_SECRET: "test",
         APP_URL: "https://example.com",
@@ -131,7 +145,12 @@ vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => true,
     isOrgScopeEnabled: () => true,
     assertOrgScopeWritable: () => {
-        if (principal.frozen) throw new Error("Organization is read-only");
+        if (principal.frozen)
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Organization is read-only",
+                403,
+            );
     },
     assertNotOrgAccount: async () => undefined,
 }));
@@ -212,6 +231,7 @@ import {
     changePoint,
     decideSuggestion,
     getMeeting,
+    listMeetings,
     patchMeeting,
     prepareMeeting,
     removeMeetingFromFolder,
@@ -930,6 +950,24 @@ suite("meeting planning server (PostgreSQL)", () => {
             })),
         );
         await decideSuggestion("owner", meeting.id, "mail-item", "added");
+        let currentPoint = (
+            await db
+                .select()
+                .from(agendaPoints)
+                .where(eq(agendaPoints.agendaId, meeting.id))
+        )[0];
+        await changePoint("owner", meeting.id, currentPoint.id, {
+            version: currentPoint.version,
+            text: "Reworded confidential topic",
+        });
+        expect(
+            (
+                await db
+                    .select()
+                    .from(agendaPoints)
+                    .where(eq(agendaPoints.id, currentPoint.id))
+            )[0].sources,
+        ).toEqual({ itemIds: ["mail"], taskIds: [] });
         const filtered = await agendaMailDerivedContent(
             "owner",
             "org",
@@ -960,6 +998,9 @@ suite("meeting planning server (PostgreSQL)", () => {
             { caller, touched: [] },
             { meetingId: meeting.id },
         );
+        expect(JSON.stringify(result)).not.toContain(
+            "Reworded confidential topic",
+        );
         expect(JSON.stringify(result)).not.toContain("mail-item topic");
         expect(JSON.stringify(result)).not.toContain("merged-task topic");
         expect(JSON.stringify(result)).toContain("audio topic");
@@ -976,7 +1017,7 @@ suite("meeting planning server (PostgreSQL)", () => {
                     { meetingId: meeting.id },
                 ),
             ),
-        ).toContain("mail-item topic");
+        ).toContain("Reworded confidential topic");
         let previousId = meeting.id;
         for (const days of [7, 14]) {
             await patchMeeting("owner", previousId, { state: "held" });
@@ -1001,7 +1042,7 @@ suite("meeting planning server (PostgreSQL)", () => {
                         { meetingId: next.id },
                     ),
                 ),
-            ).not.toContain("mail-item topic");
+            ).not.toContain("Reworded confidential topic");
             await decideSuggestion(
                 "owner",
                 next.id,
@@ -1012,6 +1053,20 @@ suite("meeting planning server (PostgreSQL)", () => {
                 (await agendaMailDerivedContent("owner", "org", next.id))
                     .pointIds.size,
             ).toBe(1);
+            currentPoint = (
+                await db
+                    .select()
+                    .from(agendaPoints)
+                    .where(eq(agendaPoints.agendaId, next.id))
+            )[0];
+            await changePoint("owner", next.id, currentPoint.id, {
+                version: currentPoint.version,
+                text: `Reworded confidential topic ${days}`,
+            });
+            const edited = JSON.stringify(
+                await tool.run({ caller, touched: [] }, { meetingId: next.id }),
+            );
+            expect(edited).not.toContain("Reworded confidential topic");
             previousId = next.id;
         }
     });
@@ -1293,5 +1348,314 @@ suite("meeting planning server (PostgreSQL)", () => {
         expect(prompts).toContain("Recorder agenda topic");
         expect(prompts).not.toContain("Foreign agenda topic");
         expect(prompts).not.toContain("Foreign live note");
+    });
+    it("manual points have no lineage even when their text matches a mail suggestion", async () => {
+        const meeting = await create();
+        await db.insert(agendaSuggestions).values({
+            id: "mail-suggestion",
+            userId: "owner",
+            agendaId: meeting.id,
+            kind: "ai",
+            text: encryptText("Same topic"),
+            sources: { itemIds: ["deleted-mail"], taskIds: [] },
+        });
+        const manual = await addPoint("owner", meeting.id, {
+            text: "Same topic",
+        });
+        await decideSuggestion("owner", meeting.id, "mail-suggestion", "added");
+        await db
+            .delete(agendaSuggestions)
+            .where(eq(agendaSuggestions.id, "mail-suggestion"));
+        const stored = await db
+            .select()
+            .from(agendaPoints)
+            .where(eq(agendaPoints.agendaId, meeting.id));
+        expect(
+            stored.find((point) => point.id === manual.id)?.sources,
+        ).toBeNull();
+        const derived = await agendaMailDerivedContent(
+            "owner",
+            "org",
+            meeting.id,
+        );
+        expect([...derived.pointIds]).toEqual(
+            stored
+                .filter((point) => point.id !== manual.id)
+                .map((point) => point.id),
+        );
+        expect(derived.suggestionIds.size).toBe(0);
+    });
+
+    it("backup export and restore preserve point lineage, map imported sources and keep missing sources restrictive", async () => {
+        const meeting = await create();
+        await recording("audio");
+        await recording("imported-audio");
+        await db.insert(chatterItems).values(
+            ["mail", "imported-mail"].map((id) => ({
+                id,
+                userId: "owner",
+                kind: "mail" as const,
+                title: encryptText("Mail"),
+                occurredAt: start,
+            })),
+        );
+        await db.insert(recordingTasks).values(
+            ["mail-task", "imported-task"].map((id) => ({
+                id,
+                itemId: id === "mail-task" ? "mail" : "imported-mail",
+                userId: "owner",
+                status: "open" as const,
+                source: "manual" as const,
+                text: encryptText("Mail task"),
+            })),
+        );
+        await db.insert(agendaSuggestions).values({
+            id: "source",
+            userId: "owner",
+            agendaId: meeting.id,
+            kind: "ai",
+            text: encryptText("Original mail topic"),
+            sources: {
+                itemIds: ["audio", "mail", "missing-mail"],
+                taskIds: ["mail-task", "missing-task"],
+            },
+        });
+        await decideSuggestion("owner", meeting.id, "source", "added");
+        const point = (
+            await db
+                .select()
+                .from(agendaPoints)
+                .where(eq(agendaPoints.agendaId, meeting.id))
+        )[0];
+        await changePoint("owner", meeting.id, point.id, {
+            version: point.version,
+            text: "Reworded archived topic",
+        });
+        await addPoint("owner", meeting.id, { text: "Manual archived topic" });
+        const archive = archivedMeetingSchema.array().parse(
+            JSON.parse(
+                JSON.stringify(
+                    await collectArchivedMeetings({
+                        kind: "personal",
+                        userId: "owner",
+                    }),
+                ),
+            ),
+        );
+        expect(archive[0].points[0].sources).toEqual(point.sources);
+        const result = await restoreMeetings("owner", {
+            meetings: archive,
+            folderIdMap: { "owner-folder": "owner-folder" },
+            itemIdMap: { audio: "imported-audio", mail: "imported-mail" },
+            taskIdMap: { "mail-task": "imported-task" },
+        });
+        expect(result.skipped).toEqual([]);
+        expect(result.restored).toHaveLength(1);
+        const restored = await db
+            .select()
+            .from(agendaPoints)
+            .where(eq(agendaPoints.agendaId, result.restored[0].id));
+        const sourced = restored.find((point) => point.sources);
+        expect(sourced?.sources).toEqual({
+            itemIds: ["imported-audio", "imported-mail", "missing-mail"],
+            taskIds: ["imported-task", "missing-task"],
+        });
+        expect(restored.find((point) => !point.sources)).toBeDefined();
+        expect([
+            ...(
+                await agendaMailDerivedContent(
+                    "owner",
+                    "org",
+                    result.restored[0].id,
+                )
+            ).pointIds,
+        ]).toEqual([sourced?.id]);
+        const tool = MEETING_TOOLS.find((tool) => tool.name === "get_meeting");
+        if (!tool) throw new Error("Missing tool");
+        const caller: McpCaller = {
+            kind: "user",
+            userId: "owner",
+            orgUserId: "org",
+            subject: "owner",
+            email: "owner@example.com",
+            clientId: "test",
+            roles: new Set(["tasks:read"]),
+        };
+        const detail = JSON.stringify(
+            await tool.run(
+                { caller, touched: [] },
+                { meetingId: result.restored[0].id },
+            ),
+        );
+        expect(detail).not.toContain("Reworded archived topic");
+        expect(detail).toContain("Manual archived topic");
+    });
+
+    it("listMeetings gates recording IDs per row but retains agenda calendar IDs", async () => {
+        const meeting = await prepareMeeting("owner", {
+            folderId: "org-folder",
+            calendarEventId: "event",
+        });
+        await recording("rec");
+        await attachAgenda("owner", meeting.id, "rec");
+        const originalRows = await meetingQueries.listMeetingRows(
+            "owner",
+            "org",
+            { includePast: true, includeAbsorbed: true },
+        );
+        expect(originalRows).toHaveLength(1);
+        const selection = vi.spyOn(meetingQueries, "listMeetingRows");
+        try {
+            for (const actor of ["owner", "other"]) {
+                selection.mockResolvedValueOnce(originalRows);
+                const [listed] = await listMeetings(actor, {
+                    includePast: true,
+                    includeAbsorbed: true,
+                });
+                expect(listed).toMatchObject({
+                    recordingItemId: actor === "owner" ? "rec" : null,
+                    calendarEventId: "event",
+                    calendarSeriesId: "series",
+                });
+                expect(await getMeeting(actor, meeting.id)).toMatchObject({
+                    recordingItemId: listed.recordingItemId,
+                    calendarEventId: listed.calendarEventId,
+                    calendarSeriesId: listed.calendarSeriesId,
+                });
+            }
+        } finally {
+            selection.mockRestore();
+        }
+    });
+
+    it("refuses a revoked participant's move into an Organization folder", async () => {
+        await share();
+        await recording("contribution", "owner-folder", "other");
+        await db
+            .update(folderShares)
+            .set({ state: "removed" })
+            .where(eq(folderShares.id, "owner-folder-other"));
+        await expect(
+            moveRecordingBetweenFolders({
+                userId: "other",
+                recordingId: "contribution",
+                fromFolderId: "owner-folder",
+                toFolderId: "org-folder",
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "contribution")),
+        ).toMatchObject([{ folderId: "owner-folder", userId: "other" }]);
+    });
+
+    it("keeps both released recorder attachment IDs and canonical folder IDs resolvable, and revokes both", async () => {
+        await share();
+        await db.insert(receivedFolderAttachments).values({
+            id: "old-recorder-id",
+            userId: "other",
+            shareId: "owner-folder-other",
+            name: encryptText("Shared Acme"),
+            parentId: "other-root",
+        });
+        for (const id of ["old-recorder-id", "owner-folder"])
+            expect(await assertCategorizableFolders("other", [id])).toEqual([
+                {
+                    folderId: "owner-folder",
+                    ownerId: "owner",
+                    scope: "personal",
+                },
+            ]);
+        await db
+            .update(folderShares)
+            .set({ state: "removed" })
+            .where(eq(folderShares.id, "owner-folder-other"));
+        for (const id of ["old-recorder-id", "owner-folder"])
+            await expect(
+                assertCategorizableFolders("other", [id]),
+            ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("MCP advertises filing only where the ordinary categorization check permits it, including neither root", async () => {
+        const tool = RECORDING_TOOLS.find(
+            (tool) => tool.name === "list_folders",
+        );
+        if (!tool) throw new Error("Missing tool");
+        const caller: McpCaller = {
+            kind: "user",
+            userId: "owner",
+            orgUserId: "org",
+            subject: "owner",
+            email: "owner@example.com",
+            clientId: "test",
+            roles: new Set(["tasks:read"]),
+        };
+        const result = await tool.run({ caller, touched: [] }, {});
+        expect(result).toMatchObject({
+            folders: expect.arrayContaining([
+                expect.objectContaining({
+                    id: "owner-root",
+                    can_file_own_items: false,
+                }),
+                expect.objectContaining({
+                    id: "org-root",
+                    can_file_own_items: false,
+                }),
+                expect.objectContaining({
+                    id: "owner-folder",
+                    can_file_own_items: true,
+                }),
+                expect.objectContaining({
+                    id: "org-folder",
+                    can_file_own_items: true,
+                }),
+            ]),
+        });
+        principal.frozen = true;
+        const frozen = await tool.run({ caller, touched: [] }, {});
+        expect(frozen).toMatchObject({
+            folders: expect.arrayContaining([
+                expect.objectContaining({
+                    id: "org-folder",
+                    can_file_own_items: false,
+                }),
+                expect.objectContaining({
+                    id: "owner-folder",
+                    can_file_own_items: true,
+                }),
+            ]),
+        });
+    });
+
+    it("explicit attachment into a person-shared folder matches ordinary filing without an Organization publish intent", async () => {
+        await share();
+        const meeting = await create();
+        await recording("ordinary", undefined, "other");
+        await recording("attached", undefined, "other");
+        await addRecordingToFolder({
+            userId: "other",
+            recordingId: "ordinary",
+            folderId: "owner-folder",
+        });
+        await attachAgenda("other", meeting.id, "attached");
+        for (const itemId of ["ordinary", "attached"]) {
+            expect(
+                await db
+                    .select()
+                    .from(recordingFolderAssignments)
+                    .where(eq(recordingFolderAssignments.itemId, itemId)),
+            ).toMatchObject([{ userId: "other", folderId: "owner-folder" }]);
+            expect(
+                await db
+                    .select()
+                    .from(mailPendingShares)
+                    .where(eq(mailPendingShares.itemId, itemId)),
+            ).toEqual([]);
+        }
+        expect(await getMeeting("owner", meeting.id)).toMatchObject({
+            recordingItemId: "attached",
+        });
     });
 });

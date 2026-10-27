@@ -18,6 +18,7 @@ import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-pa
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
+import { meetingsInLocation } from "@/components/dashboard/meeting-location";
 import { PlaudReconnectBanner } from "@/components/dashboard/plaud-reconnect-banner";
 import {
     RecordingList,
@@ -61,7 +62,6 @@ import {
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import {
-    descendantFolderIds,
     recordingIdsVisibleInFolder,
     sharedRecordingIds,
 } from "@/lib/folders/hierarchy";
@@ -769,23 +769,23 @@ export function Workstation({
         visibleRecordings,
     ]);
     locationRecordingsRef.current = locationRecordings;
-    const locationMeetings = useMemo(() => {
-        const descendants = selectedFolder
-            ? descendantFolderIds(folderOrganization.folders, selectedFolder.id)
-            : null;
-        return meetings.filter((meeting) =>
-            descendants
-                ? meeting.folders.some((folder) => descendants.has(folder.id))
-                : meeting.author.id === userId ||
-                  meeting.folders.some((folder) =>
-                      folderOrganization.folders.some(
-                          (visible) =>
-                              visible.id === folder.id &&
-                              visible.receivedFolder,
-                      ),
-                  ),
-        );
-    }, [meetings, selectedFolder, folderOrganization.folders, userId]);
+    const locationMeetings = useMemo(
+        () =>
+            meetingsInLocation(
+                meetings,
+                folderOrganization.folders,
+                selectedFolder,
+                userId,
+                isOrgAccount,
+            ),
+        [
+            meetings,
+            selectedFolder,
+            folderOrganization.folders,
+            userId,
+            isOrgAccount,
+        ],
+    );
     const rowLocations = useMemo(
         () =>
             folderRowLocations(

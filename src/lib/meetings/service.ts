@@ -98,6 +98,17 @@ function pointWhere(agenda: Agenda) {
     );
 }
 
+function readPoint({
+    sources: _sources,
+    ...point
+}: typeof agendaPoints.$inferSelect) {
+    return {
+        ...point,
+        text: decryptText(point.text),
+        note: point.note ? decryptText(point.note) : null,
+    };
+}
+
 /** Bump the polling version in the same transaction as an agenda edit. */
 export async function bumpAgenda(tx: MeetingTx, agenda: Agenda) {
     await tx
@@ -293,22 +304,6 @@ async function carryOver(
             ),
         );
     if (points.length) {
-        const sources = await tx
-            .select({
-                text: agendaSuggestions.text,
-                sources: agendaSuggestions.sources,
-            })
-            .from(agendaSuggestions)
-            .where(
-                and(
-                    eq(agendaSuggestions.agendaId, previous.agenda.id),
-                    eq(agendaSuggestions.userId, previous.agenda.userId),
-                    inArray(
-                        agendaSuggestions.text,
-                        points.map((point) => point.text),
-                    ),
-                ),
-            );
         await tx.insert(agendaSuggestions).values(
             points.map((point) => ({
                 agendaId: access.agenda.id,
@@ -323,23 +318,11 @@ async function carryOver(
                                 previous.agenda.recordingItemId ??
                                     previous.agenda.meetingItemId ??
                                     "",
-                                ...sources
-                                    .filter(
-                                        (source) => source.text === point.text,
-                                    )
-                                    .flatMap(
-                                        (source) => source.sources.itemIds,
-                                    ),
+                                ...(point.sources?.itemIds ?? []),
                             ].filter(Boolean),
                         ),
                     ],
-                    taskIds: [
-                        ...new Set(
-                            sources
-                                .filter((source) => source.text === point.text)
-                                .flatMap((source) => source.sources.taskIds),
-                        ),
-                    ],
+                    taskIds: [...new Set(point.sources?.taskIds ?? [])],
                 },
                 createdByUserId: userId,
             })),
@@ -456,75 +439,99 @@ export async function listMeetings(
     const navigation = new Map(
         receivedFolders.map((folder) => [folder.sourceId, folder]),
     );
-    const folders = rows.length
-        ? await db
-              .select({
-                  itemId: recordingFolderAssignments.itemId,
-                  id: recordingFolders.id,
-                  name: recordingFolders.name,
-                  userId: recordingFolders.userId,
-                  parentId: recordingFolders.parentId,
-              })
-              .from(recordingFolderAssignments)
-              .innerJoin(
-                  recordingFolders,
-                  eq(recordingFolders.id, recordingFolderAssignments.folderId),
-              )
-              .where(
-                  and(
-                      inArray(
-                          recordingFolderAssignments.itemId,
-                          rows.flatMap(({ agenda }) =>
-                              agenda.meetingItemId
-                                  ? [agenda.meetingItemId]
-                                  : [],
+    const attachedIds = rows.flatMap(({ agenda }) =>
+        agenda.recordingItemId ? [agenda.recordingItemId] : [],
+    );
+    const [folders, editors, visibleRecordings] = await Promise.all([
+        rows.length
+            ? db
+                  .select({
+                      itemId: recordingFolderAssignments.itemId,
+                      id: recordingFolders.id,
+                      name: recordingFolders.name,
+                      userId: recordingFolders.userId,
+                      parentId: recordingFolders.parentId,
+                  })
+                  .from(recordingFolderAssignments)
+                  .innerJoin(
+                      recordingFolders,
+                      eq(
+                          recordingFolders.id,
+                          recordingFolderAssignments.folderId,
+                      ),
+                  )
+                  .where(
+                      and(
+                          inArray(
+                              recordingFolderAssignments.itemId,
+                              rows.flatMap(({ agenda }) =>
+                                  agenda.meetingItemId
+                                      ? [agenda.meetingItemId]
+                                      : [],
+                              ),
+                          ),
+                          or(
+                              ...rows.flatMap(({ agenda }) =>
+                                  agenda.meetingItemId
+                                      ? [
+                                            and(
+                                                eq(
+                                                    recordingFolderAssignments.itemId,
+                                                    agenda.meetingItemId,
+                                                ),
+                                                eq(
+                                                    recordingFolderAssignments.userId,
+                                                    agenda.userId,
+                                                ),
+                                            ),
+                                        ]
+                                      : [],
+                              ),
                           ),
                       ),
+                  )
+            : [],
+        rows.length
+            ? db
+                  .selectDistinct({
+                      agendaId: agendaPoints.agendaId,
+                      id: users.id,
+                      name: users.name,
+                  })
+                  .from(agendaPoints)
+                  .innerJoin(users, eq(users.id, agendaPoints.authorUserId))
+                  .where(
                       or(
-                          ...rows.flatMap(({ agenda }) =>
-                              agenda.meetingItemId
-                                  ? [
-                                        and(
-                                            eq(
-                                                recordingFolderAssignments.itemId,
-                                                agenda.meetingItemId,
-                                            ),
-                                            eq(
-                                                recordingFolderAssignments.userId,
-                                                agenda.userId,
-                                            ),
-                                        ),
-                                    ]
-                                  : [],
+                          ...rows.map(({ agenda }) =>
+                              and(
+                                  eq(agendaPoints.agendaId, agenda.id),
+                                  eq(agendaPoints.userId, agenda.userId),
+                              ),
                           ),
                       ),
-                  ),
-              )
-        : [];
-    const editors = rows.length
-        ? await db
-              .selectDistinct({
-                  agendaId: agendaPoints.agendaId,
-                  id: users.id,
-                  name: users.name,
-              })
-              .from(agendaPoints)
-              .innerJoin(users, eq(users.id, agendaPoints.authorUserId))
-              .where(
-                  or(
-                      ...rows.map(({ agenda }) =>
-                          and(
-                              eq(agendaPoints.agendaId, agenda.id),
-                              eq(agendaPoints.userId, agenda.userId),
-                          ),
+                  )
+            : [],
+        attachedIds.length
+            ? db
+                  .select({ id: chatterItems.id })
+                  .from(chatterItems)
+                  .where(
+                      and(
+                          inArray(chatterItems.id, attachedIds),
+                          meetingVisibility(userId, viewer.orgUserId),
                       ),
-                  ),
-              )
-        : [];
+                  )
+            : [],
+    ]);
+    const visibleRecordingIds = new Set(visibleRecordings.map((row) => row.id));
     return rows.map(({ agenda, item, counts, authorName }) => ({
         id: agenda.id,
         meetingItemId: agenda.meetingItemId,
-        recordingItemId: agenda.recordingItemId,
+        recordingItemId:
+            agenda.recordingItemId &&
+            visibleRecordingIds.has(agenda.recordingItemId)
+                ? agenda.recordingItemId
+                : null,
         title: decryptText(item.title),
         start: agenda.plannedStart,
         end: agenda.plannedEnd,
@@ -753,9 +760,7 @@ export async function getMeeting(
     }
     const invitees = event?.attendees.map(({ name }) => ({ name })) ?? [];
     const tree = points.map((point) => ({
-        ...point,
-        text: decryptText(point.text),
-        note: point.note ? decryptText(point.note) : null,
+        ...readPoint(point),
         summaryOutcome:
             agenda.recordingItemId && !access.recordingVisible
                 ? null
@@ -1135,7 +1140,7 @@ export async function addPoint(
                     origin: input.origin ?? "manual",
                 })
                 .returning();
-            return { ...point, text: input.text, note: null };
+            return readPoint(point);
         },
         true,
     );
@@ -1173,11 +1178,7 @@ export async function changePoint(
                     "Agenda point changed",
                     409,
                     {
-                        point: {
-                            ...point,
-                            text: decryptText(point.text),
-                            note: point.note ? decryptText(point.note) : null,
-                        },
+                        point: readPoint(point),
                     },
                 );
             const structural =
@@ -1296,11 +1297,7 @@ export async function changePoint(
                     ),
                 )
                 .returning();
-            return {
-                ...updated,
-                text: decryptText(updated.text),
-                note: updated.note ? decryptText(updated.note) : null,
-            };
+            return readPoint(updated);
         },
         true,
     );
@@ -1445,6 +1442,7 @@ export async function decideSuggestion(
                 userId: agenda.userId,
                 agendaId: agenda.id,
                 text: suggestion.text,
+                sources: suggestion.sources,
                 authorUserId: userId,
                 origin: suggestion.kind,
                 originPointId: suggestion.originPointId,

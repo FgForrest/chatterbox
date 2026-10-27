@@ -5211,6 +5211,10 @@ export const agendaPoints = pgTable(
             (): AnyPgColumn => agendaPoints.id,
             { onDelete: "set null" },
         ),
+        sources: jsonb("sources").$type<{
+            itemIds: string[];
+            taskIds: string[];
+        }>(),
         version: integer("version").notNull().default(0),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),

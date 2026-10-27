@@ -1,7 +1,7 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 19:01
+updated: 2026-10-27 20:45
 status: proposed
 kind: feature
 issues: []
@@ -122,7 +122,9 @@ Google consent or provider fallbacks.
   prior coverage; detach clears it. Learn includes only point text authored by the recording owner;
   notes have no recorded author and are omitted. Summary and spelling context retain their normal scope.
 - MCP callers without mail access receive no suggestions sourced from mail items or mail-evidence tasks,
-  including merged mail notes and accepted points still carrying that suggestion text.
+  including merged mail notes. Accepted points persist source item/task IDs; editing their text and later
+  carry-over preserve that lineage. Archives retain it and restore remaps imported source IDs while keeping
+  missing sources restrictive.
 
 ## Verification
 
@@ -142,7 +144,9 @@ and mail-role filtering. Existing task, sharing, export, Google, recorder and MC
   support are incorrectly classified as covered.
 - Migration `0148_agenda_review_indexes.sql` adds six foreign-key indexes and tightens the time check;
   the service already rejects an end without a start. No environment variable, compose or deployment-step
-  change is required. Earlier meeting migrations remain separate generated artifacts.
+  change is required. Migration `0149_agenda_point_sources.sql` adds nullable ID-only point provenance
+  in both deployment modes; older images ignore the column. Earlier meeting migrations remain separate
+  generated artifacts.
 - A privacy-filter regression can reveal content to shared self-host members; corrected filtering stops
   subsequent reads but cannot recall prior responses. Hosted has no person-sharing surface, while recorder
   and MCP capability filtering applies in both modes. The indexes require no data conversion; a failed

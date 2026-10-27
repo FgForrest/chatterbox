@@ -32,6 +32,10 @@ const pointArchive = z.object({
     summaryOutcome: z.enum(["covered", "not_covered"]).nullable(),
     origin: z.enum(["manual", "carry_over", "ai", "live"]),
     originPointId: id.nullable(),
+    sources: z
+        .object({ itemIds: z.array(id), taskIds: z.array(id) })
+        .nullable()
+        .default(null),
     version: z.number().int().nonnegative(),
     createdAt: date,
     updatedAt: date,

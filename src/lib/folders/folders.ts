@@ -2061,7 +2061,16 @@ export async function moveRecordingBetweenFolders(input: {
 
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
-            if (to.scope === "org") await lockOrgTree(tx);
+            if (to.scope === "org") {
+                await lockOrgTree(tx);
+                if (from.scope === "personal")
+                    await lockCategorizableFolderInTx(
+                        tx,
+                        input.userId,
+                        from.folder.id,
+                        true,
+                    );
+            }
             if (to.scope === "personal") {
                 for (const folderId of [
                     ...new Set([from.folder.id, to.folder.id]),

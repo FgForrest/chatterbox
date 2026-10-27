@@ -246,7 +246,7 @@ export function OutlineEditor({
     userId,
     readOnly = false,
     live = false,
-    pending,
+    pendingPaths = [],
     onPatch,
     onRemove,
     onAdd,
@@ -255,7 +255,7 @@ export function OutlineEditor({
     userId?: string;
     readOnly?: boolean;
     live?: boolean;
-    pending: boolean;
+    pendingPaths?: readonly string[];
     onPatch: (
         point: MeetingPoint,
         patch: PointPatch,
@@ -293,6 +293,8 @@ export function OutlineEditor({
     const [failedAdds, setFailedAdds] = useState<
         { text: string; parentId: string | null; position: number }[]
     >([]);
+    const adding = pendingPaths.includes("/points");
+    const pointPaths = new Set(pendingPaths.map((path) => path.split("?")[0]));
     const canAdd = !readOnly && detail.permissions.edit;
     const insert = (point?: MeetingPoint) => {
         draftReleased.current = false;
@@ -319,7 +321,7 @@ export function OutlineEditor({
         );
     };
     useEffect(() => {
-        if (!canAdd || pending || submitting.current || !queued.length) return;
+        if (!canAdd || adding || submitting.current || !queued.length) return;
         const next = queued[0];
         submitting.current = true;
         void onAdd(next.text, next.parentId, next.position)
@@ -341,7 +343,7 @@ export function OutlineEditor({
             .finally(() => {
                 submitting.current = false;
             });
-    }, [canAdd, pending, queued, onAdd]);
+    }, [canAdd, adding, queued, onAdd]);
     const draftRow = insertion && canAdd && (
         <div
             className="flex items-center gap-2 py-1"
@@ -398,7 +400,7 @@ export function OutlineEditor({
             <Button
                 size="sm"
                 variant="ghost"
-                disabled={!newText.trim() || pending}
+                disabled={!newText.trim() || adding}
                 onClick={() => void submit()}
             >
                 {i18n("Add")}
@@ -434,6 +436,16 @@ export function OutlineEditor({
                     0,
                     sibling < 0 ? undefined : sibling,
                 );
+                const subtreePending = [
+                    point,
+                    ...descendants.map((row) => row.point),
+                ].some(
+                    (entry) =>
+                        entry.id.startsWith("pending-") ||
+                        pointPaths.has(
+                            `/points/${encodeURIComponent(entry.id)}`,
+                        ),
+                );
                 const canRemove =
                     detail.permissions.manage ||
                     descendants.every(
@@ -455,7 +467,7 @@ export function OutlineEditor({
                                         checked={Boolean(point.discussedAt)}
                                         disabled={
                                             !canAdd ||
-                                            pending ||
+                                            subtreePending ||
                                             point.id.startsWith("pending-")
                                         }
                                         onChange={(event) =>
@@ -471,7 +483,7 @@ export function OutlineEditor({
                                 <PointField
                                     point={point}
                                     editable={editable}
-                                    pending={pending}
+                                    pending={subtreePending}
                                     onSave={(edit) => {
                                         const move =
                                             edit.outdent === undefined
@@ -494,7 +506,7 @@ export function OutlineEditor({
                                     onEnter={() => insert(point)}
                                     onRelease={() => exit.current?.focus()}
                                     onEmpty={() => {
-                                        if (canRemove && !pending) {
+                                        if (canRemove && !subtreePending) {
                                             onRemove(point, true);
                                             const previous = displayRows
                                                 .slice(0, index)
@@ -534,7 +546,7 @@ export function OutlineEditor({
                                             variant="ghost"
                                             size="icon-sm"
                                             aria-label={i18n("Indent point")}
-                                            disabled={!indent || pending}
+                                            disabled={!indent || subtreePending}
                                             onClick={() => {
                                                 if (indent)
                                                     onPatch(point, indent);
@@ -546,7 +558,9 @@ export function OutlineEditor({
                                             variant="ghost"
                                             size="icon-sm"
                                             aria-label={i18n("Outdent point")}
-                                            disabled={!outdent || pending}
+                                            disabled={
+                                                !outdent || subtreePending
+                                            }
                                             onClick={() => {
                                                 if (outdent)
                                                     onPatch(point, outdent);
@@ -561,7 +575,7 @@ export function OutlineEditor({
                                                 aria-label={i18n(
                                                     "Remove point",
                                                 )}
-                                                disabled={pending}
+                                                disabled={subtreePending}
                                                 onClick={() => onRemove(point)}
                                             >
                                                 <Trash2 className="size-3.5" />

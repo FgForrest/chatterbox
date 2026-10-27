@@ -41,6 +41,12 @@ export async function restoreMeetings(
     const restored: { oldId: string; id: string; meetingItemId: string }[] = [];
     const skipped: { id: string; reason: string }[] = [];
     const restoredPointIds = new Map<string, string>();
+    const restoredItemIds = new Map(Object.entries(input.itemIdMap));
+    const sourceLinks: {
+        id: string;
+        agendaId: string;
+        sources: NonNullable<typeof agendaPoints.$inferSelect.sources>;
+    }[] = [];
     const originLinks: { id: string; agendaId: string; sourceId: string }[] =
         [];
     for (const rawMeeting of input.meetings) {
@@ -373,6 +379,20 @@ export async function restoreMeetings(
                 return { oldId: meeting.id, id, meetingItemId };
             });
             restored.push(restoredMeeting);
+            if (meeting.meetingItemId)
+                restoredItemIds.set(
+                    meeting.meetingItemId,
+                    restoredMeeting.meetingItemId,
+                );
+            for (const point of meeting.points) {
+                const pointId = pointMap.get(point.id);
+                if (pointId && point.sources)
+                    sourceLinks.push({
+                        id: pointId,
+                        agendaId: restoredMeeting.id,
+                        sources: point.sources,
+                    });
+            }
             skipped.push(...skippedTasks);
             for (const [oldId, newId] of pointMap)
                 restoredPointIds.set(oldId, newId);
@@ -386,6 +406,27 @@ export async function restoreMeetings(
                         : "Meeting could not be restored",
             });
         }
+    }
+    for (const link of sourceLinks) {
+        await db
+            .update(agendaPoints)
+            .set({
+                sources: {
+                    itemIds: link.sources.itemIds.map(
+                        (id) => restoredItemIds.get(id) ?? id,
+                    ),
+                    taskIds: link.sources.taskIds.map(
+                        (id) => input.taskIdMap[id] ?? id,
+                    ),
+                },
+            })
+            .where(
+                and(
+                    eq(agendaPoints.id, link.id),
+                    eq(agendaPoints.agendaId, link.agendaId),
+                    eq(agendaPoints.userId, userId),
+                ),
+            );
     }
     for (const link of originLinks) {
         const originPointId = restoredPointIds.get(link.sourceId);
