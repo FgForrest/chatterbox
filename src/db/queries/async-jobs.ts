@@ -452,7 +452,9 @@ export async function claimDueJobs(
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
     const result =
-        kind === "pipeline.advance" || kind === "pipeline.action"
+        kind === "pipeline.advance" ||
+        kind === "pipeline.action" ||
+        kind === "agenda.suggestions"
             ? await db.execute(sql`
         with eligible_users as (
             select

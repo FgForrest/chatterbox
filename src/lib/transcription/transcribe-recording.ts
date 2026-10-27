@@ -39,6 +39,10 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import {
+    agendaSpellingTerms,
+    loadRecordingAgenda,
+} from "@/lib/meetings/pipeline-context";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -672,6 +676,16 @@ async function transcribeRecordingInner(
         // The Almanac's names, for the providers that can be told what to
         // expect. A failure to read them costs accuracy, not the run.
         const almanacTerms = async (): Promise<AlmanacTerm[]> => {
+            const agenda = await loadRecordingAgenda(
+                ctx.actorUserId,
+                recordingId,
+            ).catch(() => {
+                console.warn(
+                    "[transcription] Agenda spelling hints unavailable",
+                );
+                return null;
+            });
+            const agendaTerms = agendaSpellingTerms(agenda);
             const roster = await resolveMeetingRoster({
                 ownerUserId: ctx.ownerUserId,
                 itemId: recordingId,
@@ -700,7 +714,8 @@ async function transcribeRecordingInner(
                         ctx.ownerUserId,
                     ),
                 });
-                if (!roster?.attendees.length) return terms;
+                if (!roster?.attendees.length && !agendaTerms.length)
+                    return terms;
                 if (!orgView) {
                     const [owner] = await db
                         .select({ email: users.email })
@@ -719,9 +734,14 @@ async function transcribeRecordingInner(
             } catch (error) {
                 unavailable(error);
             }
-            if (!roster?.attendees.length) return terms;
+            if (!roster?.attendees.length && !agendaTerms.length) return terms;
             try {
-                return mergeMeetingTerms(terms, roster.attendees, recorderName);
+                return mergeMeetingTerms(
+                    terms,
+                    roster?.attendees ?? [],
+                    recorderName,
+                    agendaTerms,
+                );
             } catch (error) {
                 unavailable(error);
                 return terms;

@@ -7,6 +7,7 @@ import type { LearnSpeakerCandidate } from "@/lib/learn/run-fallback";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import {
     type CalendarEventCandidate,
+    getCalendarEvent,
     listCalendarEventsForRecording,
 } from "./calendar-events";
 import {
@@ -105,16 +106,26 @@ export async function resolveMeetingRoster(input: {
             )
             .limit(1);
         if (!recording) return null;
-        const event = selectMeetingEvent(
-            await listCalendarEventsForRecording({
-                userId: input.ownerUserId,
-                ...recording,
-                fetchImpl: input.fetchImpl,
-            }),
-            recording.start,
-            recording.end,
-            input.calendarEventId ?? recording.calendarEventId ?? undefined,
-        );
+        const explicitEventId =
+            input.calendarEventId ?? recording.calendarEventId ?? undefined;
+        const event =
+            selectMeetingEvent(
+                await listCalendarEventsForRecording({
+                    userId: input.ownerUserId,
+                    ...recording,
+                    fetchImpl: input.fetchImpl,
+                }),
+                recording.start,
+                recording.end,
+                explicitEventId,
+            ) ??
+            (explicitEventId
+                ? await getCalendarEvent(
+                      input.ownerUserId,
+                      explicitEventId,
+                      input.fetchImpl,
+                  ).catch(() => null)
+                : null);
         if (!event) return null;
         await db
             .update(recordings)

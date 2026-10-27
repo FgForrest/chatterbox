@@ -6,6 +6,10 @@
  */
 
 import {
+    type AgendaOutcome,
+    readAgendaOutcome,
+} from "@/lib/meetings/summary-directive";
+import {
     readTaskItems,
     readTaskUpdates,
     type SummaryTaskItem,
@@ -14,6 +18,7 @@ import {
 } from "@/lib/tasks/summary-items";
 
 export interface SummaryPayload {
+    agendaOutcome?: AgendaOutcome | null;
     summary: string;
     keyPoints: string[];
     /** One line per action item, as the summary has always stored them. */
@@ -128,6 +133,9 @@ export function parseSummaryPayloadResult(
                 taskUpdates: tasksEnabled
                     ? readTaskUpdates(parsed.taskUpdates)
                     : [],
+                ...(parsed.agendaOutcome !== undefined
+                    ? { agendaOutcome: readAgendaOutcome(parsed.agendaOutcome) }
+                    : {}),
                 structured: true,
             },
             failure: null,

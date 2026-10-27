@@ -49,6 +49,7 @@ import {
     patchPointInput,
     validatePointTree,
 } from "@/lib/meetings/model";
+import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTask, getVisibleTasks } from "@/lib/tasks/tasks";
 
@@ -207,6 +208,10 @@ async function carryOver(
             and(
                 meetingVisibility(userId, orgUserId),
                 ne(meetingAgendas.id, access.agenda.id),
+                or(
+                    eq(meetingAgendas.state, "held"),
+                    sql`${meetingAgendas.recordingItemId} is not null`,
+                ),
                 sql`${meetingAgendas.createdAt} < ${access.agenda.createdAt.toISOString()}::timestamp`,
                 sql`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt}) < ${(access.agenda.plannedStart ?? access.agenda.createdAt).toISOString()}::timestamp`,
                 access.agenda.calendarSeriesId
@@ -214,7 +219,7 @@ async function carryOver(
                           meetingAgendas.calendarSeriesId,
                           access.agenda.calendarSeriesId,
                       )
-                    : sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${meetingAgendas.meetingItemId} and ${recordingFolderAssignments.folderId} = ${folderId})`,
+                    : sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId}) and ${recordingFolderAssignments.folderId} = ${folderId})`,
             ),
         )
         .orderBy(
@@ -231,12 +236,9 @@ async function carryOver(
         .where(
             and(
                 pointWhere(previous.agenda),
-                or(
-                    eq(agendaPoints.summaryOutcome, "not_covered"),
-                    previous.agenda.state === "held"
-                        ? isNull(agendaPoints.discussedAt)
-                        : undefined,
-                ),
+                previous.agenda.recordingItemId
+                    ? eq(agendaPoints.summaryOutcome, "not_covered")
+                    : isNull(agendaPoints.discussedAt),
             ),
         );
     if (points.length)
@@ -597,6 +599,9 @@ export async function getMeeting(userId: string, id: string, since?: number) {
             ...suggestion,
             text: decryptText(suggestion.text),
         })),
+        aiSuggestions: agenda.recordingItemId
+            ? { available: false, reason: null }
+            : await agendaSuggestionsAvailability(userId, agenda.id),
         outcomeUnplanned:
             decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [],
         calendar: event

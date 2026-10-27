@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as AgendaContextModule from "@/lib/meetings/pipeline-context";
 import type * as sessionActor from "@/tests/helpers/session-actor";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
@@ -33,6 +34,10 @@ vi.mock("@/lib/tasks/store", () => ({
 vi.mock("@/lib/tasks/proposals", () => ({
     loadTasksPromptContext: vi.fn(async () => ({ text: "", refs: new Map() })),
     resolveTaskProposals: vi.fn(async () => undefined),
+}));
+vi.mock("@/lib/meetings/pipeline-context", async (importOriginal) => ({
+    ...(await importOriginal<typeof AgendaContextModule>()),
+    loadRecordingAgenda: vi.fn(async () => null),
 }));
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));

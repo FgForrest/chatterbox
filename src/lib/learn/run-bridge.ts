@@ -79,6 +79,7 @@ export interface BridgeInput {
         "subject" | "relationKey" | "object"
     >[];
     signal?: AbortSignal;
+    agendaPlan?: string;
 }
 
 const ANSWER_MAX_TOKENS = 8_000;
@@ -124,6 +125,7 @@ export async function runBridgePass(
         knownPeople: input.knownPeople ?? [],
         answeredSpeakers: input.answeredSpeakers ?? [],
         knownFacts: input.knownFacts ?? [],
+        ...(input.agendaPlan ? { agendaPlan: input.agendaPlan } : {}),
     };
     const user = `CHOICES (JSON):\n${JSON.stringify(context)}\n\nTRANSCRIPT:\n${renderLearnTranscript(input.turns, 0)}`;
     const result: FallbackResult = {
