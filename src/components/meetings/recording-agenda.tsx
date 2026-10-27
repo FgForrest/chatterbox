@@ -51,8 +51,8 @@ export function RecordingAgenda({
         async (signal?: AbortSignal) => {
             const [agendaResult, candidatesResult, nextResult] =
                 await Promise.allSettled([
-                    meetingRequest<MeetingDetail>(
-                        meetingUrl(recording.id),
+                    meetingRequest<{ agenda: MeetingDetail | null }>(
+                        `/api/recordings/${encodeURIComponent(recording.id)}/agenda`,
                         "GET",
                         undefined,
                         signal,
@@ -75,8 +75,8 @@ export function RecordingAgenda({
             if (signal?.aborted) return;
             setAttached(
                 agendaResult.status === "fulfilled" &&
-                    agendaResult.value.recordingItemId
-                    ? agendaResult.value
+                    agendaResult.value.agenda?.recordingItemId
+                    ? agendaResult.value.agenda
                     : null,
             );
             setCandidates(

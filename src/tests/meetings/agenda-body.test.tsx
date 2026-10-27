@@ -391,3 +391,68 @@ it("does not let a non-manager start or end a meeting", async () => {
     await act(async () => {});
     expect(screen.queryByRole("button", { name: "Start meeting" })).toBeNull();
 });
+
+it("adds a point when randomUUID is unavailable on an HTTP installation", async () => {
+    vi.stubGlobal("crypto", {
+        getRandomValues: globalThis.crypto.getRandomValues.bind(
+            globalThis.crypto,
+        ),
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/points") && init?.method === "POST") {
+            const body = JSON.parse(String(init.body));
+            server = {
+                ...server,
+                version: server.version + 1,
+                points: [...server.points, point(body.text)],
+            };
+            return Response.json(server.points.at(-1));
+        }
+        return Response.json(server);
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="owner" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const input = screen.getByLabelText("New discussion point");
+    fireEvent.change(input, { target: { value: "Review migration dates" } });
+    await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+    expect(screen.getByDisplayValue("Review migration dates")).toHaveProperty(
+        "value",
+        "Review migration dates",
+    );
+    expect(toastError).not.toHaveBeenCalled();
+});
+
+it("offers one task source per recording across personal and Organization views", () => {
+    const recording = {
+        id: "source",
+        filename: "Previous meeting",
+        duration: 60000,
+        filesize: 0,
+        startTime: at,
+        deviceSn: "test",
+    };
+    render(
+        <AgendaBody
+            id="agenda"
+            initial={server}
+            recordings={[recording, { ...recording, view: "org" }]}
+        />,
+    );
+    expect(
+        screen.getAllByRole("option", { name: "Previous meeting" }),
+    ).toHaveLength(1);
+});
+
+it.each([
+    [1, 1, "1 úkol · 1 hotový"],
+    [3, 2, "3 úkoly · 2 hotové"],
+    [5, 0, "5 úkolů · 0 hotových"],
+])("uses Czech count forms for %s tasks and %s done", (count, done, expected) => {
+    expect(
+        translatedSourceMessage(
+            "cs-CZ",
+            "{count, number} tasks · {done, number} done",
+            { count, done },
+        ),
+    ).toBe(expected);
+});

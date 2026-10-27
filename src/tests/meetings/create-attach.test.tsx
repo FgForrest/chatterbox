@@ -195,16 +195,13 @@ it("shows a widening-sharing audience, attaches explicitly and reads back the ab
             return Response.json({ event: null });
         expect(init.method).toBe("GET");
         return attached
-            ? Response.json(
-                  detail({
+            ? Response.json({
+                  agenda: detail({
                       recordingItemId: "recording",
                       title: "Prepared agenda",
                   }),
-              )
-            : Response.json(
-                  { error: "No agenda", code: "NOT_FOUND" },
-                  { status: 404 },
-              );
+              })
+            : Response.json({ agenda: null });
     });
     const changed = vi.fn();
     render(
@@ -227,6 +224,33 @@ it("shows a widening-sharing audience, attaches explicitly and reads back the ab
     expect(screen.getByTestId("readonly-agenda")).toBeTruthy();
     expect(screen.queryByText(/published|now visible/)).toBeNull();
 });
+it("keeps ordinary recordings free of agenda UI and uses the optional lookup", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+        Response.json(
+            url.endsWith("/agenda")
+                ? { agenda: null }
+                : url.endsWith("/next-meeting")
+                  ? { event: null }
+                  : { candidates: [] },
+        ),
+    );
+    const { container } = render(
+        <RecordingAgenda
+            recording={recording}
+            folders={[folder]}
+            onChanged={vi.fn()}
+        />,
+    );
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/recordings/recording/agenda",
+        expect.objectContaining({ method: "GET" }),
+    );
+    expect(
+        fetchMock.mock.calls.some(([url]) => url.startsWith("/api/meetings/")),
+    ).toBe(false);
+});
 it("offers prepare next only when the route returns an instance", async () => {
     fetchMock.mockImplementation(async (url: string) =>
         url.endsWith("/next-meeting")
@@ -242,7 +266,9 @@ it("offers prepare next only when the route returns an instance", async () => {
               })
             : url.includes("candidates")
               ? Response.json({ candidates: [] })
-              : Response.json(detail({ recordingItemId: "recording" })),
+              : Response.json({
+                    agenda: detail({ recordingItemId: "recording" }),
+                }),
     );
     render(
         <RecordingAgenda

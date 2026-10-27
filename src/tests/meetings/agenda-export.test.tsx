@@ -112,6 +112,50 @@ describe("export visibility", () => {
     });
     it.each([
         true,
+        false,
+    ])("copies on HTTP without Clipboard API and reports the result %s", async (copied) => {
+        Object.defineProperty(navigator, "clipboard", { value: undefined });
+        const copy = vi.fn(() => {
+            expect(
+                document.getSelection()?.toString() ||
+                    document.querySelector("textarea")?.value,
+            ).toContain("Review dates");
+            return copied;
+        });
+        Object.defineProperty(document, "execCommand", {
+            configurable: true,
+            value: copy,
+        });
+        let finish: (response: Response) => void = () => {};
+        const response = new Promise<Response>((resolve) => {
+            finish = resolve;
+        });
+        fetchMock.mockReturnValueOnce(response);
+        render(<AgendaExport detail={detail()} />);
+        const trigger = screen.getByRole("button", { name: "Agenda export" });
+        act(() => trigger.focus());
+        await openMenu();
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("menuitem", { name: "Copy agenda Markdown" }),
+            ),
+        );
+        await waitFor(() => expect(document.activeElement).toBe(trigger));
+        await act(async () => finish(new Response("# Acme\nReview dates")));
+        expect(copy).toHaveBeenCalledWith("copy");
+        expect(document.querySelector("textarea")).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        if (copied)
+            expect(toast.success).toHaveBeenCalledWith(
+                "Agenda Markdown copied",
+            );
+        else
+            expect(toast.error).toHaveBeenCalledWith(
+                "Could not copy the agenda",
+            );
+    });
+    it.each([
+        true,
         null,
     ])("previews without tasks and hands off consent with organizer permission %s", async (canExportCalendar) => {
         render(

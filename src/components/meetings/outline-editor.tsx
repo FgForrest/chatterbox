@@ -39,11 +39,24 @@ function PointField({
     const input = useRef<HTMLTextAreaElement>(null);
     useEffect(() => {
         const field = input.current;
-        if (field && field.value === draft) {
+        if (!editable || !field || field.value !== draft) return;
+        const resize = () => {
             field.style.height = "0px";
             field.style.height = `${Math.max(32, field.scrollHeight)}px`;
-        }
-    }, [draft]);
+        };
+        resize();
+        let width = field.clientWidth;
+        const observer =
+            typeof ResizeObserver === "undefined"
+                ? null
+                : new ResizeObserver(() => {
+                      if (width === field.clientWidth) return;
+                      width = field.clientWidth;
+                      resize();
+                  });
+        observer?.observe(field);
+        return () => observer?.disconnect();
+    }, [draft, editable]);
     useEffect(() => {
         if (!focused.current) setDraft(point.text);
     }, [point.text]);

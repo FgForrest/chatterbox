@@ -9,10 +9,11 @@ import {
     Users,
     X,
 } from "lucide-react";
+import { nanoid } from "nanoid";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,16 @@ export function AgendaBody({
     const [attachOpen, setAttachOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
+    const sourceRecordings = useMemo(
+        () => [
+            ...new Map(
+                recordings
+                    .filter((recording) => recording.kind !== "mail")
+                    .map((recording) => [recording.id, recording]),
+            ).values(),
+        ],
+        [recordings],
+    );
     const readOnly =
         variant === "recording" || Boolean(detail?.recordingItemId);
     const live = !readOnly && (variant === "live" || detail?.state === "live");
@@ -346,19 +357,14 @@ export function AgendaBody({
                                 }}
                             >
                                 <option value="">{i18n("Automatic")}</option>
-                                {recordings
-                                    .filter(
-                                        (recording) =>
-                                            recording.kind !== "mail",
-                                    )
-                                    .map((recording) => (
-                                        <option
-                                            key={`${recording.id}:${recording.view}`}
-                                            value={recording.id}
-                                        >
-                                            {recording.filename}
-                                        </option>
-                                    ))}
+                                {sourceRecordings.map((recording) => (
+                                    <option
+                                        key={`${recording.id}:${recording.view}`}
+                                        value={recording.id}
+                                    >
+                                        {recording.filename}
+                                    </option>
+                                ))}
                             </select>
                         </label>
                     )}
@@ -777,7 +783,7 @@ export function AgendaBody({
                     onAdd={(text, parentId, position) => {
                         const at = new Date().toISOString();
                         const point: MeetingPoint = {
-                            id: `pending-${crypto.randomUUID()}`,
+                            id: `pending-${nanoid()}`,
                             agendaId: detail.id,
                             userId: detail.userId,
                             authorUserId: userId ?? null,

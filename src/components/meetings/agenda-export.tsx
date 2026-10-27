@@ -67,7 +67,26 @@ export function AgendaExport({
         try {
             const response = await fetch(endpoint);
             if (!response.ok) throw new Error();
-            await navigator.clipboard.writeText(await response.text());
+            const markdown = await response.text();
+            if (navigator.clipboard) {
+                await navigator.clipboard.writeText(markdown);
+            } else {
+                const focused = document.activeElement;
+                const field = document.createElement("textarea");
+                field.value = markdown;
+                field.style.position = "fixed";
+                field.style.opacity = "0";
+                field.setAttribute("aria-hidden", "true");
+                document.body.append(field);
+                try {
+                    field.select();
+                    if (!document.execCommand("copy")) throw new Error();
+                } finally {
+                    field.remove();
+                    if (focused instanceof HTMLElement && focused.isConnected)
+                        focused.focus({ preventScroll: true });
+                }
+            }
             toast.success(i18n("Agenda Markdown copied"));
         } catch {
             toast.error(i18n("Could not copy the agenda"));

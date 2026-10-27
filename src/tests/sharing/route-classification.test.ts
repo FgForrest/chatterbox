@@ -55,6 +55,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         DELETE: "owner",
     },
     "recordings/[id]/agenda-candidates/route.ts": { GET: "owner" },
+    "recordings/[id]/agenda/route.ts": { GET: "access" },
     "recordings/[id]/agenda/detach/route.ts": { POST: "owner" },
     "recordings/[id]/next-meeting/route.ts": { GET: "access" },
     "recordings/[id]/audio/route.ts": { GET: "access" },

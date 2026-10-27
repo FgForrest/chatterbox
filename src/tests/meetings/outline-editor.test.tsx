@@ -20,7 +20,10 @@ vi.mock("next-intl", () => ({
         dateTime: (value: Date) => value.toISOString().slice(11, 16),
     }),
 }));
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 function editor(
     points = [point("Root"), point("Second", { position: 1 })],
     overrides = {},
@@ -38,6 +41,29 @@ function editor(
     return { ...result, props };
 }
 describe("outline keyboard", () => {
+    it("grows wrapped point text when the pane narrows without changing the text", () => {
+        let resize = () => {};
+        const disconnect = vi.fn();
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(callback: () => void) {
+                    resize = callback;
+                }
+                observe() {}
+                disconnect = disconnect;
+            },
+        );
+        const { unmount } = editor([point("Long discussion point")]);
+        const field = screen.getByLabelText("Discussion point");
+        Object.defineProperty(field, "clientWidth", { value: 120 });
+        Object.defineProperty(field, "scrollHeight", { value: 80 });
+        act(() => resize());
+        expect(field.style.height).toBe("80px");
+        expect(field).toHaveProperty("value", "Long discussion point");
+        unmount();
+        expect(disconnect).toHaveBeenCalledOnce();
+    });
     it("Enter creates a focused draft directly after a point and persists it once", async () => {
         const { props } = editor();
         fireEvent.keyDown(screen.getAllByLabelText("Discussion point")[0], {
