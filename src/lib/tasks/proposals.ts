@@ -102,6 +102,7 @@ export interface TasksPromptContext {
     refs: Map<string, string>;
     /** Folder scope used for this run's task matching. */
     scopeFingerprint: string;
+    agendaTasks?: readonly AgendaReviewedTask[];
 }
 
 interface RecordingRow {
@@ -164,6 +165,7 @@ async function scopedCandidates(
     reviewer: TaskViewer,
     scopeFolderIds: readonly string[],
     excludeCurrentItem = true,
+    includeDecided = false,
 ): Promise<CandidateTask[]> {
     const [assigned, pending] = await Promise.all([
         db
@@ -217,7 +219,13 @@ async function scopedCandidates(
         )
         .where(
             and(
-                eq(recordingTasks.status, "open"),
+                includeDecided
+                    ? inArray(recordingTasks.status, [
+                          "open",
+                          "done",
+                          "dropped",
+                      ])
+                    : eq(recordingTasks.status, "open"),
                 ...(excludeCurrentItem
                     ? [ne(recordingTasks.itemId, recording.id)]
                     : []),
@@ -325,6 +333,7 @@ async function unfiledCandidates(
     recording: RecordingRow,
     reviewer: TaskViewer,
     participantPersonIds: readonly string[],
+    includeDecided = false,
 ): Promise<CandidateTask[]> {
     if (participantPersonIds.length === 0) return [];
     const rows = await db
@@ -353,7 +362,13 @@ async function unfiledCandidates(
         )
         .where(
             and(
-                eq(recordingTasks.status, "open"),
+                includeDecided
+                    ? inArray(recordingTasks.status, [
+                          "open",
+                          "done",
+                          "dropped",
+                      ])
+                    : eq(recordingTasks.status, "open"),
                 inArray(recordingTasks.assigneePersonId, [
                     ...participantPersonIds,
                 ]),
@@ -990,14 +1005,34 @@ export async function loadTasksPromptContext({
         scopeFolderIds.length > 0
             ? await scopedCandidates(recording, reviewer, scopeFolderIds)
             : await unfiledCandidates(recording, reviewer, [...labelOf.keys()]);
-    const reviewedIds = new Set(agendaTasks.map((task) => task.id));
+    const agendaEligible = agendaTasks.length
+        ? scopeFolderIds.length > 0
+            ? await scopedCandidates(
+                  recording,
+                  reviewer,
+                  scopeFolderIds,
+                  true,
+                  true,
+              )
+            : await unfiledCandidates(
+                  recording,
+                  reviewer,
+                  [...labelOf.keys()],
+                  true,
+              )
+        : [];
+    const eligibleIds = new Set(agendaEligible.map((task) => task.id));
+    const reviewedTasks = agendaTasks.filter((task) =>
+        eligibleIds.has(task.id),
+    );
+    const reviewedIds = new Set(reviewedTasks.map((task) => task.id));
     const ranked = await rankedCandidates(
         eligible.filter((task) => !reviewedIds.has(task.id)),
         itemText,
         participantPersonIds,
     );
     const rows = [
-        ...agendaTasks
+        ...reviewedTasks
             .filter(
                 (task) =>
                     !task.changedDuringMeeting &&
@@ -1033,7 +1068,7 @@ export async function loadTasksPromptContext({
         language,
         decided: [
             ...decidedRows.map((row) => decryptText(row.text)),
-            ...agendaTasks
+            ...reviewedTasks
                 .filter((task) => task.changedDuringMeeting)
                 .map((task) => task.text),
         ],
@@ -1043,6 +1078,7 @@ export async function loadTasksPromptContext({
     return {
         text: mask(text),
         refs,
+        agendaTasks: reviewedTasks,
         scopeFingerprint: await itemScopeFingerprint(
             recording.id,
             orgView ? "org" : "private",

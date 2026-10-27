@@ -355,4 +355,26 @@ describe("agenda side panel", () => {
         expect(el("open-app").hidden).toBe(true);
         expect(el("status").textContent).toContain("Could not load");
     });
+    it("uses since and preserves the detail on an unchanged poll", async () => {
+        data.version = 4;
+        data.cursor = "4:standalone:idle";
+        await start();
+        request.mockResolvedValueOnce({
+            unchanged: true,
+            version: 4,
+            cursor: data.cursor,
+        });
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(request).toHaveBeenLastCalledWith(
+            "/agenda-one?since=4%3Astandalone%3Aidle",
+        );
+        expect(el("title").textContent).toBe("Acme review");
+    });
+    it("stops polling after the agenda is absorbed", async () => {
+        data.recordingItemId = "recording-one";
+        data.permissions.edit = false;
+        await start();
+        await vi.advanceTimersByTimeAsync(120000);
+        expect(request).toHaveBeenCalledTimes(1);
+    });
 });

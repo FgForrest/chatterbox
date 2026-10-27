@@ -32,6 +32,7 @@ export async function enqueueVideoExtractionJob(
             encryptedFilename: input.encryptedFilename,
             sourceSize: input.sourceSize,
             folderId: input.folderId,
+            ...(input.agendaId ? { agendaId: input.agendaId } : {}),
         },
     });
     if (enqueued.created) nudge();

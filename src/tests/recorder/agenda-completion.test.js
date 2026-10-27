@@ -163,6 +163,64 @@ describe("popup agenda confirmation", () => {
     });
 });
 
+describe("popup folder precedence", () => {
+    it("sends the user's folder pick while the agenda card is shown", async () => {
+        const original = send.getMockImplementation();
+        send.mockImplementation((message) =>
+            message.type === "get-folders" && message.q
+                ? Promise.resolve({
+                      ok: true,
+                      folders: [{ id: "chosen-folder", label: "Chosen" }],
+                  })
+                : original(message),
+        );
+        await popup();
+        const input = el("folder-picker");
+        input.focus();
+        input.value = "Chosen";
+        input.dispatchEvent(new Event("input"));
+        await vi.advanceTimersByTimeAsync(200);
+        el("folder-listbox").children[1].click();
+        await settle();
+        el("start").click();
+        await settle();
+        expect(send).toHaveBeenCalledWith({
+            type: "start-recording",
+            payload: expect.objectContaining({
+                agendaId: "agenda-one",
+                folderId: "chosen-folder",
+            }),
+        });
+    });
+    it("preserves File later when the agenda card arrives after the user's pick", async () => {
+        let release;
+        const original = send.getMockImplementation();
+        send.mockImplementation((message) =>
+            message.type === "match-agendas"
+                ? new Promise((resolve) => {
+                      release = resolve;
+                  })
+                : original(message),
+        );
+        await popup();
+        el("folder-picker").focus();
+        el("folder-listbox").children[0].click();
+        await settle();
+        release({ ok: true, agendas: [agenda] });
+        await settle();
+        expect(el("folder-picker").value).toContain("fileLater");
+        el("start").click();
+        await settle();
+        expect(send).toHaveBeenCalledWith({
+            type: "start-recording",
+            payload: expect.objectContaining({
+                agendaId: "agenda-one",
+                folderId: null,
+            }),
+        });
+    });
+});
+
 describe.each(["en", "cs"])("localized agenda completion in %s", (locale) => {
     beforeEach(() => {
         const messages = JSON.parse(

@@ -3,10 +3,12 @@ import { db } from "@/db";
 import { listMeetingRows, meetingVisibility } from "@/db/queries/meetings";
 import {
     chatterItems,
+    meetingAgendas,
     recordingFolderAssignments,
     recordings,
 } from "@/db/schema";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { assertCategorizableFolder } from "@/lib/folders/folders";
 import { listUpcomingCalendarEvents } from "@/lib/integrations/google/calendar-events";
 import {
@@ -17,7 +19,10 @@ import {
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import { extractMeetCode } from "@/lib/integrations/google/meet-code";
 import { meetingViewer } from "@/lib/meetings/access";
-import { readMeetingCalendarSnapshot } from "@/lib/meetings/calendar-snapshot";
+import {
+    cachedMeetingCalendarSnapshot,
+    readMeetingCalendarSnapshot,
+} from "@/lib/meetings/calendar-snapshot";
 import { listMeetings } from "@/lib/meetings/service";
 import { requireRecordingAccess } from "@/lib/sharing/access";
 
@@ -114,6 +119,17 @@ export async function meetingCalendarEvents(userId: string, folderId: string) {
 /** Next instance is offered only for a recurring recording visible to this caller. */
 export async function nextMeeting(userId: string, itemId: string) {
     const access = await requireRecordingAccess(userId, itemId);
+    const [attached] = await db
+        .select({ id: meetingAgendas.id })
+        .from(meetingAgendas)
+        .where(eq(meetingAgendas.recordingItemId, itemId))
+        .limit(1);
+    if (!attached)
+        throw new AppError(
+            ErrorCode.NOT_FOUND,
+            "Attached agenda not found",
+            404,
+        );
     const [recording] = await db
         .select({ seriesId: recordings.calendarSeriesId })
         .from(recordings)
@@ -158,6 +174,7 @@ export async function matchRecorderAgendas(
     userId: string,
     at: Date,
     meetCode?: string,
+    scheduleRefresh?: (refresh: () => Promise<void>) => void,
 ) {
     const rows = await listMeetings(userId, {
         from: new Date(at.getTime() - 24 * 3600000),
@@ -171,14 +188,17 @@ export async function matchRecorderAgendas(
         : null;
     if (meetCode && !code) return [];
     const viewer = await meetingViewer(userId);
-    const agendas = code
-        ? await listMeetingRows(userId, viewer.orgUserId, {
-              from: new Date(at.getTime() - 24 * 3600000),
-              to: new Date(at.getTime() + 15 * 60000),
-              includePast: true,
-          })
-        : [];
+    const agendas = await listMeetingRows(userId, viewer.orgUserId, {
+        from: new Date(at.getTime() - 24 * 3600000),
+        to: new Date(at.getTime() + 15 * 60000),
+        includePast: true,
+    });
     const byId = new Map(agendas.map((row) => [row.agenda.id, row.agenda]));
+    scheduleRefresh?.(async () => {
+        await Promise.all(
+            agendas.map(({ agenda }) => readMeetingCalendarSnapshot(agenda)),
+        );
+    });
     const matches = await Promise.all(
         rows.map(async (row) => {
             if (
@@ -191,8 +211,9 @@ export async function matchRecorderAgendas(
                 if (!row.calendarEventId) return null;
                 const agenda = byId.get(row.id);
                 const event = agenda
-                    ? await readMeetingCalendarSnapshot(agenda)
+                    ? cachedMeetingCalendarSnapshot(agenda)
                     : null;
+
                 if (event?.meetingCode !== code) return null;
             }
             return row;

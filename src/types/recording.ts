@@ -6,6 +6,8 @@ import type { RecordingView } from "@/lib/sharing/view";
  */
 export interface RecordingQueryResult {
     confirmedLanguage?: string | null;
+    hasAgenda?: boolean;
+    agendaCandidateCount?: number;
     id: string;
     filename: string;
     duration: number;

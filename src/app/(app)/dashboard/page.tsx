@@ -3,6 +3,7 @@ import { Workstation } from "@/components/dashboard/workstation";
 import { PersonSharingProvider } from "@/components/sharing/person-sharing";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
+import { recordingHasAgenda } from "@/db/queries/agenda-presence";
 import {
     listOutgoingSharedItemIds,
     receivedItemCondition,
@@ -138,6 +139,7 @@ async function loadOrganizationLibrary(
     const rows = await db
         .select({
             id: recordings.id,
+            hasAgenda: recordingHasAgenda(),
             userId: recordings.userId,
             filename: chatterItems.title,
             duration: recordings.duration,
@@ -278,6 +280,7 @@ export default async function DashboardPage() {
         db
             .select({
                 id: recordings.id,
+                hasAgenda: recordingHasAgenda(),
                 filename: chatterItems.title,
                 duration: recordings.duration,
                 startTime: chatterItems.occurredAt,

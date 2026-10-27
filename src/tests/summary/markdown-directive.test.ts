@@ -42,6 +42,7 @@ import {
     SUMMARY_TASKS_DIRECTIVE,
     SUMMARY_TASKS_MERGE_DIRECTIVE,
 } from "@/lib/tasks/directive";
+import { loadTasksPromptContext } from "@/lib/tasks/proposals";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
@@ -90,8 +91,9 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock, profileLegacy } = vi.hoisted(() => ({
+const { createMock, profileLegacy, taskExtraction } = vi.hoisted(() => ({
     createMock: vi.fn(),
+    taskExtraction: { enabled: true },
     profileLegacy: {
         current: {} as Partial<LegacyProfileSettings>,
     },
@@ -107,14 +109,24 @@ vi.mock("@/db/queries/agenda-pipeline", () => ({
     lockSummaryAgenda: async () => true,
     writeSummaryAgenda: async () => undefined,
 }));
+beforeEach(() => {
+    taskExtraction.enabled = true;
+    vi.mocked(loadTasksPromptContext).mockResolvedValue({
+        text: "",
+        refs: new Map(),
+        scopeFingerprint: "scope",
+    });
+});
 afterEach(() => {
     agendaContext.current = null;
 });
 
 vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: vi.fn(async () =>
-        resolvedAudioProfile(profileLegacy.current),
-    ),
+    resolveItemProfile: vi.fn(async () => {
+        const profile = resolvedAudioProfile(profileLegacy.current);
+        profile.settings.steps.tasks.enabled = taskExtraction.enabled;
+        return profile;
+    }),
 }));
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue(null),
@@ -701,4 +713,48 @@ describe("absorbed agenda summary prompts", () => {
         expect(userMessages()[0]).toContain('"id":"point"');
         expect(userMessages()[0]).toContain('"note":"Only a hint"');
     });
+});
+
+it.each([
+    true,
+    false,
+])("uses only reviewer-eligible agenda tasks in the actual prompt (extraction=%s)", async (enabled) => {
+    createMock.mockReset();
+    selectResults.clear();
+    taskExtraction.enabled = enabled;
+    const visible = {
+        id: "visible",
+        text: "Eligible task",
+        status: "open",
+        assigneePersonId: null,
+        assigneeName: null,
+        dueDate: null,
+        changedDuringMeeting: false,
+    };
+    agendaContext.current = {
+        id: "agenda",
+        userId: "user-1",
+        version: 0,
+        calendarEventId: null,
+        points: [],
+        tasks: [
+            visible,
+            {
+                ...visible,
+                id: "private",
+                text: "Owner-only task must not reach the model",
+            },
+        ],
+    };
+    vi.mocked(loadTasksPromptContext).mockResolvedValueOnce({
+        text: "Eligible candidates",
+        refs: new Map([["T1", visible.id]]),
+        scopeFingerprint: "scope",
+        agendaTasks: [visible],
+    });
+    await summarize();
+    expect(userMessages()[0]).toContain("Eligible task");
+    expect(userMessages()[0]).not.toContain("Owner-only task");
+    expect(userMessages()[0].includes("Eligible candidates")).toBe(enabled);
+    expect(createMock).toHaveBeenCalledTimes(1);
 });

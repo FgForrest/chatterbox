@@ -16,9 +16,16 @@ type Json<T> = T extends Date
       : T extends object
         ? { [K in keyof T]: Json<T[K]> }
         : T;
-export type MeetingDetail = Json<
+type OptionalJob<T> = T extends { job: infer J }
+    ? Omit<T, "job"> & { job?: J }
+    : T;
+type Detail = Json<
     Exclude<Awaited<ReturnType<typeof getMeeting>>, { unchanged: true }>
 >;
+export type MeetingDetail = Omit<Detail, "cursor" | "aiSuggestions"> & {
+    cursor?: string;
+    aiSuggestions: OptionalJob<Detail["aiSuggestions"]>;
+};
 export type MeetingPoint = MeetingDetail["points"][number];
 export type MeetingTask = MeetingDetail["tasks"][number];
 export type MeetingRowData = Json<

@@ -3,7 +3,12 @@ import { z } from "zod";
 import { db } from "@/db";
 import { agendaSuggestionInputs } from "@/db/queries/agenda-suggestions";
 import { enqueueJob } from "@/db/queries/async-jobs";
-import { agendaSuggestions, meetingAgendas, users } from "@/db/schema";
+import {
+    agendaPoints,
+    agendaSuggestions,
+    meetingAgendas,
+    users,
+} from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -148,7 +153,7 @@ export const agendaSuggestionsJobHandler: JobHandler<{ agendaId: string }> = {
                 ownerUserId: agenda.userId,
                 actorUserId: userId,
                 payerUserId: model.payerUserId,
-                operation: "summary",
+                operation: "topics",
                 provider: model.credentials.provider,
                 model: model.model,
                 baseUrl: model.credentials.baseUrl,
@@ -167,7 +172,6 @@ export const agendaSuggestionsJobHandler: JobHandler<{ agendaId: string }> = {
                 502,
             );
         const taskIds = new Set(tasks.map((task) => task.id));
-        const pointIds = new Set(points.map((point) => point.id));
         const seen = new Set(
             [...points, ...prior].map((entry) => suggestionKey(entry.text)),
         );
@@ -193,11 +197,41 @@ export const agendaSuggestionsJobHandler: JobHandler<{ agendaId: string }> = {
                 { viewer: access.viewer, executor: tx, lock: true },
             );
             signal.throwIfAborted();
-            if (current.agenda.version !== agenda.version)
-                return { skipped: "agenda_changed", count: 0 };
-            if (suggestions.length) {
+            const [currentPoints, currentSuggestions] = await Promise.all([
+                tx
+                    .select()
+                    .from(agendaPoints)
+                    .where(
+                        and(
+                            eq(agendaPoints.agendaId, current.agenda.id),
+                            eq(agendaPoints.userId, current.agenda.userId),
+                        ),
+                    ),
+                tx
+                    .select()
+                    .from(agendaSuggestions)
+                    .where(
+                        and(
+                            eq(agendaSuggestions.agendaId, current.agenda.id),
+                            eq(agendaSuggestions.userId, current.agenda.userId),
+                        ),
+                    ),
+            ]);
+            const pointIds = new Set(currentPoints.map((point) => point.id));
+            const currentKeys = new Set(
+                [...currentPoints, ...currentSuggestions].map((entry) =>
+                    suggestionKey(decryptText(entry.text)),
+                ),
+            );
+            const result = suggestions.filter((suggestion) => {
+                const key = suggestionKey(suggestion.text);
+                if (currentKeys.has(key)) return false;
+                currentKeys.add(key);
+                return true;
+            });
+            if (result.length) {
                 await tx.insert(agendaSuggestions).values(
-                    suggestions.map((suggestion) => ({
+                    result.map((suggestion) => ({
                         userId: agenda.userId,
                         agendaId: agenda.id,
                         kind: "ai" as const,
@@ -224,7 +258,7 @@ export const agendaSuggestionsJobHandler: JobHandler<{ agendaId: string }> = {
                         ),
                     );
             }
-            return { count: suggestions.length };
+            return { count: result.length };
         });
     },
     isRetryable: isRetryableError,

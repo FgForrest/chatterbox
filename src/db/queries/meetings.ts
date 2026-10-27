@@ -1,4 +1,5 @@
 import {
+    type AnyColumn,
     and,
     asc,
     eq,
@@ -36,22 +37,26 @@ export type MeetingExecutor = Pick<
 export function meetingVisibility(
     userId: string,
     orgUserId: string | null,
+    item: Record<
+        "id" | "userId" | "kind" | "deletedAt",
+        AnyColumn
+    > = chatterItems,
 ): SQL {
     return and(
-        isNull(chatterItems.deletedAt),
+        isNull(item.deletedAt),
         or(
-            eq(chatterItems.userId, userId),
+            eq(item.userId, userId),
             or(
                 and(
-                    eq(chatterItems.kind, "meeting"),
-                    receivedThroughFolderCondition(userId),
+                    eq(item.kind, "meeting"),
+                    receivedThroughFolderCondition(userId, item.id),
                 ),
                 and(
-                    inArray(chatterItems.kind, ["audio", "mail"]),
-                    receivedItemCondition(userId),
+                    inArray(item.kind, ["audio", "mail"]),
+                    receivedItemCondition(userId, item.id),
                 ),
             ),
-            orgUserId ? sharedItemCondition(orgUserId) : undefined,
+            orgUserId ? sharedItemCondition(orgUserId, item.id) : undefined,
         ),
     ) as SQL;
 }
@@ -185,7 +190,12 @@ export async function listMeetingRows(
                       ),
             ),
         )
-        .orderBy(asc(meetingAgendas.plannedStart), asc(meetingAgendas.id))
+        .orderBy(
+            sql`case when ${meetingAgendas.plannedStart} >= now() or not ${meetingAgendas.timeSet} then 0 else 1 end`,
+            sql`case when ${meetingAgendas.plannedStart} >= now() then ${meetingAgendas.plannedStart} end asc`,
+            sql`case when ${meetingAgendas.plannedStart} < now() then ${meetingAgendas.plannedStart} end desc`,
+            asc(meetingAgendas.id),
+        )
         .limit(input.limit ?? 500);
 }
 

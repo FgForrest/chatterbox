@@ -109,20 +109,36 @@ export async function clearAgendaReminders() {
 }
 
 /** Refresh the next day's agendas with the recorder configuration. */
-export async function refreshAgendas() {
+let refreshing;
+export function refreshAgendas(options = {}) {
+    refreshing ??= refreshAgendasNow(options).finally(() => { refreshing = undefined; });
+    return refreshing;
+}
+
+async function refreshAgendasNow({ force = false } = {}) {
     const settings = await getSettings();
     if (!supportsAgendas(settings)) {
         await clearAgendas();
         return;
     }
     const now = Date.now();
+    const cached = (await chrome.storage.session.get(AGENDA_CACHE_KEY))[AGENDA_CACHE_KEY];
+    if (!force && cached?.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && now - cached.fetchedAt < 30 * 60000) return;
     const query = new URLSearchParams({
         from: new Date(now).toISOString(),
         to: new Date(now + 86400000).toISOString(),
     });
     const identity = (await chrome.storage.local.get("encryptedApiKey"))
         .encryptedApiKey;
-    const body = await agendaRequest(`?${query}`);
+    const controller = new AbortController();
+    let timer;
+    let body;
+    try {
+        body = await Promise.race([
+            agendaRequest(`?${query}`, { signal: controller.signal }),
+            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda refresh timed out")); }, 5000); }),
+        ]);
+    } finally { clearTimeout(timer); }
     const latest = await getSettings();
     if (
         !supportsAgendas(latest) ||
@@ -141,13 +157,20 @@ export async function refreshAgendas() {
             serverUrl: settings.serverUrl,
             connectionId: settings.connectionId,
             agendas,
+            fetchedAt: now,
         },
     });
-    await clearAgendaReminders();
-    if (!latest.agendaReminders) return;
+    if (!latest.agendaReminders) { await clearAgendaReminders(); return; }
+    const desired = new Map(agendas.map((agenda) => [`${AGENDA_ALARM_PREFIX}${agenda.id}`, Date.parse(agenda.start) - 60000]));
+    for (const alarm of (await chrome.alarms?.getAll?.()) ?? []) {
+        if (alarm.name.startsWith(AGENDA_ALARM_PREFIX) && (!desired.has(alarm.name) || desired.get(alarm.name) !== alarm.scheduledTime)) await chrome.alarms.clear(alarm.name);
+    }
+    for (const id of Object.keys((await chrome.notifications?.getAll?.()) ?? {}))
+        if (id.startsWith(AGENDA_ALARM_PREFIX) && !desired.has(id)) await chrome.notifications.clear(id);
     for (const agenda of agendas) {
         const when = Date.parse(agenda.start) - 60000;
-        if (when > now)
+        const existing = await chrome.alarms?.get?.(`${AGENDA_ALARM_PREFIX}${agenda.id}`);
+        if (when > now && existing?.scheduledTime !== when)
             await chrome.alarms.create(`${AGENDA_ALARM_PREFIX}${agenda.id}`, {
                 when,
             });

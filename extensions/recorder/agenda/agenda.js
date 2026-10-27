@@ -256,13 +256,13 @@ function elapsed(start) {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-async function loadDetail(id) {
+async function loadDetail(id, poll = false) {
     const version = ++generation;
     try {
-        const next = await agendaRequest(`/${encodeURIComponent(id)}`);
+        const since = poll && detail?.id === id ? detail.cursor ?? detail.version : undefined;
+        const next = await agendaRequest(`/${encodeURIComponent(id)}${since !== undefined ? `?since=${encodeURIComponent(since)}` : ""}`);
         if (version !== generation) return;
-        detail = next;
-        render();
+        if (!next.unchanged) { detail = next; render(); }
     } catch (error) {
         if (version !== generation) return;
         detail = null;
@@ -317,7 +317,7 @@ async function choices() {
         el("choice-list").append(text("p", t("agendaEmpty"), "hint"));
 }
 
-async function restore() {
+async function restore(poll = false) {
     if (loading || saving) {
         reloadPending = true;
         return;
@@ -341,7 +341,7 @@ async function restore() {
         state = stored.recordingState ?? {};
         live = live || (state.state === "recording" && !state.stopped);
         if (!context.choose && context.agendaIds?.length === 1)
-            await loadDetail(context.agendaIds[0]);
+            await loadDetail(context.agendaIds[0], poll);
         else await choices();
     } catch (error) {
         showError(error);
@@ -424,10 +424,11 @@ setInterval(() => {
     if (
         saving ||
         loading ||
+        detail?.recordingItemId ||
         document.activeElement?.matches('input[type="text"]')
     )
         return;
-    void restore();
+    void restore(true);
 }, 15000);
 setInterval(renderRecording, 1000);
 await restore();

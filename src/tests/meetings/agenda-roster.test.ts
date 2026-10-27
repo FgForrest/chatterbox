@@ -8,7 +8,10 @@ const { list, get, meet, stored, update } = vi.hoisted(() => ({
     get: vi.fn(),
     meet: vi.fn(),
     update: vi.fn(),
-    stored: { calendarEventId: "agenda-event" as string | null },
+    stored: {
+        calendarEventId: "agenda-event" as string | null,
+        calendarSeriesId: null as string | null,
+    },
 }));
 vi.mock("@/db", () => ({
     db: {
@@ -21,6 +24,7 @@ vi.mock("@/db", () => ({
                                 start: new Date("2026-10-27T10:00:00Z"),
                                 end: new Date("2026-10-27T11:00:00Z"),
                                 calendarEventId: stored.calendarEventId,
+                                calendarSeriesId: stored.calendarSeriesId,
                             },
                         ],
                     }),
@@ -47,6 +51,7 @@ describe("explicit agenda Calendar event", () => {
     beforeEach(() => {
         vi.resetAllMocks();
         stored.calendarEventId = "agenda-event";
+        stored.calendarSeriesId = null;
         list.mockResolvedValue([]);
         get.mockResolvedValue({
             id: "agenda-event",
@@ -96,4 +101,22 @@ describe("explicit agenda Calendar event", () => {
         ).toBeNull();
         expect(meet).not.toHaveBeenCalled();
     });
+});
+
+it("does not write Calendar identifiers again when repeated views resolve the same event", async () => {
+    stored.calendarEventId = "agenda-event";
+    stored.calendarSeriesId = "series";
+    update.mockClear();
+    get.mockResolvedValue({
+        id: "agenda-event",
+        start: "2026-10-27T08:00:00Z",
+        end: "2026-10-27T09:00:00Z",
+        recurringEventId: "series",
+        attendees: [{ name: "Jitka Dvořáková" }],
+    });
+    for (let i = 0; i < 3; i++)
+        await expect(
+            resolveMeetingRoster({ ownerUserId: "owner", itemId: "recording" }),
+        ).resolves.toMatchObject({ eventId: "agenda-event" });
+    expect(update).not.toHaveBeenCalled();
 });

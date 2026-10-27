@@ -35,7 +35,9 @@ Stránka schůzky může prostřednictvím posluchačů klávesnice ve fázi zac
 ## Agendy schůzek
 
 Pokud server podporuje agendy, rozšíření z propojeného serveru načítá názvy a časy
-viditelných schůzek, složky, body, poznámky a úkoly ke kontrole. Agendy s časem na
+viditelných schůzek, složky, body, poznámky, jména pozvaných a autorů, texty úkolů,
+řešitele a poznámky k úkolům. Tento obsah agendy ukládá pouze do dočasného úložiště
+relace rozšíření. Agendy s časem na
 nejbližších 24 hodin uchovává v dočasném úložišti relace rozšíření pro připomínky.
 Agendu zobrazuje v bočním panelu Chromu nebo v malém okně rozšíření. Připomínky
 a nabídku v liště lze vypnout samostatně. Serverům bez podpory agend neposílá
@@ -48,7 +50,7 @@ stránek ani další zvuk. Izolovaná lišta zobrazuje údaje agendy ze serveru 
 jen ovládací zprávy procesu na pozadí; klíč se stránce schůzky nezpřístupňuje.
 Zaškrtnutí bodů, poznámky, nové body a označení úkolů Hotovo nebo Zrušit ukládá
 na váš server. Změna úkolu mění skutečný úkol podle vašich stávajících oprávnění.
-ID a název vybrané agendy zůstávají v metadatech pro obnovení odesílání do
+ID vybrané agendy zůstává v metadatech pro obnovení odesílání do
 dokončení nebo zahození nahrávky; ID se posílá při dokončení. Při odpojení nebo novém propojení se dočasné agendy a volby smažou.
 Názvy v připomínkách mohou být viditelné v systémových oznámeních; připomínky
 můžete vypnout v Možnostech.

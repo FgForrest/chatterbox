@@ -31,11 +31,14 @@ export function mergeMeetingTerms(
                     soundsLike: [],
                 },
         ),
-        ...agendaTerms.map(
-            (text) =>
-                almanac.get(attendeeNameKey(text)) ?? { text, soundsLike: [] },
-        ),
         ...terms,
+        ...agendaTerms.slice(0, 50).map(
+            (text) =>
+                almanac.get(attendeeNameKey(text)) ?? {
+                    text,
+                    soundsLike: [],
+                },
+        ),
     ];
     const merged = new Map<string, AlmanacTerm>();
     for (const term of ordered) {

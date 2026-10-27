@@ -354,7 +354,12 @@ describe("configuration capability negotiation", () => {
         expect(fetch.mock.calls[0][0]).toBe(
             "https://recorder.example.com/api/v1/recorder/config",
         );
-        expect(fetch.mock.calls[1][0]).toContain("/api/v1/recorder/agendas?");
+        await vi.waitFor(() =>
+            expect(fetch.mock.calls[1]?.[0]).toContain(
+                "/api/v1/recorder/agendas?",
+            ),
+        );
+        await refreshAgendas();
     });
     it("a released config removes stale support without attempting any new endpoint", async () => {
         session[AGENDA_CACHE_KEY] = {
@@ -392,5 +397,54 @@ describe("pairing identity", () => {
         local.encryptedApiKey.nonce = [4, 5, 6];
         await remindAgenda(meeting.id);
         expect(chrome.notifications.create).not.toHaveBeenCalled();
+    });
+});
+
+describe("reminder refresh regressions", () => {
+    it("limits routine refreshes to once per 30 minutes and allows a popup refresh", async () => {
+        await refreshAgendas();
+        await refreshAgendas();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(30 * 60000);
+        await refreshAgendas();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        await refreshAgendas({ force: true });
+        expect(fetch).toHaveBeenCalledTimes(3);
+    });
+    it("preserves alarms and shown reminders when refreshed agendas are unchanged", async () => {
+        await refreshAgendas();
+        chrome.alarms.get = vi.fn(async () => ({
+            name: "agenda:agenda-one",
+            scheduledTime: Date.parse(meeting.start) - 60000,
+        }));
+        chrome.alarms.getAll.mockResolvedValue([
+            {
+                name: "agenda:agenda-one",
+                scheduledTime: Date.parse(meeting.start) - 60000,
+            },
+        ]);
+        chrome.notifications.getAll.mockResolvedValue({
+            "agenda:agenda-one": {},
+        });
+        chrome.alarms.clear.mockClear();
+        chrome.alarms.create.mockClear();
+        chrome.notifications.clear.mockClear();
+        await refreshAgendas({ force: true });
+        expect(chrome.alarms.clear).not.toHaveBeenCalled();
+        expect(chrome.alarms.create).not.toHaveBeenCalled();
+        expect(chrome.notifications.clear).not.toHaveBeenCalled();
+    });
+    it("times out a hanging refresh without blocking config or pairing", async () => {
+        fetch
+            .mockResolvedValueOnce(
+                Response.json({ features: { agendas: true } }),
+            )
+            .mockImplementationOnce(() => new Promise(() => {}));
+        await refreshServerConfig();
+        await vi.advanceTimersByTimeAsync(0);
+        const refresh = refreshAgendas();
+        const assertion = expect(refresh).rejects.toThrow("timed out");
+        await vi.advanceTimersByTimeAsync(5000);
+        await assertion;
     });
 });

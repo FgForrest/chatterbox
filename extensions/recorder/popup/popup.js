@@ -93,10 +93,12 @@ function dbToWidth(db) {
     return `${Math.round(((clamped + 60) / 60) * 100)}%`;
 }
 
+let popupFolderChoice;
 const folderCombobox = createFolderField({
     container: el("folder-row"),
     request: (params) => sendMessage({ type: "get-folders", ...params }),
-    save: saveSettings,
+    save: (folder) => { popupFolderChoice = folder; return saveSettings(folder); },
+    saveOnRefresh: saveSettings,
     t,
 });
 const recordingFolder = createRecordingFolder({
@@ -112,7 +114,7 @@ async function renderAgendaCard(settings, state) {
     if (!supportsAgendas(settings)) { container.hidden = true; return; }
     agendaCard ??= createAgendaCard(container, {
         tab: () => currentTab,
-        onFolder: (agenda) => { if (currentState.state === STATE.idle) folderCombobox.reset(agendaFolder(agenda), { refresh: false }); },
+        onFolder: (agenda) => { if (currentState.state === STATE.idle && !popupFolderChoice) folderCombobox.reset(agendaFolder(agenda), { refresh: false }); },
     });
     await agendaCard(settings, state);
 }
@@ -159,7 +161,7 @@ async function renderIdle(version = renderVersion) {
     el("start").textContent = t("recordTabWithConsent");
     el("notice-text").textContent = effectiveNoticeText(settings);
     el("picker-hint").hidden = false;
-    folderCombobox.reset(settings);
+    folderCombobox.reset(popupFolderChoice ?? settings);
 
     if (currentPlatform) {
         hint.textContent = t("recordThis", currentPlatform.name);
@@ -191,6 +193,7 @@ async function startRecording(forceDesktop = false) {
                 platformHint: currentPlatform?.id ?? undefined,
                 noticeAcknowledgedAt: new Date().toISOString(),
                 ...agendaChoice,
+                ...(popupFolderChoice ?? {}),
             },
         });
         if (response?.ok !== true) {

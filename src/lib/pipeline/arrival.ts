@@ -57,6 +57,7 @@ export async function requestArrivalInTx(
         profile?: ProfileRecord | null;
         manualOnly?: boolean;
         folder?: ArrivalFolder | null;
+        agendaId?: string;
     },
 ) {
     const view = input.view ?? "private";
@@ -96,6 +97,7 @@ export async function requestArrivalInTx(
                 input.userId,
                 input.itemId,
                 recording.plaudFileId,
+                ...(input.agendaId ? [input.agendaId] : []),
             );
     }
     if (input.profile && view === "private") {

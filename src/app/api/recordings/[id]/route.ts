@@ -8,6 +8,10 @@ import {
     setItemTitle,
     toRecordingResponseRow,
 } from "@/db/items";
+import {
+    recordingAgendaCandidateCount,
+    recordingHasAgenda,
+} from "@/db/queries/agenda-presence";
 import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import {
     aiEnhancements,
@@ -82,6 +86,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         const [item] = await db
             .select({
                 id: recordings.id,
+                hasAgenda: recordingHasAgenda(),
                 title: chatterItems.title,
                 duration: recordings.duration,
                 occurredAt: chatterItems.occurredAt,
@@ -106,6 +111,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         return NextResponse.json({
             recording: {
                 id: item.id,
+                hasAgenda: item.hasAgenda,
+                agendaCandidateCount: 0,
                 filename: decryptText(item.title),
                 duration: item.duration,
                 startTime: item.occurredAt,
@@ -132,7 +139,14 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
 
     const [row] = await db
-        .select(audioItemColumns)
+        .select({
+            ...audioItemColumns,
+            hasAgenda: recordingHasAgenda(),
+            agendaCandidateCount: recordingAgendaCandidateCount(
+                session.user.id,
+                await getOrgUserId(),
+            ),
+        })
         .from(recordings)
         .innerJoin(chatterItems, recordingItemJoin)
         .where(

@@ -96,6 +96,7 @@ import {
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
 import {
+    agendaLearnEvent,
     agendaPlanBlock,
     loadRecordingAgenda,
 } from "@/lib/meetings/pipeline-context";
@@ -848,15 +849,14 @@ async function runLearnJob({
         const storedAutoSelected =
             run.inputs?.calendarEventAutoSelected === true;
         const chosenEventId = mayChooseEvent
-            ? payload.calendarEventId
+            ? (payload.calendarEventId ??
+              (!storedAutoSelected ? storedEventId : undefined))
             : undefined;
-        let selectedEventId: string | undefined;
-        if (mayChooseEvent) {
-            selectedEventId = chosenEventId ?? storedEventId;
-        } else if (storedAutoSelected) {
-            selectedEventId = storedEventId;
-        }
-        selectedEventId = agenda?.calendarEventId ?? selectedEventId;
+        const selectedEventId = agendaLearnEvent(
+            chosenEventId,
+            agenda?.calendarEventId,
+            mayChooseEvent || storedAutoSelected ? storedEventId : undefined,
+        );
         const eventAutoSelected =
             selectedEventId === undefined ||
             (chosenEventId === undefined && storedAutoSelected);

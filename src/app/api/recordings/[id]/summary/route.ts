@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
+import { loadRecordingAgendaPresence } from "@/db/queries/agenda-presence";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import {
     aiEnhancements,
@@ -421,6 +422,18 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, view, {
         kinds: ALL_ITEM_KINDS,
     });
+    const agendaPresence =
+        access.kind === "audio"
+            ? await loadRecordingAgendaPresence({
+                  itemId: id,
+                  ownerUserId: access.ownerUserId,
+                  viewerUserId: session.user.id,
+                  orgUserId: access.orgUserId,
+                  includeCandidates:
+                      view === "private" &&
+                      access.ownerUserId === session.user.id,
+              })
+            : { hasAgenda: false, agendaCandidateCount: 0 };
     const [processing] = await db
         .select({ profileId: itemProcessing.profileId })
         .from(itemProcessing)
@@ -481,6 +494,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             availableSources,
             activeJob: source === "riffado" ? activeJob : undefined,
             itemProfileId,
+            ...agendaPresence,
         });
     }
 
@@ -507,6 +521,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
         itemProfileId,
+        ...agendaPresence,
     });
 });
 

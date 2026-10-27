@@ -28,6 +28,7 @@ export interface SaveUploadedAudioInput {
     sourceExtension: string;
     convertedFromVideo: boolean;
     folderId?: string | null;
+    agendaId?: string;
     /**
      * When the audio was actually captured. Defaults to now, which is right
      * for a file picked from disk but wrong for a meeting recording that
@@ -161,6 +162,7 @@ export async function saveUploadedAudio(
                 initializeInTx: (tx, arrival) =>
                     requestArrivalInTx(tx, {
                         ...arrival,
+                        ...(input.agendaId ? { agendaId: input.agendaId } : {}),
                         folder,
                         profile: profileResolution?.profile ?? null,
                         manualOnly: profileResolution?.manualOnly ?? false,

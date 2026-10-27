@@ -1,6 +1,6 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { meetingDate, meetingRoute } from "@/lib/meetings/route";
-import { listMeetings, meetingFolderPaths } from "@/lib/meetings/service";
+import { meetingFolderPaths, reminderMeetings } from "@/lib/meetings/service";
 export const GET = meetingRoute(async ({ userId, url }) => {
     const from = meetingDate(url.searchParams.get("from"), new Date());
     const to = meetingDate(
@@ -13,7 +13,11 @@ export const GET = meetingRoute(async ({ userId, url }) => {
             "Choose an agenda window of at most 31 days",
             400,
         );
-    const rows = await listMeetings(userId, { from, to, includePast: true });
+    const rows = await reminderMeetings(userId, {
+        from,
+        to,
+        includePast: true,
+    });
     const folderPath = await meetingFolderPaths(userId);
     return {
         data: rows

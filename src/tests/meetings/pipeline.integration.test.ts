@@ -98,8 +98,10 @@ vi.mock("openai", async (importOriginal) => ({
 }));
 
 import { db } from "@/db";
+import { writeSummaryAgenda } from "@/db/queries/agenda-pipeline";
 import { agendaSuggestionInputs } from "@/db/queries/agenda-suggestions";
 import { claimDueJobs, enqueueJob } from "@/db/queries/async-jobs";
+import { loadStatistics } from "@/db/queries/statistics";
 import { encrypt } from "@/lib/encryption";
 import {
     decryptJsonField,
@@ -108,15 +110,21 @@ import {
 } from "@/lib/encryption/fields";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import {
+    agendaPlanBlock,
     agendaSpellingTerms,
     loadRecordingAgenda,
 } from "@/lib/meetings/pipeline-context";
-import { prepareMeeting } from "@/lib/meetings/service";
+import {
+    changePoint,
+    getMeeting,
+    prepareMeeting,
+} from "@/lib/meetings/service";
 import {
     agendaSuggestionsJobHandler,
     enqueueAgendaSuggestions,
 } from "@/lib/meetings/suggestions-job";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
+import { metricIndex } from "@/lib/statistics/data";
 import { taskViewerById } from "@/lib/tasks/access";
 import { loadTasksPromptContext } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
@@ -660,7 +668,7 @@ suite("meeting processing pipeline (PostgreSQL)", () => {
         expect(await db.select().from(agendaPoints)).toHaveLength(2);
         expect(await db.select().from(aiUsageEvents)).toMatchObject([
             {
-                operation: "summary",
+                operation: "topics",
                 model: "local-model",
                 inputTokens: 100,
                 outputTokens: 50,
@@ -673,5 +681,179 @@ suite("meeting processing pipeline (PostgreSQL)", () => {
         expect(
             await agendaSuggestionsAvailability("owner", "agenda"),
         ).toMatchObject({ available: false, errorCode: "CONFLICT" });
+    });
+    it("keeps owner-only agenda task text out of Organization candidates, decided tasks and the plan", async () => {
+        await task("Owner-only agenda task", 0);
+        await task("Owner-only decided task", 1, true);
+        const agenda = await loadRecordingAgenda("owner", "recording");
+        const context = await loadTasksPromptContext({
+            recording: {
+                id: "recording",
+                userId: "owner",
+                occurredAt: start,
+                timezone: null,
+                zonemins: null,
+            },
+            transcriptionId: null,
+            orgView: true,
+            reviewer: await taskViewerById("other"),
+            agendaTasks: agenda?.tasks,
+        });
+        expect(context.refs.size).toBe(0);
+        expect(context.text).not.toContain("Owner-only");
+        expect(
+            agendaPlanBlock(
+                agenda
+                    ? { ...agenda, tasks: [...(context.agendaTasks ?? [])] }
+                    : null,
+            ),
+        ).not.toContain("Owner-only");
+    });
+    it("preserves the last outcome when a later summary omits agendaOutcome", async () => {
+        await write();
+        const [before] = await db.select().from(meetingAgendas);
+        await db.transaction((tx) =>
+            writeSummaryAgenda(
+                tx,
+                {
+                    id: before.id,
+                    userId: before.userId,
+                    version: before.version,
+                    outcome: null,
+                },
+                "unused",
+            ),
+        );
+        const [after] = await db.select().from(meetingAgendas);
+        expect(after).toEqual(before);
+        expect(
+            (
+                await db
+                    .select()
+                    .from(agendaPoints)
+                    .where(eq(agendaPoints.id, "p2"))
+            )[0].summaryOutcome,
+        ).toBe("covered");
+    });
+    it("commits paid suggestions after a concurrent tick, deduplicating new points and repairing removed parents", async () => {
+        await standalone();
+        await provider();
+        await task("open-task", -1);
+        complete.mockImplementation(async () => {
+            await changePoint("owner", "agenda", "p1", {
+                version: 0,
+                discussed: true,
+            });
+            await db.delete(agendaPoints).where(eq(agendaPoints.id, "p2"));
+            await db.insert(agendaPoints).values({
+                userId: "owner",
+                agendaId: "agenda",
+                text: encryptText("Already added"),
+                authorUserId: "owner",
+            });
+            return {
+                choices: [
+                    {
+                        message: {
+                            content: JSON.stringify({
+                                suggestions: [
+                                    {
+                                        text: "New suggestion",
+                                        parentPointId: "p2",
+                                        sources: {
+                                            itemIds: [],
+                                            taskIds: ["open-task"],
+                                        },
+                                    },
+                                    {
+                                        text: "Already added",
+                                        sources: {
+                                            itemIds: [],
+                                            taskIds: ["open-task"],
+                                        },
+                                    },
+                                ],
+                            }),
+                        },
+                    },
+                ],
+                usage: { prompt_tokens: 100, completion_tokens: 50 },
+            };
+        });
+        expect(
+            await agendaSuggestionsJobHandler.run({
+                userId: "owner",
+                payload: { agendaId: "agenda" },
+                jobId: "test",
+                attempt: 1,
+                maxAttempts: 3,
+                signal: new AbortController().signal,
+                reportProgress: vi.fn(),
+            }),
+        ).toEqual({ count: 1 });
+        const suggestions = await db.select().from(agendaSuggestions);
+        expect(suggestions).toHaveLength(1);
+        expect(decryptText(suggestions[0].text)).toBe("New suggestion");
+        expect(suggestions[0].parentPointId).toBeNull();
+    });
+    it.each([
+        "pending",
+        "processing",
+        "failed",
+    ] as const)("exposes durable suggestions state %s and invalidates the polling cursor", async (status) => {
+        await standalone();
+        const before = await getMeeting("owner", "agenda");
+        await db.insert(asyncJobs).values({
+            userId: "owner",
+            kind: "agenda.suggestions",
+            subjectId: "agenda",
+            status,
+            payload: { agendaId: "agenda" },
+            errorCode: status === "failed" ? "AI_PROVIDER_API_ERROR" : null,
+        });
+        const after = await getMeeting("owner", "agenda", before.cursor);
+        expect(after).toMatchObject({
+            unchanged: false,
+            aiSuggestions: {
+                job: {
+                    state:
+                        status === "pending"
+                            ? "queued"
+                            : status === "processing"
+                              ? "running"
+                              : "failed",
+                },
+            },
+        });
+        if (!after.unchanged && status === "failed")
+            expect(after.aiSuggestions.job.errorCode).toBe(
+                "AI_PROVIDER_API_ERROR",
+            );
+    });
+    it("keeps suggestion usage counted after absorption without counting a summary activity", async () => {
+        await db.insert(aiUsageEvents).values({
+            itemId: "meeting",
+            userId: "owner",
+            actorUserId: "owner",
+            payerUserId: "owner",
+            operation: "topics",
+            provider: "test",
+            model: "test",
+            costUsd: "0.25",
+        });
+        const stats = await loadStatistics("owner", "mine", "UTC");
+        expect(
+            stats.daily[metricIndex.summaries].every((count) => count === 0),
+        ).toBe(true);
+        expect(
+            stats.daily[metricIndex.topicsCost].reduce(
+                (sum, value) => sum + value,
+                0,
+            ),
+        ).toBe(0.25);
+        expect(stats.modelDays.reduce((sum, row) => sum + row[3], 0)).toBe(1);
+        expect(stats.modelDays.reduce((sum, row) => sum + row[4], 0)).toBe(
+            0.25,
+        );
     });
 });

@@ -1,7 +1,7 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 11:47
+updated: 2026-10-27 14:20
 status: partially-implemented
 kind: feature
 issues: []
@@ -96,14 +96,19 @@ Google consent or provider fallbacks.
   only when equal to the agenda's values and removes attach-created filing in someone else's folder.
   Event context is encrypted in `calendar_snapshot`; a conditional `calendar_refreshed_at` update claims
   one lazy refresh per ten-minute TTL across processes. Detail and recorder matching read that snapshot;
-  Meet codes stay server-only. Calendar export always reads fresh, defaults to excluding tasks, and
+  Meet codes stay server-only. Point edits retain participating user IDs in the existing snapshot
+  envelope, independently of the encrypted event cache; refreshing or relinking preserves them.
+  Recorder reminders are limited to authors, editors or invitees whose connected Google email
+  matches a stored attendee. Reminder filtering never refreshes Calendar. Calendar export always reads fresh, defaults to excluding tasks, and
   excludes assignee and live notes. Both English and Czech block markers are recognized.
 - Archives use the existing server-resolved scope and include standalone and absorbed agendas.
   The meeting restore endpoint accepts validated item/folder/task mappings; it creates no accounts,
   invitations or automatic external sharing. Suggestions can be regenerated and are omitted.
 - Read-only MCP tools carry `readOnlyHint`; agenda writes use the existing `tasks:write` role.
   Task review and task counts require `tasks:read`; service callers cannot prepare or edit agendas.
-  The recorder capability and optional completion metadata are additive for older extensions. An
+  Recorder keys with `recordings:write` also read visible agendas, add live points,
+  change discussed ticks and notes, and change tasks allowed by the holder's existing task permissions.
+  They cannot read recordings. The recorder capability and optional completion metadata are additive for older extensions. An
   unavailable selected agenda never blocks completion: the response adds
   `agenda: { attached: false, reason: "unavailable" }`. Requests without `agendaId` keep their response shape.
 

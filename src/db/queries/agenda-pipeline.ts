@@ -40,6 +40,7 @@ export async function writeSummaryAgenda(
     agenda: AgendaSummaryWrite,
     summaryId: string,
 ) {
+    if (!agenda.outcome) return;
     const pointsWhere = and(
         eq(agendaPoints.agendaId, agenda.id),
         eq(agendaPoints.userId, agenda.userId),
