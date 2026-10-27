@@ -10,11 +10,16 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
-import { providerFetch } from "@/lib/ai/provider-fetch";
+import { fetchWithoutIdleTimeout } from "@/lib/ai/provider-fetch";
 import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
+import {
+    createUsageFetch,
+    usageAttemptFetch,
+    withUsageFailure,
+} from "@/lib/ai/usage-attempt";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
@@ -148,6 +153,7 @@ export async function storeBrowserTranscription(
             id: recordings.id,
             deletedAt: recordings.deletedAt,
             fileMd5: recordings.fileMd5,
+            duration: recordings.duration,
         })
         .from(recordings)
         .where(
@@ -350,6 +356,19 @@ export async function storeBrowserTranscription(
         }
         throw txError;
     }
+
+    await recordAiUsage(
+        {
+            recordingId,
+            ownerUserId: userId,
+            actorUserId: userId,
+            payerUserId: userId,
+            operation: "transcription",
+            provider: "browser",
+            model,
+        },
+        { audioSeconds: recording.duration / 1000, reportedCostUsd: 0 },
+    );
 
     await removeRecordingSidecar(userId, recordingId, "summary", "riffado");
 
@@ -648,7 +667,21 @@ async function transcribeRecordingInner(
                 filename: decryptText(recording.title),
             };
             await reserveCall();
-            const result = await transcribeViaMynah(input);
+            const result = await transcribeViaMynah({
+                ...input,
+                fetch: createUsageFetch(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        actorUserId: ctx.actorUserId,
+                        payerUserId,
+                        operation: "transcription",
+                        provider: "Mynah",
+                        model: "parakeet",
+                    },
+                    fetchWithoutIdleTimeout,
+                ),
+            });
             await recordAiUsage(
                 {
                     recordingId,
@@ -773,6 +806,17 @@ async function transcribeRecordingInner(
                 credentials.defaultModel ||
                 getDefaultTranscriptionModel(credentials.provider) ||
                 "whisper-1";
+            const usageContext = {
+                recordingId,
+                ownerUserId: ctx.ownerUserId,
+                actorUserId: ctx.actorUserId,
+                payerUserId,
+                operation: "transcription" as const,
+                provider: credentials.provider,
+                model,
+                baseUrl: credentials.baseUrl,
+                credentialId: credentials.id,
+            };
             persistProvider = credentials.provider;
             persistModel = model;
 
@@ -796,24 +840,12 @@ async function transcribeRecordingInner(
                     audioBuffer,
                     contentType,
                     language: defaultLanguage,
+                    attempt: (run) => withUsageFailure(usageContext, run),
                 });
-                await recordAiUsage(
-                    {
-                        recordingId,
-                        ownerUserId: ctx.ownerUserId,
-                        actorUserId: ctx.actorUserId,
-                        payerUserId,
-                        operation: "transcription",
-                        provider: credentials.provider,
-                        model,
-                        baseUrl: credentials.baseUrl,
-                        credentialId: credentials.id,
-                    },
-                    {
-                        inputTokens: result.inputTokens,
-                        outputTokens: result.outputTokens,
-                    },
-                );
+                await recordAiUsage(usageContext, {
+                    inputTokens: result.inputTokens,
+                    outputTokens: result.outputTokens,
+                });
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
             } else if (transcriptionStyle === "elevenlabs") {
@@ -823,68 +855,49 @@ async function transcribeRecordingInner(
                     ? (await almanacTerms()).map((term) => term.text)
                     : [];
                 await reserveCall();
-                const result = await elevenLabsTranscribe({
-                    apiKey,
-                    model,
-                    file: audioFile,
-                    language: defaultLanguage,
-                    baseUrl: credentials.baseUrl,
-                    keyterms,
-                });
-                await recordAiUsage(
-                    {
-                        recordingId,
-                        ownerUserId: ctx.ownerUserId,
-                        actorUserId: ctx.actorUserId,
-                        payerUserId,
-                        operation: "transcription",
-                        provider: credentials.provider,
+                const result = await withUsageFailure(usageContext, () =>
+                    elevenLabsTranscribe({
+                        apiKey,
                         model,
+                        file: audioFile,
+                        language: defaultLanguage,
                         baseUrl: credentials.baseUrl,
-                        credentialId: credentials.id,
-                    },
-                    {
-                        audioSeconds: recording.duration / 1000,
-                        keytermCount: keyterms.length,
-                    },
+                        keyterms,
+                    }),
                 );
+                await recordAiUsage(usageContext, {
+                    audioSeconds: recording.duration / 1000,
+                    keytermCount: keyterms.length,
+                });
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
                 turns = result.turns;
             } else if (transcriptionStyle === "speechmatics") {
                 // Batch accepts hours-long uploads, so the Whisper 25 MiB
                 // re-encode is skipped here the same way it is for Scribe.
+                const vocabulary = speechmaticsTakesVocabulary(model)
+                    ? await almanacTerms()
+                    : [];
                 await reserveCall();
-                const result = await speechmaticsTranscribe({
-                    apiKey,
-                    model,
-                    file: audioFile,
-                    language: defaultLanguage,
-                    baseUrl: credentials.baseUrl,
-                    vocabulary: speechmaticsTakesVocabulary(model)
-                        ? await almanacTerms()
-                        : [],
-                });
-                await recordAiUsage(
-                    {
-                        recordingId,
-                        ownerUserId: ctx.ownerUserId,
-                        actorUserId: ctx.actorUserId,
-                        payerUserId,
-                        operation: "transcription",
-                        provider: credentials.provider,
+                const result = await withUsageFailure(usageContext, () =>
+                    speechmaticsTranscribe({
+                        apiKey,
                         model,
+                        file: audioFile,
+                        language: defaultLanguage,
                         baseUrl: credentials.baseUrl,
-                        credentialId: credentials.id,
-                    },
-                    { audioSeconds: recording.duration / 1000 },
+                        vocabulary,
+                    }),
                 );
+                await recordAiUsage(usageContext, {
+                    audioSeconds: recording.duration / 1000,
+                });
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
                 turns = result.turns;
             } else {
                 const openai = new OpenAI({
-                    fetch: providerFetch,
+                    fetch: usageAttemptFetch,
                     apiKey,
                     baseURL: credentials.baseUrl || undefined,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
@@ -899,25 +912,13 @@ async function transcribeRecordingInner(
                         audioBuffer,
                         contentType,
                         language: defaultLanguage,
+                        attempt: (run) => withUsageFailure(usageContext, run),
                     });
-                    await recordAiUsage(
-                        {
-                            recordingId,
-                            ownerUserId: ctx.ownerUserId,
-                            actorUserId: ctx.actorUserId,
-                            payerUserId,
-                            operation: "transcription",
-                            provider: credentials.provider,
-                            model,
-                            baseUrl: credentials.baseUrl,
-                            credentialId: credentials.id,
-                        },
-                        {
-                            inputTokens: result.inputTokens,
-                            outputTokens: result.outputTokens,
-                            reportedCostUsd: result.reportedCostUsd,
-                        },
-                    );
+                    await recordAiUsage(usageContext, {
+                        inputTokens: result.inputTokens,
+                        outputTokens: result.outputTokens,
+                        reportedCostUsd: result.reportedCostUsd,
+                    });
                     transcriptionText = result.text;
                     detectedLanguage = result.detectedLanguage;
                 } else {
@@ -945,16 +946,19 @@ async function transcribeRecordingInner(
                     // (10 min) times out long before that; override
                     // per-request so other OpenAI calls keep the default.
                     await reserveCall();
-                    const transcription =
-                        await openai.audio.transcriptions.create(
-                            buildTranscriptionParams({
-                                file: fileToSend,
-                                model,
-                                responseFormat,
-                                language: defaultLanguage,
-                            }),
-                            { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
-                        );
+                    const transcription = await withUsageFailure(
+                        usageContext,
+                        () =>
+                            openai.audio.transcriptions.create(
+                                buildTranscriptionParams({
+                                    file: fileToSend,
+                                    model,
+                                    responseFormat,
+                                    language: defaultLanguage,
+                                }),
+                                { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
+                            ),
+                    );
                     const measured =
                         typeof transcription === "string"
                             ? null
@@ -967,25 +971,12 @@ async function transcribeRecordingInner(
                                       };
                                   }
                               ).usage;
-                    await recordAiUsage(
-                        {
-                            recordingId,
-                            ownerUserId: ctx.ownerUserId,
-                            actorUserId: ctx.actorUserId,
-                            payerUserId,
-                            operation: "transcription",
-                            provider: credentials.provider,
-                            model,
-                            baseUrl: credentials.baseUrl,
-                            credentialId: credentials.id,
-                        },
-                        {
-                            inputTokens: measured?.input_tokens,
-                            outputTokens: measured?.output_tokens,
-                            audioSeconds:
-                                measured?.seconds ?? recording.duration / 1000,
-                        },
-                    );
+                    await recordAiUsage(usageContext, {
+                        inputTokens: measured?.input_tokens,
+                        outputTokens: measured?.output_tokens,
+                        audioSeconds:
+                            measured?.seconds ?? recording.duration / 1000,
+                    });
                     const parsed = parseTranscriptionResponse(
                         transcription,
                         responseFormat,

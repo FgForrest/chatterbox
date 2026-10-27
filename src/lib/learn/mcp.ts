@@ -35,6 +35,7 @@ export interface McpRun {
     /** A Learn run's, or a correction pass's: where its lookups count. */
     kind?: "learn" | "correction";
     userId: string;
+    actorUserId?: string | null;
     itemId: string;
     view: "private" | "org";
     /** Its transcript's language, which names are matched in. */
@@ -245,6 +246,7 @@ export async function handleLearnMcp(
                 read: {
                     kind: "recording",
                     ownerUserId: run.userId,
+                    actorUserId: run.actorUserId ?? run.userId,
                     shared: run.view === "org",
                 },
                 budget: { remaining: 1 },

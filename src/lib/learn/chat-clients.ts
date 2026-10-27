@@ -9,11 +9,11 @@
 import { OpenAI } from "openai";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { providerFetch } from "@/lib/ai/provider-fetch";
 import {
-    type AiOperation,
-    recordChatCompletionUsage,
-} from "@/lib/ai/usage-cost";
+    chatCompletionWithUsage,
+    usageAttemptFetch,
+} from "@/lib/ai/usage-attempt";
+import type { AiOperation } from "@/lib/ai/usage-cost";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
@@ -65,14 +65,14 @@ export async function learnChatClients(input: {
     }
     const credentials = resolved.credential;
     const openai = new OpenAI({
-        fetch: providerFetch,
+        fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
-        fetch: providerFetch,
+        fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: 0,
@@ -106,29 +106,37 @@ export async function learnChatClients(input: {
             complete: async ({ system, user, schema, mcp, maxTokens }) => {
                 signal.throwIfAborted();
                 await resolved.reserveCall();
-                const response = await bridgeClient.chat.completions.create(
-                    {
-                        ...buildChatCompletionParams({
-                            model,
-                            messages: [
-                                { role: "system", content: system },
-                                { role: "user", content: user },
-                            ],
-                            temperature: 0.1,
-                            maxTokens,
-                            maxOutputTokens: credentials.maxOutputTokens,
-                        }),
-                        response_format: {
-                            type: "json_schema",
-                            json_schema: { name: input.schemaName, schema },
-                        },
-                        ...(mcp ? { riffado_mcp: mcp } : {}),
-                    } as Parameters<
-                        typeof openai.chat.completions.create
-                    >[0] & { stream?: false },
-                    { signal },
+                const response = await chatCompletionWithUsage(
+                    usage,
+                    () =>
+                        bridgeClient.chat.completions.create(
+                            {
+                                ...buildChatCompletionParams({
+                                    model,
+                                    messages: [
+                                        { role: "system", content: system },
+                                        { role: "user", content: user },
+                                    ],
+                                    temperature: 0.1,
+                                    maxTokens,
+                                    maxOutputTokens:
+                                        credentials.maxOutputTokens,
+                                }),
+                                response_format: {
+                                    type: "json_schema",
+                                    json_schema: {
+                                        name: input.schemaName,
+                                        schema,
+                                    },
+                                },
+                                ...(mcp ? { riffado_mcp: mcp } : {}),
+                            } as Parameters<
+                                typeof openai.chat.completions.create
+                            >[0] & { stream?: false },
+                            { signal },
+                        ),
+                    signal,
                 );
-                await recordChatCompletionUsage(usage, response);
                 return response.choices[0]?.message?.content?.trim() || "";
             },
         },
@@ -144,22 +152,27 @@ export async function learnChatClients(input: {
                     run: async () => {
                         signal.throwIfAborted();
                         await resolved.reserveCall();
-                        const response = await openai.chat.completions.create(
-                            buildChatCompletionParams({
-                                model,
-                                messages,
-                                temperature: 0.1,
-                                maxTokens,
-                                maxOutputTokens: credentials.maxOutputTokens,
-                            }),
-                            {
-                                signal,
-                                ...(options?.retry === false
-                                    ? { maxRetries: 0 }
-                                    : {}),
-                            },
+                        const response = await chatCompletionWithUsage(
+                            usage,
+                            () =>
+                                openai.chat.completions.create(
+                                    buildChatCompletionParams({
+                                        model,
+                                        messages,
+                                        temperature: 0.1,
+                                        maxTokens,
+                                        maxOutputTokens:
+                                            credentials.maxOutputTokens,
+                                    }),
+                                    {
+                                        signal,
+                                        ...(options?.retry === false
+                                            ? { maxRetries: 0 }
+                                            : {}),
+                                    },
+                                ),
+                            signal,
                         );
-                        await recordChatCompletionUsage(usage, response);
                         return (
                             response.choices[0]?.message?.content?.trim() || ""
                         );

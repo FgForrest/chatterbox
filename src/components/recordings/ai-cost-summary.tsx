@@ -42,6 +42,7 @@ export function AiCostSummary({
         topics: i18n("Topics"),
         learn: i18n("Learn"),
         correction: i18n("Correction pass"),
+        embedding: i18n("Embeddings"),
     };
     const operationLabel = (operation: string) =>
         Object.hasOwn(operations, operation)

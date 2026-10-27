@@ -355,6 +355,7 @@ export async function embedScope(
             chunk.map((item) => item.text),
             {
                 signal,
+                usage: { userId: scope },
                 onBatch: async (batch) => {
                     embedded += await writeChunk(
                         scope,
