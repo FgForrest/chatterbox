@@ -164,6 +164,9 @@ export async function saveUploadedAudio(
                         ...arrival,
                         ...(input.agendaId ? { agendaId: input.agendaId } : {}),
                         folder,
+                        allowUnavailableFolder: Boolean(
+                            input.deferredFolderFallback,
+                        ),
                         profile: profileResolution?.profile ?? null,
                         manualOnly: profileResolution?.manualOnly ?? false,
                     }),

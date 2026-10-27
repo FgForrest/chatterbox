@@ -1,15 +1,15 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 14:20
+updated: 2026-10-27 14:30
 status: partially-implemented
 kind: feature
 issues: []
 prs: []
-areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/meeting-folder-access.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
-supersedes: [2026-10-22-person-to-person-sharing]
+areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
+supersedes: []
 superseded-by: []
-relates: [2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
+relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
 ---
 
 # Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
@@ -84,9 +84,7 @@ Google consent or provider fallbacks.
   its own agenda; deleting a colleague's attached recording instead restores the author's standalone
   meeting as planned or held under the ordinary time rules. Migrations `0144_parched_rogue.sql`,
   `0145_unusual_sheva_callister.sql` and `0146_numerous_mother_askani.sql` are additive.
-- An explicitly attached colleague-owned recording is the narrow exception to same-owner folder
-  membership. `meeting-folder-access.ts` validates the attached agenda and its original placement;
-  accepted receivers lose access immediately on revocation. The recording remains its owner's data.
+- [Two-way shared folders](2026-10-27-shared-folders-are-two-way.md) define general participant-owned filing, replacing this implementation's original explicit-attachment exception. An attached recording remains its owner's data, and acceptance/revocation controls its shared-folder visibility.
 - Explicit Organization attachment records a normal intended placement through
   `recordIntendedPlacementInTx`. Publication waits for the ordinary transcription and speaker share gate.
   Colleagues who could see the meeting retain read-only agenda access while the recording is unpublished:
@@ -134,9 +132,7 @@ and mail-role filtering. Existing task, sharing, export, Google, recorder and MC
 
 ## Related work
 
-- [Person-to-person sharing](2026-10-22-person-to-person-sharing.md): superseded only for same-owner
-  direct-folder membership when a co-editor explicitly attaches their own recording. Ordinary receiver
-  rights and invitation revocation remain unchanged.
+- [Two-way shared folders](2026-10-27-shared-folders-are-two-way.md): owns the partial supersession of person-to-person sharing. General participant-owned filing replaces the narrow explicit-attachment exception; receiver item rights and invitation revocation remain unchanged.
 - [Calendar speaker candidates](2026-10-12-calendar-meet-speaker-candidates.md) and
   [automatic roster guesses](2026-10-22-calendar-speaker-guesses-in-automatic-runs.md): reuse the Google
   connection, transient roster and overlap rule; an agenda remains a plan rather than speaker evidence.

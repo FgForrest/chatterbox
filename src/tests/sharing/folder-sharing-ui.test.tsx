@@ -187,7 +187,7 @@ afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
 });
-function tree(enabled = true) {
+function tree(enabled = true, items = [recording]) {
     const assign = vi.fn().mockResolvedValue(undefined),
         move = vi.fn().mockResolvedValue(undefined),
         select = vi.fn();
@@ -199,7 +199,7 @@ function tree(enabled = true) {
                     assignments={[
                         { recordingId: "audio", folderId: "attached" },
                     ]}
-                    recordings={[recording]}
+                    recordings={items}
                     selectedFolderId="attached"
                     onRecent={vi.fn()}
                     onSelectFolder={select}
@@ -406,9 +406,7 @@ describe("folder person sharing UI", () => {
         const row = screen.getByRole("button", {
             name: "Local research, 1 recording",
         });
-        expect(row.title).toBe(
-            "Shared by Alex Morgan · read-only · originally Owner research",
-        );
+        expect(row.title).toBe("Shared by Alex Morgan (Owner research)");
         expect(row.getAttribute("draggable")).toBe("false");
         expect(
             row.querySelector(".lucide-folder-input.text-person-share"),
@@ -509,7 +507,10 @@ describe("folder person sharing UI", () => {
             name: "Local research, 1 recording",
         });
         const transfer = {
-            types: ["application/x-riffado-recording"],
+            types: [
+                "application/x-riffado-recording",
+                "application/x-riffado-recording-other-owner",
+            ],
             dropEffect: "copy",
             getData: () => "audio",
             setData: vi.fn(),
@@ -532,7 +533,27 @@ describe("folder person sharing UI", () => {
         expect(assign).not.toHaveBeenCalled();
         expect(move).not.toHaveBeenCalled();
     });
-    it("excludes attachments from filing pickers and upload targets while marking outgoing folders", () => {
+    it("files the caller's own dragged recording into an attachment", async () => {
+        const { assign } = tree(true, [
+            { ...recording, view: "private", isOwn: true },
+        ]);
+        const row = screen.getByRole("button", {
+            name: "Local research, 1 recording",
+        });
+        const transfer = {
+            types: ["application/x-riffado-recording"],
+            dropEffect: "none",
+            getData: (type: string) =>
+                type === "application/x-riffado-recording" ? "audio" : "",
+        };
+        fireEvent.dragOver(row, { dataTransfer: transfer });
+        expect(transfer.dropEffect).toBe("copy");
+        fireEvent.drop(row, { dataTransfer: transfer });
+        await waitFor(() =>
+            expect(assign).toHaveBeenCalledWith("audio", "attached"),
+        );
+    });
+    it("offers attachments as filing and upload targets with incoming and outgoing marks", () => {
         render(
             <FolderPicker
                 folders={folders}
@@ -543,8 +564,10 @@ describe("folder person sharing UI", () => {
             />,
         );
         expect(
-            screen.queryByRole("option", { name: "Local research" }),
-        ).toBeNull();
+            screen
+                .getByRole("option", { name: "Local research" })
+                .querySelector(".lucide-folder-input"),
+        ).toBeTruthy();
         expect(
             screen
                 .getByRole("option", { name: "Research" })
@@ -554,7 +577,7 @@ describe("folder person sharing UI", () => {
             uploadFolderOptions(folders, true, (folder) => folder.name).some(
                 (folder) => folder.id === "attached",
             ),
-        ).toBe(false);
+        ).toBe(true);
     });
     it("finds attachments in the command palette under their own name", async () => {
         const select = vi.fn();

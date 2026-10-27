@@ -40,7 +40,35 @@ export function folderRecordingCondition(
     const folder = organization.folders.find((entry) => entry.id === folderId);
     if (!folder) return null;
     if (folder.receivedFolder)
-        return receivedThroughFolderCondition(userId, item.id, folder.id);
+        return or(
+            receivedThroughFolderCondition(userId, item.id, folder.id),
+            folder.receivedFolder.sourceFolderId
+                ? and(
+                      eq(item.userId, userId),
+                      exists(
+                          db
+                              .select({ one: sql`1` })
+                              .from(recordingFolderAssignments)
+                              .where(
+                                  and(
+                                      eq(
+                                          recordingFolderAssignments.itemId,
+                                          item.id,
+                                      ),
+                                      eq(
+                                          recordingFolderAssignments.userId,
+                                          userId,
+                                      ),
+                                      eq(
+                                          recordingFolderAssignments.folderId,
+                                          folder.receivedFolder.sourceFolderId,
+                                      ),
+                                  ),
+                              ),
+                      ),
+                  )
+                : undefined,
+        ) as SQL;
     if (folder.kind === "private")
         return or(
             eq(item.userId, userId),

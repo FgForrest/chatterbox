@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { recordIntent, requestAdvance, attachArriving } = vi.hoisted(() => ({
-    attachArriving: vi.fn(async () => {}),
-    recordIntent: vi.fn(async () => {}),
-    requestAdvance: vi.fn(async () => null),
+const { recordIntent, requestAdvance, attachArriving, lockFolder } = vi.hoisted(
+    () => ({
+        lockFolder: vi.fn(async () => {}),
+        attachArriving: vi.fn(async () => {}),
+        recordIntent: vi.fn(async () => {}),
+        requestAdvance: vi.fn(async () => null),
+    }),
+);
+
+vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
+
+vi.mock("@/lib/folders/folders", () => ({
+    lockCategorizableFolderInTx: lockFolder,
 }));
 
 vi.mock("@/lib/meetings/attachment", () => ({
@@ -55,6 +64,10 @@ describe("folder-known-at-arrival", () => {
             },
         });
 
+        expect(lockFolder).toHaveBeenCalledWith(tx, "owner", "personal-folder");
+        expect(lockFolder.mock.invocationCallOrder[0]).toBeLessThan(
+            values.mock.invocationCallOrder[0],
+        );
         expect(values).toHaveBeenCalledWith({
             itemId: "recording",
             userId: "owner",

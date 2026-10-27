@@ -42,7 +42,7 @@ export async function calendarUnavailableReason(userId: string) {
 
 /** Fourteen-day event picker, ranking known recurring series by folder usage. */
 export async function meetingCalendarEvents(userId: string, folderId: string) {
-    await assertCategorizableFolder(userId, folderId);
+    const folder = await assertCategorizableFolder(userId, folderId);
     const reason = await calendarUnavailableReason(userId);
     if (reason) return { reason, recurring: [], other: [] };
     const viewer = await meetingViewer(userId);
@@ -72,7 +72,7 @@ export async function meetingCalendarEvents(userId: string, folderId: string) {
             )
             .where(
                 and(
-                    eq(recordingFolderAssignments.folderId, folderId),
+                    eq(recordingFolderAssignments.folderId, folder.folderId),
                     meetingVisibility(userId, viewer.orgUserId),
                 ),
             )

@@ -1,10 +1,10 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { folderItemOwnerCondition } from "@/db/queries/folder-participants";
 import {
     activeShareRecipientCondition,
     activeShareRecipientExistsCondition,
 } from "@/db/queries/item-shares";
-import { folderItemOwnerCondition } from "@/db/queries/meeting-folder-access";
 import {
     chatterItems,
     folderShares,
@@ -327,6 +327,20 @@ export async function changeFolderShare(
                 });
             } else if (input.action === "remove") {
                 await tx
+                    .delete(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(
+                                recordingFolderAssignments.folderId,
+                                share.folderId,
+                            ),
+                            eq(
+                                recordingFolderAssignments.userId,
+                                share.receiverUserId,
+                            ),
+                        ),
+                    );
+                await tx
                     .delete(receivedFolderAttachments)
                     .where(
                         and(
@@ -401,12 +415,14 @@ export async function changeFolderShare(
     await Promise.all([
         notifyPersonShareChanged(changed.userId),
         notifyPersonShareChanged(changed.receiverUserId),
+        notifyFolderSharesChanged(changed.userId, changed.folderId),
     ]);
 }
 
 /** Receiver-owned navigation nodes and live placements, never processing assignments. */
 export async function listReceivedFolderOrganization(
     userId: string,
+    includeAssignments = true,
 ): Promise<FolderOrganization> {
     if (!isOrgScopeVisible()) return { folders: [], assignments: [] };
     const rows = await db
@@ -465,6 +481,7 @@ export async function listReceivedFolderOrganization(
             kind: "custom",
             scope: "personal",
             receivedFolder: {
+                sourceFolderId: share.folderId,
                 shareId: share.id,
                 shareVersion: share.version,
                 ownerName: ownerName || ownerEmail,
@@ -472,7 +489,8 @@ export async function listReceivedFolderOrganization(
             },
         }),
     );
-    if (!rows.length) return { folders, assignments: [] };
+    if (!rows.length || !includeAssignments)
+        return { folders, assignments: [] };
     const assignments = await db
         .select({
             recordingId: recordingFolderAssignments.itemId,
@@ -494,7 +512,6 @@ export async function listReceivedFolderOrganization(
                     folderShares.userId,
                     recordingFolderAssignments.userId,
                     folderShares.folderId,
-                    recordingFolderAssignments.itemId,
                 ),
             ),
         )
@@ -517,7 +534,10 @@ export async function listReceivedFolderOrganization(
 }
 
 /** Refresh receivers after live membership, shared-folder naming or deletion changes. */
-export async function notifyFolderSharesChanged(userId: string) {
+export async function notifyFolderSharesChanged(
+    userId: string,
+    folderId?: string,
+) {
     if (!isOrgScopeVisible()) return;
     const rows = await db
         .select({ receiverId: folderShares.receiverUserId })
@@ -525,6 +545,7 @@ export async function notifyFolderSharesChanged(userId: string) {
         .where(
             and(
                 eq(folderShares.userId, userId),
+                folderId ? eq(folderShares.folderId, folderId) : undefined,
                 inArray(folderShares.state, ["pending", "accepted"]),
             ),
         );

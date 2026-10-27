@@ -19,7 +19,9 @@ import {
     agendaPoints,
     agendaTasks,
     chatterItems,
+    folderShares,
     meetingAgendas,
+    receivedFolderAttachments,
     recordingFolderAssignments,
     users,
 } from "@/db/schema";
@@ -167,7 +169,11 @@ export async function listMeetingRows(
                     ? undefined
                     : isNull(meetingAgendas.recordingItemId),
                 input.folderId
-                    ? sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${chatterItems.id} and ${recordingFolderAssignments.folderId} = ${input.folderId})`
+                    ? sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${chatterItems.id} and (${recordingFolderAssignments.folderId} = ${input.folderId}
+                        or ${recordingFolderAssignments.folderId} in (select ${folderShares.folderId} from ${receivedFolderAttachments}
+                            inner join ${folderShares} on ${folderShares.id} = ${receivedFolderAttachments.shareId}
+                            where ${receivedFolderAttachments.id} = ${input.folderId} and ${receivedFolderAttachments.userId} = ${userId}
+                              and ${folderShares.receiverUserId} = ${userId} and ${folderShares.state} = 'accepted')))`
                     : undefined,
                 input.overlapWith
                     ? sql`${meetingAgendas.plannedStart} < ${input.overlapWith.end.toISOString()}::timestamp and coalesce(${meetingAgendas.plannedEnd}, ${meetingAgendas.plannedStart} + interval '2 hours') > ${input.overlapWith.start.toISOString()}::timestamp`

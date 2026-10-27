@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -14,6 +14,7 @@ import {
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
+    lockCategorizableFolderInTx,
     lockItemForFolderMutation,
     pruneRedundantAssignmentsInTx,
     scheduleFolderExportProjection,
@@ -153,6 +154,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const orgUserId = await getOrgUserId();
     const result = await db.transaction(async (tx) => {
+        for (const folderId of [...personalFolderIds].sort())
+            await lockCategorizableFolderInTx(tx, ownerUserId, folderId);
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const [current] = await tx
             .select({
@@ -333,7 +336,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         recordingFolders.id,
                         recordingFolderAssignments.folderId,
                     ),
-                    eq(recordingFolders.userId, ownerUserId),
+                    orgUserId
+                        ? ne(recordingFolders.userId, orgUserId)
+                        : undefined,
                     isNotNull(recordingFolders.parentId),
                 ),
             )
@@ -398,7 +403,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 })),
             );
         }
-        await pruneRedundantAssignmentsInTx(tx, ownerUserId, itemId);
+        for (const treeOwnerId of new Set(
+            folders
+                .filter((folder) => folder.scope === "personal")
+                .map((folder) => folder.ownerId),
+        ))
+            await pruneRedundantAssignmentsInTx(tx, treeOwnerId, itemId);
         if (rootPlacements.length > 0) {
             await tx
                 .insert(recordingFolderAssignments)

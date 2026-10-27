@@ -56,6 +56,7 @@ interface RecordingFolderTagsProps {
      * Organization view, who confirms the owner's retention warning.
      */
     canWithdraw?: boolean;
+    canUnfilePersonal?: boolean;
     /** Show only Organization folders (the recording's Organization view). */
     organizationOnly?: boolean;
     onMove?: (
@@ -75,6 +76,7 @@ export function RecordingFolderTags({
     onRemove,
     isOwn = true,
     canWithdraw = isOwn,
+    canUnfilePersonal = false,
     organizationOnly = false,
     onMove,
     canCurate,
@@ -147,7 +149,11 @@ export function RecordingFolderTags({
                         )}
                         {label(folder)}
                     </button>
-                    {(isOwn || (canWithdraw && folder.scope === "org")) && (
+                    {(isOwn ||
+                        (canWithdraw && folder.scope === "org") ||
+                        (canUnfilePersonal &&
+                            folder.scope === "personal" &&
+                            !folder.receivedFolder)) && (
                         <button
                             type="button"
                             onClick={() => {

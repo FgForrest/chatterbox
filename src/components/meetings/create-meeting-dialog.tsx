@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,7 +16,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { folderDisplayPath } from "@/lib/folders/labels";
+import { matchFolders } from "@/lib/folders/navigation";
 import type { RecordingFolder } from "@/types/folder";
 import { meetingRequest } from "./api";
 import type { CalendarChoices, MeetingDetail } from "./types";
@@ -38,19 +39,9 @@ export function CreateMeetingDialog({
     const i18n = useExtracted();
     const format = useFormatter();
     const label = useFolderLabel();
-    const available = folders.filter(
-        (folder) =>
-            (folder.kind === "custom" || folder.parentId === null) &&
-            !folder.receivedFolder,
-    );
+    const available = folders.filter((folder) => folder.kind === "custom");
     const [chosenFolder, setChosenFolder] = useState(
-        available.find((folder) => folder.id === folderId)?.id ??
-            available.find(
-                (folder) =>
-                    folder.kind === "private" && folder.scope === "personal",
-            )?.id ??
-            available.find((folder) => folder.scope === "personal")?.id ??
-            "",
+        available.find((folder) => folder.id === folderId)?.id ?? "",
     );
     const [choices, setChoices] = useState<CalendarChoices | null>(null);
     const [manual, setManual] = useState(false);
@@ -62,7 +53,7 @@ export function CreateMeetingDialog({
     const [error, setError] = useState<string | null>(null);
     const calendarError = i18n("Could not load calendar events");
     const hasDestination = available.some(
-        (folder) => folder.id === chosenFolder && folder.kind === "custom",
+        (folder) => folder.id === chosenFolder,
     );
     useEffect(() => {
         if (!open || !hasDestination) return;
@@ -122,7 +113,6 @@ export function CreateMeetingDialog({
             setBusy(false);
         }
     }
-    const byId = new Map(folders.map((folder) => [folder.id, folder]));
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
@@ -134,26 +124,20 @@ export function CreateMeetingDialog({
                             : i18n("Choose an event, or continue without one.")}
                     </DialogDescription>
                 </DialogHeader>
-                <label className="grid gap-1 text-sm">
+                <div className="grid gap-1 text-sm">
                     {i18n("Folder")}
-                    <select
-                        className="w-full rounded-md border bg-background p-2"
+                    <FolderCombobox
+                        entries={matchFolders(folders, "", label).filter(
+                            (entry) => entry.folder.kind === "custom",
+                        )}
+                        aria-label={i18n("Folder")}
                         value={chosenFolder}
-                        onChange={(event) => {
-                            setChosenFolder(event.target.value);
+                        onValueChange={(id) => {
+                            setChosenFolder(id);
                             setSelected("");
                         }}
-                    >
-                        {!chosenFolder && (
-                            <option value="">{i18n("Private")}</option>
-                        )}
-                        {available.map((folder) => (
-                            <option key={folder.id} value={folder.id}>
-                                {folderDisplayPath(folder, byId, label)}
-                            </option>
-                        ))}
-                    </select>
-                </label>
+                    />
+                </div>
                 {!available.length && (
                     <p className="text-sm text-muted-foreground">
                         {i18n("Create a folder before preparing a meeting.")}

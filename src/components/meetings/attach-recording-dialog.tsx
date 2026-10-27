@@ -65,7 +65,11 @@ export function AttachRecordingDialog({
         }
     }
     const shared = detail.folders.some((folder) => {
-        const visible = folders.find((entry) => entry.id === folder.id);
+        const visible = folders.find(
+            (entry) =>
+                entry.id === folder.id ||
+                entry.receivedFolder?.sourceFolderId === folder.id,
+        );
         return (
             visible?.scope === "org" ||
             visible?.sharedWithPeople ||
@@ -159,7 +163,13 @@ export function AttachRecordingDialog({
                             new CustomEvent("meeting-upload", {
                                 detail: {
                                     agendaId: detail.id,
-                                    folderId: detail.folders[0]?.id,
+                                    folderId:
+                                        folders.find(
+                                            (folder) =>
+                                                folder.receivedFolder
+                                                    ?.sourceFolderId ===
+                                                detail.folders[0]?.id,
+                                        )?.id ?? detail.folders[0]?.id,
                                 },
                             }),
                         );

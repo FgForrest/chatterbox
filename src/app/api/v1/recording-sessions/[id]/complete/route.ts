@@ -62,7 +62,11 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     if (typeof input.folderId === "string") {
         try {
-            await assertCategorizableFolderInput(authn.user.id, input.folderId);
+            const folder = await assertCategorizableFolderInput(
+                authn.user.id,
+                input.folderId,
+            );
+            if (folder) input.folderId = folder.folderId;
         } catch (error) {
             if (error instanceof AppError && error.statusCode === 400) {
                 throw new AppError(error.code, error.message, 400, {

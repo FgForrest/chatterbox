@@ -94,6 +94,7 @@ describe("create dialog", () => {
         render(
             <CreateMeetingDialog
                 folders={[folder]}
+                folderId="folder"
                 open
                 onOpenChange={vi.fn()}
                 onCreated={created}
@@ -148,6 +149,7 @@ describe("create dialog", () => {
         render(
             <CreateMeetingDialog
                 folders={[folder]}
+                folderId="folder"
                 open
                 onOpenChange={vi.fn()}
                 onCreated={created}
@@ -310,7 +312,7 @@ it.each([
     "folder",
     "organization",
     "organization-root",
-])("preselects only invocation context %s, defaulting to Private", async (folderId) => {
+])("preselects only invocation context %s, never another folder", async (folderId) => {
     const privateRoot: RecordingFolder = {
         ...folder,
         id: "private",
@@ -337,10 +339,14 @@ it.each([
         />,
     );
     await act(async () => {});
-    expect(screen.getByRole("combobox")).toHaveProperty(
-        "value",
-        folderId ?? "private",
-    );
+    const picker = screen.getByRole("combobox");
+    if (folderId === "folder" || folderId === "organization")
+        expect(
+            fetchMock.mock.calls.some(([url]) =>
+                String(url).includes(`folderId=${folderId}`),
+            ),
+        ).toBe(true);
+    else expect(picker.textContent).toContain("Choose a folder");
     if (!folderId || folderId === "organization-root") {
         expect(fetchMock).not.toHaveBeenCalled();
         expect(screen.getByRole("button", { name: "Prepare" })).toHaveProperty(

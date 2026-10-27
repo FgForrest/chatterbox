@@ -62,7 +62,11 @@ export async function restoreMeetings(
         const folders = meeting.folderIds
             .map((folderId) => input.folderIdMap[folderId])
             .filter(Boolean);
-        if (!folders.length && !meeting.recordingItemId) {
+        if (
+            !folders.length &&
+            meeting.folderIds.length > 0 &&
+            !meeting.recordingItemId
+        ) {
             skipped.push({
                 id: meeting.id,
                 reason: "No mapped writable folder",
