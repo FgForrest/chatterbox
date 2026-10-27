@@ -117,6 +117,8 @@ import { OpenAI } from "openai";
 import { db } from "@/db";
 import { chatterItems, recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
+import { recordAiUsage } from "@/lib/ai/usage-cost";
+import { isHostedLockedOut } from "@/lib/entitlements";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import {
     isMynahConfigured,
@@ -490,6 +492,16 @@ describe("Transcription", () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toBe("API Error");
+            expect(recordAiUsage).toHaveBeenCalledExactlyOnceWith(
+                expect.objectContaining({
+                    operation: "transcription",
+                    recordingId: mockRecordingId,
+                }),
+                expect.objectContaining({
+                    outcome: "failed",
+                    reportedCostUsd: undefined,
+                }),
+            );
         });
 
         /**
@@ -896,7 +908,6 @@ describe("Transcription", () => {
         }
 
         it("returns HOSTED_LOCKED_OUT (not TRANSCRIPTION_FAILED) when the account is lapsed", async () => {
-            const { isHostedLockedOut } = await import("@/lib/entitlements");
             (isHostedLockedOut as Mock).mockResolvedValueOnce(true);
             const result = await storeBrowserTranscription({
                 userId: mockUserId,
@@ -943,7 +954,9 @@ describe("Transcription", () => {
         });
 
         it("inserts a new transcription row with type='browser' and provider='browser' (model preserved)", async () => {
-            mockOwnershipLookup([{ id: mockRecordingId, deletedAt: null }]);
+            mockOwnershipLookup([
+                { id: mockRecordingId, deletedAt: null, duration: 123_456 },
+            ]);
             const harness = makeTxMock({
                 stillActive: { deletedAt: null },
                 existingTranscription: null,
@@ -958,6 +971,18 @@ describe("Transcription", () => {
             });
 
             expect(result.success).toBe(true);
+            expect(recordAiUsage).toHaveBeenCalledExactlyOnceWith(
+                {
+                    recordingId: mockRecordingId,
+                    ownerUserId: mockUserId,
+                    actorUserId: mockUserId,
+                    payerUserId: mockUserId,
+                    operation: "transcription",
+                    provider: "browser",
+                    model: "whisper-base",
+                },
+                { audioSeconds: 123.456, reportedCostUsd: 0 },
+            );
             expect(result.text).toBe("new transcript text");
             expect(result.detectedLanguage).toBe("fr");
             expect(harness.txInsert).toHaveBeenCalled();

@@ -1,7 +1,7 @@
 ---
 title: Members see three aggregate statistics scopes on shared self-host
 date: 2026-10-26
-updated: 2026-10-26 21:49
+updated: 2026-10-27 15:20
 status: accepted
 kind: feature
 issues: [287]
@@ -9,7 +9,7 @@ prs: [288]
 areas: [src/db/queries/statistics.ts, src/components/statistics, src/app/api/statistics]
 supersedes: []
 superseded-by: []
-relates: []
+relates: [2026-10-26-durable-ai-usage-ledger]
 ---
 
 # Members see three aggregate statistics scopes on shared self-host
@@ -74,7 +74,11 @@ Everyone and Organization are refused on hosted deployments and in local mode, e
 - Both deployment modes receive additive migration `0143_shallow_mariko_yashida.sql`, creating `storage_daily_snapshots` and `task_status_transitions`, with no environment or compose changes. Existing installations need no configuration changes. Older images ignore the new tables, so application rollback requires no data recovery.
 - A scope-query regression can expose aggregates to unintended users; explicit refusal and ownership tests guard this boundary in both modes. Snapshot failures leave prior measurements available. Task/log failures roll back together and affect only the attempted edit.
 - Storage before the first measurement and tasks predating transition history remain estimates. Task erasure removes history; aggregate storage snapshots remain until account deletion. This is not an audit ledger or a history of item ownership and sharing.
-- AI spend and model usage are only as complete as `ai_usage_events`: its rows cascade away with a hard-deleted item, and failed calls, browser transcription and embeddings are not logged. Tracked in #290.
+- Before #290, AI spend and model usage lost a hard-deleted item's rows and missed failed calls, browser transcription and embeddings; the [durable usage ledger](2026-10-26-durable-ai-usage-ledger.md) records them.
+
+## Related work
+
+- [2026-10-26-durable-ai-usage-ledger](2026-10-26-durable-ai-usage-ledger.md): usage survives item erasure, and failed, browser and embedding attempts enter spend and model aggregates.
 
 ## Timeline
 

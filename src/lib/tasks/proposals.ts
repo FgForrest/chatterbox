@@ -18,7 +18,10 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { getTranscriptSpeakers } from "@/lib/knowledge/attribution";
-import { embeddingClient } from "@/lib/knowledge/embeddings";
+import {
+    type EmbeddingUsage,
+    embeddingClient,
+} from "@/lib/knowledge/embeddings";
 import { vectorGenerationFor } from "@/lib/knowledge/knowledge-embed";
 import { findByName, knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
@@ -570,6 +573,7 @@ async function rankedCandidateEntries(
     itemText: string,
     participantPersonIds: readonly string[],
     contentKey?: ContentVectorKey,
+    usage?: EmbeddingUsage,
 ): Promise<{
     ranked: RankedTaskCandidate<CandidateTask>[];
     usedEmbeddings: boolean;
@@ -670,6 +674,7 @@ async function rankedCandidateEntries(
             const vectors = await client.embed(
                 pending.map((request) => request.text),
                 {
+                    usage,
                     onBatch: (batch) => acceptBatch(batch.start, batch.vectors),
                 },
             );
@@ -724,9 +729,16 @@ async function rankedCandidates(
     candidates: readonly CandidateTask[],
     itemText: string,
     participantPersonIds: readonly string[],
+    usage: EmbeddingUsage,
 ): Promise<CandidateTask[]> {
     return (
-        await rankedCandidateEntries(candidates, itemText, participantPersonIds)
+        await rankedCandidateEntries(
+            candidates,
+            itemText,
+            participantPersonIds,
+            undefined,
+            usage,
+        )
     ).ranked
         .slice(0, TASK_CANDIDATE_LIMIT)
         .map((entry) => entry.candidate);
@@ -857,6 +869,13 @@ export async function searchMergeCandidates(
                   revision: content.revision,
               }
             : undefined,
+        {
+            userId: item.userId,
+            recordingId: item.id,
+            actorUserId: reviewer.userId,
+            payerUserId:
+                (item.shared ? reviewer.orgUserId : null) ?? item.userId,
+        },
     );
     const matching = text
         ? rankTaskSearchCandidates(ranking.ranked, text, ranking.usedEmbeddings)
@@ -973,6 +992,13 @@ export async function loadTasksPromptContext({
         eligible,
         itemText,
         participantPersonIds,
+        {
+            userId: recording.userId,
+            recordingId: recording.id,
+            actorUserId: reviewer.userId,
+            payerUserId:
+                (orgView ? reviewer.orgUserId : null) ?? recording.userId,
+        },
     );
     rows.forEach((row, index) => {
         const ref = `T${index + 1}`;

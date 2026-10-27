@@ -10,7 +10,7 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 
 vi.mock("@/db", () => ({
-    db: { select: vi.fn(), insert: vi.fn() },
+    db: { select: vi.fn(), insert: vi.fn(), transaction: vi.fn() },
 }));
 
 import { db } from "@/db";
@@ -123,6 +123,23 @@ describe("recordAiUsage with a provider card's price", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         inserted = undefined;
+        (db.transaction as Mock).mockImplementation(
+            async (run: (tx: unknown) => Promise<void>) =>
+                run({
+                    select: () => ({
+                        from: () => ({
+                            where: () => ({
+                                for: () => ({
+                                    limit: async () => [
+                                        { id: "rec-1", kind: "audio" },
+                                    ],
+                                }),
+                            }),
+                        }),
+                    }),
+                    insert: db.insert,
+                }),
+        );
         (db.insert as Mock).mockReturnValue({
             values: vi.fn((values: Record<string, unknown>) => {
                 inserted = values;

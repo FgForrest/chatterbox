@@ -40,6 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
+| 2026-10-26 | [AI usage outlives item erasure but remains bounded by account deletion](2026-10-26-durable-ai-usage-ledger.md) | fix | proposed | [#290](https://github.com/FgForrest/chatterbox/issues/290) |
 | 2026-10-26 | [Members see three aggregate statistics scopes on shared self-host](2026-10-26-member-visible-usage-statistics.md) | feature | accepted | [#287](https://github.com/FgForrest/chatterbox/issues/287), [PR #288](https://github.com/FgForrest/chatterbox/pull/288) |
 | 2026-10-22 | [AGENTS.md stays the single source of agent rules, area rules move to path-scoped files, and decisions are recorded as ADRs with a generated, checked index](2026-10-22-agent-instructions-and-decision-records.md) | process | accepted | [PR #245](https://github.com/FgForrest/chatterbox/pull/245) |
 | 2026-10-22 | [Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only](2026-10-22-almanac-curator-desk.md) | feature | accepted | [#240](https://github.com/FgForrest/chatterbox/issues/240), [PR #244](https://github.com/FgForrest/chatterbox/pull/244), [PR #247](https://github.com/FgForrest/chatterbox/pull/247), [PR #275](https://github.com/FgForrest/chatterbox/pull/275) |

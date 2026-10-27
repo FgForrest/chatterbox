@@ -1,4 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/db", () => ({
+    db: { select: () => ({ from: () => ({ where: async () => [] }) }) },
+}));
+vi.mock("@/lib/ai/usage-cost", () => ({
+    recordAiUsage: vi.fn().mockResolvedValue(undefined),
+    recordChatCompletionUsage: vi.fn(),
+}));
 
 vi.mock("@/lib/env", () => ({
     env: {
@@ -9,6 +17,8 @@ vi.mock("@/lib/env", () => ({
         EMBEDDING_TIMEOUT_MS: 60_000,
     },
 }));
+
+import { recordAiUsage } from "@/lib/ai/usage-cost";
 
 import {
     EmbeddingClient,
@@ -51,6 +61,7 @@ function fakeFetch(
         const status = options.status?.() ?? 200;
         if (status !== 200) return new Response("no", { status });
         return Response.json({
+            usage: { prompt_tokens: body.input.length * 10 },
             data: (body.input as string[])
                 .map((text, index) => ({
                     index,
@@ -63,6 +74,67 @@ function fakeFetch(
 }
 
 describe("EmbeddingClient", () => {
+    beforeEach(() => vi.clearAllMocks());
+    it("records a single usage event per HTTP batch, including a null item", async () => {
+        const { fetch } = fakeFetch();
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            batchSize: 2,
+            fetch,
+        });
+        await client.embed(["one", "two", "three"], {
+            usage: { userId: "owner" },
+        });
+        expect(recordAiUsage).toHaveBeenCalledTimes(2);
+        expect(recordAiUsage).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                recordingId: null,
+                operation: "embedding",
+                ownerUserId: "owner",
+                provider: "Embeddings",
+                model: "m",
+            }),
+            expect.objectContaining({ inputTokens: 20, outcome: "succeeded" }),
+        );
+        expect(recordAiUsage).toHaveBeenNthCalledWith(
+            2,
+            expect.anything(),
+            expect.objectContaining({ inputTokens: 10 }),
+        );
+    });
+    it("records one failed request but no request rejected by the circuit breaker", async () => {
+        const { fetch } = fakeFetch({ fail: () => true });
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            failureThreshold: 1,
+            fetch,
+        });
+        for (let i = 0; i < 2; i++)
+            await expect(
+                client.embed(["text"], { usage: { userId: "owner" } }),
+            ).rejects.toBeInstanceOf(EmbeddingUnavailable);
+        expect(recordAiUsage).toHaveBeenCalledTimes(1);
+        expect(recordAiUsage).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ outcome: "failed" }),
+        );
+    });
+    it("skips unpriced search queries", async () => {
+        const { fetch } = fakeFetch();
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            fetch,
+        });
+        await client.embed(["query"], {
+            usage: { userId: "owner", query: true },
+        });
+        expect(recordAiUsage).not.toHaveBeenCalled();
+    });
+
     it("embeds in batches, in order, normalized, with the model and key", async () => {
         const { fetch, calls } = fakeFetch();
         const client = new EmbeddingClient({

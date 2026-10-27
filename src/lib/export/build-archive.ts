@@ -182,21 +182,13 @@ export async function buildAndUploadExportArchive(input: {
 
     const recordingIds = userRecordings.map((r) => r.id);
 
-    // What a recording cost is its payer's: never in the Organization's.
-    const userUsage =
-        recordingIds.length > 0 && scope.kind === "personal"
-            ? await db
-                  .select()
-                  .from(aiUsageEvents)
-                  .where(
-                      and(
-                          inArray(aiUsageEvents.itemId, recordingIds),
-                          eq(aiUsageEvents.payerUserId, userId),
-                      ),
-                  )
-            : [];
+    const userUsage = await db
+        .select()
+        .from(aiUsageEvents)
+        .where(eq(aiUsageEvents.payerUserId, userId));
     const usageMap = new Map<string, typeof userUsage>();
     for (const usage of userUsage) {
+        if (scope.kind !== "personal" || usage.itemId === null) continue;
         const group = usageMap.get(usage.itemId) ?? [];
         group.push(usage);
         usageMap.set(usage.itemId, group);
@@ -403,6 +395,7 @@ export async function buildAndUploadExportArchive(input: {
             homeMoves: { count: number; path: string | null };
         };
         aiProviderRates?: { count: number; path: string };
+        aiUsage?: { count: number; path: string };
         /** Mail of the pile: each a directory with message.eml and mail.json. */
         mail?: {
             id: string;
@@ -1105,6 +1098,14 @@ export async function buildAndUploadExportArchive(input: {
             name: path,
         });
         manifest.aiProviderRates = { count: priced.length, path };
+    }
+
+    if (userUsage.length > 0) {
+        const path = "ai/usage.json";
+        archive.append(Buffer.from(JSON.stringify(userUsage, null, 2)), {
+            name: path,
+        });
+        manifest.aiUsage = { count: userUsage.length, path };
     }
 
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {

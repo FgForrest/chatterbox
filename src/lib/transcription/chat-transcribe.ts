@@ -1,5 +1,6 @@
 import type { OpenAI } from "openai";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
+import { withResponseUsage } from "@/lib/ai/usage-values";
 import { sniffAudio } from "@/lib/audio/sniff";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -117,17 +118,23 @@ export async function chatTranscribe({
     );
 
     if (response.choices?.[0]?.finish_reason === "length") {
-        throw new AppError(
-            ErrorCode.TRANSCRIPTION_FAILED,
-            "The transcription provider cut off the transcript at its output limit. No partial transcript was saved. Use a provider or model that can return the full recording.",
-            400,
+        throw withResponseUsage(
+            new AppError(
+                ErrorCode.TRANSCRIPTION_FAILED,
+                "The transcription provider cut off the transcript at its output limit. No partial transcript was saved. Use a provider or model that can return the full recording.",
+                400,
+            ),
+            response,
         );
     }
 
     const text = response.choices?.[0]?.message?.content;
     if (typeof text !== "string" || text.trim() === "") {
-        throw new Error(
-            "Transcription provider returned an empty response. The model may not support audio input — pick an audio-capable model.",
+        throw withResponseUsage(
+            new Error(
+                "Transcription provider returned an empty response. The model may not support audio input — pick an audio-capable model.",
+            ),
+            response,
         );
     }
 

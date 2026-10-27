@@ -2,8 +2,10 @@ import { OpenAI } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { providerFetch } from "@/lib/ai/provider-fetch";
-import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
+import {
+    chatCompletionWithUsage,
+    usageAttemptFetch,
+} from "@/lib/ai/usage-attempt";
 import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
@@ -86,7 +88,7 @@ export async function summaryModelFor(
     const credentials = resolved.credential;
 
     const openai = new OpenAI({
-        fetch: providerFetch,
+        fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,
@@ -220,9 +222,7 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                         }
                     }
                     firstAttempt = false;
-                    const response =
-                        await openai.chat.completions.create(params);
-                    await recordChatCompletionUsage(
+                    const response = await chatCompletionWithUsage(
                         {
                             recordingId: input.usage.itemId,
                             ownerUserId: input.usage.ownerUserId,
@@ -234,8 +234,9 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                             baseUrl: credentials.baseUrl,
                             credentialId: credentials.id,
                         },
-                        response,
+                        () => openai.chat.completions.create(params),
                     );
+
                     return {
                         raw:
                             response.choices[0]?.message?.content?.trim() || "",

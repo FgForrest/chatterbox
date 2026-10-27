@@ -76,10 +76,7 @@ export function SpendSection({ view }: { view: StatisticsView }) {
                         {
                             label: i18n("Per recorded hour"),
                             value: minutesTotal
-                                ? usd(
-                                      Math.max(0, cost - total("mailCost")) /
-                                          (minutesTotal / 60),
-                                  )
+                                ? usd(total("audioCost") / (minutesTotal / 60))
                                 : "–",
                         },
                         {
@@ -237,14 +234,23 @@ export function ModelsSection({ view }: { view: StatisticsView }) {
         provider,
         model,
         index,
-        parts: steps.map(() => ({ cost: 0, jobs: 0, unknown: 0 })),
+        parts: steps.map(() => ({ cost: 0, jobs: 0, unknown: 0, failed: 0 })),
     }));
-    for (const [day, model, step, jobs, modelCost, unknown] of data.modelDays) {
+    for (const [
+        day,
+        model,
+        step,
+        jobs,
+        modelCost,
+        unknown,
+        failed = 0,
+    ] of data.modelDays) {
         if (day < range.start || day > range.end) continue;
         const part = modelGroups[model].parts[step];
         part.cost += modelCost;
         part.jobs += jobs;
         part.unknown += unknown;
+        part.failed += failed;
     }
     const modelRows: RankedRow[] = modelGroups
         .filter((group) => group.parts.some((part) => part.jobs))
@@ -270,7 +276,7 @@ export function ModelsSection({ view }: { view: StatisticsView }) {
                     label: steps[i].label,
                     color: steps[i].color,
                     value: modelsBy === "cost" ? part.cost : part.jobs,
-                    detail: `${usd(part.cost)} · ${i18n("{count} jobs", { count: count(part.jobs) })}${part.unknown ? ` · ${i18n("{count} unpriced", { count: count(part.unknown) })}` : ""}`,
+                    detail: `${usd(part.cost)} · ${i18n("{count} jobs", { count: count(part.jobs) })}${part.unknown ? ` · ${i18n("{count} unpriced", { count: count(part.unknown) })}` : ""} · ${i18n("{count} failed", { count: count(part.failed) })}`,
                 })),
             };
         })

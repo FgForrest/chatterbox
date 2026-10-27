@@ -1,4 +1,5 @@
 import { fetchWithoutIdleTimeout } from "@/lib/ai/provider-fetch";
+import { withResponseUsage } from "@/lib/ai/usage-values";
 import { env } from "@/lib/env";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -173,9 +174,16 @@ export async function geminiTranscribe({
     );
 
     if (!response.ok) {
-        throw new GeminiTranscribeError(
-            response.status,
-            await describeError(response, name),
+        const failureUsage = await response
+            .clone()
+            .json()
+            .catch(() => null);
+        throw withResponseUsage(
+            new GeminiTranscribeError(
+                response.status,
+                await describeError(response, name),
+            ),
+            failureUsage,
         );
     }
 
@@ -183,9 +191,12 @@ export async function geminiTranscribe({
     const candidate = payload.candidates?.[0];
     const blocked = blockedReason(payload);
     if (blocked) {
-        throw new GeminiTranscribeError(
-            null,
-            `Google Gemini withheld the transcription: ${blocked}.`,
+        throw withResponseUsage(
+            new GeminiTranscribeError(
+                null,
+                `Google Gemini withheld the transcription: ${blocked}.`,
+            ),
+            payload,
         );
     }
 
@@ -195,9 +206,12 @@ export async function geminiTranscribe({
         .join("")
         .trim();
     if (!text) {
-        throw new GeminiTranscribeError(
-            null,
-            "Google Gemini returned an empty transcription. The audio may be silent or the model may not have recognised the content.",
+        throw withResponseUsage(
+            new GeminiTranscribeError(
+                null,
+                "Google Gemini returned an empty transcription. The audio may be silent or the model may not have recognised the content.",
+            ),
+            payload,
         );
     }
 

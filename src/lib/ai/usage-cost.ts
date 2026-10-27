@@ -1,7 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 import { db } from "@/db";
-import { aiUsageEvents, apiCredentials, users } from "@/db/schema";
+import {
+    aiUsageEvents,
+    apiCredentials,
+    chatterItems,
+    users,
+} from "@/db/schema";
 import {
     type AiRate,
     PRICE_SOURCE,
@@ -15,10 +20,11 @@ export type AiOperation =
     | "topics"
     | "learn"
     | "correction"
-    | "title";
+    | "title"
+    | "embedding";
 
 export interface AiUsageContext {
-    recordingId: string;
+    recordingId: string | null;
     ownerUserId: string;
     actorUserId: string;
     payerUserId: string;
@@ -30,7 +36,8 @@ export interface AiUsageContext {
     credentialId?: string | null;
 }
 
-interface UsageValues {
+export interface UsageValues {
+    outcome?: "succeeded" | "failed";
     inputTokens?: number | null;
     outputTokens?: number | null;
     audioSeconds?: number | null;
@@ -64,7 +71,9 @@ export function estimateAiUsage(
     source: string | null;
 } {
     const inputTokens = positiveFinite(usage.inputTokens);
-    const outputTokens = positiveFinite(usage.outputTokens);
+    const outputTokens = positiveFinite(
+        usage.outputTokens ?? (context.operation === "embedding" ? 0 : null),
+    );
     const audioSeconds = positiveFinite(usage.audioSeconds);
     const reportedCost = positiveFinite(usage.reportedCostUsd);
     let cost: number | null = reportedCost;
@@ -154,7 +163,7 @@ async function cardRate(context: AiUsageContext): Promise<AiRate | null> {
     return storedRate(card);
 }
 
-/** Store measured provider usage and a rate snapshot for one completed call. */
+/** Store one attempt without allowing ledger failures to replace the caller’s result. */
 export async function recordAiUsage(
     context: AiUsageContext,
     usage: UsageValues,
@@ -162,23 +171,40 @@ export async function recordAiUsage(
     try {
         const { inputTokens, outputTokens, audioSeconds, cost, source } =
             estimateAiUsage(context, usage, await cardRate(context));
-        await db.insert(aiUsageEvents).values({
-            itemId: context.recordingId,
-            userId: context.ownerUserId,
-            actorUserId: context.actorUserId,
-            payerUserId: context.payerUserId,
-            operation: context.operation,
-            provider: context.provider,
-            model: context.model,
-            inputTokens,
-            outputTokens,
-            audioSeconds:
-                audioSeconds === null ? null : audioSeconds.toFixed(3),
-            costUsd: cost === null ? null : cost.toFixed(9),
-            priceSource: source,
+        await db.transaction(async (tx) => {
+            const [item] = context.recordingId
+                ? await tx
+                      .select({ id: chatterItems.id, kind: chatterItems.kind })
+                      .from(chatterItems)
+                      .where(
+                          and(
+                              eq(chatterItems.id, context.recordingId),
+                              eq(chatterItems.userId, context.ownerUserId),
+                          ),
+                      )
+                      .for("key share")
+                      .limit(1)
+                : [];
+            await tx.insert(aiUsageEvents).values({
+                itemId: item?.id ?? null,
+                itemKind: item?.kind ?? null,
+                outcome: usage.outcome ?? "succeeded",
+                userId: context.ownerUserId,
+                actorUserId: context.actorUserId,
+                payerUserId: context.payerUserId,
+                operation: context.operation,
+                provider: context.provider,
+                model: context.model,
+                inputTokens,
+                outputTokens,
+                audioSeconds:
+                    audioSeconds === null ? null : audioSeconds.toFixed(3),
+                costUsd: cost === null ? null : cost.toFixed(9),
+                priceSource: source,
+            });
         });
-    } catch (error) {
-        console.error("Failed to record AI usage:", error);
+    } catch {
+        console.error("Failed to record AI usage");
     }
 }
 

@@ -17,6 +17,24 @@ function context(provider: string, model: string): AiUsageContext {
 }
 
 describe("AI usage estimates", () => {
+    it("prices embedding input tokens without inventing output usage or an unmeasured cost", () => {
+        const usageContext = {
+            ...context("Custom", "embed"),
+            operation: "embedding" as const,
+        };
+        const rate = {
+            inputUsdPerMillion: 2,
+            outputUsdPerMillion: 99,
+            audioUsdPerHour: null,
+        };
+        expect(
+            estimateAiUsage(usageContext, { inputTokens: 1000 }, rate),
+        ).toMatchObject({ cost: 0.002, outputTokens: 0, source: "user" });
+        expect(
+            estimateAiUsage(usageContext, { outcome: "failed" }, rate).cost,
+        ).toBeNull();
+    });
+
     it("uses audio transcription rates before similarly named text models", () => {
         const result = estimateAiUsage(
             context("OpenAI", "gpt-4o-mini-transcribe"),
