@@ -5104,6 +5104,8 @@ export const meetingAgendas = pgTable(
             .references(() => chatterItems.id, { onDelete: "set null" }),
         calendarEventId: text("calendar_event_id"),
         calendarSeriesId: text("calendar_series_id"),
+        calendarSnapshot: jsonb("calendar_snapshot"),
+        calendarRefreshedAt: timestamp("calendar_refreshed_at"),
         plannedStart: timestamp("planned_start"),
         plannedEnd: timestamp("planned_end"),
         timeSet: boolean("time_set").notNull().default(false),

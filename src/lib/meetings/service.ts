@@ -1,8 +1,22 @@
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import {
+    and,
+    asc,
+    desc,
+    eq,
+    inArray,
+    isNull,
+    ne,
+    notInArray,
+    or,
+    sql,
+} from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { z } from "zod";
 import { db } from "@/db";
-import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
+import {
+    activeShareRecipientExistsCondition,
+    notifyFolderReceiversInTx,
+} from "@/db/queries/item-shares";
 import {
     listMeetingRows,
     lockMeetingEvent,
@@ -20,7 +34,9 @@ import {
     agendaSuggestions,
     agendaTasks,
     chatterItems,
+    folderShares,
     meetingAgendas,
+    receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -36,12 +52,18 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
-    listRecordingFolderTrees,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { getCalendarEvent } from "@/lib/integrations/google/calendar-events";
-import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
-import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
+import {
+    meetingRecordingRedirect,
+    meetingViewer,
+    requireMeetingAccess,
+} from "@/lib/meetings/access";
+import {
+    encryptCalendarSnapshot,
+    readMeetingCalendarSnapshot,
+} from "@/lib/meetings/calendar-snapshot";
 import {
     createMeetingInput,
     createPointInput,
@@ -152,15 +174,6 @@ async function snapshotTasks(
         .update(meetingAgendas)
         .set({ snapshotSourceItemId: sourceId })
         .where(whereAgenda(agenda));
-    await tx
-        .delete(agendaTasks)
-        .where(
-            and(
-                eq(agendaTasks.agendaId, agenda.id),
-                eq(agendaTasks.userId, agenda.userId),
-            ),
-        );
-    if (!sourceId) return;
     const tasks = await tx
         .select({ id: recordingTasks.id })
         .from(recordingTasks)
@@ -170,22 +183,40 @@ async function snapshotTasks(
                 inArray(recordingTasks.status, ["open", "done"]),
                 taskVisible(viewer, ANY_TASK_ITEM, true),
                 or(
-                    eq(recordingTasks.itemId, sourceId),
-                    sql`exists (select 1 from ${taskMentions} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.itemId} = ${sourceId} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new'))`,
+                    sourceId ? eq(recordingTasks.itemId, sourceId) : sql`false`,
+                    sourceId
+                        ? sql`exists (select 1 from ${taskMentions} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.itemId} = ${sourceId} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new'))`
+                        : sql`false`,
                 ),
             ),
         )
         .orderBy(asc(recordingTasks.position), asc(recordingTasks.id));
+    await tx.delete(agendaTasks).where(
+        and(
+            eq(agendaTasks.agendaId, agenda.id),
+            eq(agendaTasks.userId, agenda.userId),
+            eq(agendaTasks.origin, "last_meeting"),
+            tasks.length
+                ? notInArray(
+                      agendaTasks.taskId,
+                      tasks.map((task) => task.id),
+                  )
+                : undefined,
+        ),
+    );
     if (tasks.length)
-        await tx.insert(agendaTasks).values(
-            tasks.map((task, position) => ({
-                userId: agenda.userId,
-                agendaId: agenda.id,
-                taskId: task.id,
-                origin: "last_meeting" as const,
-                position,
-            })),
-        );
+        await tx
+            .insert(agendaTasks)
+            .values(
+                tasks.map((task, position) => ({
+                    userId: agenda.userId,
+                    agendaId: agenda.id,
+                    taskId: task.id,
+                    origin: "last_meeting" as const,
+                    position,
+                })),
+            )
+            .onConflictDoNothing();
 }
 
 async function carryOver(
@@ -325,6 +356,8 @@ export async function prepareMeeting(
                 meetingItemId: itemId,
                 calendarEventId: event?.id,
                 calendarSeriesId: event?.recurringEventId,
+                calendarSnapshot: event ? encryptCalendarSnapshot(event) : null,
+                calendarRefreshedAt: event ? at : null,
                 plannedStart: start,
                 plannedEnd: end,
                 timeSet: start !== null,
@@ -478,7 +511,13 @@ export async function getMeeting(userId: string, id: string, since?: number) {
     const access = await requireMeetingAccess(userId, id);
     let { agenda } = access;
     const { item } = access;
-    if (since === agenda.version) {
+    if (
+        since === agenda.version &&
+        !agenda.recordingItemId &&
+        (!agenda.calendarEventId ||
+            (agenda.calendarRefreshedAt &&
+                agenda.calendarRefreshedAt.getTime() > Date.now() - 10 * 60000))
+    ) {
         const [changedTask] = await db
             .select({ id: agendaTasks.taskId })
             .from(agendaTasks)
@@ -506,73 +545,61 @@ export async function getMeeting(userId: string, id: string, since?: number) {
             .returning();
         agenda = refreshed;
     }
-    const [
-        points,
-        links,
-        suggestions,
-        folders,
-        viewer,
-        event,
-        sourceRows,
-        connection,
-    ] = await Promise.all([
-        db
-            .select()
-            .from(agendaPoints)
-            .where(pointWhere(agenda))
-            .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
-        db
-            .select()
-            .from(agendaTasks)
-            .where(
-                and(
-                    eq(agendaTasks.agendaId, agenda.id),
-                    eq(agendaTasks.userId, agenda.userId),
-                ),
-            )
-            .orderBy(asc(agendaTasks.position)),
-        db
-            .select()
-            .from(agendaSuggestions)
-            .where(
-                and(
-                    eq(agendaSuggestions.agendaId, agenda.id),
-                    eq(agendaSuggestions.userId, agenda.userId),
-                ),
-            )
-            .orderBy(asc(agendaSuggestions.createdAt)),
-        agenda.meetingItemId
-            ? meetingFolders(db, agenda.meetingItemId, agenda.userId)
-            : [],
-        taskViewerById(userId).then((value) => ({
-            ...value,
-            includeReceived: true,
-        })),
-        agenda.calendarEventId
-            ? getCalendarEvent(agenda.userId, agenda.calendarEventId).catch(
-                  () => null,
-              )
-            : null,
-        agenda.snapshotSourceItemId
-            ? db
-                  .select({
-                      id: chatterItems.id,
-                      title: chatterItems.title,
-                      occurredAt: chatterItems.occurredAt,
-                  })
-                  .from(chatterItems)
-                  .where(
-                      and(
-                          eq(chatterItems.id, agenda.snapshotSourceItemId),
-                          meetingVisibility(userId, access.viewer.orgUserId),
-                      ),
-                  )
-                  .limit(1)
-            : [],
-        agenda.calendarEventId
-            ? getGoogleConnectionStatus(agenda.userId).catch(() => null)
-            : null,
-    ]);
+    const [points, links, suggestions, folders, viewer, event, sourceRows] =
+        await Promise.all([
+            db
+                .select()
+                .from(agendaPoints)
+                .where(pointWhere(agenda))
+                .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
+            db
+                .select()
+                .from(agendaTasks)
+                .where(
+                    and(
+                        eq(agendaTasks.agendaId, agenda.id),
+                        eq(agendaTasks.userId, agenda.userId),
+                    ),
+                )
+                .orderBy(asc(agendaTasks.position)),
+            db
+                .select()
+                .from(agendaSuggestions)
+                .where(
+                    and(
+                        eq(agendaSuggestions.agendaId, agenda.id),
+                        eq(agendaSuggestions.userId, agenda.userId),
+                    ),
+                )
+                .orderBy(asc(agendaSuggestions.createdAt)),
+            agenda.meetingItemId
+                ? meetingFolders(db, agenda.meetingItemId, agenda.userId)
+                : [],
+            taskViewerById(userId).then((value) => ({
+                ...value,
+                includeReceived: true,
+            })),
+            readMeetingCalendarSnapshot(agenda),
+            agenda.snapshotSourceItemId
+                ? db
+                      .select({
+                          id: chatterItems.id,
+                          title: chatterItems.title,
+                          occurredAt: chatterItems.occurredAt,
+                      })
+                      .from(chatterItems)
+                      .where(
+                          and(
+                              eq(chatterItems.id, agenda.snapshotSourceItemId),
+                              meetingVisibility(
+                                  userId,
+                                  access.viewer.orgUserId,
+                              ),
+                          ),
+                      )
+                      .limit(1)
+                : [],
+        ]);
     const visibleTasks = new Map(
         (
             await getVisibleTasks(
@@ -619,16 +646,22 @@ export async function getMeeting(userId: string, id: string, since?: number) {
         text: decryptText(point.text),
         note: point.note ? decryptText(point.note) : null,
     }));
+    const {
+        calendarSnapshot: _snapshot,
+        calendarRefreshedAt: _refreshedAt,
+        ...publicAgenda
+    } = agenda;
     return {
         unchanged: false as const,
-        ...agenda,
+        ...publicAgenda,
+        attachedRecording: agenda.recordingItemId
+            ? { visible: access.recordingVisible }
+            : null,
         title: decryptText(item.title),
         permissions: access.permissions,
         authors,
         canExportCalendar: exportEvent?.organizer?.self === true,
-        redirectTo: agenda.recordingItemId
-            ? `/dashboard?recording=${encodeURIComponent(agenda.recordingItemId)}`
-            : null,
+        redirectTo: await meetingRecordingRedirect(userId, access),
         folders: folders.map((folder) => ({
             ...folder,
             name: decryptText(folder.name),
@@ -659,18 +692,22 @@ export async function getMeeting(userId: string, id: string, since?: number) {
             decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [],
         calendar: event
             ? {
-                  organizer: event.organizer,
+                  organizer: event.organizer
+                      ? {
+                            self: event.organizer.self,
+                            name: event.organizer.name,
+                        }
+                      : undefined,
                   htmlLink: event.htmlLink,
                   attendeeCount: event.attendees.length,
-                  externalInviteeCount: connection
+                  externalInviteeCount: event.organizer?.email
                       ? event.attendees.filter(
                             (attendee) =>
                                 attendee.email &&
                                 attendee.email.split("@")[1]?.toLowerCase() !==
-                                    (
-                                        connection.hostedDomain ??
-                                        connection.email?.split("@")[1]
-                                    )?.toLowerCase(),
+                                    event.organizer?.email
+                                        ?.split("@")[1]
+                                        ?.toLowerCase(),
                         ).length
                       : null,
               }
@@ -744,6 +781,10 @@ export async function patchMeeting(
                     ? {
                           calendarEventId: event?.id ?? null,
                           calendarSeriesId: event?.recurringEventId ?? null,
+                          calendarSnapshot: event
+                              ? encryptCalendarSnapshot(event)
+                              : null,
+                          calendarRefreshedAt: event ? new Date() : null,
                       }
                     : {}),
                 ...(input.taskSourceItemId !== undefined
@@ -1208,23 +1249,80 @@ export async function olderTasks(
     );
 }
 
-/** Resolve a readable folder path from metadata already authorized by the meeting. */
-export async function meetingFolderPath(
-    userId: string,
-    folders: readonly { id: string; name: string; parentId: string | null }[],
-) {
-    const tree = await listRecordingFolderTrees(userId);
-    const first = folders[0];
-    if (!first) return "";
-    const names = [first.name];
-    const seen = new Set([first.id]);
-    let parentId = first.parentId;
-    while (parentId && !seen.has(parentId)) {
-        seen.add(parentId);
-        const parent = tree.find((entry) => entry.id === parentId);
-        if (!parent) break;
-        names.unshift(parent.name);
-        parentId = parent.parentId;
-    }
-    return names.join(" / ");
+/** Resolve reminder paths in one batch, using the receiver's filing instead of private owner ancestors. */
+export async function meetingFolderPaths(userId: string) {
+    const viewer = await meetingViewer(userId);
+    const [tree, received] = await Promise.all([
+        db
+            .select({
+                id: recordingFolders.id,
+                name: recordingFolders.name,
+                parentId: recordingFolders.parentId,
+            })
+            .from(recordingFolders)
+            .where(
+                inArray(recordingFolders.userId, [
+                    userId,
+                    ...(viewer.orgUserId ? [viewer.orgUserId] : []),
+                ]),
+            ),
+        viewer.orgUserId
+            ? db
+                  .select({
+                      sourceId: folderShares.folderId,
+                      id: receivedFolderAttachments.id,
+                      name: receivedFolderAttachments.name,
+                      parentId: receivedFolderAttachments.parentId,
+                  })
+                  .from(receivedFolderAttachments)
+                  .innerJoin(
+                      folderShares,
+                      and(
+                          eq(
+                              folderShares.id,
+                              receivedFolderAttachments.shareId,
+                          ),
+                          eq(folderShares.receiverUserId, userId),
+                      ),
+                  )
+                  .where(
+                      and(
+                          eq(receivedFolderAttachments.userId, userId),
+                          eq(folderShares.state, "accepted"),
+                          activeShareRecipientExistsCondition(userId),
+                      ),
+                  )
+            : [],
+    ]);
+    const nodes = new Map(
+        [...tree, ...received].map((row) => [
+            row.id,
+            { ...row, name: decryptText(row.name) },
+        ]),
+    );
+    const receivedBySource = new Map(
+        received.map((row) => [row.sourceId, row.id]),
+    );
+    return (
+        folders: readonly {
+            id: string;
+            name: string;
+            parentId: string | null;
+        }[],
+    ) => {
+        const first = folders[0];
+        if (!first) return "";
+        let current = nodes.get(receivedBySource.get(first.id) ?? first.id);
+        if (!current) return first.name;
+        const names: string[] = [];
+        const seen = new Set<string>();
+        while (current && !seen.has(current.id)) {
+            seen.add(current.id);
+            names.unshift(current.name);
+            current = current.parentId
+                ? nodes.get(current.parentId)
+                : undefined;
+        }
+        return names.join(" / ");
+    };
 }

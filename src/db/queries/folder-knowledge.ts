@@ -15,14 +15,14 @@ function folderItems(input: FolderKnowledgeScope) {
         ? sql`
             select item.id, item.user_id, item.title, item.occurred_at
             from chatter_items item
-            where item.deleted_at is null and item.user_id = ${input.viewerId}
+            where item.deleted_at is null and item.kind in ('audio', 'mail') and item.user_id = ${input.viewerId}
         `
         : sql`
             select distinct item.id, item.user_id, item.title, item.occurred_at
             from folders folder
             join recording_folder_assignments assignment on assignment.folder_id = folder.id
             join chatter_items item on item.id = assignment.recording_id and item.user_id = assignment.user_id
-            where item.deleted_at is null
+            where item.deleted_at is null and item.kind in ('audio', 'mail')
               and (${input.shared} or assignment.user_id = ${input.viewerId})
         `;
     return sql`

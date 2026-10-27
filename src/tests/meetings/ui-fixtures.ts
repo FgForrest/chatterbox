@@ -119,6 +119,7 @@ export function detail(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
         taskGroups: [],
         suggestions: [],
         calendar: null,
+        attachedRecording: null,
         aiSuggestions: { available: true, reason: null },
         ...overrides,
     };

@@ -152,8 +152,13 @@ export async function collectArchivedMeetings(
                       )
                 : [],
         ]);
+        const {
+            calendarSnapshot: _snapshot,
+            calendarRefreshedAt: _refreshedAt,
+            ...archivedAgenda
+        } = agenda;
         result.push({
-            ...agenda,
+            ...archivedAgenda,
             title: item ? decryptText(item.title) : "Meeting",
             folderIds: folders.map((folder) => folder.id),
             plannedStart: agenda.plannedStart?.toISOString() ?? null,

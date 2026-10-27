@@ -47,6 +47,8 @@ export function receivedItemCondition(
     if (!isOrgScopeVisible()) return sql`false`;
     return sql`${itemId} in (
         select ${itemShares.itemId} from ${itemShares}
+        inner join chatter_items direct_item on direct_item.id = ${itemShares.itemId}
+            and direct_item.user_id = ${itemShares.userId} and direct_item.kind in ('audio', 'mail')
         inner join ${users} on ${users.id} = ${itemShares.receiverUserId}
         where ${itemShares.receiverUserId} = ${receiverUserId}
           and ${itemShares.state} = 'accepted'
@@ -116,6 +118,7 @@ function receivedFolderItemIds(
         ${attachmentId ? sql`inner join ${receivedFolderAttachments} on ${receivedFolderAttachments.shareId} = ${folderShares.id} and ${receivedFolderAttachments.userId} = ${receiverUserId}` : sql``}
         where ${folderShares.receiverUserId} = ${receiverUserId}
             and ${folderShares.state} = 'accepted'
+            and ${chatterItems.userId} <> ${receiverUserId}
             and ${recordingFolders.kind} = 'custom'
             and ${activeShareRecipientCondition()}
             ${attachmentId ? sql`and ${receivedFolderAttachments.id} = ${attachmentId}` : sql``}

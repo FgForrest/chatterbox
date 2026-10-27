@@ -117,7 +117,7 @@ describe("export visibility", () => {
                     calendarEventId: "event",
                     canExportCalendar: true,
                     calendar: {
-                        organizer: { self: true },
+                        organizer: { self: true, name: undefined },
                         htmlLink: "https://calendar.google.com",
                         attendeeCount: 4,
                         externalInviteeCount: 2,

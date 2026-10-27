@@ -1,6 +1,6 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { meetingDate, meetingRoute } from "@/lib/meetings/route";
-import { listMeetings, meetingFolderPath } from "@/lib/meetings/service";
+import { listMeetings, meetingFolderPaths } from "@/lib/meetings/service";
 export const GET = meetingRoute(async ({ userId, url }) => {
     const from = meetingDate(url.searchParams.get("from"), new Date());
     const to = meetingDate(
@@ -14,14 +14,10 @@ export const GET = meetingRoute(async ({ userId, url }) => {
             400,
         );
     const rows = await listMeetings(userId, { from, to, includePast: true });
+    const folderPath = await meetingFolderPaths(userId);
     return {
-        data: await Promise.all(
-            rows
-                .filter((row) => row.timeSet)
-                .map(async (row) => ({
-                    ...row,
-                    folderPath: await meetingFolderPath(userId, row.folders),
-                })),
-        ),
+        data: rows
+            .filter((row) => row.timeSet)
+            .map((row) => ({ ...row, folderPath: folderPath(row.folders) })),
     };
 }, true);

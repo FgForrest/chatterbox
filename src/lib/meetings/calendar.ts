@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { meetingVisibility } from "@/db/queries/meetings";
+import { listMeetingRows, meetingVisibility } from "@/db/queries/meetings";
 import {
     chatterItems,
     recordingFolderAssignments,
@@ -8,10 +8,7 @@ import {
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { assertCategorizableFolder } from "@/lib/folders/folders";
-import {
-    getCalendarEvent,
-    listUpcomingCalendarEvents,
-} from "@/lib/integrations/google/calendar-events";
+import { listUpcomingCalendarEvents } from "@/lib/integrations/google/calendar-events";
 import {
     GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
     GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE,
@@ -20,6 +17,7 @@ import {
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import { extractMeetCode } from "@/lib/integrations/google/meet-code";
 import { meetingViewer } from "@/lib/meetings/access";
+import { readMeetingCalendarSnapshot } from "@/lib/meetings/calendar-snapshot";
 import { listMeetings } from "@/lib/meetings/service";
 import { requireRecordingAccess } from "@/lib/sharing/access";
 
@@ -50,7 +48,12 @@ export async function meetingCalendarEvents(userId: string, folderId: string) {
             now,
             new Date(now.getTime() + 14 * 86400000),
         ),
-        listMeetings(userId, { includePast: true, includeAbsorbed: true }),
+        listMeetings(userId, {
+            from: now,
+            to: new Date(now.getTime() + 14 * 86400000),
+            includePast: true,
+            includeAbsorbed: true,
+        }),
         db
             .select({
                 series: recordings.calendarSeriesId,
@@ -167,6 +170,15 @@ export async function matchRecorderAgendas(
           })
         : null;
     if (meetCode && !code) return [];
+    const viewer = await meetingViewer(userId);
+    const agendas = code
+        ? await listMeetingRows(userId, viewer.orgUserId, {
+              from: new Date(at.getTime() - 24 * 3600000),
+              to: new Date(at.getTime() + 15 * 60000),
+              includePast: true,
+          })
+        : [];
+    const byId = new Map(agendas.map((row) => [row.agenda.id, row.agenda]));
     const matches = await Promise.all(
         rows.map(async (row) => {
             if (
@@ -177,10 +189,10 @@ export async function matchRecorderAgendas(
                 return null;
             if (code) {
                 if (!row.calendarEventId) return null;
-                const event = await getCalendarEvent(
-                    row.author.id,
-                    row.calendarEventId,
-                ).catch(() => null);
+                const agenda = byId.get(row.id);
+                const event = agenda
+                    ? await readMeetingCalendarSnapshot(agenda)
+                    : null;
                 if (event?.meetingCode !== code) return null;
             }
             return row;

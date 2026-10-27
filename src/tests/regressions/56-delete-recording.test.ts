@@ -20,6 +20,13 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+const { deleteRecordingAgendaInTx } = vi.hoisted(() => ({
+    deleteRecordingAgendaInTx: vi.fn(),
+}));
+vi.mock("@/db/queries/meeting-lifecycle", () => ({
+    deleteRecordingAgendaInTx,
+}));
+
 // A sync that replaces the audio demotes names on the transcripts it keeps
 // (audio provenance); not what these tests are about.
 vi.mock("@/lib/knowledge/transcript-rewrite", async (importOriginal) => ({
@@ -633,6 +640,10 @@ describe("DELETE /api/recordings/[id]", () => {
 
         const res = await deleteRecording(makeRequest(), { params });
         expect(res.status).toBe(200);
+        expect(deleteRecordingAgendaInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            { id: recordingId, userId, at: expect.any(Date) },
+        );
         expect(deleteFile).toHaveBeenCalledWith(storagePath);
         // Storage delete must happen before the DB transaction opens.
         expect(deleteFile.mock.invocationCallOrder[0]).toBeLessThan(

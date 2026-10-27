@@ -1,16 +1,30 @@
-import { and, asc, desc, eq, isNull, or, type SQL, sql } from "drizzle-orm";
+import {
+    and,
+    asc,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    or,
+    type SQL,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
-import { receivedItemCondition } from "@/db/queries/item-shares";
+import {
+    receivedItemCondition,
+    receivedThroughFolderCondition,
+} from "@/db/queries/item-shares";
 import {
     agendaPoints,
     agendaTasks,
     chatterItems,
     meetingAgendas,
     recordingFolderAssignments,
-    recordingFolders,
     users,
 } from "@/db/schema";
 import { sharedItemCondition } from "@/lib/sharing/shared";
+
+export { meetingFolders } from "@/db/queries/meeting-folders";
 
 export type MeetingTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type MeetingExecutor = Pick<
@@ -27,7 +41,16 @@ export function meetingVisibility(
         isNull(chatterItems.deletedAt),
         or(
             eq(chatterItems.userId, userId),
-            receivedItemCondition(userId),
+            or(
+                and(
+                    eq(chatterItems.kind, "meeting"),
+                    receivedThroughFolderCondition(userId),
+                ),
+                and(
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                    receivedItemCondition(userId),
+                ),
+            ),
             orgUserId ? sharedItemCondition(orgUserId) : undefined,
         ),
     ) as SQL;
@@ -65,7 +88,34 @@ export async function findMeeting(
     const [row] = await (lock
         ? query.for("update", { of: meetingAgendas })
         : query);
-    return row ?? null;
+    if (row) return { ...row, recordingVisible: !!row.agenda.recordingItemId };
+    const fallback = executor
+        .select({ agenda: meetingAgendas, item: chatterItems })
+        .from(meetingAgendas)
+        .innerJoin(
+            chatterItems,
+            eq(chatterItems.id, meetingAgendas.meetingItemId),
+        )
+        .where(
+            and(
+                or(
+                    eq(meetingAgendas.id, id),
+                    eq(meetingAgendas.meetingItemId, id),
+                ),
+                isNotNull(meetingAgendas.recordingItemId),
+                eq(chatterItems.kind, "meeting"),
+                or(
+                    eq(chatterItems.userId, userId),
+                    receivedThroughFolderCondition(userId),
+                    orgUserId ? sharedItemCondition(orgUserId) : undefined,
+                ),
+            ),
+        )
+        .limit(1);
+    const [original] = await (lock
+        ? fallback.for("update", { of: meetingAgendas })
+        : fallback);
+    return original ? { ...original, recordingVisible: false } : null;
 }
 
 /** Visible standalone agendas, bounded for polling, calendar annotation and recorder reminders. */
@@ -137,36 +187,6 @@ export async function listMeetingRows(
         )
         .orderBy(asc(meetingAgendas.plannedStart), asc(meetingAgendas.id))
         .limit(input.limit ?? 500);
-}
-
-/** The meeting's actual filing, retained on its tombstone after absorption. */
-export async function meetingFolders(
-    executor: MeetingExecutor,
-    meetingItemId: string,
-    ownerUserId: string,
-) {
-    return executor
-        .select({
-            id: recordingFolders.id,
-            name: recordingFolders.name,
-            userId: recordingFolders.userId,
-            parentId: recordingFolders.parentId,
-        })
-        .from(recordingFolderAssignments)
-        .innerJoin(
-            recordingFolders,
-            eq(recordingFolders.id, recordingFolderAssignments.folderId),
-        )
-        .where(
-            and(
-                eq(recordingFolderAssignments.itemId, meetingItemId),
-                eq(recordingFolderAssignments.userId, ownerUserId),
-            ),
-        )
-        .orderBy(
-            desc(recordingFolderAssignments.createdAt),
-            asc(recordingFolders.id),
-        );
 }
 
 /** Serialize event creation across processes before checking visible duplicates. */

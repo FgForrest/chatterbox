@@ -9,7 +9,6 @@ import {
     asyncJobs,
     chatterItems,
     folderExportConfigurations,
-    meetingAgendas,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -57,7 +56,7 @@ import {
     publishSpeakerNamesInTx,
     publishTaskAssigneesInTx,
 } from "@/lib/sharing/share-names";
-import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import {
     lockItemTaskGraphInTx,
     withdrawItemTaskHomesInTx,
@@ -1255,7 +1254,6 @@ export async function shareItemToOrganizationFolderInTx(
         itemId: string;
         folderId: string;
         orgUserId: string;
-        explicitAgendaId?: string;
     },
 ): Promise<ShareGateProblem[]> {
     await lockOrgTree(tx);
@@ -1301,46 +1299,11 @@ export async function shareItemToOrganizationFolderInTx(
         input.orgUserId,
         tx,
     );
-    let explicitAgenda = false;
-    if (input.explicitAgendaId && kind === "audio") {
-        const [agenda] = await tx
-            .select({ id: meetingAgendas.id })
-            .from(meetingAgendas)
-            .innerJoin(
-                chatterItems,
-                eq(chatterItems.id, meetingAgendas.meetingItemId),
-            )
-            .innerJoin(
-                recordingFolderAssignments,
-                and(
-                    eq(recordingFolderAssignments.itemId, chatterItems.id),
-                    eq(recordingFolderAssignments.userId, chatterItems.userId),
-                ),
-            )
-            .where(
-                and(
-                    eq(meetingAgendas.id, input.explicitAgendaId),
-                    isNull(meetingAgendas.recordingItemId),
-                    isNull(chatterItems.deletedAt),
-                    eq(recordingFolderAssignments.folderId, input.folderId),
-                    sharedItemCondition(input.orgUserId),
-                ),
-            )
-            .limit(1);
-        explicitAgenda = !!agenda;
-        if (!explicitAgenda)
-            throw new AppError(
-                ErrorCode.FORBIDDEN,
-                "Explicit agenda sharing requires a visible Organization agenda",
-                403,
-            );
-    }
-    const problems =
-        wasShared || explicitAgenda
-            ? []
-            : kind === "mail"
-              ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
-              : await loadShareGate(tx, input.itemId, input.ownerUserId);
+    const problems = wasShared
+        ? []
+        : kind === "mail"
+          ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
+          : await loadShareGate(tx, input.itemId, input.ownerUserId);
     if (problems.length > 0) return problems;
 
     if (kind === "mail") {

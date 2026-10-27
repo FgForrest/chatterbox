@@ -30,5 +30,7 @@ export function authorAgendaRecordingIds(userId: string) {
         inner join recording_folders agenda_folder on agenda_folder.id = agenda_filing.folder_id and agenda_folder.user_id = ${userId}
         inner join recording_folder_assignments recording_filing on recording_filing.recording_id = ${meetingAgendas.recordingItemId}
             and recording_filing.folder_id = agenda_folder.id
+        inner join chatter_items recording_item on recording_item.id = ${meetingAgendas.recordingItemId}
+            and recording_item.user_id <> ${userId}
         where ${meetingAgendas.userId} = ${userId} and ${meetingAgendas.recordingItemId} is not null`;
 }

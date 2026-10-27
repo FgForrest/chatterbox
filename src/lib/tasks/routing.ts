@@ -20,7 +20,7 @@ import {
     taskUpdateProposals,
     users,
 } from "@/db/schema";
-import { contentKindColumn } from "@/lib/content/item-kinds";
+import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -854,6 +854,7 @@ export async function listRoutedTaskProposals(
                 isNull(chatterItems.deletedAt),
                 taskVisible(viewer, ANY_TASK_ITEM, true),
                 isNull(routedSourceItem.deletedAt),
+                inArray(routedSourceItem.kind, ["audio", "mail"]),
                 or(
                     eq(routedSourceItem.userId, viewer.userId),
                     recordingSharedCondition(routedSourceItem.id),
@@ -864,69 +865,71 @@ export async function listRoutedTaskProposals(
             asc(taskUpdateProposals.updatedAt),
             asc(taskUpdateProposals.id),
         );
-    return rows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        sourceItemId: row.sourceItemId,
-        taskId: row.taskId,
-        currentDueDate: row.currentDueDate,
-        dueDate: row.dueDate,
-        evidenceStartMs: row.evidenceStartMs,
-        version: row.version,
-        proposedAssigneeCheck: row.proposedAssigneeCheck,
-        taskText: decryptText(row.taskText),
-        currentDuePhrase: row.currentDuePhrase
-            ? decryptText(row.currentDuePhrase)
-            : null,
-        duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
-        currentAssigneeName: row.currentAssigneeName
-            ? decryptText(row.currentAssigneeName)
-            : null,
-        proposedAssignee:
-            row.proposedAssigneePersonId && row.proposedAssigneeName
-                ? {
-                      personId: row.proposedAssigneePersonId,
-                      name: decryptText(row.proposedAssigneeName),
-                  }
+    return rows
+        .filter((row) => hasContentKind(row, "sourceItemKind"))
+        .map((row) => ({
+            id: row.id,
+            kind: row.kind,
+            sourceItemId: row.sourceItemId,
+            taskId: row.taskId,
+            currentDueDate: row.currentDueDate,
+            dueDate: row.dueDate,
+            evidenceStartMs: row.evidenceStartMs,
+            version: row.version,
+            proposedAssigneeCheck: row.proposedAssigneeCheck,
+            taskText: decryptText(row.taskText),
+            currentDuePhrase: row.currentDuePhrase
+                ? decryptText(row.currentDuePhrase)
                 : null,
-        proposedAssigneeHint: row.proposedAssigneeHint
-            ? decryptText(row.proposedAssigneeHint)
-            : null,
-        quote: row.quote ? decryptText(row.quote) : null,
-        evidenceText:
-            row.evidenceSegmentIndex !== null &&
-            row.evidenceCharStart !== null &&
-            row.evidenceCharEnd !== null
-                ? {
-                      segmentIndex: row.evidenceSegmentIndex,
-                      charStart: row.evidenceCharStart,
-                      charEnd: row.evidenceCharEnd,
-                  }
+            duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            currentAssigneeName: row.currentAssigneeName
+                ? decryptText(row.currentAssigneeName)
                 : null,
-        sourceItem:
-            row.kind === "attach_merge" && !row.hasEvidence
-                ? null
-                : {
-                      id: row.sourceItemId,
-                      kind: row.sourceItemKind,
-                      title: decryptText(row.sourceItemTitle),
-                      audioAvailable: hasAudio({
+            proposedAssignee:
+                row.proposedAssigneePersonId && row.proposedAssigneeName
+                    ? {
+                          personId: row.proposedAssigneePersonId,
+                          name: decryptText(row.proposedAssigneeName),
+                      }
+                    : null,
+            proposedAssigneeHint: row.proposedAssigneeHint
+                ? decryptText(row.proposedAssigneeHint)
+                : null,
+            quote: row.quote ? decryptText(row.quote) : null,
+            evidenceText:
+                row.evidenceSegmentIndex !== null &&
+                row.evidenceCharStart !== null &&
+                row.evidenceCharEnd !== null
+                    ? {
+                          segmentIndex: row.evidenceSegmentIndex,
+                          charStart: row.evidenceCharStart,
+                          charEnd: row.evidenceCharEnd,
+                      }
+                    : null,
+            sourceItem:
+                row.kind === "attach_merge" && !row.hasEvidence
+                    ? null
+                    : {
+                          id: row.sourceItemId,
                           kind: row.sourceItemKind,
-                          audioId: row.sourceAudioId,
-                          audioReapedAt: row.sourceAudioReapedAt,
-                          audioDeletedAt: row.sourceAudioDeletedAt,
-                      }),
-                  },
-        proposedBy: row.proposedById
-            ? {
-                  id: row.proposedById,
-                  name:
-                      row.proposedByName ??
-                      row.proposedByEmail ??
-                      row.proposedById,
-              }
-            : null,
-    }));
+                          title: decryptText(row.sourceItemTitle),
+                          audioAvailable: hasAudio({
+                              kind: row.sourceItemKind,
+                              audioId: row.sourceAudioId,
+                              audioReapedAt: row.sourceAudioReapedAt,
+                              audioDeletedAt: row.sourceAudioDeletedAt,
+                          }),
+                      },
+            proposedBy: row.proposedById
+                ? {
+                      id: row.proposedById,
+                      name:
+                          row.proposedByName ??
+                          row.proposedByEmail ??
+                          row.proposedById,
+                  }
+                : null,
+        }));
 }
 
 /** Counts every pending routed proposal visible to the viewer. */
@@ -955,6 +958,7 @@ export async function countRoutedTaskProposals(
                 isNull(chatterItems.deletedAt),
                 taskVisible(viewer, ANY_TASK_ITEM, true),
                 isNull(routedSourceItem.deletedAt),
+                inArray(routedSourceItem.kind, ["audio", "mail"]),
                 or(
                     eq(routedSourceItem.userId, viewer.userId),
                     recordingSharedCondition(routedSourceItem.id),

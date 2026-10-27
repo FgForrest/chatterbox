@@ -23,6 +23,14 @@ import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+const JOB_STEPS: Record<string, ProfileStepName> = {
+    [SUMMARY_JOB_KIND]: "summary",
+    [TOPICS_JOB_KIND]: "topics",
+    [TITLE_JOB_KIND]: "title",
+    [TRANSCRIPTION_JOB_KIND]: "transcribe",
+    [LEARN_JOB_KIND]: "learn",
+};
+
 /** Bind future steps to the current placement while the caller holds the item lock. */
 export async function bindPlacementProfileInTx(
     tx: Tx,
@@ -169,13 +177,6 @@ export async function bindPlacementProfileInTx(
             })
         )?.currentRevisionId;
     const heldProfiles = { ...categorized.heldProfiles };
-    const jobSteps: Record<string, ProfileStepName> = {
-        [SUMMARY_JOB_KIND]: "summary",
-        [TOPICS_JOB_KIND]: "topics",
-        [TITLE_JOB_KIND]: "title",
-        [TRANSCRIPTION_JOB_KIND]: "transcribe",
-        [LEARN_JOB_KIND]: "learn",
-    };
     const jobs = await tx
         .select({ id: asyncJobs.id, kind: asyncJobs.kind })
         .from(asyncJobs)
@@ -187,16 +188,16 @@ export async function bindPlacementProfileInTx(
                     recordingJobSubject(input.itemId, "private"),
                 ),
                 inArray(asyncJobs.status, ["pending", "processing"]),
-                inArray(asyncJobs.kind, Object.keys(jobSteps)),
+                inArray(asyncJobs.kind, Object.keys(JOB_STEPS)),
             ),
         );
     const activeJobIds = new Set(jobs.map((job) => job.id));
-    for (const step of Object.values(jobSteps)) {
+    for (const step of Object.values(JOB_STEPS)) {
         const held = heldProfiles[step];
         if (held && !activeJobIds.has(held.jobId)) delete heldProfiles[step];
     }
     for (const job of jobs) {
-        const step = jobSteps[job.kind];
+        const step = JOB_STEPS[job.kind];
         if (step && oldRevision && heldProfiles[step]?.jobId !== job.id) {
             heldProfiles[step] = {
                 jobId: job.id,

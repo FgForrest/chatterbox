@@ -12,7 +12,7 @@ import {
     taskMentions,
     taskVectors,
 } from "@/db/schema";
-import { contentKindColumn } from "@/lib/content/item-kinds";
+import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { readItemContent } from "@/lib/content/read-item-content";
 import type { ItemContent } from "@/lib/content/types";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -222,6 +222,7 @@ async function scopedCandidates(
                     ? [ne(recordingTasks.itemId, recording.id)]
                     : []),
                 isNull(candidateHomeItem.deletedAt),
+                inArray(candidateHomeItem.kind, ["audio", "mail"]),
                 taskVisible(reviewer, {
                     id: candidateHomeItem.id,
                     userId: candidateHomeItem.userId,
@@ -249,7 +250,9 @@ async function scopedCandidates(
             asc(taskMentions.id),
         );
     const candidates = new Map<string, CandidateTask>();
-    for (const row of rows) {
+    for (const row of rows.filter((row) =>
+        hasContentKind(row, "homeItemKind"),
+    )) {
         if (candidates.has(row.id)) continue;
         candidates.set(row.id, {
             ...row,
@@ -356,6 +359,10 @@ async function unfiledCandidates(
                 ]),
                 ne(recordingTasks.itemId, recording.id),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
                 taskClosable(reviewer, ANY_TASK_ITEM),
             ),
         )
@@ -364,20 +371,24 @@ async function unfiledCandidates(
         reviewer,
         rows.map((row) => row.id),
     );
-    return rows.map((row) => ({
-        id: row.id,
-        userId: row.userId,
-        text: decryptText(row.text),
-        assigneePersonId: row.assigneePersonId,
-        assigneeName: row.assigneeName ? decryptText(row.assigneeName) : null,
-        dueDate: row.dueDate,
-        duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
-        homeItemId: row.homeItemId,
-        homeItemKind: row.homeItemKind,
-        homeItemTitle: decryptText(row.homeItemTitle),
-        shared: row.shared,
-        statementAt: statements.get(row.id) ?? row.createdAt,
-    }));
+    return rows
+        .filter((row) => hasContentKind(row, "homeItemKind"))
+        .map((row) => ({
+            id: row.id,
+            userId: row.userId,
+            text: decryptText(row.text),
+            assigneePersonId: row.assigneePersonId,
+            assigneeName: row.assigneeName
+                ? decryptText(row.assigneeName)
+                : null,
+            dueDate: row.dueDate,
+            duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            homeItemId: row.homeItemId,
+            homeItemKind: row.homeItemKind,
+            homeItemTitle: decryptText(row.homeItemTitle),
+            shared: row.shared,
+            statementAt: statements.get(row.id) ?? row.createdAt,
+        }));
 }
 
 async function currentTaskVectors(
@@ -779,7 +790,13 @@ export async function searchMergeCandidates(
             canReview: sql<boolean>`${taskEditable(reviewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
-        .where(and(eq(chatterItems.id, itemId), isNull(chatterItems.deletedAt)))
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                isNull(chatterItems.deletedAt),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+            ),
+        )
         .limit(1);
     if (!item?.canReview) {
         throw new AppError(
@@ -1364,6 +1381,10 @@ export async function searchAssignedMergeCandidates(
                 taskMergeable(viewer, ANY_TASK_ITEM),
                 assignedToViewer(viewer),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
             ),
         )
         .limit(1);
@@ -1397,6 +1418,10 @@ export async function searchAssignedMergeCandidates(
                         : undefined,
                 ),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
             ),
         )
         .orderBy(desc(recordingTasks.createdAt), asc(recordingTasks.id))

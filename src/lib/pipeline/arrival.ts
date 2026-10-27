@@ -6,8 +6,10 @@ import {
     itemProcessing,
     processingProfiles,
     recordingFolderAssignments,
+    recordings,
 } from "@/db/schema";
 import type { assertCategorizableFolder } from "@/lib/folders/folders";
+import { attachArrivingRecordingInTx } from "@/lib/meetings/attachment";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -76,6 +78,25 @@ export async function requestArrivalInTx(
                 })
                 .onConflictDoNothing();
         }
+    }
+    if (view === "private") {
+        const [recording] = await tx
+            .select({ plaudFileId: recordings.plaudFileId })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, input.itemId),
+                    eq(recordings.userId, input.userId),
+                ),
+            )
+            .limit(1);
+        if (recording)
+            await attachArrivingRecordingInTx(
+                tx,
+                input.userId,
+                input.itemId,
+                recording.plaudFileId,
+            );
     }
     if (input.profile && view === "private") {
         await lockPipelineTargetsInTx(

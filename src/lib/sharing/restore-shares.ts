@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import { chatterItems, itemShares, users } from "@/db/schema";
@@ -57,6 +57,7 @@ export async function restoreArchivedItemShares(
                         eq(chatterItems.id, itemId),
                         eq(chatterItems.userId, userId),
                         isNull(chatterItems.deletedAt),
+                        inArray(chatterItems.kind, ["audio", "mail"]),
                     ),
                 )
                 .for("update");
