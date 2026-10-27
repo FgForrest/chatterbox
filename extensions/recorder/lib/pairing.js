@@ -2,6 +2,7 @@
 // host-permission grants, pairing-relay registration, storing the pair, and
 // fetching the server's recorder defaults.
 
+import { clearAgendas, refreshAgendas } from "./agendas.js";
 import { confirmPairing, getRecorderConfig } from "./api.js";
 import { listLocalSessions, readLocalMeta } from "./chunk-store.js";
 import { SETUP_FLOW_KEY, STORAGE_KEYS } from "./constants.js";
@@ -181,6 +182,8 @@ export async function storePairing({
             }
         }
     }
+    await clearAgendas();
+    await chrome.storage.local.remove(STORAGE_KEYS.serverDefaults);
     await storeToken(String(apiKey));
     await chrome.storage.local.set({ [STORAGE_KEYS.serverUrl]: cleanUrl });
     await unregisterPairingScripts();
@@ -216,6 +219,7 @@ export async function refreshServerConfig() {
     const defaults = config?.defaults ?? {};
     await chrome.storage.local.set({
         [STORAGE_KEYS.serverDefaults]: {
+            agendas: config.features?.agendas === true,
             encryptedRecordingProtocol: config.encrypted_recording_protocol,
             recordingFolderOverride: config.recording_folder_override === true,
             autoRecordPlatforms: Array.isArray(defaults.auto_record_platforms)
@@ -236,6 +240,7 @@ export async function refreshServerConfig() {
             fetchedAt: new Date().toISOString(),
         },
     });
+    await refreshAgendas().catch(() => {});
     return true;
 }
 
@@ -246,6 +251,7 @@ export async function clearPairing() {
             "Finish or discard pending encrypted recordings before disconnecting",
         );
     }
+    await clearAgendas();
     await clearToken();
     await chrome.storage.session.remove([SETUP_FLOW_KEY, "pendingPairing"]);
     await unregisterPairingScripts(true);

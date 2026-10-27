@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Agenda</title>
+        <link rel="stylesheet" href="../popup/popup.css" />
+        <link rel="stylesheet" href="agenda.css" />
+    </head>
+    <body>
+        <header>
+            <h1><img src="../icons/icon-48.png" alt="" width="24" height="24" /><span data-i18n="appName"></span></h1>
+            <button id="open-app" class="link" type="button" data-i18n="agendaOpenApp" hidden></button>
+        </header>
+        <p id="recording-state" class="hint" role="status"></p>
+        <p id="status" class="error" role="status"></p>
+        <button id="retry" type="button" data-i18n="agendaReload" hidden></button>
+        <main id="agenda" hidden>
+            <h2 id="title"></h2>
+            <p id="time" class="hint"></p>
+            <div class="row" id="modes">
+                <button id="prep" type="button" data-i18n="agendaPrep" aria-pressed="true"></button>
+                <button id="live" type="button" data-i18n="agendaLive" aria-pressed="false"></button>
+            </div>
+            <section aria-labelledby="points-heading">
+                <h3 id="points-heading" data-i18n="agendaPoints"></h3>
+                <p id="point-count" class="hint"></p>
+                <div id="points"></div>
+                <form id="quick-add">
+                    <label for="point-text" data-i18n="agendaAdd"></label>
+                    <div class="row"><input id="point-text" type="text" maxlength="2000" required data-i18n-placeholder="agendaAdd" /><button type="submit" data-i18n="agendaAddButton"></button></div>
+                </form>
+            </section>
+            <section aria-labelledby="tasks-heading">
+                <h3 id="tasks-heading" data-i18n="agendaTasks"></h3>
+                <div id="tasks"></div>
+            </section>
+        </main>
+        <section id="choices" hidden aria-labelledby="choice-heading">
+            <h2 id="choice-heading" data-i18n="agendaChoose"></h2>
+            <div id="choice-list"></div>
+            <button id="none" type="button" data-i18n="agendaNone"></button>
+            <p class="hint" data-i18n="agendaNoneHint"></p>
+        </section>
+        <footer id="attachment" hidden>
+            <span id="attachment-text" class="hint"></span>
+            <button id="other" class="link" type="button" data-i18n="agendaOther"></button>
+        </footer>
+        <script type="module" src="agenda.js"></script>
+    </body>
+</html>

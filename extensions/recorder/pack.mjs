@@ -49,6 +49,7 @@ for (const entry of [
     "picker",
     "request",
     "options",
+    "agenda",
     "icons",
 ]) {
     const full = join(here, entry);

@@ -12,6 +12,24 @@
 // module scope: MV3 suspends this worker between events.
 
 import {
+    AGENDA_ALARM_PREFIX,
+    AGENDA_PANEL_KEY,
+    AGENDA_SELECTION_KEY,
+    agendaCompletion,
+    agendaFolder,
+    agendaRequest,
+    canChooseRecordingAgenda,
+    clearAgendaReminders,
+    clearAgendas,
+    currentAgendas,
+    matchAgendas,
+    openAgendaPanel,
+    refreshAgendas,
+    remindAgenda,
+    supportsAgendas,
+} from "./lib/agendas.js";
+
+import {
     abortSession,
     completeSession,
     createSession,
@@ -125,6 +143,10 @@ const IDLE_STATE = Object.freeze({
     sessionId: null,
     startedAt: null,
     platformHint: null,
+    agendaId: null,
+    agendaTitle: null,
+    agendaExplicit: false,
+    agendaUnavailable: false,
     folderId: null,
     folderLabel: null,
     recordingFolderOverride: false,
@@ -168,7 +190,7 @@ async function writeState(patch) {
     await updateRecordingBadge(next);
     const bannerFields = [
         "state", "tabId", "startedAt", "stopped", "folderId", "folderLabel",
-        "recordingFolderOverride", "error",
+        "recordingFolderOverride", "error", "agendaId",
     ];
     if (Object.keys(patch).some((key) => bannerFields.includes(key))) {
         if (current.tabId != null && current.tabId !== next.tabId) await syncMeetingBanner(current.tabId);
@@ -382,6 +404,8 @@ async function startRecordingLocked({
     withoutMicrophone = false,
     forceDesktop = false,
     fromPopup = false,
+    agendaId,
+    bannerAgendaId,
 }, microphoneChecked) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
@@ -399,6 +423,7 @@ async function startRecordingLocked({
             ...entry, bannerError: null, errorDismissed: false,
         } : entry);
     }
+    await prepareRecordingAgenda(tabId, fromPopup ? agendaId : bannerAgendaId);
     const apiKey = await readToken();
     if (!microphoneChecked && (await microphonePermission()) !== "granted") {
         return openStartRequest({
@@ -452,6 +477,10 @@ async function startCapturedRecording({
     apiKey,
 }) {
     const settings = await getSettings();
+    const selection = (await chrome.storage.session.get(AGENDA_SELECTION_KEY))[AGENDA_SELECTION_KEY];
+    const selectedAgenda = supportsAgendas(settings) && selection?.serverUrl === settings.serverUrl && selection.connectionId === settings.connectionId ? selection.agenda : null;
+    const agendaExplicit = supportsAgendas(settings) && selection?.serverUrl === settings.serverUrl && selection.connectionId === settings.connectionId && selection.explicit === true;
+    const selectedFolder = selectedAgenda ? agendaFolder(selectedAgenda) : {};
     if (settings.serverDefaults?.encryptedRecordingProtocol !== 1) {
         await setState({ state: STATE.error, error: t("encryptedServerRequired") });
         throw new Error(t("encryptedServerRequired"));
@@ -473,23 +502,23 @@ async function startCapturedRecording({
         clientVersion: chrome.runtime.getManifest().version,
         timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
         noticeAcknowledgedAt: noticeAcknowledgedAt ?? startedAt,
-        folderId: settings.folderId ?? undefined,
+        folderId: selectedFolder.folderId ?? settings.folderId ?? undefined,
     };
     let session;
-    let folderId = settings.folderId ?? null;
-    let folderLabel = settings.folderLabel ?? null;
+    let folderId = selectedFolder.folderId ?? settings.folderId ?? null;
+    let folderLabel = selectedFolder.folderLabel ?? settings.folderLabel ?? null;
     try {
         try {
             session = await createSession(auth, sessionBody);
         } catch (error) {
             if (
-                settings.folderId &&
+                folderId &&
                 error?.status === 400 &&
                 error?.field === "folderId"
             ) {
                 folderId = null;
                 folderLabel = null;
-                await saveSettings({ folderId, folderLabel });
+                if (!selectedFolder.folderId) await saveSettings({ folderId, folderLabel });
                 const fallbackBody = { ...sessionBody };
                 delete fallbackBody.folderId;
                 session = await createSession(auth, fallbackBody);
@@ -530,6 +559,10 @@ async function startCapturedRecording({
         }
 
         const folder = {
+            agendaId: selectedAgenda?.id ?? null,
+            agendaTitle: selectedAgenda?.title ?? null,
+            agendaExplicit,
+            agendaUnavailable: false,
             folderId,
             folderLabel,
             startFolderId: folderId,
@@ -618,6 +651,7 @@ async function startCapturedRecording({
             throw new Error(response?.error || t("couldNotCapture"));
         }
 
+        await chrome.storage.session.remove(AGENDA_SELECTION_KEY);
         return { sessionId: session.id };
     } catch (error) {
         if (captureMode === "tab") await closeOffscreen().catch(() => {});
@@ -689,10 +723,10 @@ function updateLocalMeta(bufferId, patch) {
     return update;
 }
 
-async function applyRecordingFolder(state, folder) {
+async function applyRecordingFolder(state, folder, remember = true) {
     await updateLocalMeta(state.bufferId ?? state.sessionId, folder);
     await setState(folder);
-    await saveSettings(folder);
+    if (remember) await saveSettings(folder);
 }
 
 function updateRecordingFolder(message, sender) {
@@ -720,7 +754,7 @@ function updateRecordingFolder(message, sender) {
             folderLabel: message.folderId && typeof message.folderLabel === "string"
                 ? message.folderLabel : null,
         };
-        await applyRecordingFolder(state, folder);
+        await applyRecordingFolder(state, folder, message.remember !== false);
         return { ok: true };
     });
     folderUpdates = update.catch(() => {});
@@ -856,6 +890,7 @@ async function finalize(truncatedAtChunk = null) {
             ...(truncatedAtChunk ? { truncatedAtChunk } : {}),
             endedAt: new Date().toISOString(),
             stopReason: state.stopReason,
+            ...agendaCompletion(settings, state),
             ...(settings.serverDefaults?.recordingFolderOverride === true &&
                 state.recordingFolderOverride === true
                 ? { folderId: state.folderId ?? null }
@@ -872,12 +907,14 @@ async function finalize(truncatedAtChunk = null) {
                 await applyRecordingFolder(state, {
                     folderId: state.startFolderId ?? null,
                     folderLabel: state.startFolderLabel ?? null,
-                });
+                }, !state.agendaExplicit || !state.agendaId);
             } else {
                 throw error;
             }
         }
-        await setState({ jobId: result.job_id ?? null });
+        const agendaUnavailable = result.agenda?.attached === false && result.agenda.reason === "unavailable";
+        if (agendaUnavailable) await updateLocalMeta(state.bufferId ?? state.sessionId, { agendaUnavailable });
+        await setState({ jobId: result.job_id ?? null, agendaUnavailable });
 
         await reconcileServerSession(state.sessionId, auth);
     } catch (error) {
@@ -948,11 +985,10 @@ async function reconcileServerSessionOnce(sessionId, auth) {
             recordingUrl,
             partial: Boolean(remote.truncated_at_chunk),
         });
+        const completionBody = remote.truncated_at_chunk ? t("partialRecordingSent") : t("recordingSentBody");
         await notify(
             t("recordingSent"),
-            remote.truncated_at_chunk
-                ? t("partialRecordingSent")
-                : t("recordingSentBody"),
+            completionBody + (state.agendaUnavailable ? `\n${t("agendaUnavailable")}` : ""),
             { id: `${COMPLETION_PREFIX}${encodeURIComponent(recordingUrl)}` },
         );
         await new Promise((resolve) => setTimeout(resolve, COMPLETION_DISPLAY_MS));
@@ -996,6 +1032,104 @@ async function navigateToRecording(serverUrl, recordingUrl, preferredTabId) {
     await chrome.tabs.create({ url: recordingUrl, active: true });
 }
 
+async function bannerAgendas(tab) {
+    const key = `agenda-match:${tab.id}`;
+    const target = JSON.stringify(meetingTarget(tab.url));
+    const cached = (await chrome.storage.session.get(key))[key];
+    const settings = await getSettings();
+    if (cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000) return cached.agendas;
+    const controller = new AbortController();
+    let timer;
+    try {
+        const agendas = await Promise.race([
+            matchAgendas(tab.url, Date.now(), { signal: controller.signal }),
+            new Promise((resolve) => { timer = setTimeout(() => { controller.abort(); resolve([]); }, 1000); }),
+        ]);
+        await chrome.storage.session.set({ [key]: { target, serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas } });
+        return agendas;
+    } catch { return []; }
+    finally { clearTimeout(timer); }
+}
+
+async function prepareRecordingAgenda(tabId, shownAgendaId) {
+    const settings = await getSettings();
+    if (!supportsAgendas(settings)) return;
+    const tab = tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null;
+    const target = JSON.stringify(meetingTarget(tab?.url));
+    const selected = (await chrome.storage.session.get(AGENDA_SELECTION_KEY))[AGENDA_SELECTION_KEY];
+    if (selected?.explicit === true && selected.serverUrl === settings.serverUrl && selected.connectionId === settings.connectionId &&
+        (selected.target === target || (selected.explicit && selected.target === "null")) &&
+        Date.now() - selected.at < 15 * 60000) return;
+    const entry = tab ? (await getArmed())[tab.id] : null;
+    const shown = shownAgendaId !== undefined ? shownAgendaId :
+        settings.agendaBanner && entry?.promptVisible ? entry.shownAgendaId : undefined;
+    const cached = tab ? (await chrome.storage.session.get(`agenda-match:${tab.id}`))[`agenda-match:${tab.id}`] : null;
+    const matches = cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId
+        ? currentAgendas(cached.agendas) : [];
+    const agenda = shown ? matches.find((row) => row.id === shown) : null;
+    if (!agenda && shown !== null) {
+        await chrome.storage.session.remove(AGENDA_SELECTION_KEY);
+        return;
+    }
+    await chrome.storage.session.set({ [AGENDA_SELECTION_KEY]: {
+        serverUrl: settings.serverUrl, connectionId: settings.connectionId, target, at: Date.now(), agenda: agenda ?? null, explicit: true,
+    } });
+}
+
+function handleAgendaMessage(message, sender) {
+    if (message.type !== "select-agenda") return handleAgendaMessageNow(message, sender);
+    const update = folderUpdates.catch(() => {}).then(() => handleAgendaMessageNow(message, sender));
+    folderUpdates = update.catch(() => {});
+    return update;
+}
+
+async function handleAgendaMessageNow(message, sender) {
+    if (sender.id !== chrome.runtime.id ||
+        ![POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path))) throw new Error(t("unrecognizedSender"));
+    const settings = await getSettings();
+    if (!supportsAgendas(settings)) return { ok: true, agendas: [] };
+    const tab = message.tabId != null ? await chrome.tabs.get(message.tabId).catch(() => null) : null;
+    if (message.type === "match-agendas") {
+        const agendas = tab ? await bannerAgendas(tab) : await matchAgendas();
+        const selected = (await chrome.storage.session.get(AGENDA_SELECTION_KEY))[AGENDA_SELECTION_KEY];
+        const target = JSON.stringify(meetingTarget(tab?.url));
+        const hasSelection = selected?.serverUrl === settings.serverUrl && selected.connectionId === settings.connectionId && selected.explicit &&
+            (selected.target === target || selected.target === "null") && Date.now() - selected.at < 15 * 60000;
+        return { ok: true, agendas, ...(hasSelection ? { selectedAgenda: selected.agenda } : {}) };
+    }
+    let agenda = null;
+    if (message.agendaId != null) {
+        agenda = await agendaRequest(`/${encodeURIComponent(message.agendaId)}`);
+        if (!agenda.permissions?.edit) throw new Error(t("agendaFailed"));
+        agenda = { ...agenda, start: agenda.plannedStart, end: agenda.plannedEnd };
+    }
+    const state = await getState();
+    if (message.sessionId) {
+        if (state.sessionId !== message.sessionId || !canChooseRecordingAgenda(state)) throw new Error(t("agendaFailed"));
+        const patch = { agendaId: agenda?.id ?? null, agendaTitle: agenda?.title ?? null, agendaExplicit: true,
+            folderId: settings.folderId, folderLabel: settings.folderLabel,
+            ...agendaFolder(agenda) };
+        await updateLocalMeta(state.bufferId ?? state.sessionId, patch);
+        await setState(patch);
+    } else {
+        const target = JSON.stringify(meetingTarget(tab?.url));
+        await chrome.storage.session.set({ [AGENDA_SELECTION_KEY]: { serverUrl: settings.serverUrl, connectionId: settings.connectionId, target, at: Date.now(), agenda, explicit: true } });
+    }
+    return { ok: true, agenda };
+}
+
+async function resolvePanelAgenda(message, sender, meeting) {
+    if (meeting && !(await validMeetingBannerSender(sender))) throw new Error(t("unrecognizedSender"));
+    const settings = await getSettings();
+    if (!supportsAgendas(settings) || (meeting && !settings.agendaBanner)) throw new Error(t("agendaUnsupported"));
+    const state = await getState();
+    const tabId = meeting ? sender.tab.id : message.tabId;
+    const tab = tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null;
+    const matches = await matchAgendas(tab?.url);
+    const id = message.choose ? null : state.agendaId || message.agendaId || (matches.length === 1 ? matches[0].id : null);
+    await chrome.storage.session.set({ [AGENDA_PANEL_KEY]: { agendaIds: id ? [id] : matches.map((row) => row.id), choose: !id, tabId } });
+}
+
 // ---- Notifications -----------------------------------------------------
 
 async function notify(title, message, options = {}) {
@@ -1017,6 +1151,11 @@ async function notify(title, message, options = {}) {
 }
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
+    if (notificationId.startsWith(AGENDA_ALARM_PREFIX)) {
+        void openAgendaPanel({}, [notificationId.slice(AGENDA_ALARM_PREFIX.length)]).catch(() => {});
+        void chrome.notifications.clear(notificationId);
+        return;
+    }
     if (notificationId.startsWith(COMPLETION_PREFIX)) {
         const url = decodeURIComponent(
             notificationId.slice(COMPLETION_PREFIX.length),
@@ -1038,6 +1177,11 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 });
 
 chrome.notifications.onButtonClicked.addListener((id, button) => {
+    if (id.startsWith(AGENDA_ALARM_PREFIX)) {
+        if (button === 0) void openAgendaPanel({}, [id.slice(AGENDA_ALARM_PREFIX.length)]).catch(() => {});
+        void chrome.notifications.clear(id);
+        return;
+    }
     void handleMeetingNotification(id, button).catch((error) =>
         notify(t("couldNotStart"), error.message),
     );
@@ -1144,6 +1288,8 @@ async function syncMeetingBannerNow(tabId) {
         await isPaired() && await hasMeetingPromptAccess();
     const state = await getState();
     const entry = (await getArmed())[tabId];
+    const agendas = enabled && supportsAgendas(settings) && settings.agendaBanner
+        ? await bannerAgendas(tab) : [];
     const ownRecording = state.tabId === tabId &&
         (!state.meetingTarget || sameMeetingTarget(state.meetingTarget, tab?.url));
     if (enabled && ownRecording && state.state !== STATE.idle) {
@@ -1164,6 +1310,8 @@ async function syncMeetingBannerNow(tabId) {
             folderLabel: state.folderLabel,
             recordingFolderOverride: state.recordingFolderOverride === true && settings.serverDefaults?.recordingFolderOverride === true,
             error: state.error,
+            agendas: supportsAgendas(settings) && settings.agendaBanner
+                ? (state.agendaId ? [{ id: state.agendaId, title: state.agendaTitle }] : agendas) : [],
         } });
         await safe(chrome.action.setPopup({ tabId, popup: entry?.mode === "auto" ? "" : POPUP_URL }));
         return;
@@ -1182,6 +1330,7 @@ async function syncMeetingBannerNow(tabId) {
         ]);
         const response = await sendMeetingBanner(tabId, {
             view: "prompt",
+            agendas,
             notice: effectiveNoticeText(settings),
             shortcut: commands.find((command) => command.name === "toggle-recording")?.shortcut || "",
             pinned: actionSettings.isOnToolbar !== false,
@@ -1190,6 +1339,7 @@ async function syncMeetingBannerNow(tabId) {
         const next = await updateArmedTab(tabId, (current) => current ? {
             ...current,
             promptVisible: current.bannerPrompt === true && response?.visible === true,
+            shownAgendaId: response?.visible === true && agendas.length === 1 ? agendas[0].id : null,
             notificationFallback: response?.visible === true ? false : current.notificationFallback,
         } : null);
         await applyArmedUi(tabId, platformById(entry.platformId), entry.mode, next?.promptVisible);
@@ -1254,6 +1404,7 @@ async function handleMeetingBannerMessage(message, sender) {
     if (message.type === "meeting-banner-dialog") {
         try {
             await startRecording({ tabId, platformHint: entry.platformId, auto: entry.mode === "auto",
+                bannerAgendaId: entry.shownAgendaId ?? undefined,
                 forceDesktop: true, noticeAcknowledgedAt: new Date().toISOString() });
         } catch (error) {
             await showMeetingBannerError(tabId, sender.url, error);
@@ -1495,6 +1646,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     ) {
         void reevaluateAllTabs();
     }
+    if (changes.agendaReminders) void (changes.agendaReminders.newValue === false
+        ? clearAgendaReminders() : refreshAgendas()).catch(() => {});
+    if (changes.agendaBanner) void reevaluateAllTabs();
+    if (changes.encryptedApiKey || changes.serverUrl || changes.serverDefaults || changes.dataUseAcknowledgedAt) {
+        void getSettings().then(async (settings) => {
+            if (!supportsAgendas(settings)) await clearAgendas();
+        }).catch(() => {});
+    }
     if (changes.dataUseAcknowledgedAt?.newValue) {
         void reconcileOnStartup();
     }
@@ -1579,6 +1738,21 @@ chrome.commands.onCommand.addListener(async (command) => {
 // ---- Alarms: auto-stop and config refresh --------------------------------
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name.startsWith(AGENDA_ALARM_PREFIX)) {
+        const id = alarm.name.slice(AGENDA_ALARM_PREFIX.length);
+        const settings = await getSettings();
+        if (supportsAgendas(settings) && settings.agendaBanner && await hasMeetingPromptAccess()) {
+            const armed = await getArmed();
+            for (const [tabId, entry] of Object.entries(armed)) {
+                if (!entry.promptVisible) continue;
+                const tab = await chrome.tabs.get(Number(tabId)).catch(() => null);
+                if (tab && sameMeetingTarget(entry.meetingTarget, tab.url) &&
+                    (await bannerAgendas(tab)).some((agenda) => agenda.id === id)) return;
+            }
+        }
+        await remindAgenda(id).catch(() => {});
+        return;
+    }
     if (alarm.name === ALARMS.uploadRetry) {
         const state = await getState();
         if (state.sessionId && state.state === STATE.finalizing && state.jobId) {
@@ -1756,6 +1930,17 @@ async function resumeRecording(message, sender) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.target === "offscreen") return false;
+    if (message.type === "open-agenda") {
+        const extensionPage = sender.id === chrome.runtime.id &&
+            [POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path));
+        const meeting = sender.id === chrome.runtime.id && sender.frameId === 0 &&
+            Number.isInteger(sender.tab?.id) && isPromptMeeting(sender.url);
+        if (!extensionPage && !meeting) { sendResponse({ ok: false, error: t("unrecognizedSender") }); return false; }
+        const opened = openAgendaPanel({ tabId: sender.tab?.id, windowId: message.windowId }, []);
+        Promise.all([opened, resolvePanelAgenda(message, sender, meeting)]).then(() => sendResponse({ ok: true }))
+            .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+        return true;
+    }
 
     const meetingControl = sender.tab &&
         !sender.url?.startsWith(chrome.runtime.getURL("")) &&
@@ -1773,6 +1958,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     switch (message.type) {
+        case "match-agendas":
+        case "select-agenda":
+            handleAgendaMessage(message, sender).then(sendResponse)
+                .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+            return true;
         case "resume-recording":
             resumeRecording(message, sender)
                 .then(sendResponse)
@@ -2126,6 +2316,10 @@ async function discardBuffer(bufferId) {
 
 function recordingFolderState(meta) {
     return {
+        agendaId: meta?.agendaId ?? null,
+        agendaTitle: meta?.agendaTitle ?? null,
+        agendaExplicit: meta?.agendaExplicit === true,
+        agendaUnavailable: meta?.agendaUnavailable === true,
         folderId: meta?.folderId ?? null,
         folderLabel: meta?.folderLabel ?? null,
         startFolderId: meta?.startFolderId ?? null,
@@ -2140,6 +2334,7 @@ async function reconcileOnStartup() {
         console.warn("[recorder] meeting prompt registration:", error),
     );
     await ensureConfigAlarm();
+    void refreshServerConfig().catch(() => {});
     await reconcileDesktopWindow();
     // Session storage is empty after a browser restart; re-arm open meetings.
     await reevaluateAllTabs();
