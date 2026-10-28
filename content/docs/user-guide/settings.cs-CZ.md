@@ -88,6 +88,8 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
 **Jazyk** (Angličtina nebo Čeština), způsob zobrazení data, pořadí seznamu nahrávek, počet nahrávek na stránce a motiv.
 
+**Časové pásmo** používá volbu **Automaticky (podle prohlížeče)**, dokud z prohledávatelného seznamu nevyberete pásmo IANA. Správci nastavení Organizace zde mohou nastavit také **Časové pásmo Organizace**. Časy na stránkách používají Vaši výslovnou volbu, poté pásmo prohlížeče, výchozí pásmo Organizace a nakonec UTC. Práce bez prohlížeče používá Vaši volbu, výchozí pásmo Organizace a nakonec UTC. Export agendy do Markdownu i Kalendáře používá výsledné pásmo toho, kdo exportuje.
+
 ## Ostatní sekce
 
 - **Plaud účet**: připojení, opětovné připojení či odpojení účtu diktafonu.
@@ -103,5 +105,7 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 - **Přístupy** (pro ty, kdo spravují přístup, při přístupu od poskytovatele identity): kdo smí Klepnu používat, spravovat Organizaci nebo spravovat přístup. Viz [Pro administrátory](administrators.md#access-from-the-identity-provider).
 
 Přístup ke Kalendáři a Meet je volitelný a pouze pro čtení. Po připojení používá každý ruční i automatický běh Učení nad zvukem účastníky schůzky vlastníka pro návrhy mluvčích s **?**. Podporovaní poskytovatelé přepisu a následná oprava používají jejich jména pro správný pravopis. Návrhy potvrzujete Vy; nezaškrtnuté odhady zůstávají nepotvrzené. Kontrola ukazuje pozvání, účast v Meet, důkaz v přepisu nebo odhad s vysvětlením. Nepoužívají se e-maily účastníků ani hlasová data.
+
+**Agenda** je položka, kterou v Klepně připravujete pro **schůzku** nebo událost. Volby **Připravit agendu**, **Nastavení agendy** a **Smazat agendu** pracují s touto položkou. Smazáním agendy se odstraní její body a poznámky; událost v Google Kalendáři i agenda dříve zapsaná do události zůstávají. Změny úkolů provedené během schůzky platí dál. Zápis agendy do Kalendáře je samostatná akce pořadatele s výslovným souhlasem se zápisem.
 
 Dále: [Klepna v Claude](claude.md)

@@ -2,7 +2,10 @@
 
 import { Settings2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTimeZone } from "use-intl/react";
+import { useConfirm } from "@/components/confirm-dialog";
+import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -12,17 +15,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { dateTimeInput, dateTimeInputIso } from "@/lib/i18n/time-zone";
 import type { Recording } from "@/types/recording";
+import { AgendaCalendarExport } from "./agenda-export";
 import { meetingRequest } from "./api";
+import { CalendarEventPicker } from "./calendar-event-picker";
 import type { CalendarChoices, MeetingDetail } from "./types";
 
-function localTime(value: string | null) {
-    if (!value) return "";
-    const date = new Date(value);
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-        .toISOString()
-        .slice(0, 16);
-}
 export function MeetingSettings({
     detail,
     onSave,
@@ -48,6 +47,11 @@ export function MeetingSettings({
     onDelete: () => Promise<boolean>;
 }) {
     const i18n = useExtracted();
+    const timeZone = useTimeZone() ?? "UTC";
+    const localTime = useCallback(
+        (value: string | null) => dateTimeInput(value, timeZone),
+        [timeZone],
+    );
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState(detail.title);
     const [start, setStart] = useState(localTime(detail.plannedStart));
@@ -55,7 +59,12 @@ export function MeetingSettings({
     const [eventId, setEventId] = useState(detail.calendarEventId ?? "");
     const [events, setEvents] = useState<CalendarChoices | null>(null);
     const [busy, setBusy] = useState(false);
-    const [deleting, setDeleting] = useState(false);
+    const confirm = useConfirm();
+    const product = useProductName("locative");
+    const editable =
+        detail.permissions.manage &&
+        !detail.attachedRecording &&
+        !detail.recordingItemId;
     const latest = useRef(detail);
     latest.current = detail;
     const original = useRef(detail);
@@ -72,28 +81,25 @@ export function MeetingSettings({
         setStart(localTime(detail.plannedStart));
         setEnd(localTime(detail.plannedEnd));
         setEventId(detail.calendarEventId ?? "");
-        setDeleting(false);
         const controller = new AbortController();
-        const folderId = detail.folders[0]?.id;
-        if (folderId)
-            void meetingRequest<CalendarChoices>(
-                `/api/meetings/calendar-events?folderId=${encodeURIComponent(folderId)}`,
-                "GET",
-                undefined,
-                controller.signal,
-            )
-                .then((result) => {
-                    if (!controller.signal.aborted) setEvents(result);
-                })
-                .catch(() => {});
+        void meetingRequest<CalendarChoices>(
+            `/api/meetings/calendar-events?agendaId=${encodeURIComponent(detail.id)}`,
+            "GET",
+            undefined,
+            controller.signal,
+        )
+            .then((result) => {
+                if (!controller.signal.aborted) setEvents(result);
+            })
+            .catch(() => {});
         return () => controller.abort();
-    }, [open]);
+    }, [open, localTime]);
     return (
         <>
             <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={i18n("Meeting settings")}
+                aria-label={i18n("Agenda settings")}
                 onClick={() => setOpen(true)}
             >
                 <Settings2 className="size-4" />
@@ -101,7 +107,7 @@ export function MeetingSettings({
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{i18n("Meeting settings")}</DialogTitle>
+                        <DialogTitle>{i18n("Agenda settings")}</DialogTitle>
                         <DialogDescription>
                             {i18n(
                                 "Edit the title, time or linked calendar event.",
@@ -111,6 +117,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("Title")}
                         <input
+                            disabled={busy || !editable}
                             value={title}
                             maxLength={500}
                             className="rounded border bg-background p-2"
@@ -123,6 +130,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("Start (optional)")}
                         <input
+                            disabled={busy || !editable}
                             type="datetime-local"
                             value={start}
                             className="rounded border bg-background p-2"
@@ -135,6 +143,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("End (optional)")}
                         <input
+                            disabled={busy || !editable}
                             type="datetime-local"
                             value={end}
                             min={start || undefined}
@@ -146,86 +155,98 @@ export function MeetingSettings({
                         />
                     </label>
                     {(detail.calendarEventId || (events && !events.reason)) && (
-                        <label className="grid gap-1 text-sm">
+                        <div className="grid gap-2 text-sm">
                             {i18n("Calendar event")}
-                            <select
+                            <CalendarEventPicker
+                                choices={events}
                                 value={eventId}
-                                className="rounded border bg-background p-2"
-                                onChange={(event) => {
+                                current={
+                                    detail.calendarEventId
+                                        ? {
+                                              id: detail.calendarEventId,
+                                              title: detail.title,
+                                          }
+                                        : undefined
+                                }
+                                agendaId={detail.id}
+                                allowEmpty
+                                disabled={busy || !editable}
+                                onValueChange={(value) => {
                                     edited.current.add("calendarEventId");
-                                    setEventId(event.target.value);
+                                    setEventId(value);
                                 }}
-                            >
-                                <option value="">
-                                    {i18n("Without a calendar event")}
-                                </option>
-                                {detail.calendarEventId &&
-                                    ![
-                                        ...(events?.recurring ?? []),
-                                        ...(events?.other ?? []),
-                                    ].some(
-                                        (event) =>
-                                            event.id === detail.calendarEventId,
-                                    ) && (
-                                        <option value={detail.calendarEventId}>
-                                            {detail.title}
-                                        </option>
-                                    )}
-                                {[
-                                    ...(events?.recurring ?? []),
-                                    ...(events?.other ?? []),
-                                ].map((event) => (
-                                    <option
-                                        key={event.id}
-                                        value={event.id}
-                                        disabled={Boolean(
-                                            event.visibleAgenda &&
-                                                event.visibleAgenda.id !==
-                                                    detail.id,
-                                        )}
-                                    >
-                                        {event.title}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                            />
+                            <AgendaCalendarExport
+                                detail={detail}
+                                disabled={
+                                    busy ||
+                                    eventId !== (detail.calendarEventId ?? "")
+                                }
+                            />
+                        </div>
                     )}
                     {notice && (
                         <p role="alert">
                             {i18n(
-                                "Your changes were not saved. Your input is kept. Review the current meeting and try again.",
-                            )}
-                        </p>
-                    )}
-                    {deleting && (
-                        <p className="text-sm">
-                            {i18n(
-                                "Delete this meeting and its agenda? Actual task changes will remain.",
+                                "Your changes were not saved. Your input is kept. Review the current agenda and try again.",
                             )}
                         </p>
                     )}
                     <DialogFooter>
-                        <Button
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() => {
-                                if (!deleting) {
-                                    setDeleting(true);
-                                    return;
-                                }
-                                setBusy(true);
-                                void onDelete()
-                                    .then((saved) => {
-                                        if (saved) setOpen(false);
-                                        else setNotice(true);
-                                    })
-                                    .finally(() => setBusy(false));
-                            }}
-                        >
-                            {deleting
-                                ? i18n("Confirm deletion")
-                                : i18n("Delete meeting")}
-                        </Button>
+                        {editable && (
+                            <Button
+                                variant="destructive"
+                                disabled={busy}
+                                onClick={() => {
+                                    void confirm({
+                                        title: i18n("Delete agenda"),
+                                        description: (
+                                            <div className="space-y-2">
+                                                <p>
+                                                    {i18n(
+                                                        "Delete this agenda in {product}? Its points and notes are deleted.",
+                                                        { product },
+                                                    )}
+                                                </p>
+                                                {detail.calendarEventId && (
+                                                    <p>
+                                                        {i18n(
+                                                            "The Google Calendar event stays as it is, including an agenda exported into it.",
+                                                        )}
+                                                    </p>
+                                                )}
+                                                <p>
+                                                    {i18n(
+                                                        "Tasks closed or dropped during the meeting stay that way.",
+                                                    )}
+                                                </p>
+                                            </div>
+                                        ),
+                                        confirmLabel: i18n("Delete agenda"),
+                                        pendingLabel: i18n("Deleting…"),
+                                        destructive: true,
+                                        onConfirm: async () => {
+                                            setBusy(true);
+                                            try {
+                                                if (!(await onDelete())) {
+                                                    setNotice(true);
+                                                    throw new Error(
+                                                        i18n(
+                                                            "Could not delete the agenda",
+                                                        ),
+                                                    );
+                                                }
+                                                setOpen(false);
+                                            } finally {
+                                                setBusy(false);
+                                            }
+                                        },
+                                    });
+                                }}
+                            >
+                                {i18n("Delete agenda")}
+                            </Button>
+                        )}
                         <Button
                             variant="outline"
                             onClick={() => setOpen(false)}
@@ -235,15 +256,20 @@ export function MeetingSettings({
                         <Button
                             disabled={
                                 busy ||
+                                !editable ||
                                 !title.trim() ||
-                                Boolean(end && (!start || end <= start))
+                                Boolean(end && (!start || end <= start)) ||
+                                Boolean(
+                                    start && !dateTimeInputIso(start, timeZone),
+                                ) ||
+                                Boolean(end && !dateTimeInputIso(end, timeZone))
                             }
                             onClick={() => {
                                 const plannedStart = start
-                                    ? new Date(start).toISOString()
+                                    ? dateTimeInputIso(start, timeZone)
                                     : null;
                                 const plannedEnd = end
-                                    ? new Date(end).toISOString()
+                                    ? dateTimeInputIso(end, timeZone)
                                     : null;
                                 const before = notice
                                     ? latest.current

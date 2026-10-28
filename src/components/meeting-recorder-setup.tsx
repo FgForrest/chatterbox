@@ -17,6 +17,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { ConnectedLine } from "@/components/connected-line";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -72,8 +73,13 @@ interface MeetingRecorderSetupProps {
     onConnected?: () => void;
 }
 
-function formatDate(value: string | null, locale: string, never: string) {
-    return value ? new Date(value).toLocaleString(locale) : never;
+function formatDate(
+    value: string | null,
+    locale: string,
+    never: string,
+    timeZone?: string,
+) {
+    return value ? new Date(value).toLocaleString(locale, { timeZone }) : never;
 }
 
 function hostOf(value: string | null): string {
@@ -104,6 +110,7 @@ export function MeetingRecorderSetup({
 }: MeetingRecorderSetupProps) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const [extension, setExtension] = useState<RecorderExtensionState | null>(
         null,
     );
@@ -636,6 +643,7 @@ export function MeetingRecorderSetup({
                                                     key.last_used_at,
                                                     locale,
                                                     i18n("Never"),
+                                                    timeZone,
                                                 ),
                                             })}
                                         </p>

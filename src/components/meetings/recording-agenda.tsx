@@ -187,7 +187,7 @@ export function RecordingAgenda({
                       </p>
                       <p className="mt-1 max-w-xl text-xs text-muted-foreground">
                           {i18n(
-                              "Detaching restores the standalone meeting. Existing summaries and actual task changes remain.",
+                              "Detaching restores the standalone agenda. Existing summaries and actual task changes remain.",
                           )}
                       </p>
                   </div>
@@ -210,7 +210,9 @@ export function RecordingAgenda({
                           {i18n("Attach an agenda?")}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground">
-                          {i18n("The recording overlaps prepared meetings.")}
+                          {i18n(
+                              "The recording overlaps events with prepared agendas.",
+                          )}
                       </p>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -243,7 +245,13 @@ export function RecordingAgenda({
                                                       timeStyle: "short",
                                                   },
                                               )}{" "}
-                                          · {candidate.folder.name} ·{" "}
+                                          ·{" "}
+                                          {format.list(
+                                              candidate.folders.map(
+                                                  (folder) => folder.name,
+                                              ),
+                                          )}{" "}
+                                          ·{" "}
                                           {i18n(
                                               "{minutes, number} min overlap",
                                               {
@@ -281,7 +289,7 @@ export function RecordingAgenda({
                       </fieldset>
                       <p className="text-xs text-muted-foreground">
                           {i18n(
-                              "The recording will be filed into the agenda’s folder. Organization sharing may wait for the owner’s speaker review.",
+                              "The recording will be filed into all of the agenda’s folders. Organization sharing may wait for the owner’s speaker review.",
                           )}
                       </p>
                       <div className="flex justify-end gap-2">
@@ -353,7 +361,7 @@ export function RecordingAgenda({
                     else setPrepareOpen(true);
                 }}
             >
-                {i18n("Prepare next meeting")}
+                {i18n("Prepare next agenda")}
             </Button>
         </div>
     );

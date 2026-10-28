@@ -1,10 +1,11 @@
 import { rmSync } from "node:fs";
 import type { Readable } from "node:stream";
 import { and, eq } from "drizzle-orm";
+import { pgTable, text } from "drizzle-orm/pg-core";
 import unzipper from "unzipper";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { warnPendingRecordingColumnDrop } from "@/db/queries/migration-warnings";
-import { chatterItems, recordings, users } from "@/db/schema";
+import { chatterItems, recordings } from "@/db/schema";
 import { migrationsThrough } from "@/tests/integration/migrations";
 import {
     createMigratedTestDatabase,
@@ -56,6 +57,11 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import type { StorageProvider } from "@/lib/storage/types";
 
+const historicalUsers = pgTable("users", {
+    id: text("id"),
+    email: text("email"),
+});
+
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const USER_ID = "archive-owner";
@@ -90,7 +96,7 @@ describeWithDatabase("#257 deprecated recording column removal", () => {
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
         await database.db
-            .insert(users)
+            .insert(historicalUsers)
             .values({ id: USER_ID, email: "owner@example.com" });
         const [item] = await database.db
             .insert(chatterItems)

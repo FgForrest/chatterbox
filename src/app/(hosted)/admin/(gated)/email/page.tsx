@@ -1,3 +1,4 @@
+import { getTimeZone } from "next-intl/server";
 import {
     countCampaigns,
     listCampaignsOverview,
@@ -27,12 +28,14 @@ export default async function AdminEmailPage() {
         suppressionCounts,
         suppressions,
         newsletter,
+        timeZone,
     ] = await Promise.all([
         listCampaignsOverview(CAMPAIGNS_LIMIT),
         countCampaigns(),
         suppressionCountsByReason(),
         recentSuppressions(SUPPRESSIONS_LIMIT),
         newsletterStats(),
+        getTimeZone(),
     ]);
 
     const smtpConfigured = isSmtpConfigured();
@@ -180,7 +183,7 @@ export default async function AdminEmailPage() {
                                             {formatNumber(c.attempted)}
                                         </td>
                                         <td className="px-3 py-2 text-muted-foreground">
-                                            {formatDate(c.createdAt)}
+                                            {formatDate(c.createdAt, timeZone)}
                                         </td>
                                     </tr>
                                 ))
@@ -259,7 +262,7 @@ export default async function AdminEmailPage() {
                                         {s.note ?? "—"}
                                     </td>
                                     <td className="px-3 py-2 text-muted-foreground">
-                                        {formatDate(s.createdAt)}
+                                        {formatDate(s.createdAt, timeZone)}
                                     </td>
                                 </tr>
                             ))

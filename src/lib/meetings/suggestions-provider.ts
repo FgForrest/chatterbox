@@ -9,21 +9,23 @@ import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placemen
 /** Resolve the agenda folder's summary role without selecting a replacement provider. */
 export async function agendaSuggestionsProvider(userId: string, id: string) {
     const access = await requireMeetingAccess(userId, id, "edit");
-    const [folder] = access.agenda.meetingItemId
+    const folders = access.agenda.meetingItemId
         ? await meetingFolders(
               db,
               access.agenda.meetingItemId,
               access.agenda.userId,
           )
         : [];
-    if (!folder)
-        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
     const resolution = await resolveProfileForPlacements({
         ownerUserId: userId,
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
-        folderIds: [folder.id],
-        view: folder.userId === access.viewer.orgUserId ? "org" : "private",
+        folderIds: folders.map((folder) => folder.id),
+        view: folders.some(
+            (folder) => folder.userId === access.viewer.orgUserId,
+        )
+            ? "org"
+            : "private",
         seedProfiles: false,
         executor: db,
         organizationUserId: access.viewer.orgUserId,
@@ -53,7 +55,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
     enhancementChatModel(selection.credential);
     return {
         access,
-        folder,
+        folders,
         pin,
         outputLanguage: profile.settings.steps.summary.outputLanguage,
     };

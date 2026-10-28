@@ -156,10 +156,10 @@ export function AttachRecordingDialog({
                 <p className="text-xs text-muted-foreground">
                     {shared
                         ? i18n(
-                              "Attaching files the recording into the agenda’s shared folder. Sharing follows the recording owner’s normal review and publication rules.",
+                              "Attaching files the recording into the agenda’s folders. Sharing follows the recording owner’s normal review and publication rules.",
                           )
                         : i18n(
-                              "Attaching files the recording into the agenda’s folder.",
+                              "Attaching files the recording into the agenda’s folders.",
                           )}
                 </p>
                 <Button

@@ -1,10 +1,10 @@
 "use client";
 
-import { CalendarClock } from "lucide-react";
 import Link from "next/link";
-import { useExtracted, useFormatter } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { matchFolders } from "@/lib/folders/navigation";
+import { dateTimeInputIso } from "@/lib/i18n/time-zone";
 import type { RecordingFolder } from "@/types/folder";
 import { meetingRequest } from "./api";
+import { CalendarEventPicker } from "./calendar-event-picker";
 import type { CalendarChoices, MeetingDetail } from "./types";
 
 export function CreateMeetingDialog({
@@ -37,7 +39,7 @@ export function CreateMeetingDialog({
     eventId?: string;
 }) {
     const i18n = useExtracted();
-    const format = useFormatter();
+    const timeZone = useTimeZone() ?? "UTC";
     const label = useFolderLabel();
     const available = folders.filter((folder) => folder.kind === "custom");
     const [chosenFolder, setChosenFolder] = useState(
@@ -100,15 +102,17 @@ export function CreateMeetingDialog({
                     : {
                           title: title.trim(),
                           ...(start
-                              ? { start: new Date(start).toISOString() }
+                              ? { start: dateTimeInputIso(start, timeZone) }
                               : {}),
-                          ...(end ? { end: new Date(end).toISOString() } : {}),
+                          ...(end
+                              ? { end: dateTimeInputIso(end, timeZone) }
+                              : {}),
                       }),
             });
             onCreated(result.id, result.meeting);
             onOpenChange(false);
         } catch {
-            toast.error(i18n("Could not prepare the meeting"));
+            toast.error(i18n("Could not prepare the agenda"));
         } finally {
             setBusy(false);
         }
@@ -117,7 +121,7 @@ export function CreateMeetingDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
                 <DialogHeader>
-                    <DialogTitle>{i18n("Prepare a meeting")}</DialogTitle>
+                    <DialogTitle>{i18n("Prepare an agenda")}</DialogTitle>
                     <DialogDescription>
                         {manual
                             ? i18n("Without a calendar event")
@@ -140,7 +144,7 @@ export function CreateMeetingDialog({
                 </div>
                 {!available.length && (
                     <p className="text-sm text-muted-foreground">
-                        {i18n("Create a folder before preparing a meeting.")}
+                        {i18n("Create a folder before preparing an agenda.")}
                     </p>
                 )}
                 {error && (
@@ -150,120 +154,19 @@ export function CreateMeetingDialog({
                 )}
                 {!hasDestination ? (
                     <p className="text-sm text-muted-foreground">
-                        {i18n("Choose a folder to prepare the meeting.")}
+                        {i18n("Choose a folder to prepare the agenda.")}
                     </p>
                 ) : !manual ? (
                     <>
                         {!choices && !error && (
                             <output>{i18n("Loading calendar…")}</output>
                         )}
-                        {[
-                            {
-                                title: i18n(
-                                    "Recurring meetings recorded in this folder",
-                                ),
-                                events: choices?.recurring ?? [],
-                            },
-                            {
-                                title: i18n("Other calendar events"),
-                                events: choices?.other ?? [],
-                            },
-                        ].map(
-                            (group) =>
-                                group.events.length > 0 && (
-                                    <fieldset
-                                        key={group.title}
-                                        className="space-y-2"
-                                    >
-                                        <legend className="mb-2 text-xs font-semibold text-muted-foreground">
-                                            {group.title}
-                                        </legend>
-                                        {group.events.map((event) => (
-                                            <label
-                                                key={event.id}
-                                                className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
-                                            >
-                                                <input
-                                                    type="radio"
-                                                    name="meeting-event"
-                                                    className="mt-1 accent-primary"
-                                                    checked={
-                                                        selected === event.id
-                                                    }
-                                                    onChange={() =>
-                                                        setSelected(event.id)
-                                                    }
-                                                />
-                                                <CalendarClock className="mt-0.5 size-4 shrink-0 text-meeting" />
-                                                <span className="min-w-0 space-y-1">
-                                                    <span className="block text-sm font-medium">
-                                                        {event.title}
-                                                    </span>
-                                                    <span className="block text-xs text-muted-foreground">
-                                                        {format.dateTime(
-                                                            new Date(
-                                                                event.start,
-                                                            ),
-                                                            {
-                                                                dateStyle:
-                                                                    "medium",
-                                                                timeStyle:
-                                                                    "short",
-                                                            },
-                                                        )}
-                                                        –
-                                                        {format.dateTime(
-                                                            new Date(event.end),
-                                                            {
-                                                                timeStyle:
-                                                                    "short",
-                                                            },
-                                                        )}
-                                                    </span>
-                                                    {event.recordingCount >
-                                                        0 && (
-                                                        <span className="block text-xs text-muted-foreground">
-                                                            {i18n(
-                                                                "{count, plural, one {# recording in this folder} other {# recordings in this folder}}",
-                                                                {
-                                                                    count: event.recordingCount,
-                                                                },
-                                                            )}
-                                                        </span>
-                                                    )}
-                                                    <span className="block text-xs text-muted-foreground">
-                                                        {i18n(
-                                                            "{count, plural, one {# invitee} other {# invitees}}",
-                                                            {
-                                                                count: event
-                                                                    .attendees
-                                                                    .length,
-                                                            },
-                                                        )}
-                                                    </span>
-                                                    {event.visibleAgenda && (
-                                                        <span className="block text-xs text-primary">
-                                                            {i18n(
-                                                                "Open agenda · Prepared by {author}",
-                                                                {
-                                                                    author:
-                                                                        event
-                                                                            .visibleAgenda
-                                                                            .author
-                                                                            .name ??
-                                                                        i18n(
-                                                                            "Unknown author",
-                                                                        ),
-                                                                },
-                                                            )}
-                                                        </span>
-                                                    )}
-                                                </span>
-                                            </label>
-                                        ))}
-                                    </fieldset>
-                                ),
-                        )}
+                        <CalendarEventPicker
+                            choices={choices}
+                            value={selected}
+                            onValueChange={setSelected}
+                            disabled={busy}
+                        />
                         {choices && !events.length && (
                             <p className="text-sm text-muted-foreground">
                                 {i18n(
@@ -358,7 +261,14 @@ export function CreateMeetingDialog({
                             !hasDestination ||
                             (manual
                                 ? !title.trim() ||
-                                  Boolean(end && (!start || end <= start))
+                                  Boolean(end && (!start || end <= start)) ||
+                                  Boolean(
+                                      start &&
+                                          !dateTimeInputIso(start, timeZone),
+                                  ) ||
+                                  Boolean(
+                                      end && !dateTimeInputIso(end, timeZone),
+                                  )
                                 : !selected)
                         }
                         onClick={() => void prepare()}

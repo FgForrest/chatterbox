@@ -143,7 +143,16 @@ async function candidatesInTx(
     );
     const result = [];
     let overlappingCount = 0;
-    for (const row of rows) {
+    for (const candidate of rows) {
+        const locked = await findMeeting(
+            userId,
+            orgUserId,
+            candidate.agenda.id,
+            tx,
+            true,
+        );
+        if (!locked || locked.agenda.recordingItemId) continue;
+        const row = { ...candidate, ...locked };
         if (
             !row.agenda.timeSet ||
             !row.agenda.plannedStart ||
@@ -159,12 +168,13 @@ async function candidatesInTx(
         );
         if (!overlap) continue;
         overlappingCount++;
-        const [folder] = await meetingFolders(
+        const folders = await meetingFolders(
             tx,
             row.agenda.meetingItemId,
             row.agenda.userId,
         );
-        if (!folder) continue;
+        if (!folders.length) continue;
+        const folderIds = new Set(folders.map((folder) => folder.id));
         const shares = await tx
             .select({
                 receiverUserId: folderShares.receiverUserId,
@@ -174,24 +184,36 @@ async function candidatesInTx(
             .innerJoin(users, eq(users.id, folderShares.receiverUserId))
             .where(
                 and(
-                    eq(folderShares.folderId, folder.id),
-                    eq(folderShares.userId, folder.userId),
+                    inArray(folderShares.folderId, [...folderIds]),
                     inArray(folderShares.state, ["accepted", "pending"]),
                 ),
             );
-        const inFolder = assignments.some(
-            (assignment) => assignment.folderId === folder.id,
+        const inFolder = folders.every((folder) =>
+            assignments.some((assignment) => assignment.folderId === folder.id),
         );
-        const privateFolder = folder.userId === userId && shares.length === 0;
+        const privateFolder =
+            folders.every((folder) => folder.userId === userId) &&
+            shares.length === 0;
         const agendaAudience = await meetingItemAudienceInTx(
             tx,
             row.agenda.meetingItemId,
             row.agenda.userId,
             orgUserId,
         );
+        const attachmentAudience = {
+            organization: agendaAudience.organization,
+            userIds: new Set([
+                ...agendaAudience.userIds,
+                ...shares.map((share) => share.receiverUserId),
+            ]),
+        };
+        const audienceUsers = await tx
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inArray(users.id, [...attachmentAudience.userIds]));
         result.push({
             ...row,
-            folder,
+            folders,
             overlapMs: overlap,
             safe:
                 row.agenda.userId === userId &&
@@ -202,43 +224,33 @@ async function candidatesInTx(
                 !personShare &&
                 !assignments.some(
                     (assignment) =>
-                        assignment.folderId !== folder.id &&
+                        !folderIds.has(assignment.folderId) &&
                         assignment.folderOwnerId !== userId,
                 ) &&
-                !otherSharedFolders.some((shared) => shared.id !== folder.id),
-            widensSharing:
-                !inFolder && (folder.userId !== userId || shares.length > 0),
-            audience:
-                folder.userId === orgUserId
-                    ? {
-                          organization: true,
-                          userIds: [] as string[],
-                          users: [] as { id: string; name: string }[],
-                      }
-                    : {
-                          organization: false,
-                          userIds: [
-                              ...new Set([
-                                  folder.userId,
-                                  ...shares.map(
-                                      (share) => share.receiverUserId,
-                                  ),
-                              ]),
-                          ].filter((id) => id !== userId),
-                          users: [
-                              { id: row.agenda.userId, name: row.authorName },
-                              ...shares.map((share) => ({
-                                  id: share.receiverUserId,
-                                  name: share.name,
-                              })),
-                          ].filter(
-                              (entry, index, all) =>
-                                  entry.id !== userId &&
-                                  all.findIndex(
-                                      (other) => other.id === entry.id,
-                                  ) === index,
-                          ),
-                      },
+                !otherSharedFolders.some((shared) => !folderIds.has(shared.id)),
+            widensSharing: !meetingAudienceWithin(
+                attachmentAudience,
+                recordingAudience,
+            ),
+            audience: attachmentAudience.organization
+                ? {
+                      organization: true,
+                      userIds: [] as string[],
+                      users: [] as { id: string; name: string }[],
+                  }
+                : {
+                      organization: false,
+                      userIds: [...attachmentAudience.userIds].filter(
+                          (id) => id !== userId,
+                      ),
+                      users: audienceUsers.filter(
+                          (entry, index, all) =>
+                              entry.id !== userId &&
+                              all.findIndex(
+                                  (other) => other.id === entry.id,
+                              ) === index,
+                      ),
+                  },
         });
     }
     return { candidates: result, overlappingCount };
@@ -273,7 +285,7 @@ async function absorbInTx(
             "Meeting item no longer exists",
             409,
         );
-    const [folder] = await meetingFolders(
+    const folders = await meetingFolders(
         tx,
         agenda.meetingItemId,
         agenda.userId,
@@ -307,7 +319,9 @@ async function absorbInTx(
             );
         }
     }
-    if (explicit && folder) {
+    for (const folder of explicit
+        ? [...folders].sort((a, b) => a.id.localeCompare(b.id))
+        : []) {
         if (folder.userId === orgUserId) {
             assertOrgScopeWritable();
             await recordIntendedPlacementInTx(tx, {
@@ -344,8 +358,14 @@ async function absorbInTx(
                 isNull(meetingAgendas.recordingItemId),
             ),
         );
-    if (explicit && folder)
-        await notifyFolderReceiversInTx(tx, userId, recordingItemId, folder.id);
+    if (explicit)
+        for (const folder of folders)
+            await notifyFolderReceiversInTx(
+                tx,
+                userId,
+                recordingItemId,
+                folder.id,
+            );
     await tx
         .update(recordings)
         .set({
@@ -359,7 +379,11 @@ async function absorbInTx(
                 eq(recordings.userId, userId),
             ),
         );
-    if (explicit && folder && folder.userId !== orgUserId && !arriving) {
+    if (
+        explicit &&
+        folders.some((folder) => folder.userId !== orgUserId) &&
+        !arriving
+    ) {
         await requestAdvanceInTx(tx, {
             itemId: recordingItemId,
             userId,
@@ -516,10 +540,10 @@ export async function agendaCandidates(userId: string, itemId: string) {
             title: decryptText(candidate.item.title),
             start: candidate.agenda.plannedStart,
             end: candidate.agenda.plannedEnd,
-            folder: {
-                id: candidate.folder.id,
-                name: decryptText(candidate.folder.name),
-            },
+            folders: candidate.folders.map((folder) => ({
+                id: folder.id,
+                name: decryptText(folder.name),
+            })),
             overlapMs: candidate.overlapMs,
             widensSharing: candidate.widensSharing,
             audience: candidate.audience,

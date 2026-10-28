@@ -30,6 +30,7 @@ vi.mock("next-intl", () => ({
     useLocale: () => "en",
     useFormatter: () => ({
         dateTime: (value: Date) => value.toISOString().slice(0, 16),
+        list: (values: string[]) => values.join(", "),
     }),
 }));
 vi.mock("@/components/meetings/agenda-body", () => ({
@@ -59,6 +60,7 @@ const recording: Recording = {
 const fetchMock = vi.fn();
 let choices: CalendarChoices;
 beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
     choices = { reason: "not_configured", recurring: [], other: [] };
     fetchMock.mockReset();
     fetchMock.mockImplementation(async () => Response.json(choices));
@@ -155,7 +157,12 @@ describe("create dialog", () => {
                 onCreated={created}
             />,
         );
-        fireEvent.click(await screen.findByRole("radio"));
+        fireEvent.click(
+            await screen.findByRole("combobox", { name: "Calendar event" }),
+        );
+        fireEvent.click(
+            screen.getByRole("option", { name: /Existing meeting/ }),
+        );
         await act(async () =>
             fireEvent.click(
                 screen.getByRole("button", { name: "Open agenda" }),
@@ -167,7 +174,10 @@ describe("create dialog", () => {
         ).toBe(false);
     });
 });
-it("shows a widening-sharing audience, attaches explicitly and reads back the absorbed state", async () => {
+it.each([
+    true,
+    false,
+])("shows a widening-sharing audience (Organization=%s), attaches explicitly and reads back the absorbed state", async (organization) => {
     let attached = false;
     fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
         if (url.endsWith("/attach")) {
@@ -184,13 +194,29 @@ it("shows a widening-sharing audience, attaches explicitly and reads back the ab
                               title: "Prepared agenda",
                               start: at,
                               end: null,
-                              folder: { id: "folder", name: "Acme" },
+                              folders: [
+                                  { id: "folder", name: "Acme" },
+                                  { id: "private", name: "Private planning" },
+                              ],
                               overlapMs: 1800000,
                               widensSharing: true,
                               audience: {
-                                  organization: true,
-                                  userIds: [],
-                                  users: [],
+                                  organization,
+                                  userIds: organization
+                                      ? []
+                                      : ["other", "third"],
+                                  users: organization
+                                      ? []
+                                      : [
+                                            {
+                                                id: "other",
+                                                name: "Alex Example",
+                                            },
+                                            {
+                                                id: "third",
+                                                name: "Robin Example",
+                                            },
+                                        ],
                               },
                           },
                       ],
@@ -217,7 +243,15 @@ it("shows a widening-sharing audience, attaches explicitly and reads back the ab
     );
     await screen.findByText("Attach an agenda?");
     expect(
-        screen.getByText(/Shared-folder audience: Organization/),
+        screen.getByText(
+            organization
+                ? /Shared-folder audience: Organization/
+                : /Shared-folder audience: Alex Example, Robin Example/,
+        ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Acme, Private planning/)).toBeTruthy();
+    expect(
+        screen.getByText(/filed into all of the agenda’s folders/),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("radio"));
     await act(async () =>
@@ -279,7 +313,7 @@ it("offers prepare next only when the route returns an instance", async () => {
         />,
     );
     const prepare = await screen.findByRole("button", {
-        name: "Prepare next meeting",
+        name: "Prepare next agenda",
     });
     fireEvent.click(prepare);
     expect(push).toHaveBeenCalledWith("/dashboard?meeting=existing");
@@ -339,7 +373,7 @@ it.each([
         />,
     );
     await act(async () => {});
-    const picker = screen.getByRole("combobox");
+    const picker = screen.getByRole("combobox", { name: "Folder" });
     if (folderId === "folder" || folderId === "organization")
         expect(
             fetchMock.mock.calls.some(([url]) =>
@@ -535,7 +569,7 @@ it("retains meeting presence while the summary widget refreshes or is hidden", a
                     title: "Prepared agenda",
                     start: at,
                     end: null,
-                    folder: { id: "folder", name: "Acme" },
+                    folders: [{ id: "folder", name: "Acme" }],
                     overlapMs: 60000,
                     widensSharing: false,
                 },

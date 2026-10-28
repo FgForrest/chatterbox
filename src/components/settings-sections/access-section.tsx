@@ -11,10 +11,10 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { type ApiErrorBody, parseApiError } from "@/lib/api-errors";
 import { signIn } from "@/lib/auth-client";
 import { CAPABILITIES, type Capability } from "@/lib/authz/catalog";
-import { formatDateTime } from "@/lib/format-date";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
 type Source = "direct-role" | "other-group" | "parent-group" | "composite";
@@ -80,6 +80,7 @@ function personLabel(
 export function AccessSection() {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const name = useProductName();
     const confirm = useConfirm();
     const [search, setSearch] = useState("");

@@ -32,8 +32,8 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { formatBytes } from "@/lib/format-bytes";
-import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -145,6 +145,7 @@ export function MailDetailPane({
     const i18n = useExtracted();
     const searchParams = useSearchParams();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const [detail, setDetail] = useState<MailDetailResponse | null>(null);
     const [processing, setProcessing] =
         useState<ItemProcessingPresentation | null>(null);

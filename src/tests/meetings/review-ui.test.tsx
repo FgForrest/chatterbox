@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import {
     act,
+    render as baseRender,
     cleanup,
     fireEvent,
-    render,
     screen,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { AgendaBody } from "@/components/meetings/agenda-body";
 import { MeetingSettings } from "@/components/meetings/meeting-settings";
 import type { MeetingDetail } from "@/components/meetings/types";
@@ -30,9 +31,13 @@ vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
 vi.mock("@/components/tasks/task-row", () => ({
     TaskRow: ({ actions }: { actions: ReactNode }) => <li>{actions}</li>,
 }));
+function render(ui: Parameters<typeof baseRender>[0]) {
+    return baseRender(ui, { wrapper: ConfirmDialogProvider });
+}
 const fetchMock = vi.fn();
 let server: MeetingDetail;
 beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
     mocks.locale = "en";
     mocks.error.mockReset();
     server = detail({ cursor: "1:standalone:idle" });
@@ -272,7 +277,7 @@ it("settings preserve all input and the initial previous values through refresh 
     );
     await act(async () =>
         fireEvent.click(
-            screen.getByRole("button", { name: "Meeting settings" }),
+            screen.getByRole("button", { name: "Agenda settings" }),
         ),
     );
     fireEvent.change(screen.getByLabelText("Title"), {
@@ -343,10 +348,9 @@ it("task source sends its previous field and task notes respect composition", as
             ]}
         />,
     );
+    fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
     await act(async () =>
-        fireEvent.change(screen.getByLabelText("Task source"), {
-            target: { value: "source" },
-        }),
+        fireEvent.click(screen.getByRole("option", { name: /Previous/ })),
     );
     expect(
         JSON.parse(
@@ -412,7 +416,7 @@ it("settings retry uses the confirmed server baseline and never patches untouche
     render(<AgendaBody id="agenda" initial={server} userId="owner" />);
     await act(async () =>
         fireEvent.click(
-            screen.getByRole("button", { name: "Meeting settings" }),
+            screen.getByRole("button", { name: "Agenda settings" }),
         ),
     );
     fireEvent.change(screen.getByLabelText("Title"), {

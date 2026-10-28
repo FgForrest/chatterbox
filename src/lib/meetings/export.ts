@@ -1,4 +1,5 @@
 import { AppError, ErrorCode } from "@/lib/errors";
+import { userTimeZone } from "@/lib/i18n/user-time-zone";
 import {
     getCalendarEvent,
     writeCalendarAgenda,
@@ -6,6 +7,7 @@ import {
 import { GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE } from "@/lib/integrations/google/config";
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import { requireMeetingAccess } from "@/lib/meetings/access";
+import { inviteeNames } from "@/lib/meetings/invitee-names";
 import { getMeeting } from "@/lib/meetings/service";
 
 type Detail = Exclude<
@@ -24,16 +26,25 @@ export function meetingMarkdown(
     includeTasks = true,
     locale: "en" | "cs-CZ" = "en",
     calendar = false,
+    timeZone = "UTC",
 ): string {
     const cs = locale === "cs-CZ";
+    const dateTime = (date: Date) =>
+        new Intl.DateTimeFormat(locale, {
+            dateStyle: "medium",
+            timeStyle: "short",
+            timeZone,
+        }).format(date);
     const lines = [
         `# ${escapeMarkdown(detail.title)}`,
         "",
         [
-            detail.timeSet ? detail.plannedStart?.toISOString() : null,
-            detail.plannedEnd?.toISOString(),
+            detail.timeSet && detail.plannedStart
+                ? dateTime(detail.plannedStart)
+                : null,
+            detail.plannedEnd ? dateTime(detail.plannedEnd) : null,
             detail.invitees.length
-                ? `${cs ? "Pozvaní" : "Invitees"}: ${detail.invitees.map((invitee) => escapeMarkdown(invitee.name)).join(", ")}`
+                ? `${cs ? "Pozvaní" : "Invitees"}: ${escapeMarkdown(inviteeNames(detail.invitees))}`
                 : null,
         ]
             .filter(Boolean)
@@ -79,6 +90,7 @@ export async function exportMeetingMarkdown(
     id: string,
     locale: "en" | "cs-CZ" = "en",
     includeTasks = true,
+    timeZone?: string,
 ) {
     const detail = await getMeeting(userId, id);
     if (detail.unchanged)
@@ -87,7 +99,13 @@ export async function exportMeetingMarkdown(
         .toISOString()
         .slice(0, 10);
     return {
-        markdown: meetingMarkdown(detail, includeTasks, locale),
+        markdown: meetingMarkdown(
+            detail,
+            includeTasks,
+            locale,
+            false,
+            timeZone ?? (await userTimeZone(userId)),
+        ),
         filename: `${date} ${detail.title.replace(/[\\/:*?"<>|\r\n]/gu, " ").slice(0, 150)} - agenda.md`,
     };
 }
@@ -98,6 +116,7 @@ export async function exportMeetingCalendar(
     id: string,
     includeTasks = false,
     locale: "en" | "cs-CZ" = "en",
+    timeZone?: string,
 ) {
     const access = await requireMeetingAccess(userId, id);
     if (!access.agenda.calendarEventId)
@@ -132,7 +151,13 @@ export async function exportMeetingCalendar(
         ...(await writeCalendarAgenda(
             userId,
             event.id,
-            meetingMarkdown(detail, includeTasks, locale, true),
+            meetingMarkdown(
+                detail,
+                includeTasks,
+                locale,
+                true,
+                timeZone ?? (await userTimeZone(userId)),
+            ),
             locale,
         )),
     };

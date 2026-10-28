@@ -15,7 +15,9 @@ import type { SidecarKind } from "@/lib/export/document-sidecars";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
 interface MarkdownActionsProps {
-    kind: SidecarKind;
+    kind: SidecarKind | "agenda";
+    endpoint?: string;
+    disabled?: boolean;
     recordingId: string;
     source: string;
     view?: RecordingView;
@@ -32,35 +34,66 @@ export function MarkdownActions({
     source,
     view,
     collapseAtNarrowWidth = false,
+    endpoint: customEndpoint,
+    disabled = false,
 }: MarkdownActionsProps) {
     const i18n = useExtracted();
     const [copyState, setCopyState] = useState<"idle" | "copying" | "copied">(
         "idle",
     );
-    const endpoint = withRecordingView(
-        `/api/recordings/${encodeURIComponent(recordingId)}/markdown/${kind}?source=${encodeURIComponent(source)}`,
-        view,
-    );
+    const endpoint =
+        customEndpoint ??
+        withRecordingView(
+            `/api/recordings/${encodeURIComponent(recordingId)}/markdown/${kind}?source=${encodeURIComponent(source)}`,
+            view,
+        );
     const documentLabel =
-        kind === "transcript" ? i18n("transcript") : i18n("summary");
+        kind === "transcript"
+            ? i18n("transcript")
+            : kind === "agenda"
+              ? i18n("agenda")
+              : i18n("summary");
 
     const narrowContainer = kind === "transcript" ? "transcription" : "summary";
     const actionsLabel =
         kind === "transcript"
             ? i18n("Transcript actions")
-            : i18n("Summary actions");
+            : kind === "agenda"
+              ? i18n("Agenda actions")
+              : i18n("Summary actions");
 
     const copyMarkdown = async () => {
         setCopyState("copying");
         try {
             const response = await fetch(endpoint, { cache: "no-store" });
             if (!response.ok) throw new Error("Markdown download failed");
-            await navigator.clipboard.writeText(await response.text());
+            const markdown = await response.text();
+            if (navigator.clipboard) {
+                await navigator.clipboard.writeText(markdown);
+            } else {
+                const focused = document.activeElement;
+                const field = document.createElement("textarea");
+                field.value = markdown;
+                field.style.position = "fixed";
+                field.style.opacity = "0";
+                field.setAttribute("aria-hidden", "true");
+                document.body.append(field);
+                try {
+                    field.select();
+                    if (!document.execCommand("copy")) throw new Error();
+                } finally {
+                    field.remove();
+                    if (focused instanceof HTMLElement && focused.isConnected)
+                        focused.focus({ preventScroll: true });
+                }
+            }
             setCopyState("copied");
             toast.success(
                 kind === "transcript"
                     ? i18n("Transcript Markdown copied")
-                    : i18n("Summary Markdown copied"),
+                    : kind === "agenda"
+                      ? i18n("Agenda Markdown copied")
+                      : i18n("Summary Markdown copied"),
             );
             window.setTimeout(() => setCopyState("idle"), 1500);
         } catch {
@@ -84,9 +117,14 @@ export function MarkdownActions({
                         : "flex items-center gap-1"
                 }
             >
-                <Button asChild size="icon-sm" variant="ghost">
+                <Button
+                    asChild
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={disabled}
+                >
                     <a
-                        href={endpoint}
+                        href={disabled ? undefined : endpoint}
                         aria-label={i18n("Download {document} Markdown", {
                             document: documentLabel,
                         })}
@@ -102,7 +140,7 @@ export function MarkdownActions({
                     size="icon-sm"
                     variant="ghost"
                     onClick={copyMarkdown}
-                    disabled={copyState === "copying"}
+                    disabled={disabled || copyState === "copying"}
                     aria-label={i18n("Copy {document} Markdown", {
                         document: documentLabel,
                     })}
@@ -141,7 +179,7 @@ export function MarkdownActions({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild>
-                                <a href={endpoint}>
+                                <a href={disabled ? undefined : endpoint}>
                                     <Download className="size-4" />
                                     {i18n("Download {document} Markdown", {
                                         document: documentLabel,
@@ -150,7 +188,7 @@ export function MarkdownActions({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => void copyMarkdown()}
-                                disabled={copyState === "copying"}
+                                disabled={disabled || copyState === "copying"}
                             >
                                 <Copy className="size-4" />
                                 {i18n("Copy {document} Markdown", {

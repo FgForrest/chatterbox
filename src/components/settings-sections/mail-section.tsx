@@ -35,8 +35,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { getApiErrorMessage } from "@/lib/api-errors";
-import { formatDateTime } from "@/lib/format-date";
 import type {
     DeliveryLogEntry,
     MailAddressView,
@@ -98,6 +98,7 @@ function AddressLine({
 export function MailSection() {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const confirm = useConfirm();
     const [view, setView] = useState<MailSettingsView | null>(null);
     const [log, setLog] = useState<DeliveryLogEntry[]>([]);

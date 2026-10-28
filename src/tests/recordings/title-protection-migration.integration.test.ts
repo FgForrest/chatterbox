@@ -17,8 +17,9 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
+import { pgTable, text } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { transcriptions, users } from "@/db/schema";
+import { transcriptions } from "@/db/schema";
 import { migrationsThrough } from "@/tests/integration/migrations";
 import {
     createMigratedTestDatabase,
@@ -28,6 +29,11 @@ import {
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
+
+const historicalUsers = pgTable("users", {
+    id: text("id"),
+    email: text("email"),
+});
 
 const MIGRATIONS = join(process.cwd(), "src/db/migrations");
 
@@ -83,7 +89,9 @@ describeWithDatabase("protecting existing titles (PostgreSQL)", () => {
     }
 
     it("stamps the titles that existed, and leaves new ones unprotected", async () => {
-        await db().insert(users).values({ id: "user-1", email: "a@x.test" });
+        await db()
+            .insert(historicalUsers)
+            .values({ id: "user-1", email: "a@x.test" });
         // As before the migrations ran.
         await db().execute(
             sql`ALTER TABLE recordings DROP COLUMN title_edited_at`,

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The route says whether automatic Learn is offered here.
+vi.mock("@/lib/settings/organization", () => ({
+    organizationSettingsContext: vi.fn(),
+}));
+
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
     isLearnDeploymentAvailable: () => true,

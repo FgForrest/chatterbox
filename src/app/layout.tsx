@@ -10,6 +10,7 @@ import { RybbitAnalytics } from "@/components/rybbit-analytics";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ViewerTimeZone } from "@/components/viewer-time-zone";
 import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import "./globals.css";
@@ -99,6 +100,7 @@ export default async function RootLayout({
             >
                 <NextIntlClientProvider locale={locale} messages={messages}>
                     <ProductNameProvider isHosted={env.IS_HOSTED}>
+                        <ViewerTimeZone />
                         <AppProgress>
                             <ThemeProvider
                                 attribute="class"

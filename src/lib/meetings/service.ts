@@ -50,8 +50,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
     lockCategorizableFolderInTx,
-    orgTreeChanged,
-    scheduleFolderExportProjection,
+    removeRecordingFromFolder,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { getCalendarEvent } from "@/lib/integrations/google/calendar-events";
@@ -66,6 +65,7 @@ import {
     encryptCalendarSnapshot,
     readMeetingCalendarSnapshot,
 } from "@/lib/meetings/calendar-snapshot";
+import { meetingInvitees } from "@/lib/meetings/meeting-roster";
 import {
     createMeetingInput,
     createPointInput,
@@ -75,7 +75,6 @@ import {
     validatePointTree,
 } from "@/lib/meetings/model";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
-import { assertOrgScopeWritable } from "@/lib/org/config";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTask, getVisibleTasks } from "@/lib/tasks/tasks";
 
@@ -156,8 +155,9 @@ async function editMeeting<T>(
 async function snapshotTasks(
     tx: MeetingTx,
     agenda: Agenda,
-    folderId: string,
+    folderIds: readonly string[],
     viewer: TaskViewer,
+    retainNotes = false,
 ) {
     let sourceId = agenda.taskSourceItemId;
     if (sourceId) {
@@ -188,7 +188,7 @@ async function snapshotTasks(
                               recordings.calendarSeriesId,
                               agenda.calendarSeriesId,
                           )
-                        : sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${chatterItems.id} and ${recordingFolderAssignments.folderId} = ${folderId})`,
+                        : sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${chatterItems.id} and ${inArray(recordingFolderAssignments.folderId, [...folderIds])})`,
                     agenda.calendarSeriesId
                         ? undefined
                         : sql`exists (select 1 from ${recordingTasks} where ${recordingTasks.itemId} = ${chatterItems.id} and ${recordingTasks.status} in ('open', 'done'))`,
@@ -224,6 +224,7 @@ async function snapshotTasks(
             eq(agendaTasks.agendaId, agenda.id),
             eq(agendaTasks.userId, agenda.userId),
             eq(agendaTasks.origin, "last_meeting"),
+            retainNotes ? isNull(agendaTasks.note) : undefined,
             tasks.length
                 ? notInArray(
                       agendaTasks.taskId,
@@ -247,10 +248,10 @@ async function snapshotTasks(
             .onConflictDoNothing();
 }
 
-async function carryOver(
+async function carryOverInFolders(
     tx: MeetingTx,
     access: { agenda: Agenda; item: { id: string } },
-    folderId: string,
+    folderIds: readonly string[],
     userId: string,
     orgUserId: string | null,
 ) {
@@ -274,7 +275,7 @@ async function carryOver(
                 ),
                 sql`${meetingAgendas.createdAt} < ${access.agenda.createdAt.toISOString()}::timestamp`,
                 sql`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt}) < ${(access.agenda.plannedStart ?? access.agenda.createdAt).toISOString()}::timestamp`,
-                sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId}) and ${recordingFolderAssignments.folderId} = ${folderId})`,
+                sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId}) and ${inArray(recordingFolderAssignments.folderId, [...folderIds])})`,
             ),
         )
         .orderBy(
@@ -303,9 +304,24 @@ async function carryOver(
                     : isNull(agendaPoints.discussedAt),
             ),
         );
-    if (points.length) {
+    const existing = await tx
+        .select({ originPointId: agendaSuggestions.originPointId })
+        .from(agendaSuggestions)
+        .where(
+            and(
+                eq(agendaSuggestions.agendaId, access.agenda.id),
+                eq(agendaSuggestions.userId, access.agenda.userId),
+            ),
+        );
+    const offered = points.filter(
+        (point) =>
+            !existing.some(
+                (suggestion) => suggestion.originPointId === point.id,
+            ),
+    );
+    if (offered.length) {
         await tx.insert(agendaSuggestions).values(
-            points.map((point) => ({
+            offered.map((point) => ({
                 agendaId: access.agenda.id,
                 userId: access.agenda.userId,
                 kind: "carry_over" as const,
@@ -328,6 +344,50 @@ async function carryOver(
             })),
         );
     }
+}
+
+async function carryOver(
+    tx: MeetingTx,
+    access: { agenda: Agenda; item: { id: string } },
+    folderIds: readonly string[],
+    userId: string,
+    orgUserId: string | null,
+) {
+    for (const folderId of [...new Set(folderIds)])
+        await carryOverInFolders(tx, access, [folderId], userId, orgUserId);
+}
+
+/** Reconsider automatic preparation when the owner explicitly changes a planned agenda's filing. */
+export async function refreshMeetingFolderContext(
+    ownerUserId: string,
+    itemId: string,
+) {
+    const tasksViewer = {
+        ...(await taskViewerById(ownerUserId)),
+        includeReceived: true,
+    };
+    await editMeeting(ownerUserId, itemId, "manage", async (tx, access) => {
+        if (access.agenda.state !== "planned") return false;
+        const folders = await meetingFolders(tx, itemId, ownerUserId);
+        const folderIds = folders.map((folder) => folder.id);
+        if (!folderIds.length && !access.agenda.snapshotSourceItemId)
+            return false;
+        if (!access.agenda.taskSourceItemId)
+            await snapshotTasks(
+                tx,
+                access.agenda,
+                folderIds,
+                tasksViewer,
+                true,
+            );
+        await carryOver(
+            tx,
+            access,
+            folderIds,
+            ownerUserId,
+            access.viewer.orgUserId,
+        );
+    });
 }
 
 /** Create and file a meeting, returning a visible existing event agenda on repeated requests. */
@@ -413,11 +473,11 @@ export async function prepareMeeting(
                 .insert(recordingFolderAssignments)
                 .values({ userId, itemId, folderId: folder.folderId });
         await notifyFolderReceiversInTx(tx, userId, itemId, folder.folderId);
-        await snapshotTasks(tx, agenda, folder.folderId, tasksViewer);
+        await snapshotTasks(tx, agenda, [folder.folderId], tasksViewer);
         await carryOver(
             tx,
             { agenda, item: { id: itemId } },
-            folder.folderId,
+            [folder.folderId],
             userId,
             viewer.orgUserId,
         );
@@ -554,6 +614,7 @@ export async function listMeetings(
         author: { id: agenda.userId, name: authorName },
         folders: folders
             .filter((folder) => folder.itemId === agenda.meetingItemId)
+            .sort((a, b) => a.id.localeCompare(b.id))
             .map(({ itemId: _itemId, ...folder }) => {
                 const visible = navigation.get(folder.id);
                 return {
@@ -585,6 +646,7 @@ export async function getMeeting(
     userId: string,
     id: string,
     since?: number | string,
+    webContext = false,
 ) {
     const access = await requireMeetingAccess(userId, id);
     let { agenda } = access;
@@ -713,12 +775,25 @@ export async function getMeeting(
                       .limit(1)
                 : [],
         ]);
+    const suggestionTaskIds = webContext
+        ? [
+              ...new Set(
+                  suggestions
+                      .filter((suggestion) => suggestion.state === "open")
+                      .flatMap(
+                          (suggestion) => suggestion.sources?.taskIds ?? [],
+                      ),
+              ),
+          ]
+        : [];
     const visibleTasks = new Map(
         (
-            await getVisibleTasks(
-                viewer,
-                links.map((link) => link.taskId),
-            )
+            await getVisibleTasks(viewer, [
+                ...new Set([
+                    ...links.map((link) => link.taskId),
+                    ...suggestionTaskIds,
+                ]),
+            ])
         ).map((task) => [task.id, task]),
     );
     const tasks = links.flatMap((link) => {
@@ -758,7 +833,28 @@ export async function getMeeting(
                   event.organizer.email.trim().toLowerCase()
                 : null;
     }
-    const invitees = event?.attendees.map(({ name }) => ({ name })) ?? [];
+    const [invitees, folderRecordings] = await Promise.all([
+        event ? meetingInvitees(userId, event.attendees) : [],
+        webContext && folders.length
+            ? db
+                  .selectDistinct({ id: chatterItems.id })
+                  .from(recordingFolderAssignments)
+                  .innerJoin(
+                      chatterItems,
+                      eq(chatterItems.id, recordingFolderAssignments.itemId),
+                  )
+                  .where(
+                      and(
+                          inArray(
+                              recordingFolderAssignments.folderId,
+                              folders.map((folder) => folder.id),
+                          ),
+                          eq(chatterItems.kind, "audio"),
+                          meetingVisibility(userId, access.viewer.orgUserId),
+                      ),
+                  )
+            : [],
+    ]);
     const tree = points.map((point) => ({
         ...readPoint(point),
         summaryOutcome:
@@ -801,6 +897,16 @@ export async function getMeeting(
             name: decryptText(folder.name),
         })),
         invitees,
+        ...(webContext
+            ? {
+                  folderRecordingIds: folderRecordings.map(
+                      (recording) => recording.id,
+                  ),
+                  suggestionTasks: [...visibleTasks.values()]
+                      .filter((task) => suggestionTaskIds.includes(task.id))
+                      .map(({ id, text }) => ({ id, text })),
+              }
+            : {}),
         taskSource:
             sourceRows[0] &&
             (!agenda.recordingItemId || access.recordingVisible)
@@ -1009,76 +1115,37 @@ export async function patchMeeting(
             (input.calendarEventId !== undefined &&
                 input.calendarEventId !== agenda.calendarEventId)
         ) {
-            const [folder] = agenda.meetingItemId
+            const folders = agenda.meetingItemId
                 ? await meetingFolders(tx, agenda.meetingItemId, agenda.userId)
                 : [];
-            if (folder)
-                await snapshotTasks(tx, updated, folder.id, tasksViewer);
+            await snapshotTasks(
+                tx,
+                updated,
+                folders.map((folder) => folder.id),
+                tasksViewer,
+            );
         }
     });
     return getMeeting(userId, id);
 }
 
-/** Unfile a standalone meeting under its edit lock, preserving contribution ownership. */
+/** Unfile a standalone agenda through the ordinary item filing permissions and locks. */
 export async function removeMeetingFromFolder(
     userId: string,
     id: string,
     folderId: string,
 ) {
-    const scope = await editMeeting(userId, id, "edit", async (tx, access) => {
-        const { agenda, viewer } = access;
-        if (!agenda.meetingItemId)
-            throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
-        const [folder] = await tx
-            .select({
-                id: recordingFolders.id,
-                userId: recordingFolders.userId,
-            })
-            .from(recordingFolderAssignments)
-            .innerJoin(
-                recordingFolders,
-                eq(recordingFolders.id, recordingFolderAssignments.folderId),
-            )
-            .where(
-                and(
-                    eq(recordingFolderAssignments.itemId, agenda.meetingItemId),
-                    eq(recordingFolderAssignments.userId, agenda.userId),
-                    eq(recordingFolders.id, folderId),
-                    agenda.userId === userId
-                        ? undefined
-                        : eq(recordingFolders.userId, userId),
-                ),
-            )
-            .for("update", { of: recordingFolders });
-        if (!folder)
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Meeting folder not found",
-                404,
-            );
-        if (folder.userId === viewer.orgUserId) assertOrgScopeWritable();
-        await notifyFolderReceiversInTx(
-            tx,
-            agenda.userId,
-            agenda.meetingItemId,
-            folder.id,
-        );
-        await tx
-            .delete(recordingFolderAssignments)
-            .where(
-                and(
-                    eq(recordingFolderAssignments.itemId, agenda.meetingItemId),
-                    eq(recordingFolderAssignments.userId, agenda.userId),
-                    eq(recordingFolderAssignments.folderId, folder.id),
-                ),
-            );
-        return {
-            org: folder.userId === viewer.orgUserId,
-            ownerId: agenda.userId,
-        };
+    const { agenda } = await requireMeetingAccess(userId, id, "edit");
+    if (!agenda.meetingItemId)
+        throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
+    await removeRecordingFromFolder({
+        userId,
+        recordingId: agenda.meetingItemId,
+        folderId,
+        withdraw: true,
     });
-    if (scope.org) await orgTreeChanged();
-    else await scheduleFolderExportProjection(scope.ownerId);
+    if (agenda.userId === userId)
+        await refreshMeetingFolderContext(userId, agenda.meetingItemId);
 }
 
 /** Delete a standalone meeting and its agenda, leaving real task changes intact. */
@@ -1548,7 +1615,7 @@ export async function meetingFolderPaths(userId: string) {
             parentId: string | null;
         }[],
     ) => {
-        const first = folders[0];
+        const first = [...folders].sort((a, b) => a.id.localeCompare(b.id))[0];
         if (!first) return "";
         let current = nodes.get(receivedBySource.get(first.id) ?? first.id);
         if (!current) return first.name;

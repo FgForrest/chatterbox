@@ -10,6 +10,7 @@ import {
     normalizeLocale,
 } from "@/lib/i18n/config";
 import { createEmailTranslator } from "@/lib/i18n/email-messages";
+import { userTimeZone } from "@/lib/i18n/user-time-zone";
 import { isSmtpConfigured } from "@/lib/smtp";
 import { AccountDeletedEmail } from "./email-templates/account-deleted";
 import { EmailChangeConfirmEmail } from "./email-templates/email-change-confirm";
@@ -548,6 +549,7 @@ export async function sendGraceLastDayEmail(input: {
             const locale = resolveEmailLocale(input.locale);
             const html = await renderEmailHtml(
                 React.createElement(GraceLastDayEmail, {
+                    timeZone: await userTimeZone(input.userId),
                     deletionAt: input.deletionAt,
                     exportUrl: input.exportUrl,
                     reactivateUrl: input.reactivateUrl,

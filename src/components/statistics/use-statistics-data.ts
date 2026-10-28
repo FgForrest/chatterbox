@@ -1,13 +1,11 @@
 "use client";
 
+import { useTimeZone } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-    type StatisticsData,
-    type StatisticsScope,
-    validateTimeZone,
-} from "@/lib/statistics/data";
+import type { StatisticsData, StatisticsScope } from "@/lib/statistics/data";
 
 export function useStatisticsData(initialData: StatisticsData) {
+    const timeZone = useTimeZone() ?? "UTC";
     const [data, setData] = useState(initialData);
     const [scope, setScope] = useState(initialData.scope);
     const [loading, setLoading] = useState(false);
@@ -66,18 +64,14 @@ export function useStatisticsData(initialData: StatisticsData) {
     );
     useEffect(() => {
         mounted.current = true;
-        const browserZone = validateTimeZone(
-            Intl.DateTimeFormat().resolvedOptions().timeZone,
-        );
-        // biome-ignore lint/suspicious/noDocumentCookie: This non-secret SSR hint must work in browsers without Cookie Store.
-        document.cookie = `tz=${encodeURIComponent(browserZone)}; Path=/; Max-Age=31536000; SameSite=Lax`;
-        zone.current = browserZone;
-        if (browserZone !== initialData.tz)
-            void selectScope(wantedScope.current, browserZone);
+        if (zone.current !== timeZone) {
+            zone.current = timeZone;
+            void selectScope(wantedScope.current, timeZone);
+        }
         return () => {
             mounted.current = false;
         };
-    }, [initialData.tz, selectScope]);
+    }, [timeZone, selectScope]);
 
     const warmScope = (next: StatisticsScope) => {
         void fetchScope(next, zone.current).catch(() => undefined);

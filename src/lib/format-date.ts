@@ -19,6 +19,7 @@ export function formatDateTime(
     date: Date | string,
     formatType: DateTimeFormat = "relative",
     locale = "en",
+    timeZone?: string,
 ): string {
     const dateObj = typeof date === "string" ? new Date(date) : date;
     const resolvedLocale = dateLocale(locale);
@@ -30,13 +31,16 @@ export function formatDateTime(
                 locale: resolvedLocale,
             });
         case "absolute":
-            return format(
+            return `${new Intl.DateTimeFormat(locale, {
+                year: "numeric",
+                month: locale.toLowerCase().startsWith("cs")
+                    ? "numeric"
+                    : "short",
+                day: "numeric",
+                timeZone,
+            }).format(
                 dateObj,
-                locale.toLowerCase().startsWith("cs")
-                    ? "d. M. yyyy H:mm"
-                    : "MMM d, yyyy h:mm a",
-                { locale: resolvedLocale },
-            );
+            )} ${new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone }).format(dateObj)}`;
         case "iso":
             return dateObj.toISOString();
         default:

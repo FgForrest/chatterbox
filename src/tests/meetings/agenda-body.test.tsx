@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import {
     act,
+    render as baseRender,
     cleanup,
     fireEvent,
-    render,
     screen,
     waitFor,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import {
     AgendaBody,
     type AgendaVariant,
@@ -52,8 +53,20 @@ vi.mock("@/components/tasks/task-row", () => ({
     ),
 }));
 let server: MeetingDetail;
+function render(ui: Parameters<typeof baseRender>[0]) {
+    return baseRender(ui, { wrapper: ConfirmDialogProvider });
+}
 const fetchMock = vi.fn();
 beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
     server = detail();
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -109,7 +122,7 @@ afterEach(() => {
 it.each([
     ["planned", "Preparing"],
     ["live", "In progress"],
-    ["held", "Without recording"],
+    ["held", "Agenda without recording"],
 ] as const)("renders the %s row state and opens the agenda", (state, label) => {
     const onSelect = vi.fn();
     render(
@@ -141,7 +154,11 @@ it.each([
         />,
     );
     expect(screen.getByText("Recorded")).toBeTruthy();
-    for (const label of ["Preparing", "In progress", "Without recording"])
+    for (const label of [
+        "Preparing",
+        "In progress",
+        "Agenda without recording",
+    ])
         expect(screen.queryByText(label)).toBeNull();
     fireEvent.click(screen.getByRole("button"));
     expect(onSelect).toHaveBeenCalledWith("agenda");
@@ -358,7 +375,7 @@ it.each([
     [
         "NOT_FOUND",
         "Folder not found",
-        "The meeting folder or selected summary provider is unavailable. Check the folder and processing profile.",
+        "The agenda folder or selected summary provider is unavailable. Check the folder and processing profile.",
     ],
     [
         "INVALID_INPUT",
@@ -440,8 +457,9 @@ it("offers one task source per recording across personal and Organization views"
             recordings={[recording, { ...recording, view: "org" }]}
         />,
     );
+    fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
     expect(
-        screen.getAllByRole("option", { name: "Previous meeting" }),
+        screen.getAllByRole("option", { name: /Previous meeting/ }),
     ).toHaveLength(1);
 });
 

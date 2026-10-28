@@ -43,7 +43,8 @@ export function formatWebhookDate(
     value: string | null,
     locale: string,
     never: string,
+    timeZone?: string,
 ): string {
     if (!value) return never;
-    return new Date(value).toLocaleString(locale);
+    return new Date(value).toLocaleString(locale, { timeZone });
 }

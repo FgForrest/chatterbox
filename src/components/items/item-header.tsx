@@ -19,9 +19,10 @@ import { cn } from "@/lib/utils";
 
 interface ItemHeaderProps {
     itemId: string;
-    kind: "audio" | "mail";
+    kind: "audio" | "mail" | "meeting";
     title: string;
-    metadata: string[];
+    metadata: ReactNode[];
+    folders?: ReactNode;
     view?: RecordingView;
     /** The private item has been shared into the Organization. */
     shared?: boolean;
@@ -33,12 +34,13 @@ interface ItemHeaderProps {
     retentionNotes?: string[];
 }
 
-/** Shared page heading for recordings and mail. */
+/** Shared page heading for recordings, mail and meetings. */
 export function ItemHeader({
     itemId,
     kind,
     title,
     metadata,
+    folders,
     view,
     shared = false,
     isOwn = true,
@@ -77,6 +79,8 @@ export function ItemHeader({
         <header
             className={cn(
                 "flex min-w-0 items-start justify-between gap-4 px-1",
+                kind === "meeting" &&
+                    "rounded-r-lg border-l-2 border-meeting bg-meeting/5 py-2 pl-3",
                 organization &&
                     "rounded-r-lg border-l-2 border-organization bg-organization/5 py-2 pl-3",
                 received &&
@@ -85,15 +89,21 @@ export function ItemHeader({
         >
             <div className="min-w-0 flex-1">
                 <h1 className="min-w-0">
-                    <RecordingTitle
-                        recordingId={itemId}
-                        filename={title}
-                        onRenamed={onRenamed}
-                        readOnly={readOnly || received}
-                        view={view}
-                        kind={kind}
-                        className="text-xl font-semibold tracking-tight sm:text-2xl"
-                    />
+                    {kind === "meeting" ? (
+                        <span className="text-xl font-semibold tracking-tight sm:text-2xl">
+                            {title}
+                        </span>
+                    ) : (
+                        <RecordingTitle
+                            recordingId={itemId}
+                            filename={title}
+                            onRenamed={onRenamed}
+                            readOnly={readOnly || received}
+                            view={view}
+                            kind={kind}
+                            className="text-xl font-semibold tracking-tight sm:text-2xl"
+                        />
+                    )}
                 </h1>
                 <div
                     data-slot="item-metadata"
@@ -101,30 +111,33 @@ export function ItemHeader({
                 >
                     {metadata.map((part, index) => (
                         <span
-                            key={`${index}:${part}`}
+                            key={`${index}:${typeof part === "string" ? part : "metadata"}`}
                             className="inline-flex items-center gap-2"
                         >
                             <MetadataSeparator />
                             <span>{part}</span>
                         </span>
                     ))}
-                    {personSharing && isOwn && shareCount > 0 && (
-                        <button
-                            type="button"
-                            onClick={() => setShareOpen(true)}
-                            className="inline-flex items-center gap-1 text-person-share"
-                        >
-                            <MetadataSeparator />
-                            <FolderOutput className="size-4" />
-                            {i18n(
-                                "Shared with {count, plural, one {# person} other {# people}}",
-                                {
-                                    count: shareCount,
-                                },
-                            )}
-                        </button>
-                    )}
-                    {!received && (
+                    {kind !== "meeting" &&
+                        personSharing &&
+                        isOwn &&
+                        shareCount > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setShareOpen(true)}
+                                className="inline-flex items-center gap-1 text-person-share"
+                            >
+                                <MetadataSeparator />
+                                <FolderOutput className="size-4" />
+                                {i18n(
+                                    "Shared with {count, plural, one {# person} other {# people}}",
+                                    {
+                                        count: shareCount,
+                                    },
+                                )}
+                            </button>
+                        )}
+                    {kind !== "meeting" && !received && (
                         <AiCostSummary
                             key={`${itemId}:${view ?? "private"}`}
                             recordingId={itemId}
@@ -156,6 +169,7 @@ export function ItemHeader({
                         </span>
                     )}
                 </div>
+                {folders && <div className="mt-3">{folders}</div>}
                 {retentionNotes.map((note) => (
                     <p
                         key={note}
@@ -165,8 +179,8 @@ export function ItemHeader({
                     </p>
                 ))}
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-                {personSharing && isOwn ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
+                {kind !== "meeting" && personSharing && isOwn ? (
                     <OwnerSharingActions
                         key={itemId}
                         itemId={itemId}
@@ -189,7 +203,7 @@ export function ItemHeader({
                             </Button>
                         </ActionTooltip>
                     </OwnerSharingActions>
-                ) : (
+                ) : kind !== "meeting" ? (
                     <ActionTooltip label={i18n("Copy link")}>
                         <Button
                             type="button"
@@ -201,7 +215,7 @@ export function ItemHeader({
                             <Link className="size-4" />
                         </Button>
                     </ActionTooltip>
-                )}
+                ) : null}
                 {action}
             </div>
         </header>

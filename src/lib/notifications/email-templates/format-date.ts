@@ -1,29 +1,21 @@
-/**
- * Format a date for billing/lifecycle email copy with a pinned
- * locale + UTC timezone. Emails render server-side, so an unpinned
- * `toLocaleDateString(undefined, ...)` uses the server process's
- * locale/timezone rather than the recipient's -- if that ever differs
- * across deployments (or a container's TZ changes), the same instant
- * could render as a different calendar day, showing an inconsistent
- * cutoff/deadline date for a message that's communicating an exact
- * deletion or transition date.
- */
+/** Format lifecycle dates in UTC, or clock deadlines in the recipient's resolved zone. */
 export function formatEmailDate(
     d: Date,
     options?: { month?: "long" | "short"; includeTime?: boolean },
     locale = "en",
+    timeZone = "UTC",
 ): string {
     const datePart = d.toLocaleDateString(locale, {
         year: "numeric",
         month: options?.month ?? "long",
         day: "numeric",
-        timeZone: "UTC",
+        timeZone: options?.includeTime ? timeZone : "UTC",
     });
     if (!options?.includeTime) return datePart;
     const timePart = d.toLocaleTimeString(locale, {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: "UTC",
+        timeZone,
         timeZoneName: "short",
     });
     return `${datePart}, ${timePart}`;
