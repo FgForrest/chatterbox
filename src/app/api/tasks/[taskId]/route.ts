@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { readEventOrigin } from "@/lib/events/origin";
 import {
     enforceTaskWriteRateLimit,
     invalid,
@@ -35,15 +36,23 @@ export const PATCH = apiHandler<TaskContext>(async (request, context) => {
         throw invalid("status is open, done or dropped", "status");
     }
     return NextResponse.json(
-        await updateTask(viewer, taskId, {
-            version: readVersion(body.version),
-            text,
-            note: optionalNullableString(body, "note"),
-            folderId: optionalNullableString(body, "folderId"),
-            assigneePersonId: optionalNullableString(body, "assigneePersonId"),
-            dueDate: optionalNullableString(body, "dueDate"),
-            ticked: body.ticked as boolean | undefined,
-            status: status as "open" | "done" | "dropped" | undefined,
-        }),
+        await updateTask(
+            viewer,
+            taskId,
+            {
+                version: readVersion(body.version),
+                text,
+                note: optionalNullableString(body, "note"),
+                folderId: optionalNullableString(body, "folderId"),
+                assigneePersonId: optionalNullableString(
+                    body,
+                    "assigneePersonId",
+                ),
+                dueDate: optionalNullableString(body, "dueDate"),
+                ticked: body.ticked as boolean | undefined,
+                status: status as "open" | "done" | "dropped" | undefined,
+            },
+            readEventOrigin(request.headers),
+        ),
     );
 });

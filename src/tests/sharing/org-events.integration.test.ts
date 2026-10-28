@@ -152,4 +152,37 @@ describeWithDatabase("Organization events (PostgreSQL)", () => {
         await notifyOrgChange({ type: "tree" });
         await expect(event).resolves.toEqual({ type: "tree" });
     });
+    it("preserves a tab origin through PostgreSQL and both SSE streams", async () => {
+        const aborts = [new AbortController(), new AbortController()];
+        try {
+            const responses = await Promise.all(
+                aborts.map((abort) =>
+                    GET(
+                        new Request("http://app/api/events", {
+                            signal: abort.signal,
+                        }),
+                    ),
+                ),
+            );
+            const readers = responses.map((response) => {
+                const reader = response.body?.getReader();
+                if (!reader) throw new Error("missing stream");
+                return reader;
+            });
+            for (const reader of readers) await reader.read();
+            const event: OrgEvent = {
+                type: "recording",
+                recordingId: "rec-origin",
+                origin: "tab-a",
+            };
+            await notifyOrgChange(event);
+            for (const reader of readers) {
+                expect(
+                    new TextDecoder().decode((await reader.read()).value),
+                ).toBe(`data: ${JSON.stringify(event)}\n\n`);
+            }
+        } finally {
+            for (const abort of aborts) abort.abort();
+        }
+    });
 });

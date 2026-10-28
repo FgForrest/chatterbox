@@ -5,6 +5,7 @@ import {
     cleanup,
     fireEvent,
     render,
+    renderHook,
     screen,
     waitFor,
     within,
@@ -19,12 +20,18 @@ import type { FolderSettingsPanel as FolderSettingsPanelComponent } from "@/comp
 import type { LibraryLocationHeader as LibraryLocationHeaderComponent } from "@/components/dashboard/library-location-header";
 import type { RecordingListHandle } from "@/components/dashboard/recording-list";
 import type { Workstation as WorkstationComponent } from "@/components/dashboard/workstation";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import type { UploadCompletionAction } from "@/hooks/use-upload-queue";
+import { tabEventOrigin } from "@/lib/events/tab-origin";
+import type { OrgClientEvent } from "@/lib/events/types";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
     inFlightActions: new Map<string, "transcribing" | "summarizing">(),
     refresh: vi.fn(),
+    push: vi.fn(),
+    replace: vi.fn(),
+    orgEvent: null as ((event: OrgClientEvent) => void) | null,
     error: vi.fn(),
     custom: vi.fn<typeof toast.custom>(() => "new-item"),
     dismiss: vi.fn<typeof toast.dismiss>(() => "new-item"),
@@ -48,7 +55,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: mocks.refresh }),
+    useRouter: () => ({
+        refresh: mocks.refresh,
+        push: mocks.push,
+        replace: mocks.replace,
+    }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
@@ -104,7 +115,14 @@ vi.mock("@/hooks/use-google-connection", () => ({
     useGoogleConnectOutcome: vi.fn(),
 }));
 
-vi.mock("@/hooks/use-org-events", () => ({ useOrgEvents: vi.fn() }));
+vi.mock("@/hooks/use-org-events", () => ({
+    useOrgEvents: (
+        enabled: boolean,
+        listener: (event: OrgClientEvent) => void,
+    ) => {
+        mocks.orgEvent = enabled ? listener : null;
+    },
+}));
 vi.mock("@/hooks/use-share-refusal", () => ({
     useShareRefusal: () => vi.fn(),
 }));
@@ -285,14 +303,17 @@ vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
         onSelectRecording,
         onDelete,
         onBackToList,
+        contentRevision,
     }: {
         currentRecording: Recording | null;
         itemLinkQuery: string;
         onSelectRecording: (recording: Recording) => void;
         onDelete: (recording: Recording) => Promise<void>;
         onBackToList: () => void;
+        contentRevision: number;
     }) => (
         <div>
+            <span data-testid="content-revision">{contentRevision}</span>
             Selected: {currentRecording?.filename ?? "none"}
             <span data-testid="item-link-query">{itemLinkQuery}</span>
             <button
@@ -798,6 +819,17 @@ describe("Dashboard arrival notices", () => {
 });
 
 beforeEach(() => {
+    mocks.push
+        .mockReset()
+        .mockImplementation((url: string) =>
+            window.history.pushState({}, "", url),
+        );
+    mocks.replace
+        .mockReset()
+        .mockImplementation((url: string) =>
+            window.history.replaceState({}, "", url),
+        );
+    mocks.orgEvent = null;
     mocks.inFlightActions = new Map();
     mocks.refresh.mockClear();
     mocks.error.mockClear();
@@ -1268,7 +1300,7 @@ describe("Workstation selection history", () => {
         },
     };
 
-    it("replaces the first-load entry and pushes a person's selection without server navigation", () => {
+    it("uses native history for initial and user selections without router navigation", () => {
         const push = vi.spyOn(window.history, "pushState");
         const replace = vi.spyOn(window.history, "replaceState");
         render(<Workstation {...props} />);
@@ -1278,9 +1310,89 @@ describe("Workstation selection history", () => {
         fireEvent.click(screen.getByRole("button", { name: second.filename }));
         expect(window.location.search).toBe("?recording=second");
         expect(push).toHaveBeenCalledTimes(1);
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(mocks.replace).not.toHaveBeenCalled();
         expect(mocks.refresh).not.toHaveBeenCalled();
         push.mockRestore();
         replace.mockRestore();
+    });
+
+    it.each([
+        "query",
+        "mobile view",
+    ])("reconciles Back and Forward after refreshing the latest native %s entry", async (entry) => {
+        mocks.replace.mockImplementation(() => {});
+        const third = recording("third", "Third recording");
+        render(<Workstation {...props} recordings={[first, second, third]} />);
+        const refresh = renderHook(useDashboardRefresh).result;
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        if (entry === "query")
+            fireEvent.click(
+                screen.getByRole("button", { name: third.filename }),
+            );
+        else {
+            fireEvent.click(
+                screen.getByRole("button", { name: "Back to list" }),
+            );
+            act(() => refresh.current());
+            mocks.replace.mockClear();
+            mocks.refresh.mockClear();
+            fireEvent.click(
+                screen.getByRole("button", { name: second.filename }),
+            );
+        }
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(mocks.replace).not.toHaveBeenCalled();
+        expect(mocks.refresh).not.toHaveBeenCalled();
+
+        const reconcile = () => {
+            mocks.replace.mockClear();
+            mocks.refresh.mockClear();
+            act(() => refresh.current());
+            expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
+                `${window.location.pathname}${window.location.search}`,
+                { scroll: false },
+            );
+            expect(mocks.replace.mock.invocationCallOrder[0]).toBeLessThan(
+                mocks.refresh.mock.invocationCallOrder[0],
+            );
+            expect(mocks.refresh).toHaveBeenCalledOnce();
+            mocks.replace.mockClear();
+            mocks.refresh.mockClear();
+            act(() => refresh.current());
+            expect(mocks.replace).not.toHaveBeenCalled();
+            expect(mocks.refresh).toHaveBeenCalledOnce();
+        };
+        reconcile();
+
+        await act(async () => {
+            const popped = new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+            window.history.back();
+            await popped;
+        });
+        expect(screen.getByText("Selected: Second recording")).toBeTruthy();
+        expect(window.history.state.mobileView).toBe(
+            entry === "query" ? "detail" : "list",
+        );
+        reconcile();
+
+        await act(async () => {
+            const popped = new Promise((resolve) =>
+                window.addEventListener("popstate", resolve, { once: true }),
+            );
+            window.history.forward();
+            await popped;
+        });
+        expect(
+            screen.getByText(
+                `Selected: ${entry === "query" ? third.filename : second.filename}`,
+            ),
+        ).toBeTruthy();
+        expect(window.history.state.mobileView).toBe("detail");
+        reconcile();
+        expect(mocks.push).not.toHaveBeenCalled();
     });
 
     it("drops playback and every evidence parameter while keeping unrelated query parameters and the hash", () => {
@@ -1336,6 +1448,36 @@ describe("Workstation selection history", () => {
         expect(window.location.search).toBe("?recording=second");
         expect(push).not.toHaveBeenCalled();
         push.mockRestore();
+    });
+
+    it("restores the phone history marker after a server refresh replaces Next's history state", () => {
+        const { rerender } = render(<Workstation {...props} />);
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(window.history.state.mobileView).toBe("detail");
+        window.history.replaceState({ __NA: true }, "", window.location.href);
+        rerender(<Workstation {...props} recordings={[...props.recordings]} />);
+        expect(window.history.state.mobileView).toBe("detail");
+        fireEvent.click(screen.getByRole("button", { name: "Back to list" }));
+        window.history.replaceState({ __NA: true }, "", window.location.href);
+        rerender(<Workstation {...props} recordings={[...props.recordings]} />);
+        expect(window.history.state.mobileView).toBe("list");
+    });
+
+    it("keeps the next refresh cheap after restoring only mobile metadata from a Next render", () => {
+        mocks.replace.mockImplementation(() => {});
+        const { rerender } = render(<Workstation {...props} />);
+        const refresh = renderHook(useDashboardRefresh).result;
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        act(() => refresh.current());
+        expect(mocks.replace).toHaveBeenCalledOnce();
+        window.history.replaceState({ __NA: true }, "", window.location.href);
+        rerender(<Workstation {...props} recordings={[...props.recordings]} />);
+        expect(window.history.state.mobileView).toBe("detail");
+        mocks.replace.mockClear();
+        mocks.refresh.mockClear();
+        act(() => refresh.current());
+        expect(mocks.replace).not.toHaveBeenCalled();
+        expect(mocks.refresh).toHaveBeenCalledOnce();
     });
 
     it("replaces the URL after deletion", async () => {
@@ -1394,6 +1536,8 @@ describe("Workstation selection history", () => {
         render(<Workstation {...props} />);
         fireEvent.click(screen.getByRole("button", { name: "Open folder" }));
         expect(window.location.search).toBe("?folder=personal-child");
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(mocks.replace).not.toHaveBeenCalled();
         expect(screen.getByTestId("location").textContent).toBe(
             "personal-child",
         );
@@ -2059,5 +2203,70 @@ describe("Workstation folder locations", () => {
         expect(
             screen.getByRole("combobox", { name: "Parent folder" }).textContent,
         ).toBe("Organization");
+    });
+});
+
+describe("Workstation task event origins", () => {
+    it.each([
+        "private",
+        "org",
+    ] as const)("ignores only this tab's task echoes in %s", async (view) => {
+        vi.useFakeTimers();
+        try {
+            const item = { ...recording("origin-item", "Origin test"), view };
+            window.history.replaceState(
+                {},
+                "",
+                `/dashboard?recording=${item.id}${view === "org" ? "&view=org" : ""}`,
+            );
+            render(
+                <Workstation
+                    {...baseProps}
+                    recordings={[{ ...item, view: "private" }]}
+                    organizationLibrary={{
+                        recordings: [{ ...item, view: "org" }],
+                        transcriptions: new Map(),
+                        transcriptVariants: new Map(),
+                    }}
+                />,
+            );
+            mocks.refresh.mockClear();
+            act(() =>
+                mocks.orgEvent?.({
+                    type: "recording",
+                    recordingId: item.id,
+                    origin: tabEventOrigin(),
+                }),
+            );
+            await act(async () => {
+                vi.advanceTimersByTime(300);
+            });
+            expect(mocks.refresh).not.toHaveBeenCalled();
+            expect(screen.getByTestId("content-revision").textContent).toBe(
+                "0",
+            );
+            for (const origin of ["other-tab", undefined]) {
+                const before = Number(
+                    screen.getByTestId("content-revision").textContent,
+                );
+                act(() =>
+                    mocks.orgEvent?.({
+                        type: "recording",
+                        recordingId: item.id,
+                        ...(origin ? { origin } : {}),
+                    }),
+                );
+                await act(async () => {
+                    vi.advanceTimersByTime(300);
+                });
+                expect(mocks.refresh).toHaveBeenCalled();
+                expect(
+                    Number(screen.getByTestId("content-revision").textContent),
+                ).toBe(before + (view === "org" ? 1 : 0));
+                mocks.refresh.mockClear();
+            }
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

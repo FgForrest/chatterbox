@@ -1,6 +1,6 @@
 export type OrgClientEvent =
     | { type: "tree" }
-    | { type: "recording"; recordingId: string };
+    | { type: "recording"; recordingId: string; origin?: string };
 
 export type ClientEvent = OrgClientEvent | { type: "mail" } | { type: "share" };
 
@@ -21,13 +21,22 @@ export function parseClientEvent(data: string): ClientEvent | null {
                 return { type: value.type };
             }
             if (
-                keys.length === 2 &&
+                (keys.length === 2 ||
+                    (keys.length === 3 &&
+                        "origin" in value &&
+                        typeof value.origin === "string")) &&
                 value.type === "recording" &&
                 "recordingId" in value &&
                 typeof value.recordingId === "string" &&
                 value.recordingId.length > 0
             ) {
-                return { type: "recording", recordingId: value.recordingId };
+                return {
+                    type: "recording",
+                    recordingId: value.recordingId,
+                    ...("origin" in value && typeof value.origin === "string"
+                        ? { origin: value.origin }
+                        : {}),
+                };
             }
         }
     } catch {}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { readEventOrigin } from "@/lib/events/origin";
 import {
     searchAssignedMergeCandidates,
     searchMergeCandidates,
@@ -30,11 +31,17 @@ export const POST = apiHandler<TaskContext>(async (request, context) => {
         throw invalid("targetTaskId is required", "targetTaskId");
     }
     return NextResponse.json(
-        await mergeTaskIntoTask(viewer, taskId, body.targetTaskId, {
-            sourceVersion: readVersion(body.sourceVersion),
-            targetVersion: readVersion(body.targetVersion),
-            confirmPrivateToShared: body.confirmPrivateToShared === true,
-        }),
+        await mergeTaskIntoTask(
+            viewer,
+            taskId,
+            body.targetTaskId,
+            {
+                sourceVersion: readVersion(body.sourceVersion),
+                targetVersion: readVersion(body.targetVersion),
+                confirmPrivateToShared: body.confirmPrivateToShared === true,
+            },
+            readEventOrigin(request.headers),
+        ),
     );
 });
 
