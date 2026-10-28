@@ -259,7 +259,13 @@ export function useTranscriptionSummary({
             .then((res) => (res.ok ? res.json() : null))
             .then((data: SettingsProfilesPage | null) => {
                 if (!data) return;
-                setSummaryProfileOptions(data.profiles);
+                setSummaryProfileOptions(
+                    view === "org"
+                        ? data.profiles.filter(
+                              (profile) => profile.scope === "organization",
+                          )
+                        : data.profiles,
+                );
             })
             .catch(() => {})
             .finally(() => {
@@ -268,7 +274,7 @@ export function useTranscriptionSummary({
                 }
             });
         return () => controller.abort();
-    }, [profileChannel]);
+    }, [profileChannel, view]);
 
     useEffect(() => {
         if (

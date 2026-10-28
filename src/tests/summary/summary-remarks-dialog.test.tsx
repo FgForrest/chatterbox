@@ -45,12 +45,16 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-describe("summary remarks dialog", () => {
+describe.each([
+    "private",
+    "org",
+] as const)("summary remarks dialog in %s", (view) => {
     it("shows the author, time, stored text and actual next-run model", async () => {
         render(
             <SummaryRemarksDialog
                 itemId="item"
                 profileId="profile"
+                view={view}
                 onClose={close}
                 onRun={run}
             />,
@@ -61,7 +65,7 @@ describe("summary remarks dialog", () => {
         expect(document.querySelector("time")?.dateTime).toBe(remark.createdAt);
         expect(screen.getByText("local-model")).toBeTruthy();
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/recordings/item/summary/remarks?profileId=profile",
+            `/api/recordings/item/summary/remarks?profileId=profile${view === "org" ? "&view=org" : ""}`,
             expect.any(Object),
         );
     });
@@ -79,6 +83,7 @@ describe("summary remarks dialog", () => {
             <SummaryRemarksDialog
                 itemId="item"
                 profileId="profile"
+                view={view}
                 onClose={close}
                 onRun={run}
             />,
@@ -93,7 +98,7 @@ describe("summary remarks dialog", () => {
             ),
         );
         expect(fetchMock.mock.calls[1]).toEqual([
-            "/api/recordings/item/summary/remarks",
+            `/api/recordings/item/summary/remarks${view === "org" ? "?view=org" : ""}`,
             expect.objectContaining({
                 method: "POST",
                 body: JSON.stringify({ text: "Keep the deadline." }),
@@ -109,6 +114,7 @@ describe("summary remarks dialog", () => {
             <SummaryRemarksDialog
                 itemId="item"
                 profileId="profile"
+                view={view}
                 onClose={close}
                 onRun={run}
             />,
@@ -118,7 +124,7 @@ describe("summary remarks dialog", () => {
         expect(screen.queryByText(remark.text)).toBeNull();
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
         expect(fetchMock.mock.calls[1]).toEqual([
-            "/api/recordings/item/summary/remarks?remarkId=remark-1",
+            `/api/recordings/item/summary/remarks?remarkId=remark-1${view === "org" ? "&view=org" : ""}`,
             { method: "DELETE" },
         ]);
         expect(run).not.toHaveBeenCalled();
@@ -130,6 +136,7 @@ describe("summary remarks dialog", () => {
             <SummaryRemarksDialog
                 itemId="item"
                 profileId="profile"
+                view={view}
                 onClose={close}
                 onRun={run}
             />,

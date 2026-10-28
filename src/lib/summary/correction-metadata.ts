@@ -16,6 +16,7 @@ export async function summaryCorrectionMetadata(
               .limit(1)
         : [];
     return {
+        canEditSummary: ownerView && stored.source === "riffado",
         summaryId: stored.id,
         speakerNumberOffset: stored.speakerNumberOffset,
         editedAt: stored.editedAt?.toISOString() ?? null,

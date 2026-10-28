@@ -290,7 +290,7 @@ export async function generateMailSummary(
         "extractions",
     );
     const corrections =
-        ctx.view === "private" && ctx.actorUserId === ctx.ownerUserId
+        ctx.actorUserId === ctx.ownerUserId
             ? await summaryCorrectionsContext(
                   ctx.ownerUserId,
                   itemId,

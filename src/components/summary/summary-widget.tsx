@@ -201,7 +201,7 @@ export function SummaryWidget({
     const runSummary = () => requestSummary();
     const canCorrect =
         canChange &&
-        (view ?? "private") === "private" &&
+        view !== "received" &&
         source === "riffado" &&
         hasSummary &&
         summaryData?.canEditSummary !== false;
@@ -1000,15 +1000,17 @@ export function SummaryWidget({
                         <DialogTitle>{i18n("Summarize again?")}</DialogTitle>
                         <DialogDescription>
                             {i18n(
-                                "You edited this summary by hand. A new summary replaces those edits. Stored remarks still apply.",
+                                "A new summary replaces the hand edits. Stored remarks apply only to runs by the owner.",
                             )}
                         </DialogDescription>
                     </DialogHeader>
-                    <p className="text-sm text-muted-foreground">
-                        {i18n(
-                            "To correct part of it, write a remark. The model revises the edited text and keeps the hand-edited marker.",
-                        )}
-                    </p>
+                    {canCorrect && (
+                        <p className="text-sm text-muted-foreground">
+                            {i18n(
+                                "To correct part of it, write a remark. The model revises the edited text and keeps the hand-edited marker.",
+                            )}
+                        </p>
+                    )}
                     <DialogFooter className="sm:justify-between">
                         {canCorrect && (
                             <Button
@@ -1056,6 +1058,7 @@ export function SummaryWidget({
                 <SummaryRemarksDialog
                     key={itemId}
                     itemId={itemId}
+                    view={view}
                     profileId={summaryProfileId}
                     onClose={() => setRemarksOpen(false)}
                     onRun={() =>

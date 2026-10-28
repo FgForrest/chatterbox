@@ -461,7 +461,7 @@ export async function generateSummaryForRecording(
         : [];
     const plaudHints = buildPlaudActionItemHints(plaudActionItems);
     const corrections =
-        ctx.view === "private" && ctx.actorUserId === ctx.ownerUserId
+        ctx.actorUserId === ctx.ownerUserId
             ? await summaryCorrectionsContext(
                   ctx.ownerUserId,
                   recordingId,

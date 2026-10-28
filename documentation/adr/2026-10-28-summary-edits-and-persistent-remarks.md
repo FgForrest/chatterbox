@@ -1,7 +1,7 @@
 ---
 title: Hand-edited summaries survive automatic processing and owner remarks replay on later runs
 date: 2026-10-28
-updated: 2026-10-28 16:51
+updated: 2026-10-28 17:06
 status: proposed
 kind: feature
 issues: [299]
@@ -16,8 +16,9 @@ relates: []
 
 The owner can edit a generated summary's Markdown and key points, or revise it through stored
 remarks. Hand edits block automatic replacement, including transcript replacement. Remarks belong
-to the item and apply to every later summary run by the owner in the private view, even after an
-explicit regeneration. Organization-view generation never reads or sends the owner's remarks.
+to the item and apply to later summary runs by the owner in either their private or Organization
+view, even after explicit regeneration. A manual run by a curator or the Organization account
+never reads or sends the owner's remarks.
 
 ## Why
 
@@ -51,18 +52,29 @@ owner could neither edit the summary directly nor attach persistent corrections 
 
 ## Decision
 
-Protect hand-edited generated summaries until the owner explicitly confirms replacement. Store
+Protect hand-edited generated summaries until a permitted writer explicitly confirms replacement. Store
 encrypted remarks separately from summary rows. A remark run reads the preferred input, current
 summary and all remarks in a USER message, gives the owner's corrections priority over conflicting
-source content, and runs once through the existing manual job queue. Later owner/private runs read
-the remarks without the old summary. Organization-view runs, including those requested by the
-owner or a curator, never read or decrypt remarks. This keeps private correction inputs out of
-another actor's provider request. No remark text enters the system instructions.
+source content, and runs once through the existing manual job queue. Later runs read the remarks
+without the old summary exactly when the actor is the owner, in either view. Automatic runs on
+shared items run as the owner and retain corrections. Manual runs by curators or the Organization
+account never read or decrypt remarks, deliberately excepting them from “every later run includes
+the remarks”. Those runs store an applied-remark count of zero, removing the provenance chip until
+the owner next runs the summary; the stored remarks remain. This keeps private correction inputs
+out of another actor's provider request. No remark text enters the system instructions.
 
 ## Key technical details
 
-- Edits and remark access require the owner in the private view, including when the item is
-  shared. Plaud summaries, recipients and Organization views have no edit or remark controls.
+- Edits and remark access require the item owner in a private view or, while shared, the
+  Organization view of their own page. Received views, Plaud summaries, the Organization account,
+  curators and other members get no correction controls or remark text. A correction run from the
+  Organization view uses its Organization job subject. Both views read and update the same row;
+  the panel preserves its shared scope, Organization templates and profile resolution. The
+  Organization picker offers Organization profiles, matching the route's existing selection rule.
+  Generation responses carry the correction permission alongside provenance, so completing a run
+  cannot temporarily expose correction actions to a different writer.
+- Every writer allowed to regenerate, including curators and the Organization account, must confirm
+  replacement of hand edits. Only the owner gets the confirmation's link to write a remark.
 - The summary transaction locks the item, rechecks the writer and fences row identity, revision
   and remark membership. Explicit expected absence differs from revision zero on a stored row.
   Editors and replacement confirmations retain the version present when opened; a conflict keeps
@@ -86,10 +98,13 @@ another actor's provider request. No remark text enters the system instructions.
 
 ## Verification
 
-`src/tests/regressions/299-summary-edit-remarks.integration.test.ts`: 48 PostgreSQL cases cover
+`src/tests/regressions/299-summary-edit-remarks.integration.test.ts`: 66 PostgreSQL cases cover
 recording/mail authorization, private remark disclosure, identity/revision races, immutable save
 responses, speaker-reference removal and exports, automatic protection, Learn catch-up, usage,
-erasure, retention and backup contents. `299-summary-editor-refresh.test.tsx` has 9 real-hook/widget
+erasure, retention and backup contents. Shared-owner cases exercise both views, Organization job
+subjects and automatic remark replay; curator and Organization runs never read remarks and clear
+applied provenance. Real-resolver cases verify Organization placement and hand-picked profiles for
+owners, curators and the Organization account. `299-summary-editor-refresh.test.tsx` has 9 real-hook/widget
 and dashboard-panel cases; `299-summary-speaker-edit.test.ts` has 3 speaker round-trip cases.
 The complete unit suite passed 6,918 tests with 2,715 skipped and no failures under Node 22.
 The area integration run passed 1,686 cases across 97 files, with 25 cases in two Keycloak suites
@@ -104,8 +119,14 @@ persistence paths ran, and the demo provider configuration was restored afterwar
 
 - New summary writers must preserve the transaction fences and respect edited output. A stale
   edited summary is a deliberate durable artifact, even after a new preferred transcript appears.
-- Remarks are owner-private inputs although their resulting summary is shared. Deleting a remark
-  affects future runs; it does not rewrite the current summary or remove its provenance marker.
+- Remarks are owner-private inputs although their resulting summary is shared. Replay follows the
+  actor, not the view: another actor's manual run excludes them and clears applied provenance without
+  deleting them. Deleting a remark affects future owner runs; it does not rewrite the current
+  summary or remove its provenance marker.
+- The selected-profile revision loader retains the request's actual view. Organization-view
+  resolution is unchanged; an explicitly selected personal profile remains usable from the owner's
+  private view while shared. Placement profiles and hand-picked Organization profiles keep their
+  existing precedence.
 - A failed model run leaves its stored remarks available to retry. Revision conflicts require a
   reload; no automatic merge of competing human edits is attempted.
 
@@ -118,4 +139,5 @@ persistence paths ran, and the demo provider configuration was restored afterwar
 ## Timeline
 
 - **2026-10-28**: approved issue #299 design implemented in the stacked feature worktree;
-  awaiting review and merge.
+  awaiting review and merge. Owner corrections are available in either own view; replay is limited
+  to runs whose actor is the owner.

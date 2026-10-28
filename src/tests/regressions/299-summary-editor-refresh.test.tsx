@@ -91,8 +91,23 @@ beforeEach(() => {
                         name: "Notes",
                         isDefault: true,
                         scope: "personal",
+                        isYourDefault: true,
+                    },
+                    {
+                        id: "org-profile",
+                        name: "Organization notes",
+                        isDefault: true,
+                        scope: "organization",
+                        isYourDefault: false,
                     },
                 ],
+            });
+        if (url.includes("/remarks"))
+            return Response.json({
+                remarks: [],
+                profileName: "Organization notes",
+                provider: "Local provider",
+                model: "local-model",
             });
         if (init?.method === "PUT")
             return Response.json(
@@ -217,10 +232,10 @@ describe("dashboard transcription panel with the real summary widget and hook", 
     it.each([
         { view: undefined, readOnly: false, icons: true },
         { view: "private" as const, readOnly: false, icons: true },
-        { view: "org" as const, readOnly: false, icons: false },
+        { view: "org" as const, readOnly: false, icons: true },
         { view: "org" as const, readOnly: true, icons: false },
         { view: "received" as const, readOnly: true, icons: false },
-    ])("keeps the explicit $view view of an item that is shared, read-only: $readOnly", async ({
+    ])("uses the shared panel view for the summary of a $view item, read-only: $readOnly", async ({
         view,
         readOnly,
         icons,
@@ -258,8 +273,21 @@ describe("dashboard transcription panel with the real summary widget and hook", 
                 String(summaryGet?.[0]),
                 "https://example.test",
             ).searchParams.get("view") ?? "private",
-        ).toBe(view ?? "private");
+        ).toBe(view === "received" ? "received" : "org");
         if (icons) {
+            fireEvent.click(
+                screen.getByRole("button", { name: "Summary remarks" }),
+            );
+            await screen.findByLabelText("New remark");
+            const remarksGet = requests.mock.calls.find(([url]) =>
+                String(url).includes("/remarks?"),
+            );
+            expect(String(remarksGet?.[0])).toContain(
+                "profileId=org-profile&view=org",
+            );
+            fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        }
+        if (icons && view !== "org") {
             fireEvent.click(screen.getByRole("button", { name: "Plaud" }));
             await waitFor(() =>
                 expect(

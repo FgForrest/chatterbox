@@ -51,7 +51,12 @@ export function assertSummaryOwner(
     access: ReadableRecordingViewContext,
     actorUserId: string,
 ): void {
-    if (access.view !== "private" || access.ownerUserId !== actorUserId)
+    if (
+        access.view === "received" ||
+        access.role !== "owner" ||
+        access.ownerUserId !== actorUserId ||
+        access.orgUserId === actorUserId
+    )
         throw recordingGone();
     assertMayChange(access, actorUserId, false);
 }

@@ -158,7 +158,11 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const reviseWithRemarks = body.reviseWithRemarks === true;
     const replaceEdited = body.replaceEdited === true;
-    if (reviseWithRemarks || replaceEdited) assertSummaryOwner(access, userId);
+    if (reviseWithRemarks) {
+        assertSummaryOwner(access, userId);
+        if (requestedSummarySource(request) !== "riffado")
+            throw recordingGone();
+    }
     const editState = await summaryEditState(access.ownerUserId, id);
     if (reviseWithRemarks && !editState)
         throw new AppError(
@@ -289,7 +293,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         return NextResponse.json({
             ...(await summaryCorrectionMetadata(
                 stored,
-                view === "private" && access.ownerUserId === session.user.id,
+                view !== "received" &&
+                    access.role === "owner" &&
+                    access.orgUserId !== session.user.id,
             )),
             summary: stored.summary,
             keyPoints: stored.keyPoints,
@@ -389,8 +395,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                             result: {
                                 ...(await summaryCorrectionMetadata(
                                     stored,
-                                    view === "private" &&
-                                        access.ownerUserId === session.user.id,
+                                    view !== "received" &&
+                                        access.role === "owner" &&
+                                        access.orgUserId !== session.user.id,
                                 )),
                                 summary: stored.summary ?? "",
                                 keyPoints: stored.keyPoints,
@@ -609,7 +616,9 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     return NextResponse.json({
         ...(await summaryCorrectionMetadata(
             stored,
-            view === "private" && access.ownerUserId === session.user.id,
+            view !== "received" &&
+                access.role === "owner" &&
+                access.orgUserId !== session.user.id,
         )),
         summary: stored.summary,
         profileId: readableProfile?.id ?? null,
@@ -637,7 +646,10 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         activeJob: source === "riffado" ? activeJob : undefined,
         itemProfileId,
         canEditSummary:
-            view === "private" && access.ownerUserId === session.user.id,
+            source === "riffado" &&
+            view !== "received" &&
+            access.role === "owner" &&
+            access.orgUserId !== session.user.id,
         ...agendaPresence,
     });
 });

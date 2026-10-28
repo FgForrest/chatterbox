@@ -46,7 +46,12 @@ export const GET = apiHandler<Context>(async (request, context) => {
               actorUserId: userId,
               view: access.view,
           })
-        : await resolveManualItemProfile(id, "private", userId, userId);
+        : await resolveManualItemProfile(
+              id,
+              access.view,
+              access.ownerUserId,
+              userId,
+          );
     if (!profile || profile.profile.channel !== access.kind)
         throw new AppError(
             ErrorCode.INVALID_INPUT,

@@ -356,7 +356,6 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     });
 
     it.each([
-        { view: "org" as const },
         { view: "received" as const },
         { source: "plaud" as const },
     ])("hides correction actions for $view $source even if other changes are allowed", (options) => {
@@ -367,6 +366,55 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(
             screen.queryByRole("button", { name: "Summary remarks" }),
         ).toBeNull();
+    });
+
+    it.each([
+        "private",
+        "org",
+    ] as const)("offers owner corrections in the %s view", (view) => {
+        state.summaryData = summary({ canEditSummary: true });
+        renderWidget(kind, { view });
+        expect(
+            screen.getByRole("button", { name: "Edit summary" }),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Summary remarks" }),
+        ).toBeTruthy();
+    });
+
+    it.each([
+        "Organization account",
+        "curator",
+        "member",
+        "recipient",
+    ])("hides corrections for a %s from the server permission", () => {
+        state.summaryData = summary({
+            canEditSummary: false,
+            editedAt: "2026-10-28T10:00:00Z",
+        });
+        renderWidget(kind, { view: "org" });
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Re-summarize" }));
+        expect(screen.getByRole("dialog")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Write a remark" }),
+        ).toBeNull();
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        fireEvent.click(
+            [...screen.getByRole("dialog").querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith(undefined, {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 0,
+        });
     });
 
     it("shows a settled shared step without a generating state", () => {

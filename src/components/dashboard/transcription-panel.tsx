@@ -1218,7 +1218,7 @@ export function TranscriptionPanel({
                                 summaryTranscript ||
                                     (orgView && transcriptList.length > 0),
                             )}
-                            view={recording.view ?? "private"}
+                            view={view}
                             source={summarySource}
                             canSwitchSource={canHavePlaudSummary}
                             onSourceChange={(source) =>

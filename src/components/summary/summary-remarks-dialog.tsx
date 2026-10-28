@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { SummaryRemark } from "@/lib/summary/edits";
 
 interface RemarksData {
@@ -28,11 +29,13 @@ interface RemarksData {
 export function SummaryRemarksDialog({
     itemId,
     profileId,
+    view,
     onClose,
     onRun,
 }: {
     itemId: string;
     profileId: string;
+    view?: RecordingView;
     onClose: () => void;
     onRun: () => void;
 }) {
@@ -46,9 +49,15 @@ export function SummaryRemarksDialog({
     const url = `/api/recordings/${itemId}/summary/remarks`;
     useEffect(() => {
         const controller = new AbortController();
-        fetch(`${url}?profileId=${encodeURIComponent(profileId)}`, {
-            signal: controller.signal,
-        })
+        fetch(
+            withRecordingView(
+                `${url}?profileId=${encodeURIComponent(profileId)}`,
+                view,
+            ),
+            {
+                signal: controller.signal,
+            },
+        )
             .then(async (response) => {
                 if (!response.ok) throw new Error("remarks unavailable");
                 return response.json() as Promise<RemarksData>;
@@ -58,7 +67,7 @@ export function SummaryRemarksDialog({
                 if (!controller.signal.aborted) setFailed(true);
             });
         return () => controller.abort();
-    }, [url, profileId]);
+    }, [url, profileId, view]);
     const remove = async (remarkId: string) => {
         if (!data) return;
         const previous = data;
@@ -69,7 +78,10 @@ export function SummaryRemarksDialog({
         setBusy(true);
         try {
             const response = await fetch(
-                `${url}?remarkId=${encodeURIComponent(remarkId)}`,
+                withRecordingView(
+                    `${url}?remarkId=${encodeURIComponent(remarkId)}`,
+                    view,
+                ),
                 { method: "DELETE" },
             );
             if (!response.ok) throw new Error("remark deletion failed");
@@ -95,7 +107,7 @@ export function SummaryRemarksDialog({
                     </DialogTitle>
                     <DialogDescription>
                         {i18n(
-                            "Describe what the summary got wrong. The model reads the source, current summary and all remarks to correct it. Stored remarks also apply to every later summary of this item.",
+                            "Describe what the summary got wrong. The model reads the source, current summary and all remarks to correct it. Stored remarks also apply to every later summary run by you, including automatic runs.",
                         )}
                     </DialogDescription>
                 </DialogHeader>
@@ -221,13 +233,17 @@ export function SummaryRemarksDialog({
                             setBusy(true);
                             try {
                                 if (text.trim()) {
-                                    const response = await fetch(url, {
-                                        method: "POST",
-                                        headers: {
-                                            "Content-Type": "application/json",
+                                    const response = await fetch(
+                                        withRecordingView(url, view),
+                                        {
+                                            method: "POST",
+                                            headers: {
+                                                "Content-Type":
+                                                    "application/json",
+                                            },
+                                            body: JSON.stringify({ text }),
                                         },
-                                        body: JSON.stringify({ text }),
-                                    });
+                                    );
                                     if (!response.ok)
                                         throw new Error("remark save failed");
                                     const saved =

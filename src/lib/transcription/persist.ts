@@ -653,9 +653,9 @@ export async function upsertEnhancement(
                 (args.expectedSummaryRevision !== undefined &&
                     args.expectedSummaryId === undefined) ||
                 (existing?.editedAt &&
-                    (actorUserId !== userId ||
-                        args.view === "org" ||
-                        args.expectedSummaryRevision === undefined)) ||
+                    args.expectedSummaryRevision === undefined) ||
+                (args.summaryWriteMode === "remarks" &&
+                    actorUserId !== userId) ||
                 (args.remarksFingerprint !== undefined &&
                     args.remarksFingerprint !==
                         summaryRemarksFingerprint(

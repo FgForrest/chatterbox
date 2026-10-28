@@ -231,6 +231,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
 
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({
+            canEditSummary: true,
             summaryId: "summary-row",
             speakerNumberOffset: null,
             editedAt: null,
@@ -475,6 +476,7 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({
             summary: "Plaud summary",
+            canEditSummary: false,
             source: "plaud",
             transcriptionId: "tr-plaud",
             provider: "plaud",

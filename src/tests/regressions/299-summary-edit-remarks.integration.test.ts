@@ -15,10 +15,13 @@ import {
     aiUsageEvents,
     asyncJobs,
     chatterItems,
+    itemProcessing,
     itemShares,
     mailContents,
     mailMessages,
     people,
+    processingProfileRevisions,
+    processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
     recordingTaskRejections,
@@ -114,12 +117,14 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: mocks.sidecars,
     removeRecordingSidecar: mocks.removeSidecar,
 }));
-vi.mock("@/lib/profiles/resolve", () => ({
+vi.mock("@/lib/profiles/resolve", async (original) => ({
+    ...(await original<typeof profilesModule>()),
     resolveItemProfile: async () => testProfile(),
     resolveSelectedProfile: async () => testProfile(),
     loadSelectedProfileRevision: async () => testProfile(),
 }));
-vi.mock("@/lib/profiles/resolve-manual", () => ({
+vi.mock("@/lib/profiles/resolve-manual", async (original) => ({
+    ...(await original<typeof manualProfilesModule>()),
     resolveManualItemProfile: async () => testProfile(),
 }));
 vi.mock("@/lib/learn/llm-input", () => ({
@@ -198,9 +203,11 @@ import {
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import { planAdvance } from "@/lib/pipeline/plan";
 import * as profilesModule from "@/lib/profiles/resolve";
+import * as manualProfilesModule from "@/lib/profiles/resolve-manual";
 import { buildSeedProfiles } from "@/lib/profiles/seed";
 import { eraseLocalArtifact, eraseMailSummary } from "@/lib/recordings/erase";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
+import { summaryCorrectionMetadata } from "@/lib/summary/correction-metadata";
 import * as correctionsModule from "@/lib/summary/corrections";
 import { summaryCorrectionsContext } from "@/lib/summary/corrections";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
@@ -439,23 +446,26 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                         ),
                     )
             )[0];
-        const edit = () =>
+        const edit = (query = "") =>
             editRoute(
-                request({
-                    summary: "[Jitka Dvořáková](#speaker-1) corrected it.",
-                    keyPoints: ["New point"],
-                    revision: 0,
-                    summaryId: "original-summary",
-                }),
+                request(
+                    {
+                        summary: "[Jitka Dvořáková](#speaker-1) corrected it.",
+                        keyPoints: ["New point"],
+                        revision: 0,
+                        summaryId: "original-summary",
+                    },
+                    query,
+                ),
                 context,
             );
-        const add = () =>
+        const add = (query = "") =>
             addRemark(
                 request(
                     {
                         text: "The deadline is Thursday, even if the source says Friday.",
                     },
-                    "",
+                    query,
                     "/remarks",
                 ),
                 context,
@@ -533,7 +543,7 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
             );
         });
 
-        it("refuses correction actions in Organization and received views", async () => {
+        async function share() {
             mocks.org = "org";
             await db()
                 .insert(recordingFolders)
@@ -549,86 +559,223 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 itemId: ITEM,
                 folderId: "shared-folder",
             });
-            for (const actor of ["owner", "reader", "org"]) {
-                mocks.actor = actor;
+        }
+
+        it.each([
+            "private",
+            "org",
+        ] as const)("lets the owner correct one shared row from the %s view", async (view) => {
+            await share();
+            const query = `?view=${view}`;
+            expect(
+                await (
+                    await getSummary(request(undefined, query), context)
+                ).json(),
+            ).toMatchObject({ canEditSummary: true });
+            expect((await edit(query)).status).toBe(200);
+            expect((await add(query)).status).toBe(200);
+            const listed = await getRemarks(
+                request(undefined, query, "/remarks"),
+                context,
+            );
+            expect(listed.status).toBe(200);
+            expect((await listed.json()).remarks).toHaveLength(1);
+            const response = await summaryRoute(
+                new Request(
+                    `https://app.example.test/api/recordings/${ITEM}/summary${query}`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Accept: "text/event-stream",
+                        },
+                        body: JSON.stringify({
+                            reviseWithRemarks: true,
+                            summaryId: "original-summary",
+                            revision: 1,
+                        }),
+                    },
+                ),
+                context,
+            );
+            expect(response.status).toBe(200);
+            await response.body?.cancel();
+            const [job] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.kind, "summary"));
+            expect(job?.subjectId).toBe(view === "org" ? `org:${ITEM}` : ITEM);
+            expect(job?.payload).toMatchObject({
+                ...(view === "org" ? { view } : {}),
+                reviseWithRemarks: true,
+            });
+            if (!job) throw new Error("missing summary job");
+            await db()
+                .update(asyncJobs)
+                .set({ status: "processing" })
+                .where(eq(asyncJobs.id, job.id));
+            await summaryJobHandler.run({
+                payload: {
+                    recordingId: ITEM,
+                    view,
+                    trigger: "manual",
+                    reviseWithRemarks: true,
+                    expectedSummaryId: "original-summary",
+                    expectedSummaryRevision: 1,
+                },
+                userId: "owner",
+                jobId: job.id,
+                attempt: 1,
+                maxAttempts: 3,
+                signal: new AbortController().signal,
+                reportProgress: async () => {},
+            });
+            const rows = await db()
+                .select()
+                .from(aiEnhancements)
+                .where(eq(aiEnhancements.itemId, ITEM));
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                id: "original-summary",
+                userId: "owner",
+                revision: 2,
+                remarksAppliedCount: 1,
+            });
+            expect(
+                JSON.stringify(mocks.completion.mock.calls[0]?.[0].messages),
+            ).toContain("deadline is Thursday");
+            for (const readView of ["private", "org"]) {
                 expect(
-                    (
-                        await editRoute(
-                            request(
-                                { summary: "No", keyPoints: [], revision: 0 },
-                                "?view=org",
-                            ),
+                    await (
+                        await getSummary(
+                            request(undefined, `?view=${readView}`),
                             context,
                         )
-                    ).status,
-                ).toBe(404);
-                expect(
-                    (
-                        await getRemarks(
-                            request(undefined, "?view=org", "/remarks"),
-                            context,
-                        )
-                    ).status,
-                ).toBe(404);
+                    ).json(),
+                ).toMatchObject({
+                    summary: "Corrected summary",
+                    canEditSummary: true,
+                    remarksAppliedCount: 1,
+                });
             }
+            const [remark] = await db().select().from(summaryRemarks);
+            expect(
+                (
+                    await deleteRemark(
+                        request(
+                            undefined,
+                            `${query}&remarkId=${remark?.id}`,
+                            "/remarks",
+                        ),
+                        context,
+                    )
+                ).status,
+            ).toBe(200);
+        });
+
+        it("refuses all correction actions for Organization readers and recipients", async () => {
+            await add();
+            await share();
             await db().insert(itemShares).values({
                 userId: "owner",
                 receiverUserId: "reader",
                 itemId: ITEM,
                 state: "accepted",
             });
-            mocks.actor = "reader";
-            expect(
-                (
-                    await editRoute(
-                        request(
-                            { summary: "No", keyPoints: [], revision: 0 },
-                            "?view=received",
-                        ),
-                        context,
-                    )
-                ).status,
-            ).toBe(404);
-            expect(
-                (
-                    await getRemarks(
-                        request(undefined, "?view=received", "/remarks"),
-                        context,
-                    )
-                ).status,
-            ).toBe(404);
+            for (const [actor, view] of [
+                ["org", "org"],
+                ["curator", "org"],
+                ["reader", "org"],
+                ["reader", "received"],
+                ["owner", "received"],
+            ]) {
+                mocks.actor = actor;
+                const query = `?view=${view}`;
+                const visible = await getSummary(
+                    request(undefined, query),
+                    context,
+                );
+                if (visible.status === 200)
+                    expect(await visible.json()).toMatchObject({
+                        canEditSummary: false,
+                    });
+                expect((await edit(query)).status).toBe(404);
+                expect(
+                    (
+                        await getRemarks(
+                            request(undefined, query, "/remarks"),
+                            context,
+                        )
+                    ).status,
+                ).toBe(404);
+                expect((await add(query)).status).toBe(404);
+                expect(
+                    (
+                        await deleteRemark(
+                            request(
+                                undefined,
+                                `${query}&remarkId=unused`,
+                                "/remarks",
+                            ),
+                            context,
+                        )
+                    ).status,
+                ).toBe(404);
+                const run = await summaryRoute(
+                    request({ reviseWithRemarks: true }, query),
+                    context,
+                );
+                expect(run.status).toBe(actor === "reader" ? 403 : 404);
+            }
+            expect(mocks.completion).not.toHaveBeenCalled();
         });
 
         it.each([
             "org",
             "curator",
-            "owner",
-        ])("never reads owner remarks for %s acting in the Organization view", async (actor) => {
+        ])("never reads owner remarks for %s replacing hand edits in the Organization view", async (actor) => {
+            await edit();
             await add();
-            mocks.org = "org";
+            await share();
             await db()
-                .insert(recordingFolders)
-                .values({
-                    id: "org-folder",
-                    userId: "org",
-                    name: encryptText("Shared"),
-                    nameHash: "shared",
-                    kind: "custom",
-                });
-            await db().insert(recordingFolderAssignments).values({
-                userId: "owner",
-                itemId: ITEM,
-                folderId: "org-folder",
-            });
+                .update(aiEnhancements)
+                .set({ remarksAppliedCount: 1 })
+                .where(eq(aiEnhancements.itemId, ITEM));
             mocks.actor = actor;
+            expect(
+                (await summaryRoute(request({}, "?view=org"), context)).status,
+            ).toBe(409);
             const corrections = vi.spyOn(
                 correctionsModule,
                 "summaryCorrectionsContext",
             );
             try {
+                const response = await summaryRoute(
+                    new Request(
+                        `https://app.example.test/api/recordings/${ITEM}/summary?view=org`,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                Accept: "text/event-stream",
+                            },
+                            body: JSON.stringify({
+                                replaceEdited: true,
+                                summaryId: "original-summary",
+                                revision: 1,
+                            }),
+                        },
+                    ),
+                    context,
+                );
+                expect(response.status).toBe(200);
+                await response.body?.cancel();
                 const result = await generateSummaryForRecording(actor, ITEM, {
                     view: "org",
                     trigger: "manual",
+                    replaceEdited: true,
+                    expectedSummaryId: "original-summary",
+                    expectedSummaryRevision: 1,
                 });
                 expect(result.committed).toBe(true);
                 expect(corrections).not.toHaveBeenCalled();
@@ -641,9 +788,55 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                         "ownerCorrections",
                     );
                 }
+                expect(await stored()).toMatchObject({
+                    remarksAppliedCount: 0,
+                    editedAt: null,
+                });
+                const current = await stored();
+                if (!current) throw new Error("missing summary");
+                expect(
+                    await summaryCorrectionMetadata(
+                        storedSummaryOf(current),
+                        false,
+                    ),
+                ).toMatchObject({
+                    canEditSummary: false,
+                    correctedWithRemarks: false,
+                });
+                expect(await db().select().from(summaryRemarks)).toHaveLength(
+                    1,
+                );
+                mocks.actor = "owner";
+                await generateSummaryForRecording("owner", ITEM, {
+                    view: "org",
+                    trigger: "manual",
+                });
+                expect((await stored())?.remarksAppliedCount).toBe(1);
             } finally {
                 corrections.mockRestore();
             }
+        });
+
+        it.each([
+            "private",
+            "org",
+        ] as const)("replays remarks on an automatic owner run of a shared item in %s", async (view) => {
+            await add();
+            await share();
+            await generateSummaryForRecording("owner", ITEM, {
+                view,
+                trigger: "auto",
+            });
+            expect(mocks.completion).toHaveBeenCalled();
+            for (const [request] of mocks.completion.mock.calls) {
+                expect(JSON.stringify(request.messages)).toContain(
+                    "deadline is Thursday",
+                );
+                expect(JSON.stringify(request.messages)).not.toContain(
+                    "Generated summary",
+                );
+            }
+            expect((await stored())?.remarksAppliedCount).toBe(1);
         });
 
         it("loads a selected personal profile in the owner's private view even while shared", async () => {
@@ -694,6 +887,99 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 ).toContain("deadline is Thursday");
             } finally {
                 loadProfile.mockRestore();
+            }
+        });
+
+        it.each([
+            { actor: "owner", selected: false },
+            { actor: "owner", selected: true },
+            { actor: "curator", selected: false },
+            { actor: "org", selected: false },
+            { actor: "curator", selected: true },
+            { actor: "org", selected: true },
+        ])("keeps Organization profile resolution for $actor, hand-picked: $selected", async ({
+            actor,
+            selected,
+        }) => {
+            await share();
+            const actualProfiles = await vi.importActual<typeof profilesModule>(
+                "@/lib/profiles/resolve",
+            );
+            const actualManual = await vi.importActual<
+                typeof manualProfilesModule
+            >("@/lib/profiles/resolve-manual");
+            const resolver = vi
+                .spyOn(profilesModule, "resolveItemProfile")
+                .mockImplementation(actualProfiles.resolveItemProfile);
+            const loader = vi
+                .spyOn(profilesModule, "loadSelectedProfileRevision")
+                .mockImplementation(actualProfiles.loadSelectedProfileRevision);
+            const manual = vi
+                .spyOn(manualProfilesModule, "resolveManualItemProfile")
+                .mockImplementation(actualManual.resolveManualItemProfile);
+            try {
+                for (const [id, scope] of [
+                    ["placement", "organization"],
+                    ["picked", "organization"],
+                    ["personal", "personal"],
+                ] as const) {
+                    const settings = structuredClone(testProfile().settings);
+                    settings.steps.summary.fullPrompt = `${id} template {transcription}`;
+                    settings.steps.summary.multiPass.enabled = false;
+                    await db()
+                        .insert(processingProfiles)
+                        .values({
+                            id,
+                            ownerUserId: scope === "personal" ? "owner" : "org",
+                            scope,
+                            channel: kind,
+                            isDefault: id === "placement",
+                            name: encryptText(id),
+                            currentRevisionId: `${id}-revision`,
+                        });
+                    await db()
+                        .insert(processingProfileRevisions)
+                        .values({
+                            id: `${id}-revision`,
+                            profileId: id,
+                            settings: encryptText(JSON.stringify(settings)),
+                        });
+                }
+                await db().insert(itemProcessing).values({
+                    itemId: ITEM,
+                    userId: "owner",
+                    view: "private",
+                    profileId: "placement",
+                    profileRevisionId: "placement-revision",
+                });
+                mocks.actor = actor;
+                const result = await generateSummaryForRecording(actor, ITEM, {
+                    view: "org",
+                    trigger: "manual",
+                    ...(selected
+                        ? { profileRevisionId: "picked-revision" }
+                        : {}),
+                });
+                expect(result.committed).toBe(true);
+                expect((await stored())?.profileRevisionId).toBe(
+                    selected ? "picked-revision" : "placement-revision",
+                );
+                expect(
+                    JSON.stringify(
+                        mocks.completion.mock.calls[0]?.[0].messages,
+                    ),
+                ).toContain(`${selected ? "picked" : "placement"} template`);
+                if (selected)
+                    expect(loader).toHaveBeenCalledWith({
+                        revisionId: "picked-revision",
+                        actorUserId: actor,
+                        channel: kind,
+                        view: "org",
+                    });
+            } finally {
+                resolver.mockRestore();
+                loader.mockRestore();
+                manual.mockRestore();
             }
         });
 
