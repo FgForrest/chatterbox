@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     copy: vi.fn(),
     download: vi.fn(),
     handleSummarize: vi.fn(),
+    saveSummary: vi.fn().mockResolvedValue(true),
     recheckSummary: vi.fn(),
     setSummaryExpanded: vi.fn(),
     setSummaryProfileId: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (message: string) => message,
 }));
 
@@ -134,12 +136,15 @@ interface HookState {
     summaryProfilesLoading: boolean;
     handleSummarize: typeof mocks.handleSummarize;
     recheckSummary: typeof mocks.recheckSummary;
+    saveSummary: typeof mocks.saveSummary;
 }
 
 let state: HookState;
 
 function summary(overrides: Partial<SummaryData> = {}): SummaryData {
     return {
+        summaryId: "summary-row",
+        revision: 0,
         summary: "A concise result",
         keyPoints: ["First point"],
         actionItems: ["Send the proposal"],
@@ -171,6 +176,7 @@ function resetState(): void {
         summaryProfilesLoading: false,
         handleSummarize: mocks.handleSummarize,
         recheckSummary: mocks.recheckSummary,
+        saveSummary: mocks.saveSummary,
     };
     mocks.useSummary.mockImplementation(() => state);
 }
@@ -190,6 +196,8 @@ function widget(
 }
 
 interface RenderWidgetOptions {
+    view?: "private" | "org" | "received";
+    source?: "riffado" | "plaud";
     canChange?: boolean;
     learnHold?: "running" | "correcting" | "review" | null;
     profileName?: string;
@@ -202,6 +210,8 @@ function getWidget(kind: "audio" | "mail", options: RenderWidgetOptions = {}) {
         <SummaryWidget
             itemId={`${kind}-1`}
             kind={kind}
+            view={options.view}
+            source={options.source}
             canChange={options.canChange ?? true}
             contentText="Source text"
             canSummarize
@@ -233,6 +243,131 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
+    it("edits summary prose and key points in place and cancels without a write", () => {
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        expect(screen.getByText("Editing summary")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Re-summarize" }),
+        ).toBeNull();
+        expect(screen.queryByTestId("recording-tasks")).toBeNull();
+        fireEvent.change(screen.getByLabelText(/Summary text/), {
+            target: { value: "Discarded draft" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(mocks.saveSummary).not.toHaveBeenCalled();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+    });
+
+    it("saves the two fields separately and leaves tasks out of the edit", async () => {
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        fireEvent.change(screen.getByLabelText(/Summary text/), {
+            target: {
+                value: "### Revised\n[Jitka Dvořáková](#speaker-1) agreed.",
+            },
+        });
+        fireEvent.change(screen.getByLabelText(/Key Points/), {
+            target: { value: "One\n\nTwo" },
+        });
+        await act(async () =>
+            fireEvent.click(screen.getByRole("button", { name: "Save" })),
+        );
+        expect(mocks.saveSummary).toHaveBeenCalledWith(
+            "### Revised\n[Speaker 1](#speaker-1) agreed.",
+            ["One", "Two"],
+            { summaryId: "summary-row", revision: 0 },
+        );
+    });
+
+    it.each([
+        "Re-summarize",
+        "Regenerate",
+    ])("confirms %s before replacing hand edits", (action) => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            revision: 4,
+            olderContent: true,
+        });
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: action }));
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        const dialog = screen.getByRole("dialog");
+        fireEvent.click(
+            [...dialog.querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith(undefined, {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 4,
+        });
+    });
+
+    it("confirms the profile pencil rerun of a hand-edited summary", () => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            revision: 2,
+        });
+        renderWidget(kind);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        fireEvent.click(
+            [...screen.getByRole("dialog").querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith("profile-2", {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 2,
+        });
+    });
+
+    it("shows owner correction chips and hides both actions for readers", () => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            correctedWithRemarks: true,
+            remarksAppliedCount: 2,
+        });
+        const rendered = renderWidget(kind);
+        expect(screen.getByText("Hand-edited")).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "From remarks · {count}" }),
+        ).toBeTruthy();
+        rendered.rerender(
+            getWidget(kind, { canChange: false, view: "received" }),
+        );
+        expect(screen.getByText("Corrected from remarks")).toBeTruthy();
+        expect(screen.queryByText(/From remarks/)).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+    });
+
+    it.each([
+        { view: "org" as const },
+        { view: "received" as const },
+        { source: "plaud" as const },
+    ])("hides correction actions for $view $source even if other changes are allowed", (options) => {
+        renderWidget(kind, options);
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+    });
+
     it("shows a settled shared step without a generating state", () => {
         state.summaryData = null;
         const data: ItemProcessingPresentation = processingFixture({

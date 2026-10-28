@@ -61,6 +61,9 @@ vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
     return { ...actual, enqueueSummaryJob: vi.fn() };
 });
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/jobs/watch", () => ({ watchJob: vi.fn() }));
 vi.mock("@/lib/export/document-sidecars", () => ({
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
@@ -193,6 +196,8 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             },
         });
         (readStoredSummary as Mock).mockResolvedValue({
+            id: "summary-row",
+            speakerNumberOffset: null,
             summary: "ok",
             keyPoints: ["a", "b"],
             actionItems: ["x"],
@@ -226,6 +231,13 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
 
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({
+            summaryId: "summary-row",
+            speakerNumberOffset: null,
+            editedAt: null,
+            editedByName: null,
+            revision: 0,
+            correctedWithRemarks: false,
+            remarksAppliedCount: 0,
             summary: "ok",
             keyPoints: ["a", "b"],
             actionItems: ["x"],
@@ -236,6 +248,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             promptFallback: false,
         });
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            expectedSummaryId: null,
             userId: "user-1",
             ownerUserId: "user-1",
             recordingId: "rec-1",
@@ -249,6 +262,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         await POST(makeRequest({}), makeContext());
 
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            expectedSummaryId: null,
             userId: "user-1",
             ownerUserId: "user-1",
             recordingId: "rec-1",
@@ -277,6 +291,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             view: "private",
         });
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            expectedSummaryId: null,
             userId: "user-1",
             ownerUserId: "user-1",
             recordingId: "rec-1",
@@ -360,6 +375,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
 
         expect(response.status).toBe(200);
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            expectedSummaryId: null,
             userId: "user-1",
             ownerUserId: "user-1",
             recordingId: "rec-1",

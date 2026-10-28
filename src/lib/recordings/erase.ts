@@ -12,6 +12,7 @@ import {
     mailContents,
     plaudConnections,
     recordings,
+    summaryRemarks,
     transcriptions,
 } from "@/db/schema";
 import { sniffAudio } from "@/lib/audio/sniff";
@@ -393,6 +394,14 @@ export async function eraseLocalArtifact(
                             eq(aiEnhancements.userId, userId),
                         ),
                     );
+                await tx
+                    .delete(summaryRemarks)
+                    .where(
+                        and(
+                            eq(summaryRemarks.itemId, recordingId),
+                            eq(summaryRemarks.userId, userId),
+                        ),
+                    );
                 await dropTasksWithoutSummaryInTx(tx, {
                     recordingId,
                     ownerUserId: userId,
@@ -501,6 +510,14 @@ export async function eraseMailSummary(
                     and(
                         eq(aiEnhancements.itemId, itemId),
                         eq(aiEnhancements.userId, userId),
+                    ),
+                );
+            await tx
+                .delete(summaryRemarks)
+                .where(
+                    and(
+                        eq(summaryRemarks.itemId, itemId),
+                        eq(summaryRemarks.userId, userId),
                     ),
                 );
             await dropTasksWithoutSummaryInTx(tx, {

@@ -1,14 +1,14 @@
 ---
 title: Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's
 date: 2026-10-22
-updated: 2026-10-22 19:55
-status: accepted
+updated: 2026-10-28 15:46
+status: superseded
 kind: fix
 issues: []
 prs: [243]
 areas: [src/lib/summary/generate-summary.ts, src/lib/ai/generate-title.ts, src/lib/recordings/title-input.ts, src/lib/pipeline/facts.ts, src/lib/profiles/settings.ts, src/components/dashboard/transcription-panel.tsx]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-10-28-summary-edits-and-persistent-remarks]
 relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-pipeline-steps-settle-their-jobs]
 ---
 
@@ -20,6 +20,10 @@ already used: the own transcript (`riffado`), then the user's edited one (`mixed
 transcript, under a processing profile set to use Plaud's transcript (the built-in default), had its
 transcript, Learn and topics done and then failed summary and title with `INVALID_INPUT` ("No custom
 transcription available"). Decided on 2026-10-22 and merged the same day as PR #243.
+
+**Superseded in part** by [summary edits and persistent remarks](2026-10-28-summary-edits-and-persistent-remarks.md):
+new preferred content no longer automatically replaces a hand-edited generated summary. Its
+older-input note remains visible. The preferred transcript order and all other rules still hold.
 
 ## Why
 

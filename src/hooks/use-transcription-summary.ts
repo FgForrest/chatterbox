@@ -51,7 +51,20 @@ function toSummaryProgress(
     return { phase: raw.phase, completed, total };
 }
 
+export interface SummaryVersion {
+    summaryId: string;
+    revision: number;
+}
+
 export interface SummaryData {
+    summaryId?: string;
+    speakerNumberOffset?: number | null;
+    editedAt?: string | null;
+    editedByName?: string | null;
+    revision?: number;
+    correctedWithRemarks?: boolean;
+    remarksAppliedCount?: number;
+    canEditSummary?: boolean;
     hasAgenda?: boolean;
     agendaCandidateCount?: number;
     summary: string | null;
@@ -588,7 +601,16 @@ export function useTranscriptionSummary({
     ]);
 
     const handleSummarize = useCallback(
-        async (selectedProfileId?: string) => {
+        async (
+            selectedProfileId?: string,
+            correction?: {
+                reviseWithRemarks?: boolean;
+                replaceEdited?: boolean;
+                revision?: number;
+                summaryId?: string;
+                onSuccess?: () => void;
+            },
+        ) => {
             if (!recordingId) return;
             if (summarySource !== "riffado") return;
             if (summarizingIdsRef.current.has(recordingId)) return;
@@ -626,7 +648,8 @@ export function useTranscriptionSummary({
                         ? current
                         : [...current, "riffado"],
                 );
-                toast.success("Summary generated");
+                if (correction?.onSuccess) correction.onSuccess();
+                else toast.success("Summary generated");
             };
 
             /**
@@ -695,14 +718,26 @@ export function useTranscriptionSummary({
                         // below still handles.
                         Accept: "text/event-stream, application/json",
                     },
-                    body: JSON.stringify(
-                        (selectedProfileId ?? summaryProfileId)
+                    body: JSON.stringify({
+                        ...((selectedProfileId ?? summaryProfileId)
                             ? {
                                   profileId:
                                       selectedProfileId ?? summaryProfileId,
                               }
-                            : {},
-                    ),
+                            : {}),
+                        ...(correction?.reviseWithRemarks
+                            ? { reviseWithRemarks: true }
+                            : {}),
+                        ...(correction?.replaceEdited
+                            ? { replaceEdited: true }
+                            : {}),
+                        ...(correction?.summaryId !== undefined
+                            ? { summaryId: correction.summaryId }
+                            : {}),
+                        ...(correction?.revision !== undefined
+                            ? { revision: correction.revision }
+                            : {}),
+                    }),
                 });
                 if (response.ok) invalidateItemProcessing(targetId);
 
@@ -798,6 +833,56 @@ export function useTranscriptionSummary({
         ],
     );
 
+    const saveSummary = useCallback(
+        async (
+            summary: string,
+            keyPoints: string[],
+            expected: SummaryVersion,
+        ): Promise<boolean | "conflict"> => {
+            if (!recordingId || !summaryData || summarySource !== "riffado")
+                return false;
+            const targetId = recordingId;
+            const previous = summaryData;
+            getAbortRef.current?.abort();
+            fetchGenerationRef.current += 1;
+            setSummaryFor(targetId, "riffado", {
+                ...previous,
+                summary,
+                keyPoints,
+                editedAt: new Date().toISOString(),
+            });
+            try {
+                const response = await fetch(summaryUrl(targetId), {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        summary,
+                        keyPoints,
+                        ...expected,
+                    }),
+                });
+                if (response.status === 409) {
+                    setSummaryFor(targetId, "riffado", previous);
+                    return "conflict";
+                }
+                if (!response.ok) throw new Error("summary edit failed");
+                const metadata =
+                    (await response.json()) as Partial<SummaryData>;
+                setSummaryFor(targetId, "riffado", {
+                    ...previous,
+                    summary,
+                    keyPoints,
+                    ...metadata,
+                });
+                return true;
+            } catch {
+                setSummaryFor(targetId, "riffado", previous);
+                return false;
+            }
+        },
+        [recordingId, summaryData, summarySource, setSummaryFor, summaryUrl],
+    );
+
     const handleDeleteSummary = useCallback(async () => {
         if (!recordingId) return;
         const targetId = recordingId;
@@ -890,6 +975,7 @@ export function useTranscriptionSummary({
         summaryProfilesLoading,
         handleSummarize,
         handleDeleteSummary,
+        saveSummary,
         refetchSummary,
         recheckSummary,
     };

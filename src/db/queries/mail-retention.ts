@@ -24,6 +24,7 @@ import {
     mailContents,
     mailLearnedParts,
     mailMessages,
+    summaryRemarks,
     taskMentions,
     userSettings,
     users,
@@ -162,6 +163,20 @@ function mailReapWhere(
                 due(policy.summaryDays),
                 isNull(chatterItems.summaryReapedAt),
                 or(
+                    exists(
+                        db
+                            .select({ id: summaryRemarks.id })
+                            .from(summaryRemarks)
+                            .where(
+                                and(
+                                    eq(summaryRemarks.itemId, chatterItems.id),
+                                    eq(
+                                        summaryRemarks.userId,
+                                        chatterItems.userId,
+                                    ),
+                                ),
+                            ),
+                    ),
                     exists(
                         db
                             .select({ id: aiEnhancements.id })
@@ -408,13 +423,22 @@ export async function deleteMailSummaries(
                 ),
             )
             .returning({ id: aiEnhancements.id });
+        const removedRemarks = await tx
+            .delete(summaryRemarks)
+            .where(
+                and(
+                    eq(summaryRemarks.itemId, itemId),
+                    eq(summaryRemarks.userId, ownerUserId),
+                ),
+            )
+            .returning({ id: summaryRemarks.id });
         await dropTasksWithoutSummaryInTx(tx, {
             recordingId: itemId,
             ownerUserId,
         });
         // Marked only when a summary went: a mail that never had one may
         // still get its first.
-        if (rows.length > 0) {
+        if (rows.length > 0 || removedRemarks.length > 0) {
             await tx
                 .update(chatterItems)
                 .set({ summaryReapedAt: at, updatedAt: at })
@@ -425,6 +449,6 @@ export async function deleteMailSummaries(
                     ),
                 );
         }
-        return rows.length;
+        return rows.length + removedRemarks.length;
     });
 }

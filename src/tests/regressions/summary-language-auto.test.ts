@@ -39,6 +39,7 @@ vi.mock("@/db", () => ({
                 },
                 innerJoin: () => query,
                 where: () => query,
+                orderBy: () => query,
                 limit: rows,
                 // biome-ignore lint/suspicious/noThenProperty: Drizzle queries are awaitable
                 then: (resolve: (value: unknown[]) => unknown) =>

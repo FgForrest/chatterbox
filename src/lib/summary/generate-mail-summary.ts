@@ -54,6 +54,7 @@ import {
     resolveTaskProposals,
 } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
+import { summaryCorrectionsContext } from "./corrections";
 import type {
     GenerateSummaryOptions,
     GenerateSummaryResult,
@@ -152,7 +153,7 @@ export async function generateMailSummary(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "mail",
-                view: orgView ? "org" : ctx.view,
+                view: ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -288,7 +289,16 @@ export async function generateMailSummary(
         outputLanguage,
         "extractions",
     );
+    const corrections =
+        ctx.view === "private" && ctx.actorUserId === ctx.ownerUserId
+            ? await summaryCorrectionsContext(
+                  ctx.ownerUserId,
+                  itemId,
+                  opts.reviseWithRemarks === true,
+              )
+            : { text: "", count: 0, fingerprint: undefined };
     const prompt = [
+        corrections.text,
         promptTemplate.replaceAll("{transcription}", () => mailText),
         tasksContext.text,
     ]
@@ -322,6 +332,7 @@ export async function generateMailSummary(
         },
         systemContent,
         prompt,
+        mergeContext: corrections.text,
         mergeSystem: (mergePrompt) =>
             [
                 mergePrompt,
@@ -333,7 +344,7 @@ export async function generateMailSummary(
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassResolution.config,
+        multiPass: opts.reviseWithRemarks ? null : multiPassResolution.config,
         onProgress: opts.onProgress,
         tasksEnabled,
     });
@@ -361,7 +372,7 @@ export async function generateMailSummary(
           })
         : null;
 
-    const { committed, reason } = await upsertEnhancement({
+    const { committed, reason, summaryVersion } = await upsertEnhancement({
         userId: ctx.contentUserId,
         recordingId: itemId,
         kind: "mail",
@@ -387,8 +398,19 @@ export async function generateMailSummary(
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),
-            multiPass: multiPassResolution.source,
+            multiPass: opts.reviseWithRemarks
+                ? "off"
+                : multiPassResolution.source,
         },
+        summaryWriteMode: opts.reviseWithRemarks
+            ? "remarks"
+            : opts.trigger !== "auto"
+              ? "regenerate"
+              : undefined,
+        expectedSummaryRevision: opts.expectedSummaryRevision,
+        expectedSummaryId: opts.expectedSummaryId,
+        remarksAppliedCount: corrections.count,
+        remarksFingerprint: corrections.fingerprint,
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
@@ -463,6 +485,7 @@ export async function generateMailSummary(
             usedPromptId !== opts.presetId,
         multiPass,
         committed: true,
+        summaryVersion,
         titleFence,
     };
 }

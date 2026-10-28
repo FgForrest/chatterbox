@@ -27,6 +27,11 @@ import {
 } from "@/app/api/recordings/[id]/route";
 import { PUT as handler22PUT } from "@/app/api/recordings/[id]/speakers/route";
 import {
+    POST as addSummaryRemark,
+    DELETE as deleteSummaryRemark,
+} from "@/app/api/recordings/[id]/summary/remarks/route";
+import {
+    PUT as editSummary,
     DELETE as handler23DELETE,
     POST as handler23POST,
 } from "@/app/api/recordings/[id]/summary/route";
@@ -145,6 +150,21 @@ export const personWriteRoutes = [
         path: "recordings/[id]/speakers/route.ts",
         method: "PUT",
         handler: handler22PUT,
+    },
+    {
+        path: "recordings/[id]/summary/route.ts",
+        method: "PUT",
+        handler: editSummary,
+    },
+    {
+        path: "recordings/[id]/summary/remarks/route.ts",
+        method: "POST",
+        handler: addSummaryRemark,
+    },
+    {
+        path: "recordings/[id]/summary/remarks/route.ts",
+        method: "DELETE",
+        handler: deleteSummaryRemark,
     },
     {
         path: "recordings/[id]/summary/route.ts",

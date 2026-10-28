@@ -9,6 +9,10 @@ vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

@@ -109,6 +109,35 @@ export function canonicalizeSummarySpeakerReferences(markdown: string): string {
     );
 }
 
+/** Restore edited speaker links without changing their original numbering or plain names. */
+export function storeEditedSpeakerReferences(markdown: string): string {
+    return markdown.replace(
+        /\[(?:\\.|[^\]\\])*\]\(#speaker-([0-9]+)\)/g,
+        (_reference, number: string) =>
+            `[Speaker ${number}](#speaker-${number})`,
+    );
+}
+
+/** Show attributed names in the editor while retaining portable speaker hrefs. */
+export function summarySpeakerReferencesForEditor(
+    markdown: string,
+    attributions: SpeakerAttributions,
+    numberOffset = 0,
+): string {
+    return markdown.replace(
+        /\[Speaker ([0-9]+)\]\(#speaker-\1\)/g,
+        (reference, number: string) => {
+            const attribution = resolveSpeakerAttribution(
+                attributions,
+                offsetSpeakerLabel(`speaker_${number}`, numberOffset),
+            );
+            if (!attribution) return reference;
+            const name = attribution.name.replace(/[\\[\]]/g, "\\$&");
+            return `[${name}](#speaker-${number})`;
+        },
+    );
+}
+
 /**
  * Project stored speaker references into portable text for disk exports.
  *
@@ -143,4 +172,20 @@ export function projectSummarySpeakerReferencesForExport(
             );
         },
     );
+}
+
+/** Read the numbering captured before a human could remove speaker references. */
+export function storedSummarySpeakerNumberOffset(
+    inputs: unknown,
+): number | null {
+    if (
+        !inputs ||
+        typeof inputs !== "object" ||
+        !("speakerNumberOffset" in inputs)
+    )
+        return null;
+    const offset = inputs.speakerNumberOffset;
+    return typeof offset === "number" && Number.isSafeInteger(offset)
+        ? offset
+        : null;
 }

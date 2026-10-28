@@ -72,6 +72,7 @@ function context(overrides: Record<string, unknown> = {}) {
 
 const generated = {
     ownerUserId: "user-1",
+    summaryVersion: { id: "summary-row", revision: 1 },
     // Distinctive enough that finding it anywhere in the job's result means
     // it genuinely leaked, rather than colliding with a JSON key.
     summary: "CONFIDENTIAL_SUMMARY_PROSE",
@@ -193,7 +194,11 @@ describe("summaryJobHandler", () => {
         expect(generateSummaryForRecording).toHaveBeenCalledTimes(2);
         expect(
             (generateSummaryForRecording as Mock).mock.calls[1]?.[2],
-        ).toMatchObject({ presetId: "meeting-notes" });
+        ).toMatchObject({
+            presetId: "meeting-notes",
+            expectedSummaryId: "summary-row",
+            expectedSummaryRevision: 1,
+        });
         // Announced once, for the summary that stays.
         expect(emitEvent).toHaveBeenCalledTimes(1);
     });

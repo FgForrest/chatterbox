@@ -101,11 +101,17 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     410,
                 );
             }
+            let expectedSummaryId = payload.expectedSummaryId;
+            let expectedSummaryRevision = payload.expectedSummaryRevision;
             const generate = (presetId: string | undefined) =>
                 generateSummaryForRecording(userId, payload.recordingId, {
                     presetId,
                     profileRevisionId: payload.profileRevisionId,
                     trigger: payload.trigger,
+                    reviseWithRemarks: payload.reviseWithRemarks,
+                    replaceEdited: payload.replaceEdited,
+                    expectedSummaryId,
+                    expectedSummaryRevision,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
                     jobId,
@@ -120,18 +126,25 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             // meanwhile) found no summary to refresh, and the hold's release
             // found this job running: made again, once, from the reading as
             // it is now. A hold still open makes it at its release instead.
-            if (!orgView && !(await isHeldForLearn(payload.recordingId))) {
+            if (
+                !payload.reviseWithRemarks &&
+                !orgView &&
+                !(await isHeldForLearn(payload.recordingId))
+            ) {
                 const due = await summaryRefreshDue({
                     ownerUserId: result.ownerUserId,
                     recordingId: payload.recordingId,
                     view: "private",
                 });
-                if (due)
+                if (due && result.summaryVersion) {
+                    expectedSummaryId = result.summaryVersion.id;
+                    expectedSummaryRevision = result.summaryVersion.revision;
                     result = await generate(
                         payload.profileRevisionId
                             ? undefined
                             : (payload.presetId ?? due.presetId),
                     );
+                }
                 if (result.committed === false)
                     return {
                         skipped: "outdated",
@@ -140,7 +153,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             }
 
             let titleOutcome: PipelineJobResult["titleOutcome"];
-            if (!orgView) {
+            if (!orgView && !payload.reviseWithRemarks) {
                 titleOutcome = await updateTitleAfterSummary({
                     userId: result.ownerUserId,
                     recordingId: payload.recordingId,
