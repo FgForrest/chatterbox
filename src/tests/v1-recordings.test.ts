@@ -36,6 +36,8 @@ const recording = {
     plaudFileId: "plaud-1",
     kind: "audio" as const,
     confirmedLanguage: "cs",
+    calendarEventId: null,
+    calendarSeriesId: null,
     title: "encrypted:Planning Call",
     duration: 120000,
     occurredAt: new Date("2026-05-06T11:00:00.000Z"),

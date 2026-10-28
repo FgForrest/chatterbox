@@ -63,11 +63,13 @@ beforeEach(() => {
         status: "open",
         folderId: "start",
     });
-    mocks.assertFolder.mockResolvedValue({
-        folderId: "changed",
-        ownerId: "owner",
-        scope: "personal",
-    });
+    mocks.assertFolder.mockImplementation(
+        async (_userId: string, folderId: string) => ({
+            folderId,
+            ownerId: "owner",
+            scope: "personal",
+        }),
+    );
     mocks.complete.mockImplementation(async (input) => ({
         id: "session",
         status: "completing",
@@ -97,6 +99,21 @@ describe("complete session folder override", () => {
             mocks.enqueue.mock.invocationCallOrder[0],
         );
         expect(mocks.setJob).toHaveBeenCalledWith("session", "owner", "job");
+    });
+
+    it("stores the canonical source when a shared attachment is selected", async () => {
+        mocks.assertFolder.mockResolvedValueOnce({
+            folderId: "shared-source",
+            ownerId: "folder-owner",
+            scope: "personal",
+        });
+        const response = await complete({ folderId: "attachment" });
+        expect(response.status).toBe(202);
+        expect((await response.json()).folderId).toBe("shared-source");
+        expect(mocks.assertFolder).toHaveBeenCalledWith("owner", "attachment");
+        expect(mocks.complete).toHaveBeenCalledWith(
+            expect.objectContaining({ folderId: "shared-source" }),
+        );
     });
 
     it("keeps the start folder when absent", async () => {

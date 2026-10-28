@@ -4,7 +4,10 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { providerFetch } from "@/lib/ai/provider-fetch";
+import {
+    chatCompletionWithUsage,
+    usageAttemptFetch,
+} from "@/lib/ai/usage-attempt";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -15,7 +18,6 @@ import type { RecordingView } from "@/lib/sharing/view";
 import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import { getAiOutputLanguageDirective } from "./summary-presets";
-import { recordChatCompletionUsage } from "./usage-cost";
 
 function isAbsentProviderSelection(error: unknown): boolean {
     if (!error || typeof error !== "object" || !("details" in error)) {
@@ -100,7 +102,7 @@ export async function generateTitleFromTranscription(
 
         // Create OpenAI client
         const openai = new OpenAI({
-            fetch: providerFetch,
+            fetch: usageAttemptFetch,
             apiKey: credentials.apiKey,
             baseURL: credentials.baseUrl || undefined,
             maxRetries: resolved.organizationCredential ? 0 : undefined,
@@ -137,25 +139,7 @@ export async function generateTitleFromTranscription(
         const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective} ${capitalizationDirective}`;
 
         await resolved.reserveCall();
-        const response = await openai.chat.completions.create(
-            buildChatCompletionParams({
-                model,
-                messages: [
-                    {
-                        role: "system",
-                        content: systemContent,
-                    },
-                    {
-                        role: "user",
-                        content: prompt,
-                    },
-                ],
-                temperature: 0.7,
-                maxOutputTokens: credentials.maxOutputTokens,
-                maxTokens: 50, // Titles should be short
-            }),
-        );
-        await recordChatCompletionUsage(
+        const response = await chatCompletionWithUsage(
             {
                 recordingId,
                 ownerUserId,
@@ -167,7 +151,25 @@ export async function generateTitleFromTranscription(
                 baseUrl: credentials.baseUrl,
                 credentialId: credentials.id,
             },
-            response,
+            () =>
+                openai.chat.completions.create(
+                    buildChatCompletionParams({
+                        model,
+                        messages: [
+                            {
+                                role: "system",
+                                content: systemContent,
+                            },
+                            {
+                                role: "user",
+                                content: prompt,
+                            },
+                        ],
+                        temperature: 0.7,
+                        maxOutputTokens: credentials.maxOutputTokens,
+                        maxTokens: 50, // Titles should be short
+                    }),
+                ),
         );
 
         const title = response.choices[0]?.message?.content?.trim() || null;

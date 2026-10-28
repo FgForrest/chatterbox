@@ -11,7 +11,12 @@ export interface GoogleOAuthState {
     userId: string;
     returnTo: string;
     expiresAt: number;
-    purpose?: "drive" | "calendar" | "meet" | "calendar-meet";
+    purpose?:
+        | "drive"
+        | "calendar"
+        | "meet"
+        | "calendar-meet"
+        | "calendar-write";
     expectedSubject?: string;
 }
 
@@ -41,8 +46,10 @@ export function openGoogleOAuthState(
                 parsed.purpose !== "drive" &&
                 parsed.purpose !== "calendar" &&
                 parsed.purpose !== "meet" &&
-                parsed.purpose !== "calendar-meet") ||
-            (parsed.purpose === "meet" &&
+                parsed.purpose !== "calendar-meet" &&
+                parsed.purpose !== "calendar-write") ||
+            ((parsed.purpose === "meet" ||
+                parsed.purpose === "calendar-write") &&
                 typeof parsed.expectedSubject !== "string") ||
             parsed.expiresAt < now
         ) {

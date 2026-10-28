@@ -1,5 +1,5 @@
 type AudioSource = {
-    kind?: "audio" | "mail" | null;
+    kind?: "audio" | "mail" | "meeting" | null;
     audioReaped?: boolean;
 } & (
     | { id: string }
@@ -12,7 +12,14 @@ type AudioSource = {
 
 /** Whether a listed item or joined recording still has playable audio. */
 export function hasAudio(source: AudioSource | null | undefined): boolean {
-    if (!source || source.kind === "mail" || source.audioReaped) return false;
+    if (
+        !source ||
+        (source.kind !== undefined &&
+            source.kind !== null &&
+            source.kind !== "audio") ||
+        source.audioReaped
+    )
+        return false;
     if ("audioId" in source) {
         return (
             source.kind === "audio" &&

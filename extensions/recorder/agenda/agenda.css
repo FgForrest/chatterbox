@@ -1,0 +1,112 @@
+body {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 240px;
+    padding: 14px;
+    font-size: 13px;
+}
+body [hidden] {
+    display: none;
+}
+header {
+    position: sticky;
+    top: 0;
+    background: var(--background);
+    padding: 6px 0;
+    z-index: 1;
+}
+h2 {
+    font-size: 18px;
+    overflow-wrap: anywhere;
+}
+h3 {
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+section {
+    margin: 18px 0;
+}
+.point,
+.task {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+.point label {
+    display: flex;
+    gap: 8px;
+    align-items: start;
+    overflow-wrap: anywhere;
+}
+.point input[type="checkbox"] {
+    accent-color: var(--meeting);
+    flex: none;
+}
+.point.discussed label > span {
+    color: var(--muted-foreground);
+    text-decoration: line-through;
+}
+.point input[type="text"],
+#point-text {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px;
+    margin-top: 6px;
+    font: inherit;
+}
+.task p {
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+}
+.task .row {
+    justify-content: end;
+}
+.task .row button {
+    flex: none;
+    padding: 4px 9px;
+}
+.group {
+    font-weight: 600;
+    margin: 14px 0 3px;
+}
+#quick-add {
+    margin-top: 14px;
+}
+#quick-add .row {
+    align-items: center;
+}
+#quick-add button {
+    flex: none;
+}
+#choice-list {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+#choice-list button {
+    text-align: start;
+    overflow-wrap: anywhere;
+}
+#modes button[aria-pressed="true"] {
+    border-color: var(--meeting);
+    color: var(--meeting);
+}
+footer {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    background: var(--background);
+    border-top: 1px solid var(--border);
+    padding: 12px 0;
+}
+#status:empty,
+#recording-state:empty {
+    display: none;
+}

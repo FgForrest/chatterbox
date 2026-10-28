@@ -322,7 +322,7 @@ export async function resolveItemProfile(
             ),
         )
         .limit(1);
-    if (!item) {
+    if (!item || item.kind === "meeting") {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,
             "Item not found",
@@ -506,7 +506,7 @@ export async function loadItemProfileRevision(input: {
             ),
         )
         .limit(1);
-    if (!item) {
+    if (!item || item.kind === "meeting") {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,
             "Item not found",

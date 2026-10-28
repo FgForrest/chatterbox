@@ -1,6 +1,7 @@
 "use client";
 
 import {
+    CalendarClock,
     ChevronDown,
     ChevronRight,
     FolderPlus,
@@ -88,6 +89,7 @@ interface FolderTreeProps {
         toFolderId: string,
     ) => Promise<void>;
     onNewFolder?: () => void;
+    onPrepareMeeting?: (folder: RecordingFolder) => void;
     canCurate?: boolean;
     isOrgAccount?: boolean;
     onSettings: (folder: RecordingFolder, action?: "create") => void;
@@ -107,6 +109,7 @@ export function FolderTree({
     onAssignRecording,
     onMoveRecording,
     onNewFolder,
+    onPrepareMeeting,
     canCurate = false,
     isOrgAccount = false,
     onSettings,
@@ -351,15 +354,9 @@ export function FolderTree({
                         }
                         title={
                             folder.receivedFolder
-                                ? i18n(
-                                      "Shared by {owner} · read-only · originally {name}",
-                                      {
-                                          owner: folder.receivedFolder
-                                              .ownerName,
-                                          name: folder.receivedFolder
-                                              .originalName,
-                                      },
-                                  )
+                                ? `${i18n("Shared by {owner}", {
+                                      owner: folder.receivedFolder.ownerName,
+                                  })} (${folder.receivedFolder.originalName})`
                                 : undefined
                         }
                         onDragStart={(event) => {
@@ -379,10 +376,7 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (
-                                    folder.kind === "private" ||
-                                    folder.receivedFolder
-                                ) {
+                                if (folder.kind === "private") {
                                     event.dataTransfer.dropEffect = "none";
                                     setRecordingDropFolderId(null);
                                     return;
@@ -441,7 +435,6 @@ export function FolderTree({
                                     );
                                 if (
                                     folder.kind === "private" ||
-                                    folder.receivedFolder ||
                                     recordingDropEffect(
                                         Array.from(event.dataTransfer.types),
                                         folder.scope,
@@ -586,6 +579,18 @@ export function FolderTree({
                                             {i18n("New subfolder")}
                                         </DropdownMenuItem>
                                     )}
+                                    {onPrepareMeeting &&
+                                        folder.kind !== "private" &&
+                                        !folder.receivedFolder && (
+                                            <DropdownMenuItem
+                                                onSelect={() =>
+                                                    onPrepareMeeting(folder)
+                                                }
+                                            >
+                                                <CalendarClock className="text-meeting" />
+                                                {i18n("Prepare a meeting")}
+                                            </DropdownMenuItem>
+                                        )}
                                     {sharingEnabled &&
                                         folder.scope === "personal" &&
                                         folder.kind === "custom" && (

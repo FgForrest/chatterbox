@@ -1,4 +1,4 @@
-import type { ChatterItemKind } from "@/db/schema";
+import type { ContentItemKind } from "@/db/schema";
 
 /**
  * What a participant is to an item. A speaker of a recording; the sender,
@@ -101,7 +101,7 @@ export type ContentAnchor =
  */
 export interface ItemContent {
     itemId: string;
-    kind: ChatterItemKind;
+    kind: ContentItemKind;
     /**
      * The row it was read from: a transcription for audio, a mail content
      * revision for mail.

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as EncryptionFieldsModule from "@/lib/encryption/fields";
+import type * as AgendaContextModule from "@/lib/meetings/pipeline-context";
 import type * as AlmanacTermsModule from "@/lib/transcription/almanac-terms";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
@@ -17,9 +19,9 @@ vi.mock("@/lib/encryption", () => ({
 }));
 
 vi.mock("@/lib/encryption/fields", async () => {
-    const actual = await vi.importActual<
-        typeof import("@/lib/encryption/fields")
-    >("@/lib/encryption/fields");
+    const actual = await vi.importActual<typeof EncryptionFieldsModule>(
+        "@/lib/encryption/fields",
+    );
     return {
         ...actual,
         decryptText: vi.fn((value: string) => value),
@@ -86,6 +88,10 @@ vi.mock("@/lib/folders/item-scope", () => ({
 vi.mock("@/lib/integrations/google/meeting-roster", () => ({
     resolveMeetingRoster: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("@/lib/meetings/pipeline-context", async (importOriginal) => ({
+    ...(await importOriginal<typeof AgendaContextModule>()),
+    loadRecordingAgenda: vi.fn(async () => null),
+}));
 
 vi.mock("@/lib/transcription/almanac-terms", async () => {
     const actual = await vi.importActual<typeof AlmanacTermsModule>(
@@ -105,6 +111,7 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 
 import { db } from "@/db";
 import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
+import { loadRecordingAgenda } from "@/lib/meetings/pipeline-context";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
@@ -438,5 +445,47 @@ describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI S
         expect(config.transcription_config).not.toHaveProperty(
             "additional_vocab",
         );
+    });
+    it("sends agenda words as vocabulary without a Calendar roster", async () => {
+        vi.mocked(loadRecordingAgenda).mockResolvedValueOnce({
+            id: "agenda",
+            userId: "user-sm",
+            version: 0,
+            calendarEventId: null,
+            points: [
+                {
+                    id: "p1",
+                    parentId: null,
+                    position: 0,
+                    text: "Acme roadmap",
+                    note: null,
+                    discussedAt: null,
+                },
+            ],
+            tasks: [],
+        });
+        mockDbForCredential({
+            provider: "Speechmatics",
+            baseUrl: null,
+            defaultModel: "enhanced",
+        });
+        (db.select as Mock).mockReturnValueOnce({
+            from: () => ({
+                where: () => ({ limit: async () => [{ email: null }] }),
+            }),
+        });
+        expect((await transcribeRecording("user-sm", "rec-sm")).success).toBe(
+            true,
+        );
+        const config = JSON.parse(
+            (
+                requests().find((request) => request.method === "POST")?.init
+                    .body as FormData
+            ).get("config") as string,
+        );
+        expect(config.transcription_config.additional_vocab).toEqual([
+            { content: "Acme" },
+            { content: "roadmap" },
+        ]);
     });
 });

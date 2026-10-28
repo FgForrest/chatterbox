@@ -1,7 +1,7 @@
 ---
 title: Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm
 date: 2026-10-22
-updated: 2026-10-23 09:44
+updated: 2026-10-27 09:57
 status: accepted
 kind: feature
 issues: [256]
@@ -9,7 +9,7 @@ prs: [250]
 areas: [src/lib/integrations/google, src/lib/learn/auto-learn.ts, src/lib/learn/learn-job.ts, src/lib/learn/validate-speaker-guesses.ts, src/lib/learn/run-fallback.ts, src/lib/learn/run-bridge.ts, src/lib/learn/correction-pass.ts, src/lib/transcription/transcribe-recording.ts]
 supersedes: [2026-10-12-calendar-meet-speaker-candidates]
 superseded-by: []
-relates: [2026-09-14-speaker-identity-without-biometrics]
+relates: [2026-09-14-speaker-identity-without-biometrics, 2026-10-27-meeting-agendas]
 ---
 
 # Every Learn run uses the Calendar and Meet roster to guess speakers for the user to confirm
@@ -180,6 +180,8 @@ Google and model responses are stubbed; the integration cases use a disposable P
   Calendar invitees still arrive, because a Meet error keeps them.
 
 ## Related work
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): planned discussion points, frozen task reviews, safe recording attachment and explicit Calendar export extend this area.
 
 - [2026-10-12-calendar-meet-speaker-candidates](2026-10-12-calendar-meet-speaker-candidates.md): the rule this supersedes; its scopes, event lookup and
   Meet resolution are reused. The no-address-request rule is also superseded: addresses are transient

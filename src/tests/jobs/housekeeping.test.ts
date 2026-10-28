@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { prunes, posthog } = vi.hoisted(() => ({
     prunes: {
+        holdOverdueMeetings: vi.fn(),
         pruneAdminAuditLog: vi.fn(),
         pruneFinishedJobs: vi.fn(),
         pruneExpiredSessions: vi.fn(),
@@ -15,6 +16,9 @@ const { prunes, posthog } = vi.hoisted(() => ({
     posthog: { captureServerException: vi.fn() },
 }));
 
+vi.mock("@/db/queries/meetings", () => ({
+    holdOverdueMeetings: prunes.holdOverdueMeetings,
+}));
 vi.mock("@/db/queries/storage-snapshots", () => ({
     writeStorageSnapshots: vi.fn().mockResolvedValue(0),
 }));
@@ -99,6 +103,7 @@ describe("runHousekeeping", () => {
         errorSpy.mockRestore();
 
         expect(pruned).toEqual({
+            meeting_agendas: 0,
             webhook_deliveries: 0,
             api_rate_limit_buckets: 0,
             stripe_webhook_events: 0,
@@ -108,6 +113,10 @@ describe("runHousekeeping", () => {
             mcp_access_log: 0,
             mail_delivery_log: 0,
         });
+        expect(prunes.holdOverdueMeetings).toHaveBeenCalledWith(
+            10,
+            expect.any(Date),
+        );
         expect(writeStorageSnapshots).toHaveBeenCalledTimes(1);
         expect(prunes.pruneMcpAccessLog).toHaveBeenCalledWith(30, 10);
         expect(prunes.pruneMailDeliveryLog).toHaveBeenCalledWith(30, 10);

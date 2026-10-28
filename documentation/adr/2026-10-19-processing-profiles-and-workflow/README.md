@@ -1,7 +1,7 @@
 ---
 title: Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
 date: 2026-10-19
-updated: 2026-10-22 22:30
+updated: 2026-10-27 11:35
 status: superseded
 kind: feature
 issues: []

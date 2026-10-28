@@ -16,9 +16,11 @@ import { recordings, transcriptions, users } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { providerFetch } from "@/lib/ai/provider-fetch";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
-import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
+import {
+    chatCompletionWithUsage,
+    usageAttemptFetch,
+} from "@/lib/ai/usage-attempt";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -352,7 +354,7 @@ export async function generateTopicsForTranscript(
     }
 
     const openai = new OpenAI({
-        fetch: providerFetch,
+        fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: resolved.organizationCredential ? 0 : undefined,
@@ -380,19 +382,7 @@ export async function generateTopicsForTranscript(
             isRetryable: isRetryableError,
             run: async () => {
                 await resolved.reserveCall();
-                const response = await openai.chat.completions.create(
-                    buildChatCompletionParams({
-                        model,
-                        messages: [
-                            { role: "system", content: systemContent },
-                            { role: "user", content: prompt },
-                        ],
-                        temperature: 0.3,
-                        maxOutputTokens: credentials.maxOutputTokens,
-                        maxTokens: 2000,
-                    }),
-                );
-                await recordChatCompletionUsage(
+                const response = await chatCompletionWithUsage(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
@@ -404,8 +394,21 @@ export async function generateTopicsForTranscript(
                         baseUrl: credentials.baseUrl,
                         credentialId: credentials.id,
                     },
-                    response,
+                    () =>
+                        openai.chat.completions.create(
+                            buildChatCompletionParams({
+                                model,
+                                messages: [
+                                    { role: "system", content: systemContent },
+                                    { role: "user", content: prompt },
+                                ],
+                                temperature: 0.3,
+                                maxOutputTokens: credentials.maxOutputTokens,
+                                maxTokens: 2000,
+                            }),
+                        ),
                 );
+
                 return response.choices[0]?.message?.content?.trim() || "";
             },
             onRetry: ({ attempt, delayMs }) => {

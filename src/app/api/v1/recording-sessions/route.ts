@@ -29,7 +29,11 @@ export const POST = apiHandler(async (request: Request) => {
     const body = await request.json().catch(() => null);
     const input = parseCreateRecordingSessionBody(body);
     if (input.folderId) {
-        await assertCategorizableFolderInput(authn.user.id, input.folderId);
+        const folder = await assertCategorizableFolderInput(
+            authn.user.id,
+            input.folderId,
+        );
+        if (folder) input.folderId = folder.folderId;
     }
 
     const created = await createRecordingSession({

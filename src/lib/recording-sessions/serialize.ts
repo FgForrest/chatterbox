@@ -17,6 +17,10 @@ export function serializeRecordingSession(
     const indices = chunks.map((chunk) => chunk.index).sort((a, b) => a - b);
     const receivedBytes = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
     return {
+        ...(session.metadata.agendaOutcome &&
+        typeof session.metadata.agendaOutcome === "object"
+            ? { agenda: session.metadata.agendaOutcome }
+            : {}),
         id: session.id,
         status: session.status,
         mime_type: session.mimeType,

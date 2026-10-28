@@ -179,10 +179,10 @@ function optional(value: string | null): string | null {
  */
 export type TaskArchiveScope = ArchiveScope | { kind: "owner"; userId: string };
 
-// A person's own: on a recording they shared, the tasks the summaries
-// proposed and those they added, not those the Organization added by hand.
-// The Organization's: every task of the shared recordings it carries.
-function archivedTaskCondition(scope: TaskArchiveScope): SQL | undefined {
+/** Task ownership within an archive, excluding Organization-authored manual tasks from personal archives. */
+export function archivedTaskCondition(
+    scope: TaskArchiveScope,
+): SQL | undefined {
     if (scope.kind === "organization") {
         return archivedItemCondition(scope);
     }

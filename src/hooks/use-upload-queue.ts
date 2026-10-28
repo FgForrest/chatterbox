@@ -249,7 +249,7 @@ export function useUploadQueue({
     );
 
     const confirmUpload = useCallback(
-        async (folderId: string | null) => {
+        async (folderId: string | null, agendaId?: string) => {
             const file = selectedFile;
             if (!file) return;
             setSelectedFile(null);
@@ -278,9 +278,14 @@ export function useUploadQueue({
             setIsUploading(true);
             let conversionStarted = false;
             try {
-                const data = await sendUpload(file, folderId, (progress) => {
-                    updatePending(placeholderId, { progress });
-                });
+                const data = await sendUpload(
+                    file,
+                    folderId,
+                    (progress) => {
+                        updatePending(placeholderId, { progress });
+                    },
+                    agendaId,
+                );
 
                 if (data.conversion) {
                     conversionStarted = true;
@@ -434,6 +439,7 @@ function sendUpload(
     file: File,
     folderId: string | null,
     onProgress: (progress: number) => void,
+    agendaId?: string,
 ): Promise<UploadResponse> {
     return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
@@ -444,6 +450,7 @@ function sendUpload(
         );
         request.setRequestHeader("X-Upload-Size", String(file.size));
         if (folderId) request.setRequestHeader("X-Upload-Folder-Id", folderId);
+        if (agendaId) request.setRequestHeader("x-upload-agenda-id", agendaId);
         request.upload.addEventListener("progress", (event) => {
             if (!event.lengthComputable || event.total <= 0) return;
             onProgress(

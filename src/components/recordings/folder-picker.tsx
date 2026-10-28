@@ -55,7 +55,7 @@ export function FolderPicker({
             matchFolders(
                 folders.filter(
                     (folder) =>
-                        !folder.receivedFolder &&
+                        (!scope || !folder.receivedFolder) &&
                         (!organizationOnly || folder.scope === "org") &&
                         (!scope || folder.scope === scope),
                 ),
@@ -66,7 +66,8 @@ export function FolderPicker({
     );
     const parents = entries.filter(
         ({ folder }) =>
-            folder.scope !== "org" || folder.parentId !== null || canCurate,
+            !folder.receivedFolder &&
+            (folder.scope !== "org" || folder.parentId !== null || canCurate),
     );
     const select = async (folderId: string) => {
         if (assignedIds.has(folderId) || saving) return;

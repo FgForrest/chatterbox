@@ -13,11 +13,13 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import { RecordingAgenda } from "@/components/meetings/recording-agenda";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { openWidget } from "@/components/pipeline/workflow-widget";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
+import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +45,7 @@ interface TranscriptionData {
 
 interface Props {
     currentRecording: Recording | null;
+    userId?: string;
     itemLinkQuery?: string;
     currentTranscription: TranscriptionData | undefined;
     transcripts: TranscriptOption[] | undefined;
@@ -108,6 +111,7 @@ interface Props {
  */
 export function WorkstationDetailPane({
     currentRecording,
+    userId,
     itemLinkQuery,
     currentTranscription,
     transcripts,
@@ -245,11 +249,28 @@ export function WorkstationDetailPane({
                             }
                         />
                         {currentRecording.view === "received" ? (
-                            <ReceivedItemBanner
-                                recording={currentRecording}
-                                folders={folders}
-                                shared={recordingShared}
-                            />
+                            <>
+                                <ReceivedItemBanner
+                                    recording={currentRecording}
+                                    folders={folders}
+                                    shared={recordingShared}
+                                />
+                                <RecordingFolderTags
+                                    recordingId={currentRecording.id}
+                                    kind="audio"
+                                    folders={folders.filter(
+                                        (folder) =>
+                                            folder.scope === "personal" &&
+                                            !folder.receivedFolder,
+                                    )}
+                                    assignments={folderAssignments}
+                                    isOwn={false}
+                                    canUnfilePersonal
+                                    onSelectFolder={onSelectFolder}
+                                    onAdd={onAddToFolder}
+                                    onRemove={onRemoveFromFolder}
+                                />
+                            </>
                         ) : (
                             <ItemWorkflow
                                 itemId={currentRecording.id}
@@ -325,21 +346,55 @@ export function WorkstationDetailPane({
                                 }}
                             />
                         )}
-                        {(!currentRecording.audioReaped || hasTranscript) && (
-                            <TranscriptionPanel
-                                key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
-                                recording={currentRecording}
-                                transcription={currentTranscription}
-                                transcripts={transcripts}
-                                isTranscribing={isCurrentTranscribing}
-                                onTranscribe={onTranscribe}
-                                onTranscribeComplete={onTranscribeComplete}
-                                onTranscriptStale={onTranscriptStale}
-                                readOnly={transcriptReadOnly}
-                                shared={recordingShared}
-                                processing={processing}
-                            />
-                        )}
+                        <RecordingAgenda
+                            key={currentRecording.id}
+                            recording={currentRecording}
+                            folders={folders}
+                            folderId={
+                                folderAssignments.find(
+                                    (assignment) =>
+                                        assignment.recordingId ===
+                                        currentRecording.id,
+                                )?.folderId
+                            }
+                            userId={userId}
+                            onChanged={onArtifactsChanged}
+                        >
+                            {({ notice, agenda, nextMeeting }) => (
+                                <>
+                                    {notice}
+                                    {!currentRecording.audioReaped ||
+                                    hasTranscript ? (
+                                        <TranscriptionPanel
+                                            agenda={agenda}
+                                            nextMeeting={nextMeeting}
+                                            key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                            recording={currentRecording}
+                                            transcription={currentTranscription}
+                                            transcripts={transcripts}
+                                            isTranscribing={
+                                                isCurrentTranscribing
+                                            }
+                                            onTranscribe={onTranscribe}
+                                            onTranscribeComplete={
+                                                onTranscribeComplete
+                                            }
+                                            onTranscriptStale={
+                                                onTranscriptStale
+                                            }
+                                            readOnly={transcriptReadOnly}
+                                            shared={recordingShared}
+                                            processing={processing}
+                                        />
+                                    ) : (
+                                        <>
+                                            {nextMeeting}
+                                            {agenda}
+                                        </>
+                                    )}
+                                </>
+                            )}
+                        </RecordingAgenda>
                     </>
                 ) : (
                     <Card>

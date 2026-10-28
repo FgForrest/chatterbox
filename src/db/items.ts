@@ -1,6 +1,7 @@
 import { and, eq, getTableColumns } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { db } from "@/db";
+import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import { chatterItems, itemShares, recordings } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -148,6 +149,7 @@ export async function markRecordingDeleted(
                 eq(recordings.userId, input.userId),
             ),
         );
+    await deleteRecordingAgendaInTx(executor, input);
     await markItemDeleted(executor, input);
 }
 

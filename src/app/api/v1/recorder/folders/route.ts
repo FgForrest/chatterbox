@@ -73,10 +73,12 @@ export const GET = apiHandler(async (request: Request) => {
     let data = folders
         .filter((_, index) => allowed[index])
         .map((folder) => ({
-            id: folder.id,
+            // Released extensions retain attachment IDs; filing must keep resolving both ID shapes.
+            id: folder.receivedFolder?.sourceFolderId ?? folder.id,
             name: folder.name,
             path: folderPath(folder, byId),
             scope: folder.scope,
+            ...(folder.receivedFolder ? { sharedWithPeople: true } : {}),
         }));
 
     if (params.has("id")) {

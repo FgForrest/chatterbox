@@ -15,6 +15,7 @@ import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 // Which recordings a Learn review waits on is not what is tested here.
+vi.mock("@/lib/meetings/service", () => ({ listMeetings: async () => [] }));
 vi.mock("@/lib/learn/pending", () => ({
     recordingsNeedingReview: vi.fn(async () => new Set<string>()),
 }));

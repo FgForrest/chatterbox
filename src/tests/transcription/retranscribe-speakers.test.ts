@@ -80,6 +80,7 @@ vi.mock("@/lib/webhooks/emit", () => ({
 }));
 
 vi.mock("@/lib/summary/summary-job", () => ({
+    SUMMARY_JOB_KIND: "summary",
     enqueueSummaryJob: vi.fn().mockResolvedValue(undefined),
 }));
 

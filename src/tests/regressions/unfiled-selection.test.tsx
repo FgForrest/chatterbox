@@ -27,6 +27,17 @@ const router = vi.hoisted(() => ({
     forwardInternalState: false,
 }));
 
+vi.mock("@/components/meetings/recording-agenda", () => ({
+    RecordingAgenda: ({
+        children,
+    }: {
+        children: (parts: {
+            notice: ReactNode;
+            agenda: ReactNode;
+            nextMeeting: ReactNode;
+        }) => ReactNode;
+    }) => children({ notice: null, agenda: null, nextMeeting: null }),
+}));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: router.refresh }),
     useSearchParams: () =>

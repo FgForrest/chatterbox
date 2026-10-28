@@ -88,6 +88,7 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => null,
     isOrgScopeEnabled: () => false,
+    isOrgScopeVisible: () => false,
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/posthog-server", () => ({

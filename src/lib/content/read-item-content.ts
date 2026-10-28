@@ -47,6 +47,8 @@ export async function readItemContent(
         .limit(1);
     if (!item) return null;
     switch (item.kind) {
+        case "meeting":
+            return null;
         case "audio":
             return readAudioContent(ownerUserId, itemId, options);
         case "mail":

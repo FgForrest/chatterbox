@@ -30,11 +30,16 @@ import {
 } from "@/app/api/folders/[id]/shares/route";
 import { POST as synchronizePost } from "@/app/api/folders/[id]/synchronize/route";
 import { POST as createRoute } from "@/app/api/folders/route";
+import { DELETE as unfileMeetingRoute } from "@/app/api/meetings/[id]/folders/[folderId]/route";
 import { POST as categorizePost } from "@/app/api/recordings/[id]/categorize/route";
 import { GET as readCorrections } from "@/app/api/recordings/[id]/corrections/route";
-import { POST as assignRoute } from "@/app/api/recordings/[id]/folders/route";
+import {
+    POST as assignRoute,
+    DELETE as unfileRoute,
+} from "@/app/api/recordings/[id]/folders/route";
 import { GET as readSpeakers } from "@/app/api/recordings/[id]/speakers/route";
 import { GET as invitationsRoute } from "@/app/api/shares/route";
+import { GET as recorderFolders } from "@/app/api/v1/recorder/folders/route";
 import {
     isItemReceived,
     listOutgoingSharedItemIds,
@@ -44,7 +49,9 @@ import {
     accounts,
     asyncJobs,
     chatterItems,
+    folderDefaultProfiles,
     folderShares,
+    itemProcessing,
     itemShares,
     knowledgeEntities,
     mailAddresses,
@@ -64,12 +71,17 @@ import {
 } from "@/lib/encryption/fields";
 import { archivedItemCondition } from "@/lib/export/archive-scope";
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
+import { collectArchivedMeetings } from "@/lib/export/meetings";
 import { folderCondition } from "@/lib/folders/condition";
 import {
     addRecordingToFolder,
+    assertCategorizableFolder,
+    assertCategorizableFolders,
     deleteFolder,
+    listExportFolderOrganization,
     listFolderOrganization,
     listPersonalFolderOrganization,
+    listRecordingFolderTrees,
     moveFolder,
     moveRecordingBetweenFolders,
     removeRecordingFromFolder,
@@ -83,8 +95,26 @@ import { loadReceivedMailRows } from "@/lib/mail/list";
 import { resolveCaller } from "@/lib/mcp/caller";
 import { mcpItemCondition, recordingViewFor } from "@/lib/mcp/scope";
 import { ALL_TOOLS } from "@/lib/mcp/tools";
-import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import {
+    attachAgenda,
+    attachArrivingRecordingInTx,
+} from "@/lib/meetings/attachment";
+import { restoreMeetings } from "@/lib/meetings/restore";
+import {
+    addPoint,
+    getMeeting,
+    listMeetings,
+    patchMeeting,
+    prepareMeeting,
+} from "@/lib/meetings/service";
+import {
+    requestArrivalInTx,
+    resolveArrivalProfile,
+} from "@/lib/pipeline/arrival";
 import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
+import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import { createProfile, setDefaultProfile } from "@/lib/profiles/store";
 import { searchApp } from "@/lib/search/app-search";
 import { searchItems } from "@/lib/search/item-search";
 import {
@@ -165,6 +195,11 @@ vi.mock("@/db", () => ({
             },
         },
     ),
+}));
+vi.mock("@/lib/recording-sessions/route-gate", () => ({
+    gateRecordingSessionRequest: async () => ({
+        authn: { user: { id: "receiver" } },
+    }),
 }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/events/personal", () => ({ notifyPersonShareChanged: events }));
@@ -885,7 +920,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             )?.scope,
         ).toBe("personal");
     });
-    it("excludes attached folders from categorizing the receiver's own recording", async () => {
+    it("includes attached folders for categorizing the receiver's own recording", async () => {
         await accept();
         await insertRecording(database.db, {
             id: "receiver-audio",
@@ -904,7 +939,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             true,
         );
         expect(panel?.folders.some((folder) => folder.id === node.id)).toBe(
-            false,
+            true,
         );
         expect(panel?.selectedFolderIds).not.toContain(node.id);
     });
@@ -1963,5 +1998,772 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
                 })
             ).some((row) => row.id === own.id),
         ).toBe(true);
+    });
+    const contribute = async (
+        kind: "audio" | "mail" = "audio",
+        userId = "receiver",
+    ) => {
+        const id = `${userId}-${kind}`;
+        if (kind === "audio")
+            await insertRecording(database.db, {
+                id,
+                userId,
+                title: "Acme contribution",
+            });
+        else {
+            await database.db.insert(chatterItems).values({
+                id,
+                userId,
+                kind,
+                title: encryptText("Acme contribution"),
+                occurredAt: new Date(),
+            });
+            await database.db.insert(mailMessages).values({
+                id,
+                userId,
+                rawHash: id,
+                receivedAt: new Date(),
+                sizeBytes: 10,
+                auth: encryptJsonField({ dkim: [], spf: null, arc: null }),
+                senderVerified: true,
+            });
+        }
+        await addRecordingToFolder({
+            userId,
+            recordingId: id,
+            folderId: "source",
+        });
+        return id;
+    };
+    const acceptOther = async () => {
+        const shares = await inviteToFolder("owner", "source", ["other"]);
+        const share = shares.find((row) => row.receiverUserId === "other");
+        if (!share) throw new Error("Missing invitation");
+        await changeFolderShare("other", share.id, {
+            action: "accept",
+            version: share.version,
+        });
+    };
+    it.each([
+        "audio",
+        "mail",
+    ] as const)("shares participant-owned %s with the folder owner and fellow participants once", async (kind) => {
+        await accept();
+        await acceptOther();
+        const id = await contribute(kind);
+        expect(await isItemReceived("receiver", id)).toBe(false);
+        for (const viewer of ["owner", "other"]) {
+            expect(
+                (await visibleIds(viewer)).filter((value) => value === id),
+            ).toHaveLength(1);
+            expect(
+                await resolveRecordingAccess(viewer, id, {
+                    kinds: ["audio", "mail"],
+                }),
+            ).toMatchObject({ role: "receiver", ownerUserId: "receiver" });
+            const result = await searchItems({
+                viewerUserId: viewer,
+                query: "Acme",
+                view: "private",
+            });
+            expect(result.hits.filter((hit) => hit.id === id)).toHaveLength(1);
+            const caller = userCaller(
+                viewer,
+                `${viewer}@example.com`,
+                ["transcripts:read", "mail:read"],
+                "organization",
+            );
+            expect(
+                await database.db
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(
+                        and(
+                            eq(chatterItems.id, id),
+                            mcpItemCondition(caller, ["audio", "mail"]),
+                        ),
+                    ),
+            ).toHaveLength(1);
+        }
+        expect(
+            await resolveRecordingAccess("receiver", id, {
+                kinds: ["audio", "mail"],
+            }),
+        ).toMatchObject({ role: "owner" });
+        expect(await isItemReceived("curator", id)).toBe(false);
+        const tree = await listFolderOrganization("owner");
+        expect(
+            tree.assignments.filter((row) => row.recordingId === id),
+        ).toEqual([{ recordingId: id, folderId: "source" }]);
+        const [node] = (await listReceivedFolderOrganization("receiver"))
+            .folders;
+        const condition = await folderCondition("receiver", node.id, {
+            id: chatterItems.id,
+            userId: chatterItems.userId,
+        });
+        expect(
+            await database.db
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(and(eq(chatterItems.id, id), condition)),
+        ).toHaveLength(1);
+        expect(await listOutgoingSharedItemIds("receiver")).toContain(id);
+        const [assignment] = await database.db
+            .select()
+            .from(recordingFolderAssignments)
+            .where(eq(recordingFolderAssignments.itemId, id));
+        expect(assignment).toMatchObject({
+            userId: "receiver",
+            folderId: "source",
+        });
+    });
+    it.each([
+        "pending",
+        "declined",
+        "removed",
+    ] as const)("refuses filing by a %s receiver", async (state) => {
+        const share = await invite();
+        if (state === "declined")
+            await changeFolderShare("receiver", share.id, {
+                action: "decline",
+                version: 0,
+            });
+        if (state === "removed") {
+            await changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: 0,
+            });
+            await changeFolderShare("receiver", share.id, {
+                action: "remove",
+                version: 1,
+            });
+        }
+        await insertRecording(database.db, { id: "own", userId: "receiver" });
+        await expect(
+            addRecordingToFolder({
+                userId: "receiver",
+                recordingId: "own",
+                folderId: "source",
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            prepareMeeting("receiver", {
+                folderId: "source",
+                title: "Acme agenda",
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it("resolves attachment names and source IDs as filing targets without exposing subfolders", async () => {
+        await accept();
+        const [node] = (await listReceivedFolderOrganization("receiver"))
+            .folders;
+        expect(
+            await assertCategorizableFolders("receiver", [node.id, "source"]),
+        ).toEqual([
+            { folderId: "source", ownerId: "owner", scope: "personal" },
+        ]);
+        expect(
+            await assertCategorizableFolder("receiver", node.id),
+        ).toMatchObject({
+            folderId: "source",
+            ownerId: "owner",
+            scope: "personal",
+        });
+        expect(
+            (await listRecordingFolderTrees("receiver")).find(
+                (row) => row.id === node.id,
+            )?.name,
+        ).toBe("My research");
+        await expect(
+            assertCategorizableFolder("receiver", "child"),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        const response = await recorderFolders(
+            new Request("http://localhost/api/v1/recorder/folders?q=research"),
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual([
+            {
+                id: "source",
+                name: "My research",
+                path: "Private / Projects / My research",
+                scope: "personal",
+                sharedWithPeople: true,
+            },
+        ]);
+        const lookup = await recorderFolders(
+            new Request("http://localhost/api/v1/recorder/folders?id=source"),
+        );
+        expect((await lookup.json()).data[0].name).toBe("My research");
+    });
+    it.each([
+        "owner",
+        "receiver",
+    ])("lets %s unfile a contribution while preserving its owner and content", async (actor) => {
+        await accept();
+        await acceptOther();
+        const id = await contribute();
+        const response = await unfileRoute(
+            request(
+                `recordings/${id}/folders`,
+                "DELETE",
+                { folderId: "source" },
+                actor,
+            ),
+            context(id),
+        );
+        expect(response.status).toBe(200);
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, id)),
+        ).toEqual([]);
+        expect(await resolveRecordingAccess("owner", id)).toBeNull();
+        expect(await resolveRecordingAccess("receiver", id)).toMatchObject({
+            role: "owner",
+        });
+    });
+    it("refuses unfiling or moving a fellow participant's item and further folder invitations", async () => {
+        await accept();
+        await acceptOther();
+        const id = await contribute();
+        await removeRecordingFromFolder({
+            userId: "other",
+            recordingId: id,
+            folderId: "source",
+        });
+        expect(await isItemReceived("owner", id)).toBe(true);
+        await expect(
+            moveRecordingBetweenFolders({
+                userId: "other",
+                recordingId: id,
+                fromFolderId: "source",
+                toFolderId: "my-folder",
+            }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            inviteToFolder("receiver", "source", ["other"]),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(() =>
+            assertMayChange(
+                {
+                    view: "received",
+                    ownerUserId: "receiver",
+                    role: "receiver",
+                    shared: false,
+                    orgUserId: "organization",
+                },
+                "owner",
+                false,
+            ),
+        ).toThrow();
+    });
+    it.each([
+        "owner",
+        "receiver",
+        "delete",
+    ])("unfiles a leaving participant's items on %s removal and preserves independent access", async (actor) => {
+        const share = await accept();
+        await acceptOther();
+        const id = await contribute();
+        const meeting = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme agenda",
+        });
+        const [direct] = await inviteToItem("receiver", id, ["owner"]);
+        await changePersonShare("owner", direct.id, {
+            action: "accept",
+            version: direct.version,
+            folderId: "elsewhere",
+        });
+        if (actor === "delete") await deleteFolder("owner", "source");
+        else
+            await changeFolderShare(actor, share.id, {
+                action: "remove",
+                version: 1,
+            });
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.userId, "receiver")),
+        ).toEqual([]);
+        expect(await isItemReceived("other", id)).toBe(false);
+        expect(await isItemReceived("owner", id)).toBe(true);
+        expect(await resolveRecordingAccess("receiver", id)).toMatchObject({
+            role: "owner",
+        });
+        expect((await getMeeting("receiver", meeting.id)).unchanged).toBe(
+            false,
+        );
+        await expect(getMeeting("owner", meeting.id)).rejects.toMatchObject({
+            statusCode: 404,
+        });
+        expect(events).toHaveBeenCalledWith("receiver");
+    });
+    it("uses each contributor's unfiled profile and excludes contributions from other owners' exports and archives", async () => {
+        await accept();
+        const id = await contribute();
+        const ownProfile = await createProfile({
+            ownerUserId: "receiver",
+            actor: localActor("receiver"),
+            scope: "personal",
+            channel: "audio",
+            name: "Own audio",
+            settings: defaultProfileSettings("audio"),
+        });
+        await setDefaultProfile({
+            ownerUserId: "receiver",
+            actor: localActor("receiver"),
+            channel: "audio",
+            profileId: ownProfile.id,
+        });
+        await database.db
+            .insert(folderDefaultProfiles)
+            .values({ folderId: "source", channel: "audio", manualOnly: true });
+        const input = {
+            ownerUserId: "receiver",
+            itemId: id,
+            channel: "audio" as const,
+            view: "private" as const,
+        };
+        expect(
+            await resolveProfileForPlacements({
+                ...input,
+                folderIds: ["source"],
+            }),
+        ).toEqual(
+            await resolveProfileForPlacements({ ...input, folderIds: [] }),
+        );
+        expect(
+            await resolveArrivalProfile({ ...input, folderIds: ["source"] }),
+        ).toMatchObject({
+            profile: { ownerUserId: "receiver" },
+            manualOnly: false,
+        });
+        expect(
+            await resolveArrivalProfile({
+                ownerUserId: "owner",
+                itemId: "audio",
+                channel: "audio",
+                folderIds: ["source"],
+            }),
+        ).toMatchObject({ manualOnly: true });
+        expect(
+            (await listExportFolderOrganization("owner")).assignments.some(
+                (row) => row.recordingId === id,
+            ),
+        ).toBe(false);
+        expect(
+            (await listPersonalFolderOrganization("receiver")).folders.some(
+                (row) => row.receivedFolder,
+            ),
+        ).toBe(false);
+        for (const viewer of ["owner", "other"])
+            expect(
+                await database.db
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(
+                        and(
+                            eq(chatterItems.id, id),
+                            archivedItemCondition({
+                                kind: "personal",
+                                userId: viewer,
+                            }),
+                        ),
+                    ),
+            ).toEqual([]);
+        expect(
+            await database.db
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, id),
+                        archivedItemCondition({
+                            kind: "personal",
+                            userId: "receiver",
+                        }),
+                    ),
+                ),
+        ).toHaveLength(1);
+    });
+    it("lets every participant co-edit a receiver-authored agenda, keeps manage with its author, and accepts another participant's own recording", async () => {
+        await accept();
+        await acceptOther();
+        const meeting = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme agenda",
+        });
+        const [node] = (await listReceivedFolderOrganization("receiver"))
+            .folders;
+        const listed = await listMeetings("receiver", {
+            folderId: node.id,
+            includePast: true,
+        });
+        expect(listed.map((row) => row.id)).toContain(meeting.id);
+        expect(
+            listed.find((row) => row.id === meeting.id)?.folders[0],
+        ).toMatchObject({ id: node.id, name: "My research" });
+        for (const actor of ["owner", "other"]) {
+            const detail = await getMeeting(actor, meeting.id);
+            if (detail.unchanged) throw new Error("Missing detail");
+            expect(detail.permissions).toMatchObject({
+                edit: true,
+                manage: false,
+            });
+            await addPoint(actor, meeting.id, { text: "Acme discussion" });
+            await expect(
+                patchMeeting(actor, meeting.id, { title: "Forged" }),
+            ).rejects.toMatchObject({ statusCode: 403 });
+            expect(
+                (
+                    await collectArchivedMeetings({
+                        kind: "personal",
+                        userId: actor,
+                    })
+                ).some((row) => row.id === meeting.id),
+            ).toBe(false);
+        }
+        expect(
+            (
+                await collectArchivedMeetings({
+                    kind: "personal",
+                    userId: "receiver",
+                })
+            ).map((row) => row.id),
+        ).toContain(meeting.id);
+        await insertRecording(database.db, {
+            id: "other-audio",
+            userId: "other",
+        });
+        await attachAgenda("other", meeting.id, "other-audio");
+        for (const actor of ["owner", "receiver"])
+            expect(await isItemReceived(actor, "other-audio")).toBe(true);
+        expect(await isItemReceived("other", "other-audio")).toBe(false);
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "other-audio")),
+        ).toEqual([
+            expect.objectContaining({ userId: "other", folderId: "source" }),
+        ]);
+    });
+    it("notifies the folder owner and other accepted participants, excluding the contributor and pending invitations", async () => {
+        await accept();
+        await acceptOther();
+        await inviteToFolder("owner", "source", ["curator"]);
+        await insertRecording(database.db, {
+            id: "arriving",
+            userId: "receiver",
+        });
+        const notifications: unknown[] = [];
+        const listener = await database.sql.listen(
+            "riffado_personal",
+            (payload) => notifications.push(JSON.parse(payload)),
+        );
+        try {
+            await database.db.transaction(async (tx) => {
+                await requestArrivalInTx(tx, {
+                    userId: "receiver",
+                    itemId: "arriving",
+                    folder: {
+                        folderId: "source",
+                        ownerId: "owner",
+                        scope: "personal",
+                    },
+                });
+                expect(notifications).toEqual([]);
+            });
+            await vi.waitFor(() => expect(notifications).toHaveLength(2));
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    { type: "share", userId: "owner" },
+                    { type: "share", userId: "other" },
+                ]),
+            );
+            expect(
+                await database.db
+                    .select({ userId: itemProcessing.userId })
+                    .from(itemProcessing)
+                    .where(eq(itemProcessing.itemId, "arriving")),
+            ).toEqual([{ userId: "receiver" }]);
+        } finally {
+            await listener.unlisten();
+        }
+    });
+    it.each([
+        "filing-first",
+        "removal-first",
+    ])("serializes participation checks with revocation (%s)", async (order) => {
+        const share = await accept();
+        await insertRecording(database.db, {
+            id: "racing",
+            userId: "receiver",
+        });
+        const operations = {
+            filing: () =>
+                addRecordingToFolder({
+                    userId: "receiver",
+                    recordingId: "racing",
+                    folderId: "source",
+                }),
+            removal: () =>
+                changeFolderShare("owner", share.id, {
+                    action: "remove",
+                    version: 1,
+                }),
+        };
+        const results = await Promise.allSettled(
+            order === "filing-first"
+                ? [operations.filing(), operations.removal()]
+                : [operations.removal(), operations.filing()],
+        );
+        expect(results[1 - Number(order === "removal-first")].status).toBe(
+            "fulfilled",
+        );
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "racing")),
+        ).toEqual([]);
+        expect(
+            await resolveRecordingAccess("receiver", "racing"),
+        ).toMatchObject({ role: "owner" });
+    });
+    it("auto-attaches a participant's own already-filed recording but keeps the same-author requirement", async () => {
+        await accept();
+        const start = "2026-11-03T10:00:00Z";
+        const end = "2026-11-03T11:00:00Z";
+        const meeting = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme agenda",
+            start,
+            end,
+        });
+        await insertRecording(database.db, {
+            id: "matching",
+            userId: "receiver",
+            startTime: new Date(start),
+        });
+        await addRecordingToFolder({
+            userId: "receiver",
+            recordingId: "matching",
+            folderId: "source",
+        });
+        await database.db.transaction((tx) =>
+            attachArrivingRecordingInTx(
+                tx,
+                "receiver",
+                "matching",
+                "upload-match",
+            ),
+        );
+        const detail = await getMeeting("receiver", meeting.id);
+        if (detail.unchanged) throw new Error("Missing detail");
+        expect(detail.recordingItemId).toBe("matching");
+        const second = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme next",
+            start: "2026-11-04T10:00:00Z",
+            end: "2026-11-04T11:00:00Z",
+        });
+        await insertRecording(database.db, {
+            id: "different-owner",
+            userId: "owner",
+            startTime: new Date("2026-11-04T10:00:00Z"),
+        });
+        await addRecordingToFolder({
+            userId: "owner",
+            recordingId: "different-owner",
+            folderId: "source",
+        });
+        await database.db.transaction((tx) =>
+            attachArrivingRecordingInTx(
+                tx,
+                "owner",
+                "different-owner",
+                "upload-other",
+            ),
+        );
+        const untouched = await getMeeting("owner", second.id);
+        if (untouched.unchanged) throw new Error("Missing detail");
+        expect(untouched.recordingItemId).toBeNull();
+    });
+    it("gives the primary-email assignee receiver rights on contributed tasks without granting edits or Learn", async () => {
+        await accept();
+        await acceptOther();
+        const id = await contribute();
+        await database.db.insert(people).values({
+            id: "contributor-assignee",
+            userId: "receiver",
+            displayName: encryptText("Jitka Dvořáková"),
+            primaryEmail: encryptText("alex@example.com"),
+            primaryEmailHash: lookupHash("alex@example.com"),
+        });
+        const author = await taskViewer(
+            { id: "receiver", email: "lena@example.com" },
+            localActor("receiver"),
+        );
+        const assignee = await taskViewer(
+            { id: "owner", email: "alex@example.com" },
+            localActor("owner"),
+        );
+        const observer = await taskViewer(
+            { id: "other", email: "priya@example.com" },
+            localActor("other"),
+        );
+        const task = await addTask(author, id, {
+            text: "Acme follow-up",
+            status: "open",
+            assigneePersonId: "contributor-assignee",
+        });
+        expect(
+            (await listRecordingTasks(assignee, id))?.tasks.find(
+                (row) => row.id === task.id,
+            ),
+        ).toMatchObject({ canClose: true, canEdit: false });
+        const done = await updateTask(assignee, task.id, {
+            version: task.version,
+            status: "done",
+        });
+        await updateTask(assignee, task.id, {
+            version: done.version,
+            status: "open",
+        });
+        await expect(
+            updateTask(assignee, task.id, {
+                version: done.version + 1,
+                text: "Forged",
+            }),
+        ).rejects.toMatchObject({ statusCode: 403 });
+        expect(
+            (await listRecordingTasks(observer, id))?.tasks.find(
+                (row) => row.id === task.id,
+            ),
+        ).toMatchObject({ canClose: false, canEdit: false });
+        await expect(
+            requireRecordingView("owner", id, "private"),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it.each([
+        "owner",
+        "receiver",
+    ])("lets %s unfile a standalone contributed meeting through the route", async (actor) => {
+        await accept();
+        const meeting = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme agenda",
+        });
+        const response = await unfileMeetingRoute(
+            request(
+                `meetings/${meeting.id}/folders/source`,
+                "DELETE",
+                undefined,
+                actor,
+            ),
+            { params: Promise.resolve({ id: meeting.id, folderId: "source" }) },
+        );
+        expect(response.status).toBe(200);
+        const detail = await getMeeting("receiver", meeting.id);
+        if (detail.unchanged) throw new Error("Missing detail");
+        expect(detail.folders).toEqual([]);
+        await expect(getMeeting("owner", meeting.id)).rejects.toMatchObject({
+            statusCode: 404,
+        });
+    });
+    it("keeps a deferred capture unfiled when its share ends after placement resolution", async () => {
+        const share = await accept();
+        const folder = await assertCategorizableFolder("receiver", "source");
+        await insertRecording(database.db, {
+            id: "deferred",
+            userId: "receiver",
+        });
+        await changeFolderShare("owner", share.id, {
+            action: "remove",
+            version: 1,
+        });
+        await database.db.transaction((tx) =>
+            requestArrivalInTx(tx, {
+                itemId: "deferred",
+                userId: "receiver",
+                folder,
+                allowUnavailableFolder: true,
+            }),
+        );
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "deferred")),
+        ).toEqual([]);
+        expect(
+            await resolveRecordingAccess("receiver", "deferred"),
+        ).toMatchObject({ role: "owner" });
+        expect(await isItemReceived("owner", "deferred")).toBe(false);
+        await expect(
+            database.db.transaction((tx) =>
+                requestArrivalInTx(tx, {
+                    itemId: "deferred",
+                    userId: "receiver",
+                    folder,
+                }),
+            ),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it("round-trips a contributor's own agenda without exporting another participant's folder", async () => {
+        await accept();
+        const meeting = await prepareMeeting("receiver", {
+            folderId: "source",
+            title: "Acme portable agenda",
+        });
+        const [archived] = await collectArchivedMeetings({
+            kind: "personal",
+            userId: "receiver",
+        });
+        expect(archived.id).toBe(meeting.id);
+        expect(archived.folderIds).toEqual([]);
+        const result = await restoreMeetings("receiver", {
+            meetings: [archived],
+        });
+        expect(result.skipped).toEqual([]);
+        expect(result.restored).toHaveLength(1);
+        const detail = await getMeeting("receiver", result.restored[0].id);
+        if (detail.unchanged) throw new Error("Missing detail");
+        expect(detail.title).toBe("Acme portable agenda");
+        expect(detail.folders).toEqual([]);
+        await expect(
+            getMeeting("owner", result.restored[0].id),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it("preserves filing in the hosted legacy Public root", async () => {
+        mockEnv.IS_HOSTED = true;
+        await database.db.insert(recordingFolders).values({
+            id: "legacy-public",
+            userId: "owner",
+            name: encryptText("Public"),
+            nameHash: "public",
+            kind: "public",
+        });
+        await addRecordingToFolder({
+            userId: "owner",
+            recordingId: "later",
+            folderId: "legacy-public",
+        });
+        expect(
+            await database.db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "later")),
+        ).toEqual([
+            expect.objectContaining({
+                userId: "owner",
+                folderId: "legacy-public",
+            }),
+        ]);
+        expect(await isItemReceived("receiver", "later")).toBe(false);
     });
 });

@@ -1,3 +1,4 @@
+import { supportsAgendas } from "../lib/agendas.js";
 import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptSwitches } from "../lib/meeting-prompt-ui.js";
@@ -377,6 +378,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
         setupFlow = changes[SETUP_FLOW_KEY].newValue ?? null;
         void renderSetup();
     }
+    if (area === "local" && changes.serverDefaults) void renderAgendaSettings();
     if (area === "local" && (changes.encryptedApiKey || changes.serverUrl)) {
         void restore();
     }
@@ -497,6 +499,21 @@ el("refresh-config").addEventListener("click", async () => {
         );
     }
 });
+
+async function renderAgendaSettings() {
+    if (!el("agenda-settings")) return;
+    const settings = await getSettings();
+    const supported = supportsAgendas(settings);
+    el("agenda-unsupported").hidden = supported;
+    el("agenda-settings").hidden = !supported;
+    el("agenda-reminders").checked = settings.agendaReminders;
+    el("agenda-banner").checked = settings.agendaBanner;
+}
+for (const [id, key] of [["agenda-reminders", "agendaReminders"], ["agenda-banner", "agendaBanner"]]) {
+    el(id)?.addEventListener("change", async (event) => {
+        if (requireDataUseConsent()) await saveSettings({ [key]: event.target.checked });
+    });
+}
 
 async function renderServerDefaults() {
     const settings = await getSettings();
@@ -792,6 +809,7 @@ async function restore() {
         renderPendingBuffers(),
         renderPendingPair(),
         renderServerDefaults(),
+        renderAgendaSettings(),
         renderPlatformTable(),
         renderShortcut(),
     ]);

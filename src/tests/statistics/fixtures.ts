@@ -16,6 +16,7 @@ export function statisticsFixture(
     daily[metricIndex.plaud][364] = 90;
     daily[metricIndex.transcripts][364] = 4;
     daily[metricIndex.summaryCost][364] = 0.5;
+    daily[metricIndex.audioCost][364] = 0.5;
     return {
         scope,
         tz: "UTC",

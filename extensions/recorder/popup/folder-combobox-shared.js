@@ -10,6 +10,7 @@
         onPick,
         request,
         save,
+        saveOnRefresh = save,
         t,
     }) {
         let readOnly = false;
@@ -32,12 +33,14 @@
         let inFlight = false;
         let saving = Promise.resolve();
 
-        function persist() {
+        function persist(refresh = false) {
             const settings = {
                 folderId: remembered?.id ?? null,
                 folderLabel: remembered?.label ?? null,
             };
-            saving = saving.catch(() => {}).then(() => save(settings));
+            saving = saving.catch(() => {}).then(() =>
+                (refresh ? saveOnRefresh : save)(settings),
+            );
             return saving;
         }
 
@@ -75,7 +78,23 @@
                         String(option.id === (remembered?.id ?? null)),
                     );
                     node.setAttribute("data-active", String(index === active));
-                    node.textContent = option.label;
+                    if (option.sharedWithPeople) {
+                        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                        icon.setAttribute("viewBox", "0 0 24 24");
+                        icon.setAttribute("width", "16");
+                        icon.setAttribute("height", "16");
+                        icon.setAttribute("fill", "none");
+                        icon.setAttribute("stroke", "currentColor");
+                        icon.setAttribute("stroke-width", "2");
+                        icon.setAttribute("aria-hidden", "true");
+                        icon.style.cssText = "color:#9c5e8f;vertical-align:middle;margin-right:6px";
+                        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                        path.setAttribute("d", "M2 9V5a1 1 0 0 1 1-1h5l2 2h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1 M2 13h10 M9 10l3 3-3 3");
+                        icon.append(path);
+                        node.append(icon, document.createTextNode(option.label));
+                    } else {
+                        node.textContent = option.label;
+                    }
                     node.title = option.label;
                     node.addEventListener("mousedown", (event) =>
                         event.preventDefault(),
@@ -137,10 +156,10 @@
                     if (job.selection !== selectionVersion) return;
                     if (response?.ok && response.folders?.[0]) {
                         remembered = response.folders[0];
-                        await persist().catch(() => {});
+                        await persist(true).catch(() => {});
                     } else if (response?.status === 404) {
                         remembered = null;
-                        await persist().catch(() => {});
+                        await persist(true).catch(() => {});
                     }
                     if (!open) showSelection();
                 } else if (job.version === version) {
@@ -247,6 +266,7 @@
         onPick,
         request,
         save,
+        saveOnRefresh = save,
         t,
     }) {
         const node = (tag, suffix, className, attributes = {}) => {
@@ -285,19 +305,21 @@
             hint: el("hint"),
             onPick,
             request,
-            save: async (settings) => {
-                try {
-                    await save(settings);
-                    el("error").hidden = true;
-                } catch (error) {
-                    el("error").textContent =
-                        error?.message || t("folderChangeFailed");
-                    el("error").hidden = false;
-                    throw error;
-                }
-            },
+            save: (settings) => persistFolder(settings, save),
+            saveOnRefresh: (settings) => persistFolder(settings, saveOnRefresh),
             t,
         });
+        async function persistFolder(settings, saver) {
+            try {
+                await saver(settings);
+                el("error").hidden = true;
+            } catch (error) {
+                el("error").textContent =
+                    error?.message || t("folderChangeFailed");
+                el("error").hidden = false;
+                throw error;
+            }
+        }
         return {
             reset(settings, options = {}) {
                 el("hint").textContent = t(
@@ -315,6 +337,24 @@
         let current = null;
         let signature = "";
         let field;
+        async function saveFolder(folder, remember = true) {
+            try {
+                const response = await send({
+                    type: "set-recording-folder",
+                    sessionId: current.sessionId,
+                    ...folder,
+                    ...(!remember ? { remember: false } : {}),
+                });
+                if (!response?.ok)
+                    throw new Error(response?.error || t("folderChangeFailed"));
+            } catch (error) {
+                field.reset(current, {
+                    readOnly: current.recordingFolderOverride !== true,
+                    refresh: false,
+                });
+                throw error;
+            }
+        }
         return {
             render(state) {
                 container.hidden = state.state !== "recording" || state.stopped;
@@ -325,26 +365,8 @@
                     onPick,
                     request,
                     t,
-                    save: async (folder) => {
-                        try {
-                            const response = await send({
-                                type: "set-recording-folder",
-                                sessionId: current.sessionId,
-                                ...folder,
-                            });
-                            if (!response?.ok)
-                                throw new Error(
-                                    response?.error || t("folderChangeFailed"),
-                                );
-                        } catch (error) {
-                            field.reset(current, {
-                                readOnly:
-                                    current.recordingFolderOverride !== true,
-                                refresh: false,
-                            });
-                            throw error;
-                        }
-                    },
+                    save: (folder) => saveFolder(folder),
+                    saveOnRefresh: (folder) => saveFolder(folder, false),
                 });
                 current = state;
                 const next = JSON.stringify([

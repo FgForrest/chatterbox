@@ -153,13 +153,23 @@ import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 /** The recording-ownership check the route makes before queueing anything. */
 function stubRecordingExists(exists = true) {
     recordingAccess.exists = exists;
-    selectMock.mockReturnValue({
-        from: () => ({
-            where: () => ({
-                limit: () => Promise.resolve(exists ? [{ id: "rec-1" }] : []),
-            }),
-        }),
-    });
+    const query = {
+        innerJoin: () => query,
+        where: () => query,
+        limit: () =>
+            Promise.resolve(
+                exists
+                    ? [
+                          {
+                              id: "rec-1",
+                              hasAgenda: false,
+                              agendaCandidateCount: 0,
+                          },
+                      ]
+                    : [],
+            ),
+    };
+    selectMock.mockReturnValue({ from: () => query });
 }
 
 describe("POST /api/recordings/[id]/summary (manual)", () => {
@@ -451,6 +461,8 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             provider: "plaud",
             model: "plaud-native",
             availableSources: ["plaud", "riffado"],
+            hasAgenda: false,
+            agendaCandidateCount: 0,
         });
         expect(pipelineMayQueue).not.toHaveBeenCalled();
     });
@@ -556,5 +568,18 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             "rec-1",
             "summary",
         );
+    });
+    it("returns agenda presence even when no summary exists", async () => {
+        vi.mocked(readStoredSummaries).mockResolvedValue([]);
+        const response = await GET(
+            new Request("http://localhost/api/recordings/rec-1/summary"),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            summary: null,
+            hasAgenda: false,
+            agendaCandidateCount: 0,
+        });
     });
 });

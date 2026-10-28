@@ -10,6 +10,7 @@ import {
     pruneMailDeliveryLog,
 } from "@/db/queries/mail";
 import { pruneMcpAccessLog } from "@/db/queries/mcp-audit";
+import { holdOverdueMeetings } from "@/db/queries/meetings";
 import { pruneExpiredRateLimitBuckets } from "@/db/queries/rate-limit";
 import { writeStorageSnapshots } from "@/db/queries/storage-snapshots";
 import { pruneSettledWebhookDeliveries } from "@/db/queries/webhook-deliveries";
@@ -68,6 +69,10 @@ export async function runHousekeeping(
 ): Promise<Record<string, number>> {
     const now = Date.now();
     const prunes: [string, (limit: number) => Promise<number>][] = [
+        [
+            "meeting_agendas",
+            (limit) => holdOverdueMeetings(limit, new Date(now)),
+        ],
         ["async_jobs", (limit) => pruneFinishedJobs(DAY_MS, limit)],
         [
             "webhook_deliveries",

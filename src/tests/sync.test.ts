@@ -73,6 +73,12 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
     captureServerException: vi.fn(),
 }));
+vi.mock("@/lib/pipeline/arrival", () => ({
+    requestArrivalInTx: vi
+        .fn()
+        .mockResolvedValue({ requestedGeneration: 1, enqueued: true }),
+    resolveArrivalProfile: vi.fn(),
+}));
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue({
         requestedGeneration: 1,
@@ -84,7 +90,7 @@ import { db } from "@/db";
 import { chatterItems } from "@/db/schema";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
 import { decryptText } from "@/lib/encryption/fields";
-import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { captureServerException } from "@/lib/posthog-server";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
@@ -436,12 +442,10 @@ describe("Sync", () => {
                 expect(resolveDefaultProfile).not.toHaveBeenCalled();
                 expect(consoleError).not.toHaveBeenCalled();
                 expect(captureServerException).not.toHaveBeenCalled();
-                expect(requestAdvanceInTx).toHaveBeenCalledWith(
+                expect(requestArrivalInTx).toHaveBeenCalledWith(
                     expect.anything(),
                     expect.objectContaining({
                         userId: mockUserId,
-                        view: "private",
-                        reason: "arrival",
                     }),
                 );
             } finally {

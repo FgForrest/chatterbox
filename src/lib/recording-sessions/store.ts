@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import type { StorageProvider } from "@/lib/storage/types";
 import { MAX_SESSION_BYTES } from "./constants";
@@ -466,8 +467,28 @@ export async function markRecordingSessionCompleting(input: {
     expectedChunkCount: number;
     folderId?: string | null;
     truncatedAtChunk: number | null;
+    agendaId?: string | null;
 }): Promise<RecordingSessionRow | null> {
+    const viewer = input.agendaId ? await meetingViewer(input.userId) : null;
     return db.transaction(async (tx) => {
+        let agendaAvailable = false;
+        if (input.agendaId && viewer) {
+            try {
+                await requireMeetingAccess(
+                    input.userId,
+                    input.agendaId,
+                    "edit",
+                    { viewer, executor: tx, lock: true },
+                );
+                agendaAvailable = true;
+            } catch (error) {
+                if (
+                    !(error instanceof AppError) ||
+                    ![403, 404, 409].includes(error.statusCode)
+                )
+                    throw error;
+            }
+        }
         const [session] = await tx
             .select({ status: recordingSessions.status })
             .from(recordingSessions)
@@ -505,6 +526,25 @@ export async function markRecordingSessionCompleting(input: {
             .set({
                 ...(input.folderId !== undefined
                     ? { folderId: input.folderId }
+                    : {}),
+                ...(input.agendaId !== undefined
+                    ? {
+                          metadata: sql`(${recordingSessions.metadata} - 'agendaId' - 'agendaOutcome') || ${JSON.stringify(
+                              input.agendaId === null
+                                  ? { agendaId: null }
+                                  : {
+                                        ...(agendaAvailable
+                                            ? { agendaId: input.agendaId }
+                                            : {}),
+                                        agendaOutcome: agendaAvailable
+                                            ? { attached: true }
+                                            : {
+                                                  attached: false,
+                                                  reason: "unavailable",
+                                              },
+                                    },
+                          )}::jsonb`,
+                      }
                     : {}),
                 status: "completing",
                 endedAt: input.endedAt,

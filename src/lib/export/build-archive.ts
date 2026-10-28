@@ -58,6 +58,7 @@ import {
 } from "@/lib/export/archive-scope";
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
+import { collectArchivedMeetings } from "@/lib/export/meetings";
 import { collectCareArchive } from "@/lib/knowledge/care-archive";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { collectArchivedMail } from "@/lib/mail/archive";
@@ -82,6 +83,8 @@ export interface ArchiveResult {
 interface ManifestRecording {
     id: string;
     confirmedLanguage: string | null;
+    calendarEventId?: string | null;
+    calendarSeriesId?: string | null;
     /** Whose recording it is: in the Organization's archive only. */
     owner?: { id: string; name: string | null; email: string };
     filename: string;
@@ -182,21 +185,13 @@ export async function buildAndUploadExportArchive(input: {
 
     const recordingIds = userRecordings.map((r) => r.id);
 
-    // What a recording cost is its payer's: never in the Organization's.
-    const userUsage =
-        recordingIds.length > 0 && scope.kind === "personal"
-            ? await db
-                  .select()
-                  .from(aiUsageEvents)
-                  .where(
-                      and(
-                          inArray(aiUsageEvents.itemId, recordingIds),
-                          eq(aiUsageEvents.payerUserId, userId),
-                      ),
-                  )
-            : [];
+    const userUsage = await db
+        .select()
+        .from(aiUsageEvents)
+        .where(eq(aiUsageEvents.payerUserId, userId));
     const usageMap = new Map<string, typeof userUsage>();
     for (const usage of userUsage) {
+        if (scope.kind !== "personal" || usage.itemId === null) continue;
         const group = usageMap.get(usage.itemId) ?? [];
         group.push(usage);
         usageMap.set(usage.itemId, group);
@@ -273,6 +268,7 @@ export async function buildAndUploadExportArchive(input: {
         proposals: true,
     });
     const archivedMail = await collectArchivedMail(scope);
+    const archivedMeetings = await collectArchivedMeetings(scope);
     const mailIds = archivedMail.map((mail) => mail.id);
     const mailTasks = await tasksForArchive(scope, mailIds, {
         proposals: true,
@@ -395,6 +391,7 @@ export async function buildAndUploadExportArchive(input: {
             path: string;
         };
         personalTasks?: { count: number; path: string };
+        meetings?: { count: number; path: string };
         taskFollows?: { count: number; path: string };
         personShares?: { count: number; path: string };
         folderShares?: { count: number; path: string };
@@ -403,6 +400,7 @@ export async function buildAndUploadExportArchive(input: {
             homeMoves: { count: number; path: string | null };
         };
         aiProviderRates?: { count: number; path: string };
+        aiUsage?: { count: number; path: string };
         /** Mail of the pile: each a directory with message.eml and mail.json. */
         mail?: {
             id: string;
@@ -416,7 +414,7 @@ export async function buildAndUploadExportArchive(input: {
             raw: { included: boolean; reason?: string };
         }[];
     } = {
-        version: "2.4",
+        version: "2.5",
         scope: scope.kind,
         createdAt: new Date().toISOString(),
         userId,
@@ -441,6 +439,8 @@ export async function buildAndUploadExportArchive(input: {
         const entry: ManifestRecording = {
             id: recording.id,
             confirmedLanguage: recording.confirmedLanguage ?? null,
+            calendarEventId: recording.calendarEventId,
+            calendarSeriesId: recording.calendarSeriesId,
             ...(scope.kind === "organization"
                 ? {
                       owner: {
@@ -860,7 +860,17 @@ export async function buildAndUploadExportArchive(input: {
             manifest.taskFollows = { count: taskFollows.length, path };
         }
     }
+    if (archivedMeetings.length) {
+        const path = "meetings/agendas.json";
+        archive.append(Buffer.from(JSON.stringify(archivedMeetings, null, 2)), {
+            name: path,
+        });
+        manifest.meetings = { count: archivedMeetings.length, path };
+    }
     const containedItemIds = new Set([
+        ...archivedMeetings.flatMap((meeting) =>
+            meeting.meetingItemId ? [meeting.meetingItemId] : [],
+        ),
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),
     ]);
@@ -1105,6 +1115,14 @@ export async function buildAndUploadExportArchive(input: {
             name: path,
         });
         manifest.aiProviderRates = { count: priced.length, path };
+    }
+
+    if (userUsage.length > 0) {
+        const path = "ai/usage.json";
+        archive.append(Buffer.from(JSON.stringify(userUsage, null, 2)), {
+            name: path,
+        });
+        manifest.aiUsage = { count: userUsage.length, path };
     }
 
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {

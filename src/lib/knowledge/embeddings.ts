@@ -12,6 +12,16 @@
  * nothing: neither counts.
  */
 
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { apiCredentials } from "@/db/schema";
+import {
+    type AiUsageContext,
+    recordAiUsage,
+    type UsageValues,
+} from "@/lib/ai/usage-cost";
+import { responseUsage } from "@/lib/ai/usage-values";
+import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 
 export class EmbeddingUnavailable extends Error {
@@ -54,12 +64,24 @@ export interface EmbeddingClientOptions {
     now?: () => number;
 }
 
+export interface EmbeddingUsage {
+    userId: string;
+    payerUserId?: string;
+    /** Additional accounts whose card may match the instance embedding credential. */
+    credentialUserIds?: readonly string[];
+    recordingId?: string | null;
+    actorUserId?: string;
+    query?: boolean;
+}
+
 export interface EmbeddingBatch {
     /** Index of the first text in the original input. */
     start: number;
     texts: readonly string[];
     vectors: readonly Float32Array[];
 }
+
+type EmbeddingContext = AiUsageContext & { priced: boolean };
 
 interface PendingBatch {
     start: number;
@@ -121,8 +143,10 @@ export class EmbeddingClient {
         {
             signal,
             onBatch,
+            usage,
         }: {
             signal?: AbortSignal;
+            usage?: EmbeddingUsage;
             /** Called and awaited once per completed sub-batch before resolution. */
             onBatch?: (batch: EmbeddingBatch) => void | Promise<void>;
         } = {},
@@ -136,6 +160,7 @@ export class EmbeddingClient {
             1,
             this.options.maxBatchCharacters ?? 6_000,
         );
+        const context = usage ? await this.usageContext(usage) : null;
         const vectors: Float32Array[] = [];
         for (const request of requestBatches(
             texts,
@@ -143,7 +168,12 @@ export class EmbeddingClient {
             characterLimit,
         )) {
             signal?.throwIfAborted();
-            const batchVectors = await this.batch(request.texts, signal);
+            const batchVectors = await this.batch(
+                request.texts,
+                signal,
+                context,
+                usage?.query,
+            );
             await onBatch?.({
                 start: request.start,
                 texts: request.texts,
@@ -154,6 +184,56 @@ export class EmbeddingClient {
         return vectors;
     }
 
+    private async usageContext(
+        usage: EmbeddingUsage,
+    ): Promise<EmbeddingContext> {
+        const context: EmbeddingContext = {
+            priced: false,
+            recordingId: usage.recordingId ?? null,
+            ownerUserId: usage.userId,
+            actorUserId: usage.actorUserId ?? usage.userId,
+            payerUserId: usage.payerUserId ?? usage.userId,
+            operation: "embedding",
+            provider: "Embeddings",
+            model: this.model,
+            baseUrl: this.options.baseUrl,
+        };
+        try {
+            const cards = await db
+                .select()
+                .from(apiCredentials)
+                .where(
+                    and(
+                        inArray(apiCredentials.userId, [
+                            ...new Set([
+                                context.payerUserId,
+                                ...(usage.credentialUserIds ?? []),
+                            ]),
+                        ]),
+                        eq(apiCredentials.defaultModel, this.model),
+                        isNull(apiCredentials.disabledAt),
+                    ),
+                );
+            const matches = cards.filter(
+                (card) =>
+                    (card.baseUrl || "https://api.openai.com/v1").replace(
+                        /\/+$/,
+                        "",
+                    ) === this.options.baseUrl.replace(/\/+$/, "") &&
+                    decrypt(card.apiKey) === (this.options.apiKey ?? ""),
+            );
+            if (matches.length === 1) {
+                context.payerUserId = matches[0].userId;
+                context.credentialId = matches[0].id;
+                context.provider = matches[0].provider;
+                context.priced = Number(matches[0].inputUsdPerMillion) > 0;
+            }
+        } catch {
+            console.error("Failed to resolve embedding usage rate");
+        }
+        return context;
+    }
+
     private now(): number {
         return (this.options.now ?? Date.now)();
     }
@@ -161,9 +241,13 @@ export class EmbeddingClient {
     private async batch(
         input: string[],
         cancel?: AbortSignal,
+        context?: EmbeddingContext | null,
+        query = false,
     ): Promise<Float32Array[]> {
         const fetch = this.options.fetch ?? globalThis.fetch;
         const url = `${this.options.baseUrl.replace(/\/+$/, "")}/embeddings`;
+        let measured: UsageValues = {};
+        let completed = false;
         try {
             const response = await fetch(url, {
                 method: "POST",
@@ -181,11 +265,22 @@ export class EmbeddingClient {
                 redirect: "error",
             });
             if (!response.ok) {
+                try {
+                    measured = responseUsage(await response.json());
+                } catch {
+                    measured = {};
+                }
                 throw new HttpStatusError(response.status);
             }
             const body = (await response.json()) as {
                 data?: { index: number; embedding: number[] }[];
+                usage?: {
+                    prompt_tokens?: number;
+                    total_tokens?: number;
+                    cost?: number;
+                };
             };
+            measured = responseUsage(body);
             const data = [...(body.data ?? [])].sort(
                 (a, b) => a.index - b.index,
             );
@@ -193,6 +288,7 @@ export class EmbeddingClient {
                 throw new Error("The response does not match the request");
             }
             this.failures = 0;
+            completed = true;
             return data.map((item) => normalize(item.embedding));
         } catch (error) {
             if (cancel?.aborted) throw cancel.reason;
@@ -212,6 +308,19 @@ export class EmbeddingClient {
             throw new EmbeddingUnavailable("The embedding service failed", {
                 cause: error,
             });
+        } finally {
+            if (
+                context &&
+                !cancel?.aborted &&
+                (!query ||
+                    context.priced ||
+                    (measured.reportedCostUsd ?? 0) > 0)
+            ) {
+                await recordAiUsage(context, {
+                    ...measured,
+                    outcome: completed ? "succeeded" : "failed",
+                });
+            }
         }
     }
 }

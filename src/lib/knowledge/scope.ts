@@ -15,7 +15,12 @@
  */
 
 export type ReadContext =
-    | { kind: "recording"; ownerUserId: string; shared: boolean }
+    | {
+          kind: "recording";
+          ownerUserId: string;
+          actorUserId?: string;
+          shared: boolean;
+      }
     | { kind: "pages"; viewerUserId: string };
 
 export function readableScopes(

@@ -7,6 +7,7 @@ import {
     NewFolderForm,
     type NewFolderParent,
 } from "@/components/pipeline/new-folder-form";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -33,6 +34,7 @@ export interface UploadFolderOption {
     name: string;
     path: string;
     scope: FolderScope;
+    receivedFolder?: RecordingFolder["receivedFolder"];
 }
 
 export function uploadFolderParents(
@@ -64,8 +66,7 @@ export function uploadFolderOptions(
     return folders
         .filter(
             (folder) =>
-                !folder.receivedFolder &&
-                folder.parentId !== null &&
+                (folder.receivedFolder || folder.parentId !== null) &&
                 (folder.scope === "personal" || includeOrganization),
         )
         .map((folder) => ({
@@ -164,6 +165,15 @@ export function UploadDialog({
                             </SelectItem>
                             {availableFolders.map((folder) => (
                                 <SelectItem key={folder.id} value={folder.id}>
+                                    {folder.receivedFolder && (
+                                        <SharedFolderIcon
+                                            folder={{
+                                                ...folder,
+                                                kind: "custom",
+                                                parentId: null,
+                                            }}
+                                        />
+                                    )}
                                     {folder.path}
                                 </SelectItem>
                             ))}

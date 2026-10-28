@@ -204,3 +204,58 @@ it.each([
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.queryByRole("tooltip")).toBeNull();
 });
+
+it("renders a read-only agenda task without mutation controls", () => {
+    const onChange = vi.fn();
+    render(
+        <TaskRow
+            task={task({ canEdit: true, canClose: true })}
+            readOnly
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Note" })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).not.toHaveBeenCalled();
+});
+it("frames agenda-specific actions in the shared task row", () => {
+    render(
+        <TaskRow
+            task={task()}
+            organizationOnly
+            onChange={vi.fn()}
+            actions={<button type="button">Remove from agenda</button>}
+        />,
+    );
+    expect(
+        screen
+            .getByRole("button", { name: "Remove from agenda" })
+            .closest("li"),
+    ).toBeTruthy();
+});
+
+it("closes and drops live tasks while keeping the assignee note read-only", () => {
+    const onChange = vi.fn();
+    render(
+        <TaskRow
+            task={task({ canEdit: true, canClose: true })}
+            notesReadOnly
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenCalledWith(
+        { status: "done" },
+        { status: "done" },
+    );
+    expect(screen.queryByLabelText("Note")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Drop" }));
+    expect(onChange).toHaveBeenCalledWith(
+        { status: "dropped" },
+        { status: "dropped" },
+    );
+});

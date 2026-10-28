@@ -14,6 +14,7 @@
  * client.
  */
 
+import { mergeAgendaOutcomes } from "@/lib/meetings/summary-directive";
 import { parseSummaryPayload, type SummaryPayload } from "./payload";
 
 /**
@@ -154,6 +155,7 @@ export interface RunMultiPassOptions {
     mergePrompt?: string | null;
     onProgress?: (progress: MultiPassProgress) => void;
     tasksEnabled?: boolean;
+    agendaPointIds?: readonly string[];
 }
 
 /**
@@ -247,6 +249,7 @@ function richest(payloads: SummaryPayload[]): SummaryPayload {
 export function buildMergeInput(
     payloads: SummaryPayload[],
     tasksEnabled = true,
+    agendaEnabled = true,
 ): string {
     return payloads
         .map((payload, index) => {
@@ -257,10 +260,16 @@ export function buildMergeInput(
                           keyPoints: payload.keyPoints,
                           actionItems: payload.taskItems,
                           taskUpdates: payload.taskUpdates,
+                          ...(agendaEnabled && payload.agendaOutcome
+                              ? { agendaOutcome: payload.agendaOutcome }
+                              : {}),
                       }
                     : {
                           summary: payload.summary,
                           keyPoints: payload.keyPoints,
+                          ...(agendaEnabled && payload.agendaOutcome
+                              ? { agendaOutcome: payload.agendaOutcome }
+                              : {}),
                       },
                 null,
                 2,
@@ -342,6 +351,14 @@ export async function runMultiPassSummary(
         (payload): payload is SummaryPayload => payload !== null,
     );
     const usable = parsed.filter((p) => p.structured);
+    const agendaOutcome = options.agendaPointIds
+        ? mergeAgendaOutcomes(
+              usable.map((payload) => payload.agendaOutcome),
+              options.agendaPointIds,
+          )
+        : null;
+    const withAgenda = (payload: SummaryPayload): SummaryPayload =>
+        agendaOutcome ? { ...payload, agendaOutcome } : payload;
 
     const passOutcomes: PassOutcome[] = settled.map((outcome, index) => {
         if (outcome.status === "rejected") {
@@ -368,7 +385,7 @@ export async function runMultiPassSummary(
 
     if (usable.length === 1) {
         return {
-            payload: usable[0],
+            payload: withAgenda(usable[0]),
             roundsRequested: rounds,
             passesUsed: 1,
             merged: false,
@@ -385,13 +402,24 @@ export async function runMultiPassSummary(
 
     try {
         const mergedRaw = await runMerge(
-            buildMergeInput(usable, tasksEnabled),
+            [
+                buildMergeInput(
+                    usable,
+                    tasksEnabled,
+                    options.agendaPointIds !== undefined,
+                ),
+                agendaOutcome
+                    ? `Agenda outcome computed from the input versions. Use it unchanged and make the Agenda Markdown consistent with it:\n${JSON.stringify(agendaOutcome)}`
+                    : "",
+            ]
+                .filter(Boolean)
+                .join("\n\n"),
             mergePrompt,
         );
         const mergedPayload = parseSummaryPayload(mergedRaw, { tasksEnabled });
         if (!mergedPayload.structured) {
             return {
-                payload: richest(usable),
+                payload: withAgenda(richest(usable)),
                 roundsRequested: rounds,
                 passesUsed: usable.length,
                 merged: false,
@@ -400,7 +428,7 @@ export async function runMultiPassSummary(
             };
         }
         return {
-            payload: mergedPayload,
+            payload: withAgenda(mergedPayload),
             roundsRequested: rounds,
             passesUsed: usable.length,
             merged: true,
@@ -409,7 +437,7 @@ export async function runMultiPassSummary(
         };
     } catch {
         return {
-            payload: richest(usable),
+            payload: withAgenda(richest(usable)),
             roundsRequested: rounds,
             passesUsed: usable.length,
             merged: false,

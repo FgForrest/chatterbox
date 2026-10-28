@@ -4,6 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+    headers: vi.fn(),
     followJob: vi.fn(),
     toastError: vi.fn(),
     toastSuccess: vi.fn(),
@@ -35,7 +36,9 @@ class UploadRequest {
 
     open() {}
 
-    setRequestHeader() {}
+    setRequestHeader(name: string, value: string) {
+        mocks.headers(name, value);
+    }
 
     addEventListener(type: string, listener: EventListener) {
         this.events.addEventListener(type, listener);
@@ -49,6 +52,7 @@ class UploadRequest {
 }
 
 beforeEach(() => {
+    mocks.headers.mockReset();
     mocks.followJob.mockReset();
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
@@ -237,4 +241,41 @@ describe("useUploadQueue failure reporting", () => {
             );
         });
     });
+});
+
+it.each([
+    "audio/mpeg",
+    "video/mp4",
+])("sends the agenda with the initial %s upload, and leaves ordinary uploads independent", async (type) => {
+    const { result } = renderHook(() =>
+        useUploadQueue({ onUploadComplete: vi.fn() }),
+    );
+    const choose = () =>
+        act(() =>
+            result.current.handleUpload({
+                target: {
+                    files: [
+                        new File(
+                            ["test"],
+                            type.startsWith("video")
+                                ? "meeting.mp4"
+                                : "meeting.mp3",
+                            { type },
+                        ),
+                    ],
+                    value: "",
+                },
+            } as unknown as React.ChangeEvent<HTMLInputElement>),
+        );
+    choose();
+    await act(async () => result.current.confirmUpload("folder", "agenda"));
+    expect(mocks.headers).toHaveBeenCalledWith("x-upload-agenda-id", "agenda");
+    mocks.headers.mockClear();
+    choose();
+    await act(async () => result.current.confirmUpload(null));
+    expect(
+        mocks.headers.mock.calls.some(
+            ([name]) => name === "x-upload-agenda-id",
+        ),
+    ).toBe(false);
 });

@@ -33,7 +33,10 @@ export function TaskFolderPicker({
     return (
         <FolderCombobox
             entries={matchFolders(
-                privateFolders.filter((folder) => folder.kind !== "private"),
+                privateFolders.filter(
+                    (folder) =>
+                        folder.kind !== "private" && !folder.receivedFolder,
+                ),
                 "",
                 label,
             )}

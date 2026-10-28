@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
+import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
 import {
     aiEnhancements,
     asyncJobs,
@@ -232,6 +233,11 @@ export async function eraseLocalArtifact(
                 (scope === "transcript" || locked.contentReapedAt !== null) &&
                 (scope === "summary" || locked.summaryReapedAt !== null);
             if (erasedAsWhole) {
+                await deleteRecordingAgendaInTx(tx, {
+                    id: recordingId,
+                    userId,
+                    at: now,
+                });
                 await deleteItemTaskDataInTx(tx, {
                     itemId: recordingId,
                     ownerUserId: userId,

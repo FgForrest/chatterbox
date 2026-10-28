@@ -16,6 +16,14 @@ import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
+import {
+    agendaPlanBlock,
+    loadRecordingAgenda,
+} from "@/lib/meetings/pipeline-context";
+import {
+    SUMMARY_AGENDA_DIRECTIVE,
+    SUMMARY_AGENDA_MERGE_DIRECTIVE,
+} from "@/lib/meetings/summary-directive";
 import { pipelineDriver } from "@/lib/pipeline/driver";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { readProcessing } from "@/lib/pipeline/state";
@@ -234,6 +242,7 @@ export async function generateSummaryForRecording(
 
     const input = await modelInput(transcription);
     const transcriptText = input.text;
+    const agenda = await loadRecordingAgenda(ctx.actorUserId, recordingId);
 
     const profile = opts.presetId
         ? null
@@ -268,34 +277,39 @@ export async function generateSummaryForRecording(
     // What the summary is told about tasks: the recording's date, the tasks
     // already decided on it, and open tasks its reviewer may close. Tasks
     // never cost the summary: without them it is made as before.
-    const tasksContext = tasksEnabled
-        ? await loadTasksPromptContext({
-              recording,
-              transcriptionId: transcription.id,
-              language:
-                  recording.confirmedLanguage ?? transcription.detectedLanguage,
-              orgView,
-              reviewer: await taskViewerById(
-                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
-              ),
-              itemText: transcriptText,
-          }).catch(async (error: unknown) => {
-              console.error("[summary] task context unavailable:", error);
-              return {
+    const tasksContext =
+        tasksEnabled || Boolean(agenda?.tasks.length)
+            ? await loadTasksPromptContext({
+                  recording,
+                  transcriptionId: transcription.id,
+                  language:
+                      recording.confirmedLanguage ??
+                      transcription.detectedLanguage,
+                  orgView,
+                  reviewer: await taskViewerById(
+                      orgView ? ctx.settingsUserId : ctx.ownerUserId,
+                  ),
+                  itemText: tasksEnabled ? transcriptText : "",
+                  agendaTasks: agenda?.tasks,
+              }).catch(async (error: unknown) => {
+                  console.error("[summary] task context unavailable:", error);
+                  return {
+                      agendaTasks: [],
+                      text: "",
+                      refs: new Map<string, string>(),
+                      scopeFingerprint: await itemScopeFingerprint(
+                          recordingId,
+                          orgView ? "org" : ctx.view,
+                          ctx.ownerUserId,
+                      ),
+                  };
+              })
+            : {
+                  agendaTasks: [],
                   text: "",
                   refs: new Map<string, string>(),
-                  scopeFingerprint: await itemScopeFingerprint(
-                      recordingId,
-                      orgView ? "org" : ctx.view,
-                      ctx.ownerUserId,
-                  ),
+                  scopeFingerprint: null,
               };
-          })
-        : {
-              text: "",
-              refs: new Map<string, string>(),
-              scopeFingerprint: null,
-          };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -415,8 +429,13 @@ export async function generateSummaryForRecording(
     const plaudHints = buildPlaudActionItemHints(plaudActionItems);
     const prompt = [
         localizedTemplate.replaceAll("{transcription}", () => transcriptText),
-        tasksContext.text,
+        tasksEnabled ? tasksContext.text : "",
         plaudHints,
+        agendaPlanBlock(
+            agenda
+                ? { ...agenda, tasks: [...(tasksContext.agendaTasks ?? [])] }
+                : null,
+        ),
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -429,6 +448,7 @@ export async function generateSummaryForRecording(
         SUMMARY_MARKDOWN_DIRECTIVE,
         SUMMARY_SPEAKER_DIRECTIVE,
         tasksEnabled ? SUMMARY_TASKS_DIRECTIVE : "",
+        agenda ? SUMMARY_AGENDA_DIRECTIVE : "",
         languageDirective,
     ]
         .filter(Boolean)
@@ -461,6 +481,7 @@ export async function generateSummaryForRecording(
                 SUMMARY_MARKDOWN_DIRECTIVE,
                 SUMMARY_SPEAKER_DIRECTIVE,
                 tasksEnabled ? SUMMARY_TASKS_MERGE_DIRECTIVE : "",
+                agenda ? SUMMARY_AGENDA_MERGE_DIRECTIVE : "",
                 mergeLanguageDirective,
             ]
                 .filter(Boolean)
@@ -468,6 +489,7 @@ export async function generateSummaryForRecording(
         multiPass: multiPassResolution.config,
         onProgress: opts.onProgress,
         tasksEnabled,
+        agendaPointIds: agenda?.points.map((point) => point.id),
     });
 
     const { summary, keyPoints, actionItems } = payload;
@@ -526,6 +548,14 @@ export async function generateSummaryForRecording(
         jobId: opts.jobId,
         view: ctx.view,
         tasks,
+        agenda: agenda
+            ? {
+                  id: agenda.id,
+                  userId: agenda.userId,
+                  version: agenda.version,
+                  outcome: payload.agendaOutcome ?? null,
+              }
+            : undefined,
     });
 
     if (!committed) {

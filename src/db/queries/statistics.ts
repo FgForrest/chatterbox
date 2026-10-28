@@ -48,6 +48,8 @@ type UsageRow = {
     unpriced: number;
     mail_cost: string;
     actor: string | null;
+    failed: number;
+    audio_cost: string;
 };
 
 export async function statisticsScopes(): Promise<StatisticsScope[]> {
@@ -173,6 +175,7 @@ export async function loadStatistics(
                 count(*), null::text
             from ${aiUsageEvents} inner join ${chatterItems} on ${chatterItems.id} = ${aiUsageEvents.itemId}
             where ${itemScope} and ${chatterItems.deletedAt} is null
+                and ${aiUsageEvents.outcome} = 'succeeded'
                 and ${aiUsageEvents.operation} in ('transcription', 'summary')
                 and ${aiUsageEvents.createdAt} >= ${startUtc} and ${aiUsageEvents.createdAt} < ${endUtc} group by 1, 2`,
         tasks: sql`with scoped_tasks as (
@@ -222,10 +225,12 @@ export async function loadStatistics(
         usage: sql`select ${day(aiUsageEvents.createdAt)} as day, ${aiUsageEvents.provider} as provider,
                 ${aiUsageEvents.model} as model, ${knownStep} as step, count(*)::int as jobs,
                 coalesce(sum(${aiUsageEvents.costUsd}), 0) as cost,
-                count(*) filter (where ${aiUsageEvents.costUsd} is null)::int as unpriced,
-                coalesce(sum(${aiUsageEvents.costUsd}) filter (where ${chatterItems.kind} = 'mail'), 0) as mail_cost,
-                ${aiUsageEvents.actorUserId} as actor
-            from ${aiUsageEvents} inner join ${chatterItems} on ${chatterItems.id} = ${aiUsageEvents.itemId}
+                count(*) filter (where ${aiUsageEvents.costUsd} is null and ${aiUsageEvents.outcome} = 'succeeded')::int as unpriced,
+                coalesce(sum(${aiUsageEvents.costUsd}) filter (where coalesce(${aiUsageEvents.itemKind}, ${chatterItems.kind}) = 'mail'), 0) as mail_cost,
+                ${aiUsageEvents.actorUserId} as actor,
+                count(*) filter (where ${aiUsageEvents.outcome} = 'failed')::int as failed,
+                coalesce(sum(${aiUsageEvents.costUsd}) filter (where coalesce(${aiUsageEvents.itemKind}, ${chatterItems.kind}) = 'audio'), 0) as audio_cost
+            from ${aiUsageEvents} left join ${chatterItems} on ${chatterItems.id} = ${aiUsageEvents.itemId}
             where ${payerScope} and ${aiUsageEvents.createdAt} >= ${startUtc} and ${aiUsageEvents.createdAt} < ${endUtc}
             group by 1, 2, 3, 4, 9`,
         disk: sql`select ${clippedDay(recordings.createdAt)} as day, 'audioBytes' as metric,
@@ -421,6 +426,7 @@ export async function loadStatistics(
         ][step];
         if (costMetric) add(dayIndex, costMetric, cost);
         add(dayIndex, "mailCost", Number(row.mail_cost));
+        add(dayIndex, "audioCost", Number(row.audio_cost));
         add(dayIndex, "unpriced", Number(row.unpriced));
         rank(dayIndex, row.actor, 5, cost);
         const key = JSON.stringify([row.provider, row.model]);
@@ -438,10 +444,12 @@ export async function loadStatistics(
             0,
             0,
             0,
+            0,
         ];
         values[3] += Number(row.jobs);
         values[4] += cost;
         values[5] += Number(row.unpriced);
+        values[6] = (values[6] ?? 0) + Number(row.failed);
         modelDays.set(dailyKey, values);
     }
     for (const metric of [
@@ -485,14 +493,18 @@ export async function loadStatistics(
     data.daily = data.daily.map((series) => series.map(round));
     data.comparisonMinutes = data.comparisonMinutes.map(round);
     data.ranking = packRanking([...ranking.values()], memberRows.length);
-    data.modelDays = [...modelDays.values()].map((row) => [
-        row[0],
-        row[1],
-        row[2],
-        row[3],
-        round(row[4]),
-        row[5],
-    ]);
+    data.modelDays = [...modelDays.values()].map((row) => {
+        const values: StatisticsData["modelDays"][number] = [
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            round(row[4]),
+            row[5],
+        ];
+        if (row[6]) values[6] = row[6];
+        return values;
+    });
     data.heat = heat.map((row) => [
         Number(row.day),
         Number(row.hour),

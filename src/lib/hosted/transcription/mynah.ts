@@ -31,6 +31,7 @@ export interface MynahTranscribeInput {
     /** Recording duration in milliseconds; drives the reserved second count. */
     durationMs: number;
     language?: string;
+    fetch?: typeof globalThis.fetch;
 }
 
 // Mirrors `PlaudClient`'s retry pattern (src/lib/plaud/client.ts) -- a
@@ -69,6 +70,7 @@ interface PostTranscriptionRequestInput {
     userId: string;
     url: string;
     language?: string;
+    fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -95,20 +97,23 @@ async function postTranscriptionRequest(
     const idempotencyKey = randomUUID();
     let attempt = 0;
     for (;;) {
-        const res = await fetch(`${mynahBaseUrl}/v1/audio/transcriptions`, {
-            method: "POST",
-            headers: {
-                authorization: `Bearer ${mynahServiceToken}`,
-                "content-type": "application/json",
-                "x-riffado-user-id": userId,
-                "idempotency-key": idempotencyKey,
+        const res = await (input.fetch ?? globalThis.fetch)(
+            `${mynahBaseUrl}/v1/audio/transcriptions`,
+            {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${mynahServiceToken}`,
+                    "content-type": "application/json",
+                    "x-riffado-user-id": userId,
+                    "idempotency-key": idempotencyKey,
+                },
+                body: JSON.stringify({
+                    url,
+                    response_format: "verbose_json",
+                    ...(language ? { language } : {}),
+                }),
             },
-            body: JSON.stringify({
-                url,
-                response_format: "verbose_json",
-                ...(language ? { language } : {}),
-            }),
-        });
+        );
 
         if (res.ok) {
             return (await res.json()) as {
@@ -207,6 +212,7 @@ export async function transcribeViaMynah(
             userId: input.userId,
             url,
             language: input.language,
+            fetch: input.fetch,
         });
 
         commitMynahReservation(reservation);

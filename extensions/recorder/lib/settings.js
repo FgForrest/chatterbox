@@ -16,6 +16,7 @@ import { t } from "./i18n.js";
 /**
  * @typedef {Object} ServerDefaults
  * @property {number} encryptedRecordingProtocol
+ * @property {boolean} agendas
  * @property {boolean} recordingFolderOverride
  * @property {string[]} autoRecordPlatforms
  * @property {number} autoStopQuietSeconds
@@ -28,6 +29,7 @@ import { t } from "./i18n.js";
 /**
  * @typedef {Object} RecorderSettings
  * @property {string} serverUrl
+ * @property {string|null} connectionId
  * @property {boolean} hasApiKey
  * @property {string} microphoneId
  * @property {boolean} micReminderDismissed
@@ -36,6 +38,8 @@ import { t } from "./i18n.js";
  * @property {"mixed"|"split"} channelMode
  * @property {Record<string, "off"|"prompt"|"auto">} platformModes
  * @property {ServerDefaults|null} serverDefaults
+ * @property {boolean} agendaReminders
+ * @property {boolean} agendaBanner
  * @property {boolean} nudgeEnabled
  * @property {number|null} autoStopQuietSeconds
  * @property {string|null} autoModeAcknowledgedAt
@@ -50,6 +54,7 @@ export async function getSettings() {
     return {
         serverUrl: (raw[STORAGE_KEYS.serverUrl] ?? "").replace(/\/+$/, ""),
         hasApiKey: Boolean(raw[STORAGE_KEYS.encryptedApiKey]),
+        connectionId: raw[STORAGE_KEYS.encryptedApiKey]?.nonce?.join?.(".") ?? null,
         microphoneId: raw[STORAGE_KEYS.microphoneId] ?? "",
         micReminderDismissed: raw[STORAGE_KEYS.micReminderDismissed] === true,
         microphoneSetupSkipped: raw[STORAGE_KEYS.microphoneSetupSkipped] === true,
@@ -58,6 +63,8 @@ export async function getSettings() {
         platformModes: raw[STORAGE_KEYS.platformModes] ?? {},
         serverDefaults: raw[STORAGE_KEYS.serverDefaults] ?? null,
         nudgeEnabled: raw[STORAGE_KEYS.nudgeEnabled] ?? true,
+        agendaReminders: raw[STORAGE_KEYS.agendaReminders] !== false,
+        agendaBanner: raw[STORAGE_KEYS.agendaBanner] !== false,
         autoStopQuietSeconds: raw[STORAGE_KEYS.autoStopQuietSeconds] ?? null,
         autoModeAcknowledgedAt: raw[STORAGE_KEYS.autoModeAcknowledgedAt] ?? null,
         dataUseAcknowledgedAt: raw[STORAGE_KEYS.dataUseAcknowledgedAt] ?? null,

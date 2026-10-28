@@ -368,7 +368,7 @@ export async function loadPrivateItemProcessing(
             ),
         )
         .limit(1);
-    if (!item) return null;
+    if (!item || item.kind === "meeting") return null;
 
     const orgUserId = await getOrgUserId();
     const [

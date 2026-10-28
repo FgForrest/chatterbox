@@ -3,6 +3,7 @@ import { Workstation } from "@/components/dashboard/workstation";
 import { PersonSharingProvider } from "@/components/sharing/person-sharing";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
+import { recordingHasAgenda } from "@/db/queries/agenda-presence";
 import {
     listOutgoingSharedItemIds,
     receivedItemCondition,
@@ -31,6 +32,7 @@ import {
     loadReceivedMailRows,
     loadSharedMailRows,
 } from "@/lib/mail/list";
+import { listMeetings } from "@/lib/meetings/service";
 import {
     getOrgUserId,
     isOrgAccount,
@@ -137,6 +139,7 @@ async function loadOrganizationLibrary(
     const rows = await db
         .select({
             id: recordings.id,
+            hasAgenda: recordingHasAgenda(),
             userId: recordings.userId,
             filename: chatterItems.title,
             duration: recordings.duration,
@@ -272,10 +275,12 @@ export default async function DashboardPage() {
         orgUserId,
         viewerIsOrgAccount,
         outgoingItemIds,
+        meetings,
     ] = await Promise.all([
         db
             .select({
                 id: recordings.id,
+                hasAgenda: recordingHasAgenda(),
                 filename: chatterItems.title,
                 duration: recordings.duration,
                 startTime: chatterItems.occurredAt,
@@ -342,6 +347,7 @@ export default async function DashboardPage() {
         getOrgUserId(),
         isOrgAccount(session.user.id),
         listOutgoingSharedItemIds(session.user.id),
+        listMeetings(session.user.id, { includePast: true }),
     ]);
     // The organization account owns no recordings; anything it would read
     // as "its own" is the Organization view, loaded below.
@@ -484,6 +490,13 @@ export default async function DashboardPage() {
     return (
         <PersonSharingProvider value={personSharingEnabled}>
             <Workstation
+                initialMeetings={meetings.map((meeting) => ({
+                    ...meeting,
+                    createdAt: meeting.createdAt.toISOString(),
+                    start: meeting.start?.toISOString() ?? null,
+                    end: meeting.end?.toISOString() ?? null,
+                    liveStartedAt: meeting.liveStartedAt?.toISOString() ?? null,
+                }))}
                 userId={session.user.id}
                 recordings={[
                     ...[...recordingsData, ...mailRows].map((recording) => ({

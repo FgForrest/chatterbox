@@ -1,0 +1,2 @@
+ALTER TABLE "meeting_agendas" ADD COLUMN "snapshot_source_item_id" text;--> statement-breakpoint
+ALTER TABLE "meeting_agendas" ADD CONSTRAINT "meeting_agendas_snapshot_source_item_id_chatter_items_id_fk" FOREIGN KEY ("snapshot_source_item_id") REFERENCES "public"."chatter_items"("id") ON DELETE set null ON UPDATE no action;
