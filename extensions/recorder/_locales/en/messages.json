@@ -265,7 +265,7 @@
   "agendaNone": {"message": "No agenda"},
   "agendaChoose": {"message": "Choose an agenda"},
   "agendaEmpty": {"message": "No agendas at this time."},
-  "agendaMultiple": {"message": "$1 meetings at this time"},
+  "agendaMultiple": {"message": "Agendas at this time: $1"},
   "agendaReminderTitle": {"message": "$1 starts at $2"},
   "agendaCounts": {"message": "Agenda: $1 points and $2 tasks to review"},
   "agendaReminders": {"message": "Remind me of agendas at meeting time"},

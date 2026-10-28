@@ -70,6 +70,19 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.8.1
+
+- No permission changes. The side panel is enabled per tab only after a click,
+  immediately before opening. It has no global default path and is absent from
+  the menu on tabs where no agenda has been opened. Chrome refusals still open
+  the same packaged page in a small extension window.
+- While recording, the popup shows an agenda card only for a selected agenda or
+  matching agendas. Without a selection, one button opens the picker.
+- Options hides the agenda section on servers without agenda support.
+- English and Czech agenda lists consistently say agendas; events and meeting
+  calls remain separate terms. The 0.8.0 server contract is unchanged, and older
+  servers keep working.
+
 ## What changed in 0.8.0
 
 - Adds only `sidePanel` to required manifest permissions. No extra host access,

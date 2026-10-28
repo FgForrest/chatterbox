@@ -9,6 +9,11 @@ export const AGENDA_CACHE_KEY = "recorderAgendas";
 export const AGENDA_PANEL_KEY = "recorderAgendaPanel";
 export const AGENDA_SELECTION_KEY = "recorderAgendaSelection";
 
+/** Storage context for one tab's panel or the fallback window. */
+export function agendaPanelKey(tabId) {
+    return `${AGENDA_PANEL_KEY}:${tabId ?? "window"}`;
+}
+
 /** Whether the paired server explicitly supports recorder agendas. */
 export function supportsAgendas(settings) {
     return Boolean(
@@ -86,7 +91,7 @@ export async function clearAgendas() {
         AGENDA_CACHE_KEY,
         AGENDA_PANEL_KEY,
         AGENDA_SELECTION_KEY,
-        ...Object.keys(stored).filter((key) => key.startsWith("agenda-match:")),
+        ...Object.keys(stored).filter((key) => key.startsWith("agenda-match:") || key.startsWith(`${AGENDA_PANEL_KEY}:`)),
     ];
     await chrome.storage.session.remove(keys);
     await clearAgendaReminders();
@@ -211,10 +216,20 @@ export async function remindAgenda(id) {
 
 /** Open from the original user gesture; use the same page in a window on refusal. */
 export function openAgendaPanel(context = {}, agendaIds = []) {
+    const key = agendaPanelKey(context.tabId);
+    const panelContext = { agendaIds, choose: agendaIds.length !== 1, tabId: context.matchTabId ?? context.tabId };
     let opened;
+    let enabled;
     try {
-        // Chrome requires this call before any await in the click handler.
-        opened = chrome.sidePanel.open(
+        if (context.tabId != null) {
+            enabled = chrome.sidePanel.setOptions({
+                tabId: context.tabId,
+                path: `agenda/agenda.html?tab=${context.tabId}`,
+                enabled: true,
+            });
+        }
+        // Keep both Chrome calls in the gesture's synchronous stack.
+        const panel = chrome.sidePanel.open(
             context.tabId != null
                 ? { tabId: context.tabId }
                 : {
@@ -222,16 +237,18 @@ export function openAgendaPanel(context = {}, agendaIds = []) {
                           context.windowId ?? chrome.windows.WINDOW_ID_CURRENT,
                   },
         );
+        opened = Promise.all([enabled, panel]);
     } catch (error) {
-        opened = Promise.reject(error);
+        opened = Promise.all([enabled, Promise.reject(error)]);
     }
-    const selected = chrome.storage.session.set({
-        [AGENDA_PANEL_KEY]: { agendaIds, choose: agendaIds.length !== 1 },
-    });
     return Promise.resolve(opened)
-        .then(() => selected)
+        .then(async () => {
+            await chrome.storage.session.set({ [key]: panelContext });
+            return key;
+        })
         .catch(async () => {
-            await selected;
+            const fallbackKey = agendaPanelKey();
+            await chrome.storage.session.set({ [fallbackKey]: panelContext });
             const anchor = await chrome.windows
                 .getLastFocused({ windowTypes: ["normal"] })
                 .catch(() => null);
@@ -255,6 +272,7 @@ export function openAgendaPanel(context = {}, agendaIds = []) {
                       }
                     : {}),
             });
+            return fallbackKey;
         });
 }
 

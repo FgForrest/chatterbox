@@ -265,7 +265,7 @@
   "agendaNone": {"message": "Žádná agenda"},
   "agendaChoose": {"message": "Vybrat agendu"},
   "agendaEmpty": {"message": "V tomto čase nejsou žádné agendy."},
-  "agendaMultiple": {"message": "$1 schůzky v tomto čase"},
+  "agendaMultiple": {"message": "Agendy v tomto čase: $1"},
   "agendaReminderTitle": {"message": "$1 začíná v $2"},
   "agendaCounts": {"message": "Agenda: $1 bodů a $2 úkolů ke kontrole"},
   "agendaReminders": {"message": "Připomínat agendu v čase schůzky"},

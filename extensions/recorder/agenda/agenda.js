@@ -1,5 +1,5 @@
 import {
-    AGENDA_PANEL_KEY,
+    agendaPanelKey,
     agendaRequest,
     canChooseRecordingAgenda,
     matchAgendas,
@@ -14,6 +14,8 @@ document.getElementById("open-app").textContent = t(
     t("appName"),
 );
 const el = (id) => document.getElementById(id);
+const panelTab = new URL(location.href).searchParams.get("tab");
+const panelKey = agendaPanelKey(panelTab);
 let detail;
 let context = {};
 let state = {};
@@ -287,7 +289,7 @@ async function select(agendaId) {
         return;
     }
     await chrome.storage.session.set({
-        [AGENDA_PANEL_KEY]: {
+        [panelKey]: {
             ...context,
             agendaIds: agendaId ? [agendaId] : [],
             choose: !agendaId,
@@ -334,10 +336,10 @@ async function restore(poll = false) {
             return;
         }
         const stored = await chrome.storage.session.get([
-            AGENDA_PANEL_KEY,
+            panelKey,
             "recordingState",
         ]);
-        context = stored[AGENDA_PANEL_KEY] ?? {};
+        context = stored[panelKey] ?? {};
         state = stored.recordingState ?? {};
         live = live || (state.state === "recording" && !state.stopped);
         if (!context.choose && context.agendaIds?.length === 1)
@@ -411,7 +413,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
             el(id).hidden = true;
     }
     if (
-        (area === "session" && changes[AGENDA_PANEL_KEY]) ||
+        (area === "session" && changes[panelKey]) ||
         (area === "local" &&
             (changes.serverDefaults ||
                 changes.serverUrl ||

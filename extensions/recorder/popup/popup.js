@@ -258,7 +258,8 @@ function renderFinalizing(state) {
 async function render(state) {
     const version = ++renderVersion;
     currentState = state;
-    void getSettings().then((settings) => renderAgendaCard(settings, state));
+    if (state.state !== STATE.idle)
+        void getSettings().then((settings) => renderAgendaCard(settings, state));
     await renderMicrophoneWarning(state);
     if (version !== renderVersion) return;
     currentSessionId = state.sessionId;

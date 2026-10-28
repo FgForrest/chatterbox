@@ -327,6 +327,35 @@ describe("continuous recorder setup", () => {
     });
 });
 
+describe("agenda options capability", () => {
+    it.each([
+        undefined,
+        {},
+        { agendas: false },
+        { agendas: true },
+    ])("shows the whole section only with support: %j", async (defaults) => {
+        h.local.dataUseAcknowledgedAt = "now";
+        h.local.serverUrl = "https://example.com";
+        h.local.encryptedApiKey = { ciphertext: "test" };
+        h.local.serverDefaults = defaults;
+        h.local.agendaReminders = false;
+        h.local.agendaBanner = true;
+        chrome.storage.onChanged.addListener.mock.calls[0][0](
+            { serverDefaults: { newValue: defaults } },
+            "local",
+        );
+        await vi.waitFor(() =>
+            expect(h.node("agenda-section").hidden).toBe(
+                defaults?.agendas !== true,
+            ),
+        );
+        if (defaults?.agendas) {
+            expect(h.node("agenda-reminders").checked).toBe(false);
+            expect(h.node("agenda-banner").checked).toBe(true);
+        }
+    });
+});
+
 describe("platform prompt defaults", () => {
     it("prompts only on Meet, Teams and Zoom for fresh and implicit-default users", () => {
         const modes = effectivePlatformModes({
