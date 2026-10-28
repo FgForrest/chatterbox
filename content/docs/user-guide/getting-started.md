@@ -19,14 +19,14 @@ The Organization account's **Re-run setup** shows only shared AI providers, defa
 
 | Step | What it does |
 | --- | --- |
-| ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Chatterbox does: sync recordings, transcribe them, and summarize them with AI. |
+| ![Welcome](images/onboarding-welcome.png) | **Set up Chatterbox.** Connect the personal sources you need. With an Organization, shared services are already available. |
 | ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. On a self-hosted origin, add this site in the Plaud Connector's popup and reload the page. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Set up an AI provider.** Opens Settings, where you add the service that transcribes and summarizes. See [AI providers](settings.md#ai-providers). |
 | Google Calendar and Meet (when configured) | **Connect Google Calendar and Meet.** Read-only access helps identify meetings and suggest speakers from invited guests and Meet attendees. |
 | Meeting Recorder | **Set up Meeting Recorder:** install the extension, open its toolbar icon on this page, choose **Connect to** this server, then follow the three steps: consent, microphone, connection. This page connects automatically. Older servers offer **Connect** after the extension grants site access; [manual pairing](../guides/meeting-recorder.mdx#connect-it-to-chatterbox) remains available. |
 | Mail (when configured) | **Send mail to Chatterbox.** Your address needs no setup. Send or forward from your company address. Use a secret address in Settings → Mail for automatic forwarding from other senders. Folder addresses are generated per custom folder and changed in the folder header. Mail sent To or Cc an Organization folder waits for you to share it. The wizard shows paused or ineligible receiving states. |
 | Claude (when configured) | **Connect Claude.** In Claude on claude.ai or desktop, open **Customize → Connectors**, find the company connector, click **Connect**, and sign in with your company account. Enable it in a conversation using **+ → Connectors**. Personal-plan and Claude Code instructions are under **Not in your list?**. **Already set up** records your acknowledgement, not a verified connection. See [Claude](claude.md). |
-| ![Done](images/onboarding-done.png) | **You're all set.** Click **Get started**. |
+| ![Done](images/onboarding-done.png) | **Setup complete.** Review which connections are ready or skipped, then click **Get started**. |
 
 To see the wizard again from Chatter, Almanac, or Tasks, open the user menu and choose **Re-run setup**. This does not reset your completed setup. The final summary checks existing connections even if you return from Google sign-in without revisiting their steps. **Next** continues; only **Skip** records a skipped step. Checking, failed checks, and reconnection requirements are shown separately.
 
@@ -70,7 +70,7 @@ Search starts in the section you are viewing. Two pills below the search field s
 
 - **Chatter** searches recordings and transcripts and offers actions such as **Sync device**, **Upload** and **Open settings**. Press `⌘`/`Ctrl` + `Enter` to transcribe a listed recording that has no transcript yet.
 - **Almanac** finds people, things of every type, and taught misheard terms with their correct names. Results show the record type in your language; opening one takes you to its Almanac page.
-- **Tasks** searches Mine and Tracked together. Open tasks come before completed tasks, with each task's due date and source recording. Opening a task shows it directly, regardless of the list filters.
+- **Tasks** searches Mine and Followed together. Open tasks come before completed tasks, with each task's due date and source recording. Opening a task shows it directly, regardless of the list filters.
 - **Everywhere** combines these results, grouped by section.
 
 Use `↑` and `↓` to choose a result, `Enter` to open it, and `Esc` to close the palette. Existing list searches and task filters still work independently. If search says more results may be available, narrow the query.

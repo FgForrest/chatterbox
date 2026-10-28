@@ -22,7 +22,7 @@ Task review does not delay sharing. Colleagues see a proposed task only after th
 
 The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. Sharing cancels any open private [Learn](learn.md) run. Its findings stay private. When the Organization profile enables automatic Learn, a new run starts in the Organization scope and the summary waits for that review.
 
-If you finished the private Learn review for the item's current content, sharing publishes what you confirmed as Organization knowledge without another confirmation. Learn shows **Learned from the owner's review** with its applied and skipped counts, and the workflow counts Learn as done. This also applies to mail. Curators can start **Re-learn** and merge or delete Organization people and things.
+If you finished the private Learn review for the item's current content, sharing publishes what you confirmed as Organization knowledge without another confirmation. The item's header **Knowledge** panel shows Learn as complete with the number of applied changes, and the workflow counts Learn as done. This also applies to mail. Curators can start **Re-learn** and merge or delete Organization people and things.
 
 An item categorized with **Nothing automatic** is not shared by itself. Its intended folder offers **Share now** and a cancel button in the folder row. The strip says **Your turn.** and waits until you share or cancel it.
 
@@ -34,7 +34,7 @@ Mail sent directly to an Organization folder address also starts as a private in
 
 Everyone can open and read a shared item, play or download shared audio, and file the item into other Organization folders. The header says who shared it, and read-only recording speakers say **Managed by the Organization**.
 
-While an item is shared, its owner and Organization curators can change its title, transcript, speakers, summary, topics, and Learn review. Other members remain read-only. Changes update the one version everyone reads, in the Organization scope, from either view. Runs use Organization settings and templates; speaker names come only from Organization people, and a new name becomes an Organization person. Sharing keeps the owner’s automatic pipeline running without marking finished steps outdated.
+While an item is shared, its owner and Organization curators can change its title, transcript, speakers, summary, topics, and Learn review. Other members remain read-only. Only the item owner can hand-edit a generated summary or manage its private remarks; curators can regenerate it, with confirmation before replacing hand edits. See [Summary edits and remarks](summaries-and-tasks.md#edit-a-summary). Changes update the one version everyone reads, in the Organization scope, from either view. Runs use Organization settings and templates; speaker names come only from Organization people, and a new name becomes an Organization person. Sharing keeps the owner’s automatic pipeline running without marking finished steps outdated.
 
 Tasks have their own permissions. The home item's owner and curators can edit, drop, close, and merge a shared task. Its assignee can also close or reopen it. A task may collect mentions from several shared recordings and mail; see [Tasks across items](summaries-and-tasks.md#tasks-across-items).
 
