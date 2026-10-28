@@ -219,23 +219,24 @@ export async function readItemKnowledge(
             speakers: speakers.length,
             models: access.kind === "mail" ? 3 : 5,
         },
-        learn: run
-            ? {
-                  status: run.status,
-                  source:
-                      transcripts.find(
-                          (entry) => entry.id === run.transcriptionId,
-                      )?.source ?? null,
-                  at: (run.finishedAt ?? run.createdAt).toISOString(),
-                  applied: run.stats?.applied ?? null,
-                  skipped: run.stats?.skipped ?? null,
-                  dismissed: run.stats?.dismissed ?? null,
-                  pending:
-                      canReview && run.status === "ready"
-                          ? (review?.items.length ?? 0)
-                          : 0,
-              }
-            : null,
+        learn:
+            view !== "received" && run
+                ? {
+                      status: run.status,
+                      source:
+                          transcripts.find(
+                              (entry) => entry.id === run.transcriptionId,
+                          )?.source ?? null,
+                      at: (run.finishedAt ?? run.createdAt).toISOString(),
+                      applied: run.stats?.applied ?? null,
+                      skipped: run.stats?.skipped ?? null,
+                      dismissed: run.stats?.dismissed ?? null,
+                      pending:
+                          canReview && run.status === "ready"
+                              ? (review?.items.length ?? 0)
+                              : 0,
+                  }
+                : null,
         review,
     };
     if (tab === "models" && (view === "received" || access.kind === "mail"))

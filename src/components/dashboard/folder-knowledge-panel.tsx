@@ -195,7 +195,7 @@ export function KnowledgePanel({
                                 title: scope.title,
                             })}
                 </h2>
-                {item && (
+                {item && item.modelContextAvailable !== false && (
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <p>
                             {item.learn?.pending

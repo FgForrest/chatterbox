@@ -355,10 +355,9 @@ export function SummaryWidget({
         (profile) => profile.id === summaryProfileId,
     )?.name;
     const profileHidden = summaryData?.profileVisibility === "hidden";
-    const displayedProfileName = profileHidden
-        ? null
-        : (summaryData?.profileName ??
-          (canChange ? (selectedProfileName ?? profileName) : null));
+    const displayedProfileName =
+        (profileHidden ? null : summaryData?.profileName) ??
+        (canChange ? (selectedProfileName ?? profileName) : null);
     const lineFacts = working
         ? i18n("Generating the summary")
         : ((canChange && !profileHidden ? profileName : null) ??

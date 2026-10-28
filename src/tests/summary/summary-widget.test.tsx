@@ -18,6 +18,7 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
+import type { RecordingView } from "@/lib/sharing/view";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({
@@ -196,7 +197,7 @@ function widget(
 }
 
 interface RenderWidgetOptions {
-    view?: "private" | "org" | "received";
+    view?: RecordingView;
     source?: "riffado" | "plaud";
     canChange?: boolean;
     learnHold?: "running" | "correcting" | "review" | null;
@@ -646,7 +647,6 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it.each([
         { viewer: "recipient", canChange: false },
         { viewer: "Organization member", canChange: false },
-        { viewer: "Organization editor", canChange: true },
     ])("hides the profile label and pencil for a $viewer with private provenance", ({
         canChange,
     }) => {
@@ -663,6 +663,50 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(
             screen.queryByRole("button", { name: "Change summary profile" }),
         ).toBeNull();
+    });
+
+    it.each([
+        { viewer: "owner", view: "private" },
+        { viewer: "curator", view: "org" },
+    ] as const)("shows the next-run selection and working pencil for a $viewer with hidden provenance", ({
+        view,
+    }) => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        state.summaryProfileId = "profile-2";
+        renderWidget(kind, { view, profileName: "Assigned profile" });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Customer follow-up")).toBeTruthy();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+    });
+
+    it("lets a curator re-summarize with their chosen profile when provenance is hidden", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        renderWidget(kind, { view: "org" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
+        expect(mocks.handleSummarize).toHaveBeenCalledExactlyOnceWith(
+            "profile-2",
+        );
     });
 
     it("shows no profile label for a read-only viewer without provenance", () => {
