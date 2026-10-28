@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -18,16 +18,17 @@ import { listExportFolderOrganization } from "@/lib/folders/folders";
 import {
     ancestorFolderIds,
     descendantFolderIds,
+    exportPlacementFolderIds,
 } from "@/lib/folders/hierarchy";
 import { mailMarkdownDocument } from "@/lib/mail/export-document";
 import { readRawMail } from "@/lib/mail/raw-storage";
-import { isOrgAccount } from "@/lib/org/config";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { enqueueExportMaterialization, enqueueExportPlan } from "./jobs";
 import { withExportLock } from "./lock";
 import { planFolderExport } from "./planner";
 import { createExportProvider } from "./provider-factory";
+import { resolveFolderExportScope } from "./scope";
 import { recordExportFailure } from "./status";
 import {
     type ExportTarget,
@@ -58,21 +59,31 @@ export async function materializeFolderExport(
     if (!owner) return false;
     // The path is read under the lock, so a rename cannot move it between
     // the read and the write.
-    return withExportLock(owner.exportId, "shared", () =>
-        materializeLocked(userId, materializationId),
-    );
+    try {
+        return await withExportLock(owner.exportId, "shared", () =>
+            materializeLocked(userId, materializationId, owner.exportId),
+        );
+    } catch (error) {
+        await recordExportFailure(userId, owner.exportId, error).catch(
+            () => {},
+        );
+        throw error;
+    }
 }
 
 async function materializeLocked(
     userId: string,
     materializationId: string,
+    exportId: string,
 ): Promise<boolean> {
-    // The organization account's exports carry other people's shared
-    // recordings and mail; everyone else's carry only their own.
-    const isOrg = await isOrgAccount(userId);
+    const target = await loadExportTarget(userId, exportId);
+    if (!target) return false;
+    const { contentUserId, isOrganization: isOrg } =
+        await resolveFolderExportScope(userId, target.folderId);
     const [state] = await db
         .select({
             id: folderExportMaterializations.id,
+            placementFolderId: folderExportMaterializations.placementFolderId,
             recordingId: folderExportMaterializations.itemId,
             artifactId: folderExportMaterializations.artifactId,
             artifactType: folderExportMaterializations.artifactType,
@@ -122,15 +133,29 @@ async function materializeLocked(
                 eq(folderExportMaterializations.id, materializationId),
                 eq(folderExportMaterializations.userId, userId),
                 eq(folderExportConfigurations.userId, userId),
+                isNull(chatterItems.deletedAt),
                 isOrg
-                    ? sharedItemCondition(userId, chatterItems.id)
+                    ? sharedItemCondition(contentUserId, chatterItems.id)
                     : eq(chatterItems.userId, userId),
             ),
         )
         .limit(1);
     if (!state || !state.expected || state.status === "exported") return false;
-    const target = await loadExportTarget(userId, state.exportId);
-    if (!target) return false;
+    if (isOrg) {
+        const organization = await listExportFolderOrganization(contentUserId);
+        if (
+            !exportPlacementFolderIds(
+                organization.folders,
+                organization.assignments,
+                state.recordingId,
+                target.folderId,
+            ).includes(state.placementFolderId)
+        ) {
+            await markProjectionStale(userId, state.id);
+            await enqueueExportPlan(userId, state.exportId);
+            return false;
+        }
+    }
 
     await db
         .update(folderExportMaterializations)
@@ -196,7 +221,7 @@ async function materializeLocked(
             );
         } else if (state.artifactType === "mail_document") {
             const document = await mailMarkdownDocument({
-                viewerUserId: userId,
+                viewerUserId: contentUserId,
                 ownerUserId: state.ownerUserId,
                 itemId: state.recordingId,
             });
@@ -312,7 +337,11 @@ export async function reconcileFolderExport(
     userId: string,
     selectedFolderId: string,
 ): Promise<{ checked: number; pending: number }> {
-    const organization = await listExportFolderOrganization(userId);
+    const { contentUserId } = await resolveFolderExportScope(
+        userId,
+        selectedFolderId,
+    );
+    const organization = await listExportFolderOrganization(contentUserId);
     if (
         !organization.folders.some((folder) => folder.id === selectedFolderId)
     ) {
@@ -345,6 +374,7 @@ async function checkMaterializations(
     configuration: ExportTarget,
     subtree: ReadonlySet<string>,
 ): Promise<{ checked: number; pending: number }> {
+    await resolveFolderExportScope(userId, configuration.folderId);
     const provider = await createExportProvider(configuration);
     const states = await db
         .select({

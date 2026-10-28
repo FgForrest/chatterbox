@@ -206,10 +206,10 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
         exportSummary: false,
     };
 
-    it("is configured only by the organization account", async () => {
+    it("refuses members configuring Organization exports", async () => {
         await expect(
             createFolderExport(MEMBER, orgRootId, selection),
-        ).rejects.toMatchObject({ statusCode: 404 });
+        ).rejects.toMatchObject({ statusCode: 403 });
     });
 
     it.each([
@@ -241,7 +241,7 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
         });
     });
 
-    it("returns 404 without queueing when a member synchronizes an Organization folder they do not own", async () => {
+    it("returns 403 without queueing when a member synchronizes an Organization folder", async () => {
         sessionState.userId = MEMBER;
         const before = await db().select().from(asyncJobs);
         const response = await synchronize(
@@ -251,8 +251,8 @@ describeWithDatabase("Organization exports (PostgreSQL)", () => {
             ),
             { params: Promise.resolve({ id: orgRootId }) },
         );
-        expect(response.status).toBe(404);
-        expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ code: "FORBIDDEN" });
         expect(await db().select().from(asyncJobs)).toEqual(before);
     });
 

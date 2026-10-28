@@ -26,6 +26,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useFolderExportLabel } from "@/hooks/use-folder-export-label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useGoogleConnection } from "@/hooks/use-google-connection";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -54,6 +55,7 @@ interface FolderExportActionsProps {
     folder: RecordingFolder;
     providers: ExportProvidersAvailability;
     privateTree: boolean;
+    readOnly?: boolean;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     onPickerChange?: (picking: boolean) => void;
@@ -120,6 +122,7 @@ export function FolderExportActions({
     folder,
     providers,
     privateTree,
+    readOnly = false,
     open: controlledOpen,
     onOpenChange,
     onPickerChange,
@@ -131,6 +134,7 @@ export function FolderExportActions({
 }: FolderExportActionsProps) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
+    const targetLabel = useFolderExportLabel();
     const name = useProductName();
     const [localOpen, setLocalOpen] = useState(false);
     const open = controlledOpen ?? localOpen;
@@ -144,7 +148,7 @@ export function FolderExportActions({
     const [configurations, setConfigurations] = useState<
         FolderExportConfigurationDto[]
     >([]);
-    const [applicableIds, setApplicableIds] = useState<string[]>([]);
+    const [synchronizableIds, setSynchronizableIds] = useState<string[]>([]);
     const [status, setStatus] = useState<FolderExportStatus>({
         configured: [],
         loading: true,
@@ -156,7 +160,9 @@ export function FolderExportActions({
     const [syncing, setSyncing] = useState(false);
     const [picking, setPicking] = useState(false);
     const available = providers.filesystem || providers.googleDrive;
-    const google = useGoogleConnection(providers.googleDrive && open);
+    const google = useGoogleConnection(
+        providers.googleDrive && open && !readOnly,
+    );
 
     const load = useCallback(async () => {
         setStatus({
@@ -167,7 +173,7 @@ export function FolderExportActions({
         });
         if (!available || !privateTree) {
             setConfigurations([]);
-            setApplicableIds([]);
+            setSynchronizableIds([]);
             return;
         }
         try {
@@ -176,9 +182,10 @@ export function FolderExportActions({
             const data = (await response.json()) as {
                 configured: FolderExportConfigurationDto[];
                 applicableIds: string[];
+                synchronizableIds?: string[];
             };
             setConfigurations(data.configured);
-            setApplicableIds(data.applicableIds);
+            setSynchronizableIds(data.synchronizableIds ?? data.applicableIds);
             const ownIds = new Set(
                 data.configured.map((configuration) => configuration.id),
             );
@@ -235,10 +242,12 @@ export function FolderExportActions({
 
     useEffect(() => {
         if (!reopen) return;
-        setForm(reopen === "form" ? emptyForm("google-drive") : null);
+        setForm(
+            reopen === "form" && !readOnly ? emptyForm("google-drive") : null,
+        );
         setOpen(true);
         onReopenHandled?.();
-    }, [reopen, setOpen, onReopenHandled]);
+    }, [reopen, setOpen, onReopenHandled, readOnly]);
 
     useEffect(() => {
         onStatusChange?.(status);
@@ -263,7 +272,9 @@ export function FolderExportActions({
         google.state !== null &&
         !driveReady &&
         configurations.some(
-            (configuration) => configuration.provider === "google-drive",
+            (configuration) =>
+                configuration.provider === "google-drive" &&
+                configuration.canEdit !== false,
         );
 
     const chooseDriveFolder = async () => {
@@ -418,12 +429,21 @@ export function FolderExportActions({
             .filter(Boolean)
             .join(", ");
 
-    const targetLabel = (configuration: FolderExportConfigurationDto) =>
-        configuration.googleDrive
-            ? i18n("Google Drive: {folder}", {
-                  folder: configuration.googleDrive.rootFolderName,
-              })
-            : configuration.targetPath;
+    const description = (configuration: FolderExportConfigurationDto) => (
+        <>
+            <span className="block break-words text-sm font-medium">
+                {targetLabel(configuration)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+                {artifactLabels(configuration)}
+            </span>
+            {configuration.lastError && !configuration.stoppedReason && (
+                <span className="block text-xs text-destructive">
+                    {configuration.lastError}
+                </span>
+            )}
+        </>
+    );
 
     const canSave =
         form !== null &&
@@ -438,7 +458,7 @@ export function FolderExportActions({
 
     return (
         <>
-            {!hideTrigger && applicableIds.length > 0 && (
+            {!hideTrigger && !readOnly && synchronizableIds.length > 0 && (
                 <Button
                     type="button"
                     variant="outline"
@@ -703,43 +723,45 @@ export function FolderExportActions({
                                     key={configuration.id}
                                     className="flex items-center gap-3 rounded-md border p-3"
                                 >
-                                    <button
-                                        type="button"
-                                        className="min-w-0 flex-1 text-left"
-                                        onClick={() =>
-                                            setForm(formFor(configuration))
-                                        }
-                                    >
-                                        <span className="block truncate text-sm font-medium">
-                                            {targetLabel(configuration)}
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {artifactLabels(configuration)}
-                                        </span>
-                                        {configuration.lastError && (
-                                            <span className="block text-xs text-destructive">
-                                                {configuration.lastError}
-                                            </span>
+                                    {configuration.canEdit !== false &&
+                                    !readOnly ? (
+                                        <button
+                                            type="button"
+                                            className="min-w-0 flex-1 text-left"
+                                            onClick={() =>
+                                                setForm(formFor(configuration))
+                                            }
+                                        >
+                                            {description(configuration)}
+                                        </button>
+                                    ) : (
+                                        <div className="min-w-0 flex-1">
+                                            {description(configuration)}
+                                        </div>
+                                    )}
+                                    {configuration.canRemove !== false &&
+                                        !readOnly && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                aria-label={i18n(
+                                                    "Remove export {path}",
+                                                    {
+                                                        path: targetLabel(
+                                                            configuration,
+                                                        ),
+                                                    },
+                                                )}
+                                                onClick={() =>
+                                                    void remove(
+                                                        configuration.id,
+                                                    )
+                                                }
+                                            >
+                                                <Trash2 />
+                                            </Button>
                                         )}
-                                    </button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={i18n(
-                                            "Remove export {path}",
-                                            {
-                                                path: targetLabel(
-                                                    configuration,
-                                                ),
-                                            },
-                                        )}
-                                        onClick={() =>
-                                            void remove(configuration.id)
-                                        }
-                                    >
-                                        <Trash2 />
-                                    </Button>
                                 </div>
                             ))}
                             {configurations.length === 0 && (
@@ -750,26 +772,28 @@ export function FolderExportActions({
                                 </p>
                             )}
                             <div className="flex flex-wrap gap-2">
-                                {hideTrigger && applicableIds.length > 0 && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        disabled={syncing}
-                                        onClick={() => void synchronize()}
-                                    >
-                                        <RefreshCw
-                                            className={
-                                                syncing
-                                                    ? "animate-spin"
-                                                    : undefined
-                                            }
-                                        />
-                                        {syncing
-                                            ? i18n("Synchronizing…")
-                                            : i18n("Synchronize")}
-                                    </Button>
-                                )}
-                                {providers.filesystem && (
+                                {hideTrigger &&
+                                    !readOnly &&
+                                    synchronizableIds.length > 0 && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            disabled={syncing}
+                                            onClick={() => void synchronize()}
+                                        >
+                                            <RefreshCw
+                                                className={
+                                                    syncing
+                                                        ? "animate-spin"
+                                                        : undefined
+                                                }
+                                            />
+                                            {syncing
+                                                ? i18n("Synchronizing…")
+                                                : i18n("Synchronize")}
+                                        </Button>
+                                    )}
+                                {!readOnly && providers.filesystem && (
                                     <Button
                                         type="button"
                                         variant="outline"
@@ -780,7 +804,7 @@ export function FolderExportActions({
                                         <Plus /> {i18n("Add filesystem export")}
                                     </Button>
                                 )}
-                                {providers.googleDrive && (
+                                {!readOnly && providers.googleDrive && (
                                     <Button
                                         type="button"
                                         variant="outline"

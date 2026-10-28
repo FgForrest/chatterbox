@@ -100,6 +100,10 @@ export interface GoogleDriveExportDto {
 }
 
 export interface FolderExportConfigurationDto {
+    writer?: { id: string; name: string };
+    canEdit?: boolean;
+    canRemove?: boolean;
+    stoppedReason?: "writer_no_longer_curator" | null;
     id: string;
     folderId: string;
     provider: FolderExportProviderType;

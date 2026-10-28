@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
     filesystemExportSettings,
@@ -8,15 +8,19 @@ import {
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { resolveReadableFolder } from "@/lib/folders/folders";
 import { applicableExportConfigurationIds } from "@/lib/folders/hierarchy";
 import { isGoogleIntegrationAvailable } from "@/lib/integrations/google/config";
 import { inspectDriveFolder } from "@/lib/integrations/google/drive-folders";
 import { isMailEnabled } from "@/lib/mail/config";
-import { assertOrgScopeWritable, isOrgAccount } from "@/lib/org/config";
+import { assertOrgScopeWritable } from "@/lib/org/config";
 import { validateRelativeExportPath } from "./filesystem-provider";
 import { enqueueExportPlan } from "./jobs";
+import { mayWriteOrganizationExport, WRITER_NO_LONGER_CURATOR } from "./scope";
 import {
+    type ExportTarget,
     listExportTargets,
+    listOrganizationExportTargets,
     loadExportTarget,
     toConfigurationDto,
 } from "./target";
@@ -151,11 +155,19 @@ export async function assertOwnedFolder(
     }
 }
 
-/**
- * Exports are configured in Private, or by the organization account in the
- * Organization tree, which is its own.
- */
+/** Require an owned Private folder or an Organization folder the caller curates. */
 export async function assertExportableFolder(userId: string, folderId: string) {
+    const access = await requireExportFolder(userId, folderId);
+    if (access.scope === "org") {
+        assertOrgScopeWritable();
+        if (!(await mayWriteOrganizationExport(userId))) {
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Only curators may manage Organization folder exports",
+                403,
+            );
+        }
+    }
     const folders = await db
         .select({
             id: recordingFolders.id,
@@ -163,24 +175,46 @@ export async function assertExportableFolder(userId: string, folderId: string) {
             kind: recordingFolders.kind,
         })
         .from(recordingFolders)
-        .where(eq(recordingFolders.userId, userId));
+        .where(eq(recordingFolders.userId, access.ownerId));
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
-    if (!byId.has(folderId)) {
-        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
-    }
     let current = byId.get(folderId);
     while (current?.parentId) current = byId.get(current.parentId);
-    if (current?.kind === "public" && (await isOrgAccount(userId))) {
-        assertOrgScopeWritable();
-        return;
-    }
-    if (!current || current.kind !== "private") {
+    if (current?.kind !== (access.scope === "org" ? "public" : "private")) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            "Exports can only be configured in Private",
+            "Exports can only be configured in Private or Organization folders",
             400,
         );
     }
+    return access;
+}
+
+async function requireExportFolder(userId: string, folderId: string) {
+    const access = await resolveReadableFolder(userId, folderId);
+    if (!access)
+        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
+    return access;
+}
+
+async function configurationDto(
+    target: ExportTarget,
+    viewerId: string,
+    organization: boolean,
+    canManage?: boolean,
+): Promise<FolderExportConfigurationDto> {
+    const dto = toConfigurationDto(target);
+    if (!organization) return dto;
+    const manages = canManage ?? (await mayWriteOrganizationExport(viewerId));
+    return {
+        ...dto,
+        writer: { id: target.userId, name: target.writerName ?? target.userId },
+        canEdit: manages && target.userId === viewerId,
+        canRemove: manages,
+        stoppedReason:
+            manages && !(await mayWriteOrganizationExport(target.userId))
+                ? WRITER_NO_LONGER_CURATOR
+                : null,
+    };
 }
 
 export async function listFolderExports(
@@ -189,29 +223,43 @@ export async function listFolderExports(
 ): Promise<{
     configured: FolderExportConfigurationDto[];
     applicableIds: string[];
+    /** Applicable exports the caller writes, the ones a synchronization audits. */
+    synchronizableIds: string[];
 }> {
     assertFolderExportsAvailable();
+    const access = await requireExportFolder(userId, folderId);
     const folders = await db
         .select({
             id: recordingFolders.id,
             parentId: recordingFolders.parentId,
         })
         .from(recordingFolders)
-        .where(eq(recordingFolders.userId, userId));
-    const byId = new Map(folders.map((folder) => [folder.id, folder]));
-    if (!byId.has(folderId)) {
-        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
-    }
-    const targets = await listExportTargets(userId);
+        .where(eq(recordingFolders.userId, access.ownerId));
+    const organization = access.scope === "org";
+    const targets = organization
+        ? await listOrganizationExportTargets(userId, folderId)
+        : await listExportTargets(userId);
+    const manages = organization && (await mayWriteOrganizationExport(userId));
+    const applicableIds = applicableExportConfigurationIds(
+        folders,
+        folderId,
+        targets,
+    );
+    const ownIds = new Set(
+        targets
+            .filter((target) => target.userId === userId)
+            .map((target) => target.id),
+    );
     return {
-        configured: targets
-            .filter((target) => target.folderId === folderId)
-            .map(toConfigurationDto),
-        applicableIds: applicableExportConfigurationIds(
-            folders,
-            folderId,
-            targets,
+        configured: await Promise.all(
+            targets
+                .filter((target) => target.folderId === folderId)
+                .map((target) =>
+                    configurationDto(target, userId, organization, manages),
+                ),
         ),
+        applicableIds,
+        synchronizableIds: applicableIds.filter((id) => ownIds.has(id)),
     };
 }
 
@@ -280,6 +328,8 @@ export async function updateFolderExport(
 ): Promise<FolderExportConfigurationDto> {
     const provider = providerOf(input);
     assertProviderAvailable(provider);
+    const access = await requireExportFolder(userId, folderId);
+    if (access.scope === "org") await assertExportableFolder(userId, folderId);
     const existing = await loadExportTarget(userId, exportId);
     if (!existing || existing.folderId !== folderId) {
         throw new AppError(ErrorCode.NOT_FOUND, "Export not found", 404);
@@ -369,7 +419,8 @@ async function savedDto(
 ): Promise<FolderExportConfigurationDto> {
     const target = await loadExportTarget(userId, exportId);
     if (!target) throw new Error("Saved export configuration disappeared");
-    return toConfigurationDto(target);
+    const access = await requireExportFolder(userId, target.folderId);
+    return configurationDto(target, userId, access.scope === "org");
 }
 
 export async function deleteFolderExport(
@@ -378,12 +429,24 @@ export async function deleteFolderExport(
     exportId: string,
 ): Promise<void> {
     assertFolderExportsAvailable();
+    const access = await requireExportFolder(userId, folderId);
+    if (access.scope === "org") await assertExportableFolder(userId, folderId);
     const deleted = await db
         .delete(folderExportConfigurations)
         .where(
             and(
                 eq(folderExportConfigurations.id, exportId),
-                eq(folderExportConfigurations.userId, userId),
+                access.scope === "org"
+                    ? inArray(
+                          folderExportConfigurations.folderId,
+                          db
+                              .select({ id: recordingFolders.id })
+                              .from(recordingFolders)
+                              .where(
+                                  eq(recordingFolders.userId, access.ownerId),
+                              ),
+                      )
+                    : eq(folderExportConfigurations.userId, userId),
                 eq(folderExportConfigurations.folderId, folderId),
             ),
         )
