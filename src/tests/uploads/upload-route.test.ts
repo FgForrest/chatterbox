@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { LocalStorage } from "@/lib/storage/local-storage";
+import type * as VideoExtractionJobModule from "@/lib/uploads/video-extraction-job";
 
 const { mockEnv, storageDir } = vi.hoisted(() => ({
     mockEnv: {
@@ -26,6 +28,9 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
+}));
+vi.mock("@/lib/meetings/access", () => ({
+    requireMeetingAccess: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/org/config", () => ({
     assertNotOrgAccount: async () => {},
@@ -67,17 +72,13 @@ vi.mock("@/lib/folders/folders", () => ({
     ),
 }));
 vi.mock("@/lib/uploads/video-extraction-job", async (importOriginal) => {
-    const actual =
-        await importOriginal<
-            typeof import("@/lib/uploads/video-extraction-job")
-        >();
+    const actual = await importOriginal<typeof VideoExtractionJobModule>();
     return { ...actual, enqueueVideoExtractionJob: vi.fn() };
 });
 vi.mock("@/lib/uploads/save-uploaded-audio", () => ({
     saveUploadedAudio: vi.fn(async () => ({ recordingId: "recording-1" })),
 }));
 vi.mock("@/lib/storage/factory", async () => {
-    const { LocalStorage } = await import("@/lib/storage/local-storage");
     return {
         createUserStorageProvider: async () =>
             new LocalStorage(storageDir.path),
@@ -87,6 +88,7 @@ vi.mock("@/lib/storage/factory", async () => {
 import { GET, POST } from "@/app/api/recordings/upload/route";
 import { listJobsForUser } from "@/db/queries/async-jobs";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
+import { requireMeetingAccess } from "@/lib/meetings/access";
 import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
 import { enqueueVideoExtractionJob } from "@/lib/uploads/video-extraction-job";
 
@@ -394,4 +396,30 @@ describe("GET /api/recordings/upload", () => {
             },
         });
     });
+});
+
+it.each([
+    "voice.m4a",
+    "video.mp4",
+])("forwards an explicit agendaId before processing upload %s", async (filename) => {
+    const { request } = uploadRequest(video, {
+        filename,
+        type: filename.endsWith("m4a") ? "audio/mp4" : "video/mp4",
+    });
+    request.headers.set("x-upload-agenda-id", "held-agenda");
+    expect((await POST(request)).status).toBe(
+        filename.endsWith("m4a") ? 200 : 202,
+    );
+    expect(requireMeetingAccess).toHaveBeenCalledWith(
+        "user-1",
+        "held-agenda",
+        "edit",
+    );
+    expect(
+        filename.endsWith("m4a")
+            ? saveUploadedAudio
+            : enqueueVideoExtractionJob,
+    ).toHaveBeenCalledWith(
+        expect.objectContaining({ agendaId: "held-agenda" }),
+    );
 });

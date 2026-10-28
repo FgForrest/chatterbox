@@ -1,8 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { recordIntent, requestAdvance } = vi.hoisted(() => ({
-    recordIntent: vi.fn(async () => {}),
-    requestAdvance: vi.fn(async () => null),
+const { recordIntent, requestAdvance, attachArriving, lockFolder } = vi.hoisted(
+    () => ({
+        lockFolder: vi.fn(async () => {}),
+        attachArriving: vi.fn(async () => {}),
+        recordIntent: vi.fn(async () => {}),
+        requestAdvance: vi.fn(async () => null),
+    }),
+);
+
+vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
+
+vi.mock("@/lib/folders/folders", () => ({
+    lockCategorizableFolderInTx: lockFolder,
+}));
+
+vi.mock("@/lib/meetings/attachment", () => ({
+    attachArrivingRecordingInTx: attachArriving,
 }));
 
 vi.mock("@/lib/pipeline/share-intent", () => ({
@@ -23,7 +37,16 @@ import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 describe("folder-known-at-arrival", () => {
     const onConflictDoNothing = vi.fn(async () => {});
     const values = vi.fn(() => ({ onConflictDoNothing }));
-    const tx = { insert: vi.fn(() => ({ values })) };
+    const tx = {
+        insert: vi.fn(() => ({ values })),
+        select: vi.fn(() => ({
+            from: vi.fn(() => ({
+                where: vi.fn(() => ({
+                    limit: vi.fn(async () => [{ plaudFileId: "file" }]),
+                })),
+            })),
+        })),
+    };
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -41,12 +64,28 @@ describe("folder-known-at-arrival", () => {
             },
         });
 
+        expect(lockFolder).toHaveBeenCalledWith(tx, "owner", "personal-folder");
+        expect(lockFolder.mock.invocationCallOrder[0]).toBeLessThan(
+            values.mock.invocationCallOrder[0],
+        );
         expect(values).toHaveBeenCalledWith({
             itemId: "recording",
             userId: "owner",
             folderId: "personal-folder",
         });
         expect(onConflictDoNothing).toHaveBeenCalledOnce();
+        expect(attachArriving).toHaveBeenCalledWith(
+            tx,
+            "owner",
+            "recording",
+            "file",
+        );
+        expect(onConflictDoNothing.mock.invocationCallOrder[0]).toBeLessThan(
+            attachArriving.mock.invocationCallOrder[0] ?? 0,
+        );
+        expect(attachArriving.mock.invocationCallOrder[0]).toBeLessThan(
+            requestAdvance.mock.invocationCallOrder[0] ?? 0,
+        );
         expect(requestAdvance).toHaveBeenCalledWith(tx, {
             itemId: "recording",
             userId: "owner",

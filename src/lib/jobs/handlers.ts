@@ -16,6 +16,7 @@ import { knowledgeEmbedJobHandler } from "@/lib/knowledge/knowledge-embed";
 import { learnReleaseJobHandler } from "@/lib/learn/auto-learn";
 import { correctionPassJobHandler } from "@/lib/learn/correction-pass-job";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
+import { agendaSuggestionsJobHandler } from "@/lib/meetings/suggestions-job";
 import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { recordingSessionFinalizeJobHandler } from "@/lib/recording-sessions/finalize-job-handler";
@@ -32,6 +33,7 @@ import { registerJobHandler } from "./registry";
 
 /** Idempotent: safe to call from more than one entry point. */
 export function registerJobHandlers(): void {
+    registerJobHandler(agendaSuggestionsJobHandler);
     registerJobHandler(summaryJobHandler);
     registerJobHandler(topicsJobHandler);
     registerJobHandler(transcriptionJobHandler);

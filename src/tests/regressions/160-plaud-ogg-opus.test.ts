@@ -74,6 +74,9 @@ vi.mock("@/lib/profiles/resolve", () => ({
         },
     }),
 }));
+vi.mock("@/lib/pipeline/arrival", () => ({
+    requestArrivalInTx: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue(null),
 }));

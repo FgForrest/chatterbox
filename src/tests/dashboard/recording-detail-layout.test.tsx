@@ -1,13 +1,24 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { type Ref, useImperativeHandle } from "react";
+import { type ReactNode, type Ref, useImperativeHandle } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RecordingPlayerHandle } from "@/components/dashboard/recording-player";
 import type { Recording } from "@/types/recording";
 
 const playFrom = vi.hoisted(() => vi.fn());
 
+vi.mock("@/components/meetings/recording-agenda", () => ({
+    RecordingAgenda: ({
+        children,
+    }: {
+        children: (parts: {
+            notice: ReactNode;
+            agenda: ReactNode;
+            nextMeeting: ReactNode;
+        }) => ReactNode;
+    }) => children({ notice: null, agenda: null, nextMeeting: null }),
+}));
 vi.mock("@/components/dashboard/recording-player", () => ({
     RecordingPlayer: ({
         ref,

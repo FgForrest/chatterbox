@@ -14,7 +14,7 @@
  */
 
 import type * as OpenAIModule from "openai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     aiEnhancements,
     apiCredentials,
@@ -25,12 +25,24 @@ import {
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import {
     assembleSummaryPrompt,
+    getAiOutputLanguageDirective,
     SUMMARY_MARKDOWN_DIRECTIVE,
     SUMMARY_PROMPT_PARTS,
     SUMMARY_SPEAKER_DIRECTIVE,
 } from "@/lib/ai/summary-presets";
+import type * as AgendaContextModule from "@/lib/meetings/pipeline-context";
+import type { RecordingAgendaContext } from "@/lib/meetings/pipeline-context";
+import {
+    SUMMARY_AGENDA_DIRECTIVE,
+    SUMMARY_AGENDA_MERGE_DIRECTIVE,
+} from "@/lib/meetings/summary-directive";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
+import {
+    SUMMARY_TASKS_DIRECTIVE,
+    SUMMARY_TASKS_MERGE_DIRECTIVE,
+} from "@/lib/tasks/directive";
+import { loadTasksPromptContext } from "@/lib/tasks/proposals";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
@@ -79,17 +91,42 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock, profileLegacy } = vi.hoisted(() => ({
+const { createMock, profileLegacy, taskExtraction } = vi.hoisted(() => ({
     createMock: vi.fn(),
+    taskExtraction: { enabled: true },
     profileLegacy: {
         current: {} as Partial<LegacyProfileSettings>,
     },
 }));
+const { agendaContext } = vi.hoisted(() => ({
+    agendaContext: { current: null as RecordingAgendaContext | null },
+}));
+vi.mock("@/lib/meetings/pipeline-context", async (importOriginal) => ({
+    ...(await importOriginal<typeof AgendaContextModule>()),
+    loadRecordingAgenda: vi.fn(async () => agendaContext.current),
+}));
+vi.mock("@/db/queries/agenda-pipeline", () => ({
+    lockSummaryAgenda: async () => true,
+    writeSummaryAgenda: async () => undefined,
+}));
+beforeEach(() => {
+    taskExtraction.enabled = true;
+    vi.mocked(loadTasksPromptContext).mockResolvedValue({
+        text: "",
+        refs: new Map(),
+        scopeFingerprint: "scope",
+    });
+});
+afterEach(() => {
+    agendaContext.current = null;
+});
 
 vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: vi.fn(async () =>
-        resolvedAudioProfile(profileLegacy.current),
-    ),
+    resolveItemProfile: vi.fn(async () => {
+        const profile = resolvedAudioProfile(profileLegacy.current);
+        profile.settings.steps.tasks.enabled = taskExtraction.enabled;
+        return profile;
+    }),
 }));
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue(null),
@@ -591,4 +628,133 @@ describe("markdown content survives the parser", () => {
         const result = await summarize();
         expect(result.summary).toBe("## Heading\n\n- one\n- two");
     });
+});
+
+describe("absorbed agenda summary prompts", () => {
+    beforeEach(() => {
+        createMock.mockReset();
+        selectResults.clear();
+    });
+    it("keeps the no-agenda system and user prompts byte-for-byte", async () => {
+        await summarize();
+        expect(systemMessages()[0]).toBe(
+            [
+                "You are a helpful assistant that summarizes audio transcriptions. Always respond with one raw JSON object and nothing else: no code fences, and no text before or after it. Markdown inside the JSON string values is expected.",
+                CONTENT_IS_DATA_DIRECTIVE,
+                SUMMARY_MARKDOWN_DIRECTIVE,
+                SUMMARY_SPEAKER_DIRECTIVE,
+                SUMMARY_TASKS_DIRECTIVE,
+                getAiOutputLanguageDirective(null),
+            ].join(" "),
+        );
+        expect(userMessages()[0]).toBe(
+            assembleSummaryPrompt(SUMMARY_PROMPT_PARTS.general, "en").replace(
+                "{transcription}",
+                "a transcript",
+            ),
+        );
+        expect(systemMessages()[0]).not.toContain("AGENDA:");
+    });
+    it.each([
+        "general",
+        "meeting-notes",
+        "custom-1",
+    ])("appends the plan directive immediately after tasks for %s and its merge", async (preset) => {
+        agendaContext.current = {
+            id: "agenda",
+            userId: "user-1",
+            version: 0,
+            calendarEventId: "event",
+            points: [
+                {
+                    id: "point",
+                    parentId: null,
+                    position: 0,
+                    text: "Acme roadmap",
+                    discussedAt: "2026-10-27T10:00:00Z",
+                    note: "Only a hint",
+                },
+            ],
+            tasks: [],
+        };
+        await summarize(
+            {
+                summaryMultiPass: true,
+                summaryMultiPassRounds: 2,
+                aiOutputLanguage: "cs",
+                summaryPrompt: {
+                    selectedPrompt: preset,
+                    customPrompts: [
+                        {
+                            id: "custom-1",
+                            name: "Mine",
+                            prompt: "Exact custom: {transcription}",
+                            createdAt: "2026-01-01T00:00:00Z",
+                        },
+                    ],
+                },
+            },
+            preset,
+        );
+        const systems = systemMessages();
+        expect(systems).toHaveLength(3);
+        for (const system of systems.slice(0, 2)) {
+            expect(system).toContain(
+                `${SUMMARY_TASKS_DIRECTIVE} ${SUMMARY_AGENDA_DIRECTIVE}`,
+            );
+            expect(system).toContain(
+                "Write all natural-language output in Czech",
+            );
+        }
+        expect(systems[2]).toContain(
+            `${SUMMARY_TASKS_MERGE_DIRECTIVE}\n\n${SUMMARY_AGENDA_MERGE_DIRECTIVE}`,
+        );
+        expect(userMessages()[0]).toContain("Agenda (the plan, not evidence)");
+        expect(userMessages()[0]).toContain('"id":"point"');
+        expect(userMessages()[0]).toContain('"note":"Only a hint"');
+    });
+});
+
+it.each([
+    true,
+    false,
+])("uses only reviewer-eligible agenda tasks in the actual prompt (extraction=%s)", async (enabled) => {
+    createMock.mockReset();
+    selectResults.clear();
+    taskExtraction.enabled = enabled;
+    const visible = {
+        id: "visible",
+        text: "Eligible task",
+        status: "open",
+        assigneePersonId: null,
+        assigneeName: null,
+        dueDate: null,
+        changedDuringMeeting: false,
+    };
+    agendaContext.current = {
+        id: "agenda",
+        userId: "user-1",
+        version: 0,
+        calendarEventId: null,
+        points: [],
+        tasks: [
+            visible,
+            {
+                ...visible,
+                id: "private",
+                text: "Owner-only task must not reach the model",
+            },
+        ],
+    };
+    vi.mocked(loadTasksPromptContext).mockResolvedValueOnce({
+        text: "Eligible candidates",
+        refs: new Map([["T1", visible.id]]),
+        scopeFingerprint: "scope",
+        agendaTasks: [visible],
+    });
+    await summarize();
+    expect(userMessages()[0]).toContain("Eligible task");
+    expect(userMessages()[0]).not.toContain("Owner-only task");
+    expect(userMessages()[0].includes("Eligible candidates")).toBe(enabled);
+    expect(createMock).toHaveBeenCalledTimes(1);
 });

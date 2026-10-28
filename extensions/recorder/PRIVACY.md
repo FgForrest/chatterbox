@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 22 October 2026
+Last updated: 27 October 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -10,7 +10,7 @@ Setup asks for microphone access and briefly opens then stops a test stream. Thi
 
 - When you choose to record, the extension captures microphone audio and either the selected meeting tab's audio or the system audio from Chrome's screen picker. It records audio, not the screen video.
 - When meeting detection is enabled, it checks browser tab URLs and audible status to identify supported meeting sites and show a recording prompt. It does not upload browsing history or tab URLs.
-- It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is shared after data-use consent only with the current setup site or paired server, including to retire older recorder keys from this installation; localhost development pages can also use the declared direct setup channel. It is not a device fingerprint or a secret. The recorder API token can create recordings and look up folder names to file them, but cannot read recordings. It is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
+- It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is shared after data-use consent only with the current setup site or paired server, including to retire older recorder keys from this installation; localhost development pages can also use the declared direct setup channel. It is not a device fingerprint or a secret. The recorder API token can create recordings and look up folder names to file them, and read and edit visible agendas on supporting servers, but cannot read recordings. It is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
 - It encrypts each five-second audio segment with a key issued by your server before writing that segment to Chrome's private file system. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Encrypted segments remain on this device until the server confirms completion or you explicitly discard them. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
 - It does not automatically download a playable local copy. Once the server finishes the recording, you can download one from the authenticated Chatterbox recording page. A file you download remains until you delete it.
 
@@ -24,7 +24,7 @@ including their subdomains. For these seven origins, Chrome shows the generic
 warning **Read and change your data on a number of websites**, rather than a
 per-site list. It displays UI only in supported meeting rooms.
 It reads no page content, makes no network requests, and sends no page content
-or meeting-site data anywhere. It communicates only with this extension's
+anywhere. It communicates only with this extension's
 background worker for recording controls and folder selection. Folder searches
 use your existing paired server; no recorder key is exposed to the meeting
 page. Turning the switch off removes access to those meeting sites, unregisters
@@ -34,6 +34,28 @@ notice is visible records your acknowledgement of the participant notice; it
 does not obtain other participants' consent.
 
 The meeting page can observe keystrokes typed into the pill's folder search through its capture-phase keyboard listeners.
+
+## Meeting agendas
+
+On servers that advertise agenda support, the extension reads visible meeting titles,
+planned times, folder names, discussion points and notes, invitee and author names,
+task texts, assignees and task notes from your paired server. This agenda content is
+stored only in extension session storage. It caches the next 24 hours of timed agendas in extension session storage for
+reminders, and displays an agenda in Chrome's side panel or a small extension window.
+The reminder and banner switches are independent. Servers without support retain the
+existing recording behavior and receive no agenda calls.
+
+To match Google Meet, the background worker sends only the room code from the tab URL
+and the current time to your paired server. Other platforms match by time. Calendar
+meeting codes are never sent back to the browser. No page content or additional audio
+is collected. The isolated banner displays server-provided agenda information and sends
+only control messages to the worker; the recorder key stays outside the meeting page.
+Ticking points, adding notes or points and marking tasks Done or Dropped saves those
+changes to your server. Task changes affect the actual task under your existing access
+rights. A selected agenda’s ID is kept with upload recovery metadata until the recording is completed or discarded; the ID is sent on completion.
+Cached agendas and choices are cleared on disconnect or a new pairing. Reminder titles
+may be visible in your operating system's notifications; turn reminders off in Options
+to prevent them.
 
 ## Where data goes
 

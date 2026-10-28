@@ -10,6 +10,7 @@ export interface VideoExtractionJobPayload {
     encryptedFilename: string;
     sourceSize: number;
     folderId: string | null;
+    agendaId?: string;
 }
 
 export function parseVideoExtractionJobPayload(
@@ -60,11 +61,21 @@ export function parseVideoExtractionJobPayload(
         );
     }
 
+    const agendaId = raw.agendaId;
+    if (
+        agendaId !== undefined &&
+        (typeof agendaId !== "string" || !agendaId || agendaId.length > 255)
+    )
+        throw new InvalidJobPayloadError(
+            VIDEO_EXTRACTION_JOB_KIND,
+            "agendaId must be a non-empty string",
+        );
     return {
         uploadId,
         sourceStorageKey,
         encryptedFilename,
         sourceSize,
         folderId: folderId ?? null,
+        ...(agendaId ? { agendaId } : {}),
     };
 }

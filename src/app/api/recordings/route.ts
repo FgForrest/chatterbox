@@ -6,6 +6,7 @@ import {
     recordingItemJoin,
     toRecordingResponseRow,
 } from "@/db/items";
+import { recordingHasAgenda } from "@/db/queries/agenda-presence";
 import { chatterItems, recordings } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { decryptText } from "@/lib/encryption/fields";
@@ -15,7 +16,7 @@ export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
 
     const userRecordings = await db
-        .select(audioItemColumns)
+        .select({ ...audioItemColumns, hasAgenda: recordingHasAgenda() })
         .from(recordings)
         .innerJoin(chatterItems, recordingItemJoin)
         .where(

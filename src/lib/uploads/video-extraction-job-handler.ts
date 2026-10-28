@@ -321,6 +321,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
                     sourceExtension,
                     convertedFromVideo: true,
                     folderId: payload.folderId,
+                    ...(payload.agendaId ? { agendaId: payload.agendaId } : {}),
                     deferredFolderFallback: {
                         kind: "video extraction job",
                         id: jobId,

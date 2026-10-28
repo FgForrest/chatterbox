@@ -12,6 +12,7 @@ import {
     taskMentions,
     taskVectors,
 } from "@/db/schema";
+import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { readItemContent } from "@/lib/content/read-item-content";
 import type { ItemContent } from "@/lib/content/types";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -34,6 +35,7 @@ import {
 import { decodeVector, encodeVector } from "@/lib/knowledge/vector-search";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
 import { secretAddressMasker } from "@/lib/mail/redact";
+import type { AgendaReviewedTask } from "@/lib/meetings/pipeline-context";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
     ANY_TASK_ITEM,
@@ -103,6 +105,7 @@ export interface TasksPromptContext {
     refs: Map<string, string>;
     /** Folder scope used for this run's task matching. */
     scopeFingerprint: string;
+    agendaTasks?: readonly AgendaReviewedTask[];
 }
 
 interface RecordingRow {
@@ -165,6 +168,7 @@ async function scopedCandidates(
     reviewer: TaskViewer,
     scopeFolderIds: readonly string[],
     excludeCurrentItem = true,
+    includeDecided = false,
 ): Promise<CandidateTask[]> {
     const [assigned, pending] = await Promise.all([
         db
@@ -194,7 +198,7 @@ async function scopedCandidates(
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: candidateHomeItem.id,
-            homeItemKind: candidateHomeItem.kind,
+            homeItemKind: contentKindColumn(candidateHomeItem.kind),
             homeItemTitle: candidateHomeItem.title,
             shared: sql<boolean>`${taskRecordingShared(reviewer, {
                 id: candidateHomeItem.id,
@@ -218,11 +222,18 @@ async function scopedCandidates(
         )
         .where(
             and(
-                eq(recordingTasks.status, "open"),
+                includeDecided
+                    ? inArray(recordingTasks.status, [
+                          "open",
+                          "done",
+                          "dropped",
+                      ])
+                    : eq(recordingTasks.status, "open"),
                 ...(excludeCurrentItem
                     ? [ne(recordingTasks.itemId, recording.id)]
                     : []),
                 isNull(candidateHomeItem.deletedAt),
+                inArray(candidateHomeItem.kind, ["audio", "mail"]),
                 taskVisible(reviewer, {
                     id: candidateHomeItem.id,
                     userId: candidateHomeItem.userId,
@@ -250,7 +261,9 @@ async function scopedCandidates(
             asc(taskMentions.id),
         );
     const candidates = new Map<string, CandidateTask>();
-    for (const row of rows) {
+    for (const row of rows.filter((row) =>
+        hasContentKind(row, "homeItemKind"),
+    )) {
         if (candidates.has(row.id)) continue;
         candidates.set(row.id, {
             ...row,
@@ -323,6 +336,7 @@ async function unfiledCandidates(
     recording: RecordingRow,
     reviewer: TaskViewer,
     participantPersonIds: readonly string[],
+    includeDecided = false,
 ): Promise<CandidateTask[]> {
     if (participantPersonIds.length === 0) return [];
     const rows = await db
@@ -335,7 +349,7 @@ async function unfiledCandidates(
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: chatterItems.id,
-            homeItemKind: chatterItems.kind,
+            homeItemKind: contentKindColumn(chatterItems.kind),
             homeItemTitle: chatterItems.title,
             shared: sql<boolean>`${taskRecordingShared(
                 reviewer,
@@ -351,12 +365,22 @@ async function unfiledCandidates(
         )
         .where(
             and(
-                eq(recordingTasks.status, "open"),
+                includeDecided
+                    ? inArray(recordingTasks.status, [
+                          "open",
+                          "done",
+                          "dropped",
+                      ])
+                    : eq(recordingTasks.status, "open"),
                 inArray(recordingTasks.assigneePersonId, [
                     ...participantPersonIds,
                 ]),
                 ne(recordingTasks.itemId, recording.id),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
                 taskClosable(reviewer, ANY_TASK_ITEM),
             ),
         )
@@ -365,20 +389,24 @@ async function unfiledCandidates(
         reviewer,
         rows.map((row) => row.id),
     );
-    return rows.map((row) => ({
-        id: row.id,
-        userId: row.userId,
-        text: decryptText(row.text),
-        assigneePersonId: row.assigneePersonId,
-        assigneeName: row.assigneeName ? decryptText(row.assigneeName) : null,
-        dueDate: row.dueDate,
-        duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
-        homeItemId: row.homeItemId,
-        homeItemKind: row.homeItemKind,
-        homeItemTitle: decryptText(row.homeItemTitle),
-        shared: row.shared,
-        statementAt: statements.get(row.id) ?? row.createdAt,
-    }));
+    return rows
+        .filter((row) => hasContentKind(row, "homeItemKind"))
+        .map((row) => ({
+            id: row.id,
+            userId: row.userId,
+            text: decryptText(row.text),
+            assigneePersonId: row.assigneePersonId,
+            assigneeName: row.assigneeName
+                ? decryptText(row.assigneeName)
+                : null,
+            dueDate: row.dueDate,
+            duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            homeItemId: row.homeItemId,
+            homeItemKind: row.homeItemKind,
+            homeItemTitle: decryptText(row.homeItemTitle),
+            shared: row.shared,
+            statementAt: statements.get(row.id) ?? row.createdAt,
+        }));
 }
 
 async function currentTaskVectors(
@@ -797,7 +825,7 @@ export async function searchMergeCandidates(
         .select({
             id: chatterItems.id,
             userId: chatterItems.userId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             occurredAt: chatterItems.occurredAt,
             shared: sql<boolean>`${taskRecordingShared(
@@ -807,7 +835,13 @@ export async function searchMergeCandidates(
             canReview: sql<boolean>`${taskEditable(reviewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
-        .where(and(eq(chatterItems.id, itemId), isNull(chatterItems.deletedAt)))
+        .where(
+            and(
+                eq(chatterItems.id, itemId),
+                isNull(chatterItems.deletedAt),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+            ),
+        )
         .limit(1);
     if (!item?.canReview) {
         throw new AppError(
@@ -942,6 +976,7 @@ export async function loadTasksPromptContext({
     language = null,
     participants = [],
     itemText = "",
+    agendaTasks = [],
 }: {
     recording: RecordingRow;
     /** The transcript its speakers are confirmed on; null for a mail. */
@@ -956,6 +991,7 @@ export async function loadTasksPromptContext({
     >[];
     /** Plain item content used only to rank visible candidate tasks. */
     itemText?: string;
+    agendaTasks?: readonly AgendaReviewedTask[];
 }): Promise<TasksPromptContext> {
     const decidedRows = await db
         .select({ text: recordingTasks.text })
@@ -1008,8 +1044,29 @@ export async function loadTasksPromptContext({
         scopeFolderIds.length > 0
             ? await scopedCandidates(recording, reviewer, scopeFolderIds)
             : await unfiledCandidates(recording, reviewer, [...labelOf.keys()]);
-    const rows = await rankedCandidates(
-        eligible,
+    const agendaEligible = agendaTasks.length
+        ? scopeFolderIds.length > 0
+            ? await scopedCandidates(
+                  recording,
+                  reviewer,
+                  scopeFolderIds,
+                  true,
+                  true,
+              )
+            : await unfiledCandidates(
+                  recording,
+                  reviewer,
+                  [...labelOf.keys()],
+                  true,
+              )
+        : [];
+    const eligibleIds = new Set(agendaEligible.map((task) => task.id));
+    const reviewedTasks = agendaTasks.filter((task) =>
+        eligibleIds.has(task.id),
+    );
+    const reviewedIds = new Set(reviewedTasks.map((task) => task.id));
+    const ranked = await rankedCandidates(
+        eligible.filter((task) => !reviewedIds.has(task.id)),
         itemText,
         participantPersonIds,
         {
@@ -1021,6 +1078,16 @@ export async function loadTasksPromptContext({
                 (orgView ? reviewer.orgUserId : null) ?? recording.userId,
         },
     );
+    const rows = [
+        ...reviewedTasks
+            .filter(
+                (task) =>
+                    !task.changedDuringMeeting &&
+                    ["open", "done"].includes(task.status),
+            )
+            .map((task) => ({ ...task })),
+        ...ranked,
+    ].slice(0, TASK_CANDIDATE_LIMIT);
     rows.forEach((row, index) => {
         const ref = `T${index + 1}`;
         refs.set(ref, row.id);
@@ -1034,6 +1101,7 @@ export async function loadTasksPromptContext({
                 ? decryptText(row.assigneeName)
                 : null,
             dueDate: row.dueDate,
+            ...("status" in row ? { status: row.status } : {}),
         });
     });
 
@@ -1045,13 +1113,19 @@ export async function loadTasksPromptContext({
             recording.zonemins,
         ),
         language,
-        decided: decidedRows.map((row) => decryptText(row.text)),
+        decided: [
+            ...decidedRows.map((row) => decryptText(row.text)),
+            ...reviewedTasks
+                .filter((task) => task.changedDuringMeeting)
+                .map((task) => task.text),
+        ],
         open,
     });
     const mask = await secretAddressMasker([text]);
     return {
         text: mask(text),
         refs,
+        agendaTasks: reviewedTasks,
         scopeFingerprint: await itemScopeFingerprint(
             recording.id,
             orgView ? "org" : "private",
@@ -1390,6 +1464,10 @@ export async function searchAssignedMergeCandidates(
                 taskMergeable(viewer, ANY_TASK_ITEM),
                 assignedToViewer(viewer),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
             ),
         )
         .limit(1);
@@ -1405,7 +1483,7 @@ export async function searchAssignedMergeCandidates(
             assigneePersonId: recordingTasks.assigneePersonId,
             assigneeName: people.displayName,
             itemId: chatterItems.id,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
         })
         .from(recordingTasks)
@@ -1423,6 +1501,10 @@ export async function searchAssignedMergeCandidates(
                         : undefined,
                 ),
                 isNull(chatterItems.deletedAt),
+                or(
+                    isNull(chatterItems.id),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
             ),
         )
         .orderBy(desc(recordingTasks.createdAt), asc(recordingTasks.id))

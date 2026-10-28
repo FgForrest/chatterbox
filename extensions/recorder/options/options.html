@@ -137,6 +137,16 @@
                 </label>
                 <p id="meeting-prompt-hint" class="hint" data-i18n="meetingPromptDescription"></p>
             </section>
+            <section aria-labelledby="agenda-settings-title">
+                <h2 id="agenda-settings-title" data-i18n="agendaSettings"></h2>
+                <p id="agenda-unsupported" class="hint" data-i18n="agendaUnsupported"></p>
+                <div id="agenda-settings" hidden>
+                    <label class="check"><input id="agenda-reminders" type="checkbox" role="switch" aria-describedby="agenda-reminders-hint" /><span data-i18n="agendaReminders"></span></label>
+                    <p id="agenda-reminders-hint" class="hint" data-i18n="agendaRemindersHint"></p>
+                    <label class="check"><input id="agenda-banner" type="checkbox" role="switch" aria-describedby="agenda-banner-hint" /><span data-i18n="agendaBanner"></span></label>
+                    <p id="agenda-banner-hint" class="hint" data-i18n="agendaBannerHint"></p>
+                </div>
+            </section>
             <section>
                 <h2 data-i18n="automaticRecording">Automatic recording</h2>
                 <p class="hint" data-i18n="autoIntro">Choose what happens when you open a meeting on each platform.</p>

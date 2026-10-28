@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+    GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE,
     GOOGLE_CONNECT_SCOPES,
     getGoogleIntegrationConfig,
     getGoogleOAuthConfig,
@@ -26,13 +27,27 @@ import {
     sealGoogleOAuthState,
 } from "@/lib/integrations/google/oauth-state";
 
-type ConnectPurpose = "drive" | "calendar" | "meet" | "calendar-meet";
+type ConnectPurpose =
+    | "drive"
+    | "calendar"
+    | "meet"
+    | "calendar-meet"
+    | "calendar-write";
 
 function consentScopes(
     purpose: ConnectPurpose,
     existingScopes: string[],
 ): string[] {
     switch (purpose) {
+        case "calendar-write":
+            return [
+                ...new Set([
+                    "openid",
+                    "email",
+                    ...existingScopes,
+                    GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE,
+                ]),
+            ];
         case "meet":
             return meetConsentScopes(existingScopes);
         case "calendar-meet":
@@ -55,13 +70,15 @@ export const GET = apiHandler(async (request) => {
     const purpose: ConnectPurpose =
         requestedPurpose === "calendar" ||
         requestedPurpose === "meet" ||
-        requestedPurpose === "calendar-meet"
+        requestedPurpose === "calendar-meet" ||
+        requestedPurpose === "calendar-write"
             ? requestedPurpose
             : "drive";
     const config =
         purpose === "calendar" ||
         purpose === "meet" ||
-        purpose === "calendar-meet"
+        purpose === "calendar-meet" ||
+        purpose === "calendar-write"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!config) {
@@ -74,10 +91,13 @@ export const GET = apiHandler(async (request) => {
     const state = createOAuthState();
     const pkce = createPkcePair();
     const existing = await getGoogleConnectionStatus(session.user.id);
-    if (purpose === "meet" && (!existing || existing.status !== "active")) {
+    if (
+        (purpose === "meet" || purpose === "calendar-write") &&
+        (!existing || existing.status !== "active")
+    ) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            "Connect a Google account before enabling Meet",
+            "Connect a Google account before granting additional access",
             409,
         );
     }
@@ -103,7 +123,10 @@ export const GET = apiHandler(async (request) => {
             ),
             expiresAt: Date.now() + GOOGLE_OAUTH_STATE_TTL_SECONDS * 1000,
             purpose,
-            expectedSubject: purpose === "meet" ? existing?.subject : undefined,
+            expectedSubject:
+                purpose === "meet" || purpose === "calendar-write"
+                    ? existing?.subject
+                    : undefined,
         }),
         {
             httpOnly: true,

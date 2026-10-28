@@ -34,7 +34,7 @@ async function readError(response) {
  * @param {string} path
  * @param {RequestInit} [init]
  */
-async function request(auth, path, init = {}) {
+export async function request(auth, path, init = {}) {
     const headers = new Headers(init.headers ?? {});
     headers.set("Authorization", `Bearer ${auth.apiKey}`);
     const response = await fetch(`${auth.serverUrl}${path}`, {

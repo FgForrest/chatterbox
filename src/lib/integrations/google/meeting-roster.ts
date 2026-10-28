@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings } from "@/db/schema";
@@ -7,6 +7,7 @@ import type { LearnSpeakerCandidate } from "@/lib/learn/run-fallback";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import {
     type CalendarEventCandidate,
+    getCalendarEvent,
     listCalendarEventsForRecording,
 } from "./calendar-events";
 import {
@@ -87,7 +88,12 @@ export async function resolveMeetingRoster(input: {
     try {
         if (input.calendarEventId === "") return null;
         const [recording] = await db
-            .select({ start: chatterItems.occurredAt, end: recordings.endTime })
+            .select({
+                start: chatterItems.occurredAt,
+                end: recordings.endTime,
+                calendarEventId: recordings.calendarEventId,
+                calendarSeriesId: recordings.calendarSeriesId,
+            })
             .from(recordings)
             .innerJoin(chatterItems, recordingItemJoin)
             .where(
@@ -101,17 +107,58 @@ export async function resolveMeetingRoster(input: {
             )
             .limit(1);
         if (!recording) return null;
-        const event = selectMeetingEvent(
-            await listCalendarEventsForRecording({
-                userId: input.ownerUserId,
-                ...recording,
-                fetchImpl: input.fetchImpl,
-            }),
-            recording.start,
-            recording.end,
-            input.calendarEventId,
-        );
+        const explicitEventId =
+            input.calendarEventId ?? recording.calendarEventId ?? undefined;
+        const event =
+            selectMeetingEvent(
+                await listCalendarEventsForRecording({
+                    userId: input.ownerUserId,
+                    ...recording,
+                    fetchImpl: input.fetchImpl,
+                }),
+                recording.start,
+                recording.end,
+                explicitEventId,
+            ) ??
+            (explicitEventId
+                ? await getCalendarEvent(
+                      input.ownerUserId,
+                      explicitEventId,
+                      input.fetchImpl,
+                  ).catch(() => null)
+                : null);
         if (!event) return null;
+        if (!recording.calendarEventId)
+            await db
+                .update(recordings)
+                .set({ calendarEventId: event.id })
+                .where(
+                    and(
+                        eq(recordings.id, input.itemId),
+                        eq(recordings.userId, input.ownerUserId),
+                        isNull(recordings.calendarEventId),
+                    ),
+                );
+        if (
+            !recording.calendarSeriesId &&
+            event.recurringEventId &&
+            (!recording.calendarEventId ||
+                recording.calendarEventId === event.id)
+        )
+            await db
+                .update(recordings)
+                .set({ calendarSeriesId: event.recurringEventId })
+                .where(
+                    and(
+                        eq(recordings.id, input.itemId),
+                        eq(recordings.userId, input.ownerUserId),
+                        isNull(recordings.calendarSeriesId),
+                        or(
+                            isNull(recordings.calendarEventId),
+                            eq(recordings.calendarEventId, event.id),
+                        ),
+                    ),
+                );
         const joined = await getMeetSpeakerCandidates({
             userId: input.ownerUserId,
             event,

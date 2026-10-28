@@ -9,10 +9,18 @@ import {
     Sparkles,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+    type ReactNode,
+    useContext,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { HelpLink } from "@/components/help/help-button";
 import { Markdown } from "@/components/markdown";
+import { RecordingAgendaContext } from "@/components/meetings/recording-agenda-context";
 import {
     WorkflowWidget,
     WorkflowWidgetLine,
@@ -100,6 +108,7 @@ export function SummaryWidget({
     const i18n = useExtracted();
     const {
         summaryData,
+        agendaPresence,
         summaryLoaded = true,
         isSummarizing,
         summaryProgress,
@@ -155,6 +164,7 @@ export function SummaryWidget({
         !summaryProfileId ||
         !canSummarize ||
         source !== "riffado";
+    const reportAgendaSummary = useContext(RecordingAgendaContext);
     const summarize = useRef(handleSummarize);
     useEffect(() => {
         summarize.current = handleSummarize;
@@ -166,6 +176,28 @@ export function SummaryWidget({
         });
         return () => onResummarizeReady?.(null);
     }, [cannotSummarize, onResummarizeReady]);
+
+    useEffect(() => {
+        if (!summaryLoaded || kind !== "audio") return;
+        reportAgendaSummary?.({
+            itemId,
+            presence: agendaPresence,
+            hasSummary,
+            working,
+            run: () => void summarize.current(),
+            disabled: cannotSummarize,
+        });
+        return () => reportAgendaSummary?.(null);
+    }, [
+        reportAgendaSummary,
+        summaryLoaded,
+        kind,
+        itemId,
+        agendaPresence,
+        hasSummary,
+        working,
+        cannotSummarize,
+    ]);
 
     const summaryStatusLabel = !summaryProgress
         ? i18n("Generating summary…")

@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Schema from "@/db/schema";
 import type { StorageProvider } from "@/lib/storage/types";
 
-const { dbMock, archivedTasks } = vi.hoisted(() => ({
+const { dbMock, archivedTasks, archivedMeetings } = vi.hoisted(() => ({
     dbMock: { select: vi.fn() },
     archivedTasks: new Map<string, unknown[]>(),
+    archivedMeetings: [] as Record<string, unknown>[],
 }));
 
 vi.mock("@/db", () => ({ db: dbMock }));
@@ -19,6 +20,9 @@ vi.mock("@/lib/tasks/archive", () => ({
     taskMentionsForArchive: vi.fn(async () => []),
     taskHomeMovesForArchive: vi.fn(async () => []),
     archivedAssigneeIds: vi.fn(() => []),
+}));
+vi.mock("@/lib/export/meetings", () => ({
+    collectArchivedMeetings: vi.fn(async () => archivedMeetings),
 }));
 vi.mock("@/lib/mail/archive", () => ({
     collectArchivedMail: vi.fn().mockResolvedValue([]),
@@ -464,6 +468,41 @@ describe("buildAndUploadExportArchive", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         storage = new FakeStorage();
+        archivedMeetings.length = 0;
+    });
+
+    it("bundles agenda content and its manifest path even without recordings", async () => {
+        const agenda = {
+            id: "agenda",
+            meetingItemId: "meeting-item",
+            recordingItemId: null,
+            title: "Acme",
+            points: [{ id: "point", text: "Discussion" }],
+            tasks: [],
+        };
+        archivedMeetings.push(agenda);
+        mockSelectSequence([]);
+        await buildAndUploadExportArchive({
+            scope: { kind: "personal", userId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/meetings.zip",
+        });
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries
+                    .get("meetings/agendas.json")
+                    ?.buffer.toString("utf-8") ?? "[]",
+            ),
+        ).toEqual([agenda]);
+        expect(
+            JSON.parse(
+                entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+            ),
+        ).toMatchObject({
+            meetings: { count: 1, path: "meetings/agendas.json" },
+        });
     });
 
     it.each([

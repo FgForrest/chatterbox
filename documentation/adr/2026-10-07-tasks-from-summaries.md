@@ -1,7 +1,7 @@
 ---
 title: Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
 date: 2026-10-07
-updated: 2026-10-23 07:00
+updated: 2026-10-27 09:57
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [91, 92, 93]
 areas: [src/lib/tasks, src/components/tasks, src/app/(app)/tasks, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: [2026-10-19-processing-profiles-and-workflow, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-person-to-person-sharing]
-relates: [2026-10-07-backup-scope, 2026-10-22-assignee-task-list]
+relates: [2026-10-07-backup-scope, 2026-10-22-assignee-task-list, 2026-10-27-meeting-agendas]
 ---
 
 # Tasks come out of the summary call, the owner reviews them, and they reach other people only through the Organization
@@ -168,6 +168,8 @@ else.
   calendar export, manual reordering.
 
 ## Related work
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): planned discussion points, frozen task reviews, safe recording attachment and explicit Calendar export extend this area.
 
 - [2026-10-07-backup-scope](2026-10-07-backup-scope.md): the personal versus Organization archive
   rules that `tasksForArchive` follows.

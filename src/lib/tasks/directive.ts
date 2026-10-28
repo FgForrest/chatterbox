@@ -48,6 +48,7 @@ export interface TasksContextTask {
     /** The current assignee's name when they have no reference in this item. */
     assigneeName?: string | null;
     dueDate: string | null;
+    status?: string;
 }
 
 export interface TasksContext {
@@ -153,7 +154,9 @@ export function buildTasksContext(context: TasksContext): string {
               ];
         lines.push(
             "",
-            "Open tasks in this item's folder scope, from earlier items. Compare every commitment with them:",
+            context.open.some((task) => task.status && task.status !== "open")
+                ? "Earlier tasks, with reviewed agenda tasks first. Their current status is shown. Compare every commitment with them; completed occurrences of recurring work do not replace new commitments:"
+                : "Open tasks in this item's folder scope, from earlier items. Compare every commitment with them:",
             '- When the same commitment is mentioned again, add {"ref": "T1", "kind": "match", "quote": string} to "taskUpdates" instead of listing it as new. This entry states identity only.',
             '- Partial progress adds only that "match" entry. It does not complete or otherwise change the task.',
             '- Add field changes as separate entries for the same ref: {"ref": "T1", "kind": "due", "due": {"phrase": string, "date": "YYYY-MM-DD"}, "quote": string} for a stated date; {"ref": "T1", "kind": "due_phrase", "due": {"phrase": string, "date": null}, "quote": string} for vague postponement; or {"ref": "T1", "kind": "done", "quote": string} for completion. Never invent a date for a vague phrase.',
@@ -166,7 +169,8 @@ export function buildTasksContext(context: TasksContext): string {
                       ? ` (assigned to ${oneLine(task.assigneeName)})`
                       : "";
                 const due = task.dueDate ? `, due ${task.dueDate}` : "";
-                return `- ${task.ref}${who}: ${oneLine(task.text)}${due}`;
+                const status = task.status ? `, status ${task.status}` : "";
+                return `- ${task.ref}${who}: ${oneLine(task.text)}${due}${status}`;
             }),
         );
     }

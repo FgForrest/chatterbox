@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { AgendaPresence } from "@/components/meetings/recording-agenda-context";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ProfileChannel } from "@/lib/profiles/settings";
 import {
@@ -51,6 +52,8 @@ function toSummaryProgress(
 }
 
 export interface SummaryData {
+    hasAgenda?: boolean;
+    agendaCandidateCount?: number;
     summary: string | null;
     keyPoints: string[] | null;
     actionItems: string[] | null;
@@ -134,6 +137,23 @@ export function useTranscriptionSummary({
             ),
         [view],
     );
+    const [presenceById, setPresenceById] = useState<
+        Record<string, AgendaPresence>
+    >({});
+    const rememberPresence = useCallback((id: string, data: SummaryData) => {
+        if (
+            typeof data.hasAgenda !== "boolean" ||
+            typeof data.agendaCandidateCount !== "number"
+        )
+            return;
+        setPresenceById((value) => ({
+            ...value,
+            [id]: {
+                hasAgenda: data.hasAgenda ?? false,
+                agendaCandidateCount: data.agendaCandidateCount ?? 0,
+            },
+        }));
+    }, []);
     const [summaryDataByKey, setSummaryDataByKey] = useState<
         Record<string, SummaryData | null>
     >({});
@@ -426,6 +446,7 @@ export function useTranscriptionSummary({
                     );
                     if (!response.ok) return;
                     const data = (await response.json()) as SummaryData;
+                    rememberPresence(targetId, data);
                     setAvailableSummarySources(data.availableSources ?? []);
                     if (data.summary && isCurrent()) {
                         fetchGenerationRef.current += 1;
@@ -459,7 +480,7 @@ export function useTranscriptionSummary({
                 setSummaryElapsedMs(0);
             }
         },
-        [setSummaryFor, summaryUrl],
+        [setSummaryFor, summaryUrl, rememberPresence],
     );
 
     // Fetch when recording id changes or the re-fetch key bumps.
@@ -496,6 +517,7 @@ export function useTranscriptionSummary({
                 ) {
                     return;
                 }
+                rememberPresence(requestedId, data);
                 const availableSources = data.availableSources ?? [];
                 setItemProfileId(data.itemProfileId ?? null);
                 setAvailableSummarySources(availableSources);
@@ -555,6 +577,7 @@ export function useTranscriptionSummary({
         recordingId,
         summarySource,
         summaryFetchKey,
+        rememberPresence,
         attachToActiveJob,
         setSummaryFor,
         summaryUrl,
@@ -591,6 +614,7 @@ export function useTranscriptionSummary({
         const applyResult = (data: SummaryData) => {
             if (!postIsCurrent()) return;
             fetchGenerationRef.current += 1;
+            rememberPresence(targetId, data);
             setSummaryFor(targetId, "riffado", data);
             setAvailableSummarySources((current) =>
                 current.includes("riffado") ? current : [...current, "riffado"],
@@ -754,6 +778,7 @@ export function useTranscriptionSummary({
         summaryProfileId,
         summarySource,
         summaryUrl,
+        rememberPresence,
     ]);
 
     const handleDeleteSummary = useCallback(async () => {
@@ -833,6 +858,7 @@ export function useTranscriptionSummary({
     }, [setSummaryFor]);
 
     return {
+        agendaPresence: recordingId ? presenceById[recordingId] : undefined,
         summaryData,
         summaryLoaded,
         availableSummarySources,

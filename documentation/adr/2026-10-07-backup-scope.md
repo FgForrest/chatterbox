@@ -1,7 +1,7 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-10-23 06:40
+updated: 2026-10-27 14:30
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [89]
 areas: [src/lib/export/archive-scope.ts, src/lib/export/resolve-archive-scope.ts, src/lib/export/build-archive.ts, src/lib/export/document-sidecars.ts, src/app/api/backup]
 supersedes: []
 superseded-by: []
-relates: [2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries]
+relates: [2026-10-27-shared-folders-are-two-way, 2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries, 2026-10-27-meeting-agendas]
 ---
 
 # Backups and exports carry one scope, chosen by the account, personal or Organization, never both
@@ -135,6 +135,10 @@ Postgres, 2894 passed and 16 skipped (opt-in live tests).
   built.
 
 ## Related work
+
+- [Two-way shared folders](2026-10-27-shared-folders-are-two-way.md): participant contributions remain owned by their contributors; personal exports and archives exclude other participants' items.
+
+- [Meeting agendas](2026-10-27-meeting-agendas.md): planned discussion points, frozen task reviews, safe recording attachment and explicit Calendar export extend this area.
 
 - [Person-to-person sharing](2026-10-22-person-to-person-sharing.md): adds accepted receivers without publishing items or knowledge to the Organization; receiver archives still exclude those items.
 

@@ -232,7 +232,10 @@ async function searchChatter(
                     ? mask(row.title)
                     : row.title,
             snippet: found.get(row.id)?.snippet ?? null,
-            href: `/dashboard?recording=${encodeURIComponent(row.id)}${row.received ? "&view=received" : row.userId !== userId || row.userId === orgUserId ? "&view=org" : ""}`,
+            href:
+                row.kind === "meeting"
+                    ? `/meetings/${encodeURIComponent(row.id)}`
+                    : `/dashboard?recording=${encodeURIComponent(row.id)}${row.received ? "&view=received" : row.userId !== userId || row.userId === orgUserId ? "&view=org" : ""}`,
         })),
         limited:
             Boolean(query) &&

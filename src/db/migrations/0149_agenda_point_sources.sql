@@ -1,0 +1,1 @@
+ALTER TABLE "agenda_points" ADD COLUMN "sources" jsonb;

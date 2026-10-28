@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { isItemReceived } from "@/db/queries/item-shares";
-import { type ChatterItemKind, chatterItems, recordings } from "@/db/schema";
+import { type ContentItemKind, chatterItems, recordings } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId } from "@/lib/org/config";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -25,7 +25,7 @@ export type RecordingAccessRole = "owner" | "member" | "curator" | "receiver";
 export interface RecordingAccess {
     recordingId: string;
     /** What the item is: a recording unless the caller admitted other kinds. */
-    kind: ChatterItemKind;
+    kind: ContentItemKind;
     ownerUserId: string;
     role: RecordingAccessRole;
     shared: boolean;
@@ -53,13 +53,13 @@ export interface AccessOptions {
      * The item kinds the caller handles. A recording only by default, so a
      * route made for audio answers 404 for a mail id before doing anything.
      */
-    kinds?: readonly ChatterItemKind[];
+    kinds?: readonly ContentItemKind[];
 }
 
 async function findItem(
     itemId: string,
-    kinds: readonly ChatterItemKind[] | undefined,
-): Promise<{ userId: string; kind: ChatterItemKind } | null> {
+    kinds: readonly ContentItemKind[] | undefined,
+): Promise<{ userId: string; kind: ContentItemKind } | null> {
     if (!kinds || (kinds.length === 1 && kinds[0] === "audio")) {
         const [recording] = await db
             .select({ id: recordings.id, userId: recordings.userId })
@@ -79,7 +79,9 @@ async function findItem(
             ),
         )
         .limit(1);
-    return item ?? null;
+    return item && item.kind !== "meeting"
+        ? { ...item, kind: item.kind }
+        : null;
 }
 
 /**

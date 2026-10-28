@@ -1,10 +1,14 @@
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { db } from "@/db";
+import { recordingFolderAssignments, recordingFolders } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     addRecordingToFolder,
     moveRecordingBetweenFolders,
     removeRecordingFromFolder,
+    resolveReadableFolder,
     unshareRecording,
 } from "@/lib/folders/folders";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
@@ -98,13 +102,51 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingAccess(session.user.id, id, {
         kinds: ["audio", "mail"],
     });
-    if (!access.shared && access.role === "receiver")
-        throw new AppError(
-            ErrorCode.FORBIDDEN,
-            "Received items are read-only",
-            403,
-        );
     const body = await request.json().catch(() => null);
+    if (!access.shared && access.role === "receiver") {
+        const folderId =
+            typeof body === "object" &&
+            body !== null &&
+            "folderId" in body &&
+            typeof body.folderId === "string"
+                ? body.folderId
+                : null;
+        const folder = folderId
+            ? await resolveReadableFolder(session.user.id, folderId)
+            : null;
+        const [assignment] =
+            folder?.scope === "personal"
+                ? await db
+                      .select({ itemId: recordingFolderAssignments.itemId })
+                      .from(recordingFolderAssignments)
+                      .innerJoin(
+                          recordingFolders,
+                          and(
+                              eq(
+                                  recordingFolders.id,
+                                  recordingFolderAssignments.folderId,
+                              ),
+                              eq(recordingFolders.userId, session.user.id),
+                          ),
+                      )
+                      .where(
+                          and(
+                              eq(recordingFolderAssignments.itemId, id),
+                              eq(
+                                  recordingFolderAssignments.folderId,
+                                  folder.folder.id,
+                              ),
+                          ),
+                      )
+                : [];
+        if (!assignment)
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Received items are read-only",
+                403,
+            );
+    }
+
     if (
         typeof body === "object" &&
         body !== null &&

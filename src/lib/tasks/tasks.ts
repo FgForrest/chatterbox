@@ -37,6 +37,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { type Keyset, keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -310,7 +311,7 @@ const taskColumns = {
     evidenceCharStart: recordingTasks.evidenceCharStart,
     evidenceCharEnd: recordingTasks.evidenceCharEnd,
     evidenceProvenance: recordingTasks.evidenceProvenance,
-    homeItemKind: chatterItems.kind,
+    homeItemKind: contentKindColumn(chatterItems.kind),
     source: recordingTasks.source,
     ticked: recordingTasks.ticked,
     version: recordingTasks.version,
@@ -320,9 +321,13 @@ const taskColumns = {
 };
 
 type TaskSelect = {
-    [K in keyof typeof taskColumns]:
-        | (typeof taskColumns)[K]["_"]["data"]
-        | null;
+    [K in keyof typeof taskColumns]: (typeof taskColumns)[K] extends {
+        _: { data: infer D };
+    }
+        ? D | null
+        : (typeof taskColumns)[K] extends SQL<infer D>
+          ? D | null
+          : never;
 };
 
 function toView(
@@ -466,7 +471,7 @@ export async function listRecordingTasks(
             )}`,
             id: chatterItems.id,
             ownerUserId: chatterItems.userId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             audioId: recordings.id,
             audioReapedAt: recordings.audioReapedAt,
@@ -488,11 +493,12 @@ export async function listRecordingTasks(
             and(
                 eq(chatterItems.id, recordingId),
                 isNull(chatterItems.deletedAt),
+                sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM),
             ),
         )
         .limit(1);
-    if (!recording) return null;
+    if (!recording || !hasContentKind(recording, "kind")) return null;
 
     const linkedMentions = await db
         .select({
@@ -615,6 +621,7 @@ export async function undoTaskMatch(
             and(
                 eq(chatterItems.id, itemId),
                 isNull(chatterItems.deletedAt),
+                sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM),
             ),
         )
@@ -734,7 +741,7 @@ async function listSuggestedMatches(
             assigneePersonId: recordingTasks.assigneePersonId,
             assigneeName: people.displayName,
             homeItemId: matchCandidateHome.id,
-            homeItemKind: matchCandidateHome.kind,
+            homeItemKind: contentKindColumn(matchCandidateHome.kind),
             homeItemTitle: matchCandidateHome.title,
             homeAudioId: taskAudio.id,
             homeAudioReapedAt: taskAudio.audioReapedAt,
@@ -765,6 +772,7 @@ async function listSuggestedMatches(
                 eq(taskMentions.userId, ownerUserId),
                 eq(taskMentions.view, view),
                 eq(taskMentions.matchDecision, "suggested"),
+                inArray(matchCandidateHome.kind, ["audio", "mail"]),
                 reviewableTaskTargetCondition(
                     taskMentions.taskId,
                     viewer.userId,
@@ -773,64 +781,66 @@ async function listSuggestedMatches(
             ),
         )
         .orderBy(asc(taskMentions.createdAt));
-    const matches = rows.map(
-        (row): TaskMatchView => ({
-            id: row.id,
-            ticked: row.ticked,
-            version: row.taskVersion,
-            ambiguous: false,
-            quote: decryptOptional(row.quote),
-            evidenceStartMs: row.evidenceStartMs,
-            evidenceText:
-                row.evidenceSegmentIndex !== null &&
-                row.evidenceCharStart !== null &&
-                row.evidenceCharEnd !== null
-                    ? {
-                          segmentIndex: row.evidenceSegmentIndex,
-                          charStart: row.evidenceCharStart,
-                          charEnd: row.evidenceCharEnd,
-                      }
-                    : null,
-            evidenceProvenance: row.evidenceProvenance ?? null,
-            candidate: {
-                id: row.taskId,
-                status: row.taskStatus,
-                text: decryptText(row.taskText),
-                assignee:
-                    row.assigneePersonId && row.assigneeName
-                        ? {
-                              personId: row.assigneePersonId,
-                              name: decryptText(row.assigneeName),
-                          }
-                        : null,
-                dueDate: row.dueDate,
-                duePhrase: decryptOptional(row.duePhrase),
-                homeItem: {
-                    id: row.homeItemId,
-                    kind: row.homeItemKind,
-                    title: decryptText(row.homeItemTitle),
-                    audioAvailable: hasAudio({
-                        kind: row.homeItemKind,
-                        audioId: row.homeAudioId,
-                        audioReapedAt: row.homeAudioReapedAt,
-                        audioDeletedAt: row.homeAudioDeletedAt,
-                    }),
-                },
-                quote: decryptOptional(row.candidateQuote),
-                evidenceStartMs: row.candidateStartMs,
+    const matches = rows
+        .filter((row) => hasContentKind(row, "homeItemKind"))
+        .map(
+            (row): TaskMatchView => ({
+                id: row.id,
+                ticked: row.ticked,
+                version: row.taskVersion,
+                ambiguous: false,
+                quote: decryptOptional(row.quote),
+                evidenceStartMs: row.evidenceStartMs,
                 evidenceText:
-                    row.candidateSegmentIndex !== null &&
-                    row.candidateCharStart !== null &&
-                    row.candidateCharEnd !== null
+                    row.evidenceSegmentIndex !== null &&
+                    row.evidenceCharStart !== null &&
+                    row.evidenceCharEnd !== null
                         ? {
-                              segmentIndex: row.candidateSegmentIndex,
-                              charStart: row.candidateCharStart,
-                              charEnd: row.candidateCharEnd,
+                              segmentIndex: row.evidenceSegmentIndex,
+                              charStart: row.evidenceCharStart,
+                              charEnd: row.evidenceCharEnd,
                           }
                         : null,
-            },
-        }),
-    );
+                evidenceProvenance: row.evidenceProvenance ?? null,
+                candidate: {
+                    id: row.taskId,
+                    status: row.taskStatus,
+                    text: decryptText(row.taskText),
+                    assignee:
+                        row.assigneePersonId && row.assigneeName
+                            ? {
+                                  personId: row.assigneePersonId,
+                                  name: decryptText(row.assigneeName),
+                              }
+                            : null,
+                    dueDate: row.dueDate,
+                    duePhrase: decryptOptional(row.duePhrase),
+                    homeItem: {
+                        id: row.homeItemId,
+                        kind: row.homeItemKind,
+                        title: decryptText(row.homeItemTitle),
+                        audioAvailable: hasAudio({
+                            kind: row.homeItemKind,
+                            audioId: row.homeAudioId,
+                            audioReapedAt: row.homeAudioReapedAt,
+                            audioDeletedAt: row.homeAudioDeletedAt,
+                        }),
+                    },
+                    quote: decryptOptional(row.candidateQuote),
+                    evidenceStartMs: row.candidateStartMs,
+                    evidenceText:
+                        row.candidateSegmentIndex !== null &&
+                        row.candidateCharStart !== null &&
+                        row.candidateCharEnd !== null
+                            ? {
+                                  segmentIndex: row.candidateSegmentIndex,
+                                  charStart: row.candidateCharStart,
+                                  charEnd: row.candidateCharEnd,
+                              }
+                            : null,
+                },
+            }),
+        );
     const counts = new Map<string, number>();
     for (const match of matches) {
         const key = evidenceKey(match);
@@ -1055,10 +1065,15 @@ async function taskItemKind(
     taskId: string,
 ): Promise<"audio" | "mail" | null> {
     const [row] = await tx
-        .select({ kind: chatterItems.kind })
+        .select({ kind: contentKindColumn(chatterItems.kind) })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-        .where(eq(recordingTasks.id, taskId))
+        .where(
+            and(
+                eq(recordingTasks.id, taskId),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+            ),
+        )
         .limit(1);
     return row?.kind ?? null;
 }
@@ -1136,6 +1151,7 @@ async function lockRecordingForEdit(
                       eq(chatterItems.id, recordingId),
                       eq(chatterItems.kind, "mail"),
                       isNull(chatterItems.deletedAt),
+                      sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                   ),
               )
               .for("update")
@@ -1573,11 +1589,19 @@ async function lockMergeTasks(
         .select({
             taskId: recordingTasks.id,
             itemId: recordingTasks.itemId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
         })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-        .where(inArray(recordingTasks.id, ids));
+        .where(
+            and(
+                inArray(recordingTasks.id, ids),
+                or(
+                    isNull(recordingTasks.itemId),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
+            ),
+        );
     if (taskRefs.length !== 2) throw notFound();
     const [mentionRefs, proposalRefs] = await Promise.all([
         tx
@@ -1597,11 +1621,23 @@ async function lockMergeTasks(
         ),
     ];
     const refs = await tx
-        .select({ itemId: chatterItems.id, kind: chatterItems.kind })
+        .select({
+            itemId: chatterItems.id,
+            kind: contentKindColumn(chatterItems.kind),
+        })
         .from(chatterItems)
-        .where(inArray(chatterItems.id, graphItemIds));
+        .where(
+            and(
+                inArray(chatterItems.id, graphItemIds),
+                inArray(chatterItems.kind, ["audio", "mail"]),
+            ),
+        );
     let itemRefs: { itemId: string; kind: "audio" | "mail" }[] = [
-        ...new Map(refs.map((row) => [row.itemId, row])).values(),
+        ...new Map(
+            refs
+                .filter((row) => hasContentKind(row, "kind"))
+                .map((row) => [row.itemId, row]),
+        ).values(),
     ].sort((left, right) => left.itemId.localeCompare(right.itemId));
     const lockItems = async (
         pending: readonly { itemId: string; kind: "audio" | "mail" }[],
@@ -1640,11 +1676,22 @@ async function lockMergeTasks(
         ),
     ];
     if (driftedItemIds.length > 0) {
-        const driftedRefs = await tx
-            .select({ itemId: chatterItems.id, kind: chatterItems.kind })
+        const driftedRows = await tx
+            .select({
+                itemId: chatterItems.id,
+                kind: contentKindColumn(chatterItems.kind),
+            })
             .from(chatterItems)
-            .where(inArray(chatterItems.id, driftedItemIds))
+            .where(
+                and(
+                    inArray(chatterItems.id, driftedItemIds),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
+            )
             .orderBy(asc(chatterItems.id));
+        const driftedRefs = driftedRows.filter((row) =>
+            hasContentKind(row, "kind"),
+        );
         await lockItems(driftedRefs);
         itemRefs = [...itemRefs, ...driftedRefs];
         rows = await readTasks();
@@ -1702,6 +1749,7 @@ async function readMergeTaskRows(
             and(
                 inArray(recordingTasks.id, ids),
                 isNull(chatterItems.deletedAt),
+                sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM, true),
             ),
         )
@@ -2472,6 +2520,7 @@ export async function acceptReview(
             and(
                 eq(chatterItems.id, recordingId),
                 isNull(chatterItems.deletedAt),
+                sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM),
             ),
         )
@@ -2802,6 +2851,7 @@ export async function acceptReview(
                         and(
                             eq(recordingTasks.id, match.taskId),
                             isNull(chatterItems.deletedAt),
+                            sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                         ),
                     )
                     .limit(1);
@@ -2935,6 +2985,10 @@ async function requireTaskView(
         .where(
             and(
                 eq(recordingTasks.id, taskId),
+                or(
+                    isNull(recordingTasks.itemId),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
                 taskVisible(viewer, ANY_TASK_ITEM, true),
             ),
         )
@@ -3063,7 +3117,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
     const rows = await db
         .select({
             recordingId: chatterItems.id,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
         })
         .from(chatterItems)
@@ -3071,6 +3125,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             and(
                 inArray(chatterItems.id, [...waiting.keys()]),
                 isNull(chatterItems.deletedAt),
+                sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskContentEditable(viewer, {
                     id: chatterItems.id,
                     userId: chatterItems.userId,
@@ -3078,12 +3133,14 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             ),
         )
         .orderBy(desc(chatterItems.occurredAt));
-    return rows.map((row) => ({
-        recordingId: row.recordingId,
-        kind: row.kind,
-        title: decryptText(row.title),
-        proposals: waiting.get(row.recordingId)?.size ?? 0,
-    }));
+    return rows
+        .filter((row) => hasContentKind(row, "kind"))
+        .map((row) => ({
+            recordingId: row.recordingId,
+            kind: row.kind,
+            title: decryptText(row.title),
+            proposals: waiting.get(row.recordingId)?.size ?? 0,
+        }));
 }
 
 export type TaskTab = "mine" | "followed" | "tracked";
@@ -3142,6 +3199,7 @@ function taskTabConditions(
     return [
         ne(recordingTasks.status, "proposed"),
         isNull(chatterItems.deletedAt),
+        sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
         taskVisible(viewer, ANY_TASK_ITEM, true),
         taskTabScope(viewer, tab, organization),
     ];
@@ -3264,6 +3322,7 @@ function callerTaskConditions(viewer: TaskViewer): SQL[] {
     return [
         ne(recordingTasks.status, "proposed"),
         isNull(chatterItems.deletedAt),
+        sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
         taskListed(viewer, ANY_TASK_ITEM),
     ];
 }
@@ -3344,6 +3403,7 @@ export async function getVisibleTask(
         [
             ne(recordingTasks.status, "proposed"),
             isNull(chatterItems.deletedAt),
+            sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
             taskVisible(viewer, ANY_TASK_ITEM, true),
             eq(recordingTasks.id, taskId),
         ],
@@ -3351,6 +3411,26 @@ export async function getVisibleTask(
         1,
     );
     return task ?? null;
+}
+
+/** Read an explicitly requested set of currently visible accepted tasks in one batch. */
+export async function getVisibleTasks(
+    viewer: TaskViewer,
+    taskIds: readonly string[],
+): Promise<TaskListItem[]> {
+    if (!taskIds.length) return [];
+    return loadTaskListItems(
+        viewer,
+        [
+            ne(recordingTasks.status, "proposed"),
+            isNull(chatterItems.deletedAt),
+            sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
+            taskVisible(viewer, ANY_TASK_ITEM, true),
+            inArray(recordingTasks.id, [...new Set(taskIds)]),
+        ],
+        [],
+        taskIds.length,
+    );
 }
 
 async function loadTaskListItems(
@@ -3367,7 +3447,7 @@ async function loadTaskListItems(
             recordingOwner: chatterItems.userId,
             recordingTitle: chatterItems.title,
             recordingStart: chatterItems.occurredAt,
-            recordingKind: chatterItems.kind,
+            recordingKind: contentKindColumn(chatterItems.kind),
         })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
@@ -3383,7 +3463,15 @@ async function loadTaskListItems(
         .innerJoin(users, eq(users.id, recordingTasks.userId))
         .leftJoin(people, assigneeJoin())
         .leftJoin(taskNoteAuthor, noteAuthorJoin())
-        .where(and(...conditions))
+        .where(
+            and(
+                ...conditions,
+                or(
+                    isNull(recordingTasks.itemId),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
+                ),
+            ),
+        )
         .orderBy(...order)
         .limit(limit);
 
@@ -3485,6 +3573,7 @@ export async function countNewTasks(viewer: TaskViewer): Promise<number> {
                       and(
                           eq(recordingTasks.status, "open"),
                           isNull(chatterItems.deletedAt),
+                          sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                           assignedToViewer(viewer),
                           taskVisible(viewer, ANY_TASK_ITEM),
                           // Their own recording's tasks are not news to them.

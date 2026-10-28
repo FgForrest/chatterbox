@@ -10,9 +10,11 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
+import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
     aiEnhancements,
+    chatterItems,
     people,
     recordingFolderAssignments,
     recordingFolders,
@@ -21,7 +23,6 @@ import {
     transcriptSpeakers,
     users,
 } from "@/db/schema";
-import { insertRecordings } from "@/tests/integration/items";
 import { migrationsThrough } from "@/tests/integration/migrations";
 import {
     createMigratedTestDatabase,
@@ -36,6 +37,20 @@ const MIGRATION = join(
     process.cwd(),
     "src/db/migrations/0066_merge_org_rows.sql",
 );
+
+const historicalRecordings = pgTable("recordings", {
+    id: text("id"),
+    userId: text("user_id"),
+    deviceSn: text("device_sn"),
+    plaudFileId: text("plaud_file_id"),
+    duration: integer("duration"),
+    endTime: timestamp("end_time"),
+    filesize: integer("filesize"),
+    fileMd5: text("file_md5"),
+    storageType: text("storage_type"),
+    storagePath: text("storage_path"),
+    plaudVersion: text("plaud_version"),
+});
 
 const OWNER = "user-owner";
 const ORG = "user-org";
@@ -66,21 +81,30 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
     }, 30_000);
 
     async function recording(id: string) {
-        await insertRecordings(db(), {
-            id,
-            userId: OWNER,
-            deviceSn: "SN-1",
-            plaudFileId: id,
-            filename: "Weekly",
-            duration: 60_000,
-            startTime: new Date("2026-09-01T10:00:00Z"),
-            endTime: new Date("2026-09-01T10:01:00Z"),
-            filesize: 11,
-            fileMd5: "0".repeat(32),
-            storageType: "local",
-            storagePath: `${OWNER}/${id}.mp3`,
-            plaudVersion: "1",
-        });
+        await db()
+            .insert(chatterItems)
+            .values({
+                id,
+                userId: OWNER,
+                kind: "audio",
+                title: "Weekly",
+                occurredAt: new Date("2026-09-01T10:00:00Z"),
+            });
+        await db()
+            .insert(historicalRecordings)
+            .values({
+                id,
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: id,
+                duration: 60000,
+                endTime: new Date("2026-09-01T10:01:00Z"),
+                filesize: 11,
+                fileMd5: "0".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/${id}.mp3`,
+                plaudVersion: "1",
+            });
     }
 
     async function transcript(

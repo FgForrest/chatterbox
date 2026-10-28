@@ -23,6 +23,7 @@ import {
     WorkflowWidget,
 } from "@/components/pipeline/workflow-widget";
 import { ItemEraseMenu } from "@/components/recordings/erase-recording-menu";
+import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -347,11 +348,28 @@ export function MailDetailPane({
                 retentionNotes={retentionNotes}
             />
             {mail.view === "received" ? (
-                <ReceivedItemBanner
-                    recording={mail}
-                    folders={folders}
-                    shared={shared}
-                />
+                <>
+                    <ReceivedItemBanner
+                        recording={mail}
+                        folders={folders}
+                        shared={shared}
+                    />
+                    <RecordingFolderTags
+                        recordingId={mail.id}
+                        kind="mail"
+                        folders={folders.filter(
+                            (folder) =>
+                                folder.scope === "personal" &&
+                                !folder.receivedFolder,
+                        )}
+                        assignments={folderAssignments}
+                        isOwn={false}
+                        canUnfilePersonal
+                        onSelectFolder={onSelectFolder}
+                        onAdd={onAddToFolder}
+                        onRemove={onRemoveFromFolder}
+                    />
+                </>
             ) : (
                 <ItemWorkflow
                     itemId={mail.id}

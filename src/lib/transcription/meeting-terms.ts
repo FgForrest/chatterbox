@@ -11,6 +11,7 @@ export function mergeMeetingTerms(
     terms: readonly AlmanacTerm[],
     attendees: readonly MeetingAttendee[],
     recorderName: string | null,
+    agendaTerms: readonly string[] = [],
 ): AlmanacTerm[] {
     const recorder = recorderName
         ? terms.find(
@@ -31,6 +32,13 @@ export function mergeMeetingTerms(
                 },
         ),
         ...terms,
+        ...agendaTerms.slice(0, 50).map(
+            (text) =>
+                almanac.get(attendeeNameKey(text)) ?? {
+                    text,
+                    soundsLike: [],
+                },
+        ),
     ];
     const merged = new Map<string, AlmanacTerm>();
     for (const term of ordered) {

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    type ChatterItemKind,
+    type ContentItemKind,
     chatterItems,
     knowledgeFactEvidence,
 } from "@/db/schema";
@@ -21,7 +21,7 @@ import type { RecordingView } from "@/lib/sharing/view";
 export interface FactEvidence {
     /** The recording or mail. */
     recordingId: string;
-    kind: ChatterItemKind;
+    kind: ContentItemKind;
     /** The view the caller opens it in. */
     view: RecordingView;
     /** Where in the recording; null for evidence in a mail. */
@@ -35,7 +35,7 @@ export interface FactEvidence {
 export const MAX_EVIDENCE_PER_FACT = 3;
 
 /** The kinds of item whose words the caller may read as evidence. */
-export function evidenceKinds(caller: McpCaller): ChatterItemKind[] {
+export function evidenceKinds(caller: McpCaller): ContentItemKind[] {
     return [
         ...(caller.roles.has("transcripts:read") ? (["audio"] as const) : []),
         ...(mayReadMail(caller) ? (["mail"] as const) : []),
@@ -101,6 +101,7 @@ export async function supportedEvidence(
             ? await secretAddressMasker(mailQuotes)
             : (text: string) => text;
     for (const row of quotes) {
+        if (row.kind === "meeting") continue;
         const held = byFact.get(row.factId) ?? [];
         if (held.length >= MAX_EVIDENCE_PER_FACT) continue;
         held.push({

@@ -1,6 +1,7 @@
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import {
     GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+    GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE,
     GOOGLE_DRIVE_FILE_SCOPE,
     getGoogleIntegrationConfig,
     getGoogleOAuthConfig,
@@ -61,7 +62,8 @@ export async function completeGoogleConnect(input: {
     const config =
         sealed.purpose === "calendar" ||
         sealed.purpose === "meet" ||
-        sealed.purpose === "calendar-meet"
+        sealed.purpose === "calendar-meet" ||
+        sealed.purpose === "calendar-write"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!code || !config) return { outcome: "failed", returnTo };
@@ -94,6 +96,11 @@ export async function completeGoogleConnect(input: {
         ) {
             return { outcome: "missing_calendar_scope", returnTo };
         }
+        if (
+            sealed.purpose === "calendar-write" &&
+            !tokens.scopes.includes(GOOGLE_CALENDAR_EVENTS_WRITE_SCOPE)
+        )
+            return { outcome: "missing_calendar_scope", returnTo };
         if (needsMeet && !tokens.scopes.includes(GOOGLE_MEET_READ_SCOPE)) {
             return { outcome: "missing_meet_scope", returnTo };
         }
@@ -104,14 +111,16 @@ export async function completeGoogleConnect(input: {
         if (
             (sealed.purpose === "calendar" ||
                 sealed.purpose === "meet" ||
-                sealed.purpose === "calendar-meet") &&
+                sealed.purpose === "calendar-meet" ||
+                sealed.purpose === "calendar-write") &&
             existing &&
             existing.subject !== claims.subject
         ) {
             return { outcome: "account_mismatch", returnTo };
         }
         if (
-            sealed.purpose === "meet" &&
+            (sealed.purpose === "meet" ||
+                sealed.purpose === "calendar-write") &&
             (!existing ||
                 existing.status !== "active" ||
                 existing.subject !== sealed.expectedSubject ||
@@ -125,7 +134,7 @@ export async function completeGoogleConnect(input: {
         ) {
             return { outcome: "missing_existing_scope", returnTo };
         }
-        if (sealed.purpose === "meet") {
+        if (sealed.purpose === "meet" || sealed.purpose === "calendar-write") {
             const updated = await saveMeetGrant(
                 input.userId,
                 sealed.expectedSubject ?? "",

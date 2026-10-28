@@ -48,6 +48,8 @@ export const STORAGE_KEYS = {
     /** Last config fetched from the server, or null. */
     serverDefaults: "serverDefaults",
     nudgeEnabled: "nudgeEnabled",
+    agendaReminders: "agendaReminders",
+    agendaBanner: "agendaBanner",
     /** User override for the auto-stop quiet period, or null for server/default. */
     autoStopQuietSeconds: "autoStopQuietSeconds",
     /** ISO timestamp of the one-time auto-mode policy acknowledgement. */

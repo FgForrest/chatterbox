@@ -94,6 +94,7 @@ function renderState(state) {
         document.getElementById("picker-completion-message").textContent = t(
             state.partial ? "partialRecordingSent" : "recordingStored",
         );
+        document.getElementById("picker-completion-agenda-notice").textContent = state.agendaUnavailable ? t("agendaUnavailable") : "";
         return;
     }
 

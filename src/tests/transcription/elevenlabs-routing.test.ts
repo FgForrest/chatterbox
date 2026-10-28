@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type * as EncryptionFieldsModule from "@/lib/encryption/fields";
+import type * as AgendaContextModule from "@/lib/meetings/pipeline-context";
 import type * as AlmanacTermsModule from "@/lib/transcription/almanac-terms";
 import type * as MeetingTermsModule from "@/lib/transcription/meeting-terms";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
@@ -18,9 +20,9 @@ vi.mock("@/lib/encryption", () => ({
 }));
 
 vi.mock("@/lib/encryption/fields", async () => {
-    const actual = await vi.importActual<
-        typeof import("@/lib/encryption/fields")
-    >("@/lib/encryption/fields");
+    const actual = await vi.importActual<typeof EncryptionFieldsModule>(
+        "@/lib/encryption/fields",
+    );
     return {
         ...actual,
         decryptText: vi.fn((value: string) => value),
@@ -87,6 +89,10 @@ vi.mock("@/lib/folders/item-scope", () => ({
 vi.mock("@/lib/integrations/google/meeting-roster", () => ({
     resolveMeetingRoster: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("@/lib/meetings/pipeline-context", async (importOriginal) => ({
+    ...(await importOriginal<typeof AgendaContextModule>()),
+    loadRecordingAgenda: vi.fn(async () => null),
+}));
 
 vi.mock("@/lib/transcription/almanac-terms", async () => {
     const actual = await vi.importActual<typeof AlmanacTermsModule>(
@@ -113,6 +119,7 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 
 import { db } from "@/db";
 import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
+import { loadRecordingAgenda } from "@/lib/meetings/pipeline-context";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
@@ -475,6 +482,46 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
             RequestInit,
         ];
         expect((init.body as FormData).getAll("keyterms")).toEqual([]);
+    });
+    it("sends agenda words as keyterms without a Calendar roster", async () => {
+        vi.mocked(loadRecordingAgenda).mockResolvedValueOnce({
+            id: "agenda",
+            userId: "user-el",
+            version: 0,
+            calendarEventId: null,
+            points: [
+                {
+                    id: "p1",
+                    parentId: null,
+                    position: 0,
+                    text: "Acme roadmap",
+                    note: null,
+                    discussedAt: null,
+                },
+            ],
+            tasks: [],
+        });
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2",
+        });
+        (db.select as Mock).mockReturnValueOnce({
+            from: () => ({
+                where: () => ({ limit: async () => [{ email: null }] }),
+            }),
+        });
+        expect((await transcribeRecording("user-el", "rec-el")).success).toBe(
+            true,
+        );
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([
+            "Acme",
+            "roadmap",
+        ]);
     });
 
     it("transcribes without keyterms when the Almanac cannot be read", async () => {

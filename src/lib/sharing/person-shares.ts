@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientCondition } from "@/db/queries/item-shares";
 import { chatterItems, itemShares, recordingFolders, users } from "@/db/schema";
+import { contentKindColumn } from "@/lib/content/item-kinds";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
@@ -41,6 +42,7 @@ async function requireOwner(userId: string, itemId: string) {
                 eq(chatterItems.id, itemId),
                 eq(chatterItems.userId, userId),
                 isNull(chatterItems.deletedAt),
+                inArray(chatterItems.kind, ["audio", "mail"]),
             ),
         )
         .limit(1);
@@ -98,6 +100,7 @@ export async function inviteToItem(
                     eq(chatterItems.id, itemId),
                     eq(chatterItems.userId, userId),
                     isNull(chatterItems.deletedAt),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
                 ),
             )
             .for("update");
@@ -182,7 +185,7 @@ export async function listMyInvitations(userId: string) {
         .select({
             id: itemShares.id,
             itemId: itemShares.itemId,
-            kind: chatterItems.kind,
+            kind: contentKindColumn(chatterItems.kind),
             title: chatterItems.title,
             ownerName: users.name,
             ownerEmail: users.email,
@@ -197,6 +200,7 @@ export async function listMyInvitations(userId: string) {
                 eq(itemShares.receiverUserId, userId),
                 eq(itemShares.state, "pending"),
                 isNull(chatterItems.deletedAt),
+                inArray(chatterItems.kind, ["audio", "mail"]),
             ),
         )
         .orderBy(asc(itemShares.invitedAt));
@@ -205,14 +209,19 @@ export async function listMyInvitations(userId: string) {
             .filter((row) => row.kind === "mail")
             .map((row) => decryptText(row.title)),
     );
-    return rows.map((row) => ({
-        ...row,
-        title:
-            row.kind === "mail"
-                ? mask(decryptText(row.title))
-                : decryptText(row.title),
-        ownerName: row.ownerName || row.ownerEmail,
-    }));
+    return rows
+        .filter(
+            (row): row is typeof row & { kind: "audio" | "mail" } =>
+                row.kind !== null,
+        )
+        .map((row) => ({
+            ...row,
+            title:
+                row.kind === "mail"
+                    ? mask(decryptText(row.title))
+                    : decryptText(row.title),
+            ownerName: row.ownerName || row.ownerEmail,
+        }));
 }
 
 /** State and version checked changes, serialized against cancellation and other responses. */
@@ -249,6 +258,7 @@ export async function changePersonShare(
                     eq(chatterItems.id, reference.itemId),
                     eq(chatterItems.userId, reference.ownerId),
                     isNull(chatterItems.deletedAt),
+                    inArray(chatterItems.kind, ["audio", "mail"]),
                 ),
             )
             .for("update");

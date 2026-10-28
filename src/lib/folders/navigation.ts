@@ -25,7 +25,7 @@ export interface FolderNavigation {
 export function libraryNavigation(
     folders: RecordingFolder[],
     assignments: RecordingFolderAssignment[],
-    recordings: Recording[],
+    recordings: Pick<Recording, "id" | "startTime" | "view">[],
     label: (folder: RecordingFolder) => string,
 ): FolderNavigation {
     return {
@@ -151,7 +151,7 @@ export function matchFolders(
 export function folderActivity(
     folders: RecordingFolder[],
     assignments: RecordingFolderAssignment[],
-    recordings: Recording[],
+    recordings: Pick<Recording, "id" | "startTime" | "view">[],
 ): Map<string, number> {
     const dates = new Map(
         recordings.map((item) => [item.id, Date.parse(item.startTime)]),

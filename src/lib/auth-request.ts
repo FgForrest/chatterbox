@@ -24,7 +24,9 @@ export type AuthenticatedRequest = {
  * `read` is the original, implicit grant of every key. `recordings:write`
  * lets a key create recordings through the streaming upload surface
  * (`/api/v1/recording-sessions`); it is what the meeting recorder extension
- * is issued, and nothing else.
+ * is issued. On supporting servers it also reads visible agendas, adds live
+ * points, changes discussed ticks and notes, and changes tasks the holder may
+ * change through the existing task permissions. It cannot read recordings.
  */
 export const API_KEY_SCOPES = ["read", "recordings:write"] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];

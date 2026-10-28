@@ -61,7 +61,7 @@ export async function bindPlacementProfileInTx(
             ),
         )
         .limit(1);
-    if (!item) return;
+    if (!item || item.kind === "meeting") return;
     const phases = processing.phases;
     const categorized = phases.categorize ?? {
         state: "pending" as const,

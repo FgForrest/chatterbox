@@ -31,7 +31,7 @@ export async function resolveManualItemProfile(
                 ),
             )
             .limit(1);
-        if (!item) throw error;
+        if (!item || item.kind === "meeting") throw error;
         const fallback = await resolveDefaultProfile(
             ownerUserId,
             item.kind,

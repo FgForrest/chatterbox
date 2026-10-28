@@ -7,12 +7,24 @@ import {
     screen,
     within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import type { TaskView } from "@/lib/tasks/tasks";
 import { createTestPlayback } from "@/tests/helpers/playback";
 import type { Recording } from "@/types/recording";
 
+vi.mock("@/components/meetings/recording-agenda", () => ({
+    RecordingAgenda: ({
+        children,
+    }: {
+        children: (parts: {
+            notice: ReactNode;
+            agenda: ReactNode;
+            nextMeeting: ReactNode;
+        }) => ReactNode;
+    }) => children({ notice: null, agenda: null, nextMeeting: null }),
+}));
 vi.mock("@/components/dashboard/recording-player", () => ({
     RecordingPlayer: () => <div data-testid="player" />,
     transcriptPlayback: () => createTestPlayback().playback,

@@ -6,8 +6,14 @@ import {
     itemProcessing,
     processingProfiles,
     recordingFolderAssignments,
+    recordings,
 } from "@/db/schema";
-import type { assertCategorizableFolder } from "@/lib/folders/folders";
+import { AppError } from "@/lib/errors";
+import {
+    type assertCategorizableFolder,
+    lockCategorizableFolderInTx,
+} from "@/lib/folders/folders";
+import { attachArrivingRecordingInTx } from "@/lib/meetings/attachment";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -55,15 +61,37 @@ export async function requestArrivalInTx(
         profile?: ProfileRecord | null;
         manualOnly?: boolean;
         folder?: ArrivalFolder | null;
+        agendaId?: string;
+        allowUnavailableFolder?: boolean;
     },
 ) {
     const view = input.view ?? "private";
-    if (input.folder && view === "private") {
-        if (input.folder.scope === "org") {
+    let folder = input.folder;
+    let profile = input.profile;
+    if (folder && folder.scope !== "org" && view === "private") {
+        try {
+            await lockCategorizableFolderInTx(
+                tx,
+                input.userId,
+                folder.folderId,
+            );
+        } catch (error) {
+            if (
+                !input.allowUnavailableFolder ||
+                !(error instanceof AppError) ||
+                error.statusCode !== 404
+            )
+                throw error;
+            folder = null;
+            profile = null;
+        }
+    }
+    if (folder && view === "private") {
+        if (folder.scope === "org") {
             await recordIntendedPlacementInTx(tx, {
                 ownerUserId: input.userId,
                 itemId: input.itemId,
-                folderId: input.folder.folderId,
+                folderId: folder.folderId,
                 requestPipeline: false,
             });
         } else {
@@ -72,18 +100,38 @@ export async function requestArrivalInTx(
                 .values({
                     itemId: input.itemId,
                     userId: input.userId,
-                    folderId: input.folder.folderId,
+                    folderId: folder.folderId,
                 })
                 .onConflictDoNothing();
         }
     }
-    if (input.profile && view === "private") {
+    if (view === "private") {
+        const [recording] = await tx
+            .select({ plaudFileId: recordings.plaudFileId })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, input.itemId),
+                    eq(recordings.userId, input.userId),
+                ),
+            )
+            .limit(1);
+        if (recording)
+            await attachArrivingRecordingInTx(
+                tx,
+                input.userId,
+                input.itemId,
+                recording.plaudFileId,
+                ...(input.agendaId ? [input.agendaId] : []),
+            );
+    }
+    if (profile && view === "private") {
         await lockPipelineTargetsInTx(
             tx,
             [{ itemId: input.itemId, userId: input.userId }],
             true,
         );
-        await lockProfileMutation(tx, input.profile.ownerUserId);
+        await lockProfileMutation(tx, profile.ownerUserId);
     }
     const advance = await requestAdvanceInTx(tx, {
         itemId: input.itemId,
@@ -91,7 +139,7 @@ export async function requestArrivalInTx(
         view,
         reason: "arrival",
     });
-    if (!advance || !input.profile || view !== "private") return advance;
+    if (!advance || !profile || view !== "private") return advance;
 
     const [latest] = await tx
         .select({
@@ -101,9 +149,9 @@ export async function requestArrivalInTx(
         .from(processingProfiles)
         .where(
             and(
-                eq(processingProfiles.id, input.profile.id),
-                eq(processingProfiles.ownerUserId, input.profile.ownerUserId),
-                eq(processingProfiles.channel, input.profile.channel),
+                eq(processingProfiles.id, profile.id),
+                eq(processingProfiles.ownerUserId, profile.ownerUserId),
+                eq(processingProfiles.channel, profile.channel),
                 isNull(processingProfiles.deletedAt),
                 isNull(processingProfiles.archivedAt),
             ),

@@ -86,6 +86,7 @@ describe("Calendar event candidates", () => {
                             {
                                 id: "meeting",
                                 summary: "Team meeting",
+                                recurringEventId: "series",
                                 start: { dateTime: "2026-10-07T09:45:00Z" },
                                 end: { dateTime: "2026-10-07T11:15:00Z" },
                                 attendees: [
@@ -122,6 +123,7 @@ describe("Calendar event candidates", () => {
                 id: "meeting",
                 meetingCode: null,
                 title: "Team meeting",
+                recurringEventId: "series",
                 start: "2026-10-07T09:45:00.000Z",
                 end: "2026-10-07T11:15:00.000Z",
                 attendees: [{ name: "Alex", email: "alex@example.com" }],
@@ -132,6 +134,7 @@ describe("Calendar event candidates", () => {
             RequestInit,
         ];
         expect(url.searchParams.get("fields")).toContain("displayName,email");
+        expect(url.searchParams.get("fields")).toContain("recurringEventId");
         expect(url.pathname).toBe("/calendar/v3/calendars/primary/events");
         expect(url.searchParams.get("timeMin")).toBe(
             "2026-10-07T09:30:00.000Z",

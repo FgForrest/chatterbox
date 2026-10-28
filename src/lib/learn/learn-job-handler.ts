@@ -95,6 +95,11 @@ import {
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
+import {
+    agendaLearnEvent,
+    agendaPlanBlock,
+    loadRecordingAgenda,
+} from "@/lib/meetings/pipeline-context";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import {
@@ -835,6 +840,14 @@ async function runLearnJob({
             await chatFor(run, signal, profile.settings.steps.learn.provider);
         const mayChooseEvent =
             run.view === "private" && run.actorUserId === run.userId;
+        const agenda = await loadRecordingAgenda(
+            run.actorUserId ?? run.userId,
+            run.itemId,
+            { authoredByUserId: run.userId },
+        );
+        const agendaPlan = agenda
+            ? agendaPlanBlock({ ...agenda, tasks: [] })
+            : undefined;
         const storedEventId =
             typeof run.inputs?.calendarEventId === "string"
                 ? run.inputs.calendarEventId
@@ -842,14 +855,14 @@ async function runLearnJob({
         const storedAutoSelected =
             run.inputs?.calendarEventAutoSelected === true;
         const chosenEventId = mayChooseEvent
-            ? payload.calendarEventId
+            ? (payload.calendarEventId ??
+              (!storedAutoSelected ? storedEventId : undefined))
             : undefined;
-        let selectedEventId: string | undefined;
-        if (mayChooseEvent) {
-            selectedEventId = chosenEventId ?? storedEventId;
-        } else if (storedAutoSelected) {
-            selectedEventId = storedEventId;
-        }
+        const selectedEventId = agendaLearnEvent(
+            chosenEventId,
+            agenda?.calendarEventId,
+            mayChooseEvent || storedAutoSelected ? storedEventId : undefined,
+        );
         const eventAutoSelected =
             selectedEventId === undefined ||
             (chosenEventId === undefined && storedAutoSelected);
@@ -933,6 +946,7 @@ async function runLearnJob({
                       knownPeople,
                       answeredSpeakers,
                       knownFacts,
+                      agendaPlan,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),
@@ -955,6 +969,7 @@ async function runLearnJob({
                       knownPeople,
                       answeredSpeakers,
                       knownFacts,
+                      agendaPlan,
                       ...(speakerCandidates.length > 0
                           ? { speakerCandidates }
                           : {}),

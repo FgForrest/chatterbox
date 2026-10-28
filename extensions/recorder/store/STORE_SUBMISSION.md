@@ -48,18 +48,19 @@ how to finish there. Manual address-and-key pairing stays available.
 | `offscreen` | Runs Chrome's audio capture and encoder while the extension popup is closed. |
 | `desktopCapture` | Opens Chrome's picker when the user records audio from a desktop meeting app or another screen. The extension keeps the selected system audio, not screen video. |
 | `tabCapture` | Captures audio from the current tab when the user clicks Record this tab. |
-| `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Finds marked recorder setup tabs and shows their host and title for the user's connection choice. Tab URLs and titles are not uploaded. |
+| `tabs` | Reads tab URLs and audible status to recognize supported meeting sites, show the recording prompt, and stop a recording when its meeting tab closes. Finds marked recorder setup tabs and shows their host and title for the user's connection choice. Tab URLs and titles are not uploaded. With agenda support, only the Meet room code from the URL and current time go to the paired server for matching. |
 | `notifications` | Tells the user when a meeting is detected, when recording stops, and when an upload completes or needs attention. |
-| `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
+| `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, and reads and edits visible agendas on supporting servers, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
 | `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes. After the user turns on In-meeting prompt and grants meeting-site access, registers and injects a top-frame isolated recording banner on supported meeting sites. The banner reads no page content and makes no network requests. |
-| `alarms` | Refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
-| Optional `https://*/*` host access | Allows pairing and uploads to the Chatterbox HTTPS server origin chosen by the user. Separately, when the user turns on In-meeting prompt, requests Google Meet, Zoom web, Microsoft Teams, Webex and Whereby together to show recording instructions and controls inside supported meetings. The isolated banner reads no page content, makes no network requests and sends no page content anywhere. Turning the switch off removes that meeting-site access. No new required permissions. |
+| `sidePanel` | Shows the user-selected meeting agenda alongside browser tabs, with discussion ticks, notes and task review while recording. Opened only by a user click; if Chrome refuses, the same packaged page opens in a small extension window. |
+| `alarms` | Schedules agenda reminders one minute before timed meetings and refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
+| Optional `https://*/*` host access | Allows pairing and uploads to the Chatterbox HTTPS server origin chosen by the user. Separately, when the user turns on In-meeting prompt, requests Google Meet, Zoom web, Microsoft Teams, Webex and Whereby together to show recording instructions and controls inside supported meetings. The isolated banner reads no page content, makes no network requests and sends no page content anywhere. Turning the switch off removes that meeting-site access. Version 0.8.0 adds only the required sidePanel permission. |
 | Optional `http://localhost/*` host access | Allows pairing a Chatterbox instance on the user's own computer for local development. Remote HTTP is not supported. |
 | `externally_connectable` for `localhost` | Allows a local Chatterbox page to message the extension for setup without a pairing relay. Other origins use the relay after the user grants access. |
 
 ## Data-use declarations to check in the dashboard
 
-Declare recording audio, authentication information (the recorder key), the random installation identifier, website/tab information used for meeting detection, and user settings as applicable to the current Store form. State that recordings go to the user-selected server, not to the extension publisher by default. Declare no advertising use or sale only while the implementation continues to match those statements. If the publisher also operates a selectable server, disclose that service and its separate privacy policy accurately.
+Declare recording audio, authentication information (the recorder key), the random installation identifier, website/tab information used for meeting detection, meeting agenda titles, points and notes, invitee and author names, task texts, assignees, task notes and edits (agenda content cached only in session storage), and user settings as applicable to the current Store form. State that recordings go to the user-selected server, not to the extension publisher by default. Declare no advertising use or sale only while the implementation continues to match those statements. If the publisher also operates a selectable server, disclose that service and its separate privacy policy accurately.
 
 The privacy policy, store listing, permission explanations, and in-extension consent text must describe the same behavior. Approval remains the Chrome Web Store reviewer's decision.
 
@@ -68,6 +69,31 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.8.0
+
+- Adds only `sidePanel` to required manifest permissions. No extra host access,
+  web-accessible resources or remote code. Agendas open from an explicit click.
+- Reads agendas from the paired server only after `features.agendas: true`.
+  Released servers without this flag keep 0.7.0 recording behavior.
+- The side panel supports preparation and live review: discussed ticks, notes,
+  quick points and actual task Done/Drop actions with existing permissions.
+- Reminder alarms load the next 24 hours every 30 minutes and when the popup opens, and notify
+  one minute before timed agendas. Options can disable reminders or the banner
+  agenda independently. No agenda means no agenda reminder.
+- The meeting banner and pill offer Agenda. Matching sends only a tab's Meet
+  room code and time to the paired server, never page content or a full URL.
+- The popup preselects the agenda's folder and supports choosing another agenda
+  or none during capture. The selected ID survives upload recovery.
+
+### Dashboard update for 0.8.0
+
+Use the `sidePanel` justification above and update `alarms`, `tabs`, `storage`
+and data-use declarations for agenda content and edits. Update both privacy URLs.
+Check real Chrome notification gestures, fallback window, popup/banner clicks,
+light/dark and narrow panel appearance, task permissions, unsupported-server
+behavior and reminder opt-out before uploading. No Store upload is performed by
+packaging the ZIP.
 
 ## What changed in 0.7.0
 

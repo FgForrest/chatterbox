@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import {
     activeShareRecipientCondition,
     activeShareRecipientExistsCondition,
@@ -16,9 +17,11 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
+import { nudge } from "@/lib/jobs/nudge";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
 import { isOrgScopeVisible } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 
@@ -325,6 +328,28 @@ export async function changeFolderShare(
                     sortOrder: input.sortOrder ?? 1_000_000,
                 });
             } else if (input.action === "remove") {
+                const unfiled = await tx
+                    .delete(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(
+                                recordingFolderAssignments.folderId,
+                                share.folderId,
+                            ),
+                            eq(
+                                recordingFolderAssignments.userId,
+                                share.receiverUserId,
+                            ),
+                        ),
+                    )
+                    .returning({ itemId: recordingFolderAssignments.itemId });
+                for (const item of unfiled)
+                    await requestAdvanceInTx(tx, {
+                        itemId: item.itemId,
+                        userId: share.receiverUserId,
+                        view: "private",
+                        reason: "placement",
+                    });
                 await tx
                     .delete(receivedFolderAttachments)
                     .where(
@@ -397,15 +422,18 @@ export async function changeFolderShare(
             return share;
         }),
     );
+    if (input.action === "remove") nudge();
     await Promise.all([
         notifyPersonShareChanged(changed.userId),
         notifyPersonShareChanged(changed.receiverUserId),
+        notifyFolderSharesChanged(changed.userId, changed.folderId),
     ]);
 }
 
 /** Receiver-owned navigation nodes and live placements, never processing assignments. */
 export async function listReceivedFolderOrganization(
     userId: string,
+    includeAssignments = true,
 ): Promise<FolderOrganization> {
     if (!isOrgScopeVisible()) return { folders: [], assignments: [] };
     const rows = await db
@@ -464,6 +492,7 @@ export async function listReceivedFolderOrganization(
             kind: "custom",
             scope: "personal",
             receivedFolder: {
+                sourceFolderId: share.folderId,
                 shareId: share.id,
                 shareVersion: share.version,
                 ownerName: ownerName || ownerEmail,
@@ -471,7 +500,8 @@ export async function listReceivedFolderOrganization(
             },
         }),
     );
-    if (!rows.length) return { folders, assignments: [] };
+    if (!rows.length || !includeAssignments)
+        return { folders, assignments: [] };
     const assignments = await db
         .select({
             recordingId: recordingFolderAssignments.itemId,
@@ -489,14 +519,18 @@ export async function listReceivedFolderOrganization(
             recordingFolderAssignments,
             and(
                 eq(recordingFolderAssignments.folderId, folderShares.folderId),
-                eq(recordingFolderAssignments.userId, folderShares.userId),
+                folderParticipantCondition(
+                    folderShares.userId,
+                    recordingFolderAssignments.userId,
+                    folderShares.folderId,
+                ),
             ),
         )
         .innerJoin(
             chatterItems,
             and(
                 eq(chatterItems.id, recordingFolderAssignments.itemId),
-                eq(chatterItems.userId, folderShares.userId),
+                eq(chatterItems.userId, recordingFolderAssignments.userId),
             ),
         )
         .where(
@@ -511,7 +545,10 @@ export async function listReceivedFolderOrganization(
 }
 
 /** Refresh receivers after live membership, shared-folder naming or deletion changes. */
-export async function notifyFolderSharesChanged(userId: string) {
+export async function notifyFolderSharesChanged(
+    userId: string,
+    folderId?: string,
+) {
     if (!isOrgScopeVisible()) return;
     const rows = await db
         .select({ receiverId: folderShares.receiverUserId })
@@ -519,6 +556,7 @@ export async function notifyFolderSharesChanged(userId: string) {
         .where(
             and(
                 eq(folderShares.userId, userId),
+                folderId ? eq(folderShares.folderId, folderId) : undefined,
                 inArray(folderShares.state, ["pending", "accepted"]),
             ),
         );
