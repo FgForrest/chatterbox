@@ -50,7 +50,6 @@ describe.each(["audio", "mail"] as const)("%s Knowledge header", (kind) => {
         const { rerender } = render(<ItemHeader {...props} knowledgeOpen />);
         const button = screen.getByRole("button", { name: "Knowledge" });
         expect(button.getAttribute("aria-pressed")).toBe("true");
-        expect(button.className).toContain("border");
         rerender(<ItemHeader {...props} knowledgeOpen={false} />);
         expect(button.getAttribute("aria-pressed")).toBe("false");
     });

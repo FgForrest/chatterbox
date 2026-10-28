@@ -1224,6 +1224,7 @@ export function LearnWidget({
                     actionLabel={i18n("Learn")}
                     onAction={startLearn}
                     onOpen={(targetSource) => {
+                        // Pending audio reviews retain item.learn.source: learnRuns.transcriptionId cascades on delete and upsertTranscription updates in place.
                         if (!targetSource) startLearn();
                     }}
                 />
