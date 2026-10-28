@@ -238,7 +238,11 @@ export function WorkstationDetailPane({
                                 knowledgeItem === currentRecording.id
                             }
                             onKnowledge={() =>
-                                setKnowledgeItem(currentRecording.id)
+                                setKnowledgeItem((open) =>
+                                    open === currentRecording.id
+                                        ? null
+                                        : currentRecording.id,
+                                )
                             }
                             pendingLearnCount={
                                 transcriptReadOnly
@@ -289,7 +293,7 @@ export function WorkstationDetailPane({
                             className={
                                 knowledgeItem === currentRecording.id
                                     ? "hidden"
-                                    : "contents"
+                                    : "flex flex-col gap-6"
                             }
                         >
                             {currentRecording.view === "received" ? (
