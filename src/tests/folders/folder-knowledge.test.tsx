@@ -1028,9 +1028,12 @@ describe.each([
             expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
         });
         it.each([
-            null,
-            7,
-        ])("keeps historical applied count %s accurate in the Knowledge subtitle", async (applied) => {
+            [null, null, null],
+            [7, null, null],
+            [7, 3, 2],
+            [7, null, 2],
+            [7, 3, null],
+        ] as const)("renders finished Learn counts accurately (applied=%s, skipped=%s, dismissed=%s)", async (applied, skipped, dismissed) => {
             mocks.fetch.mockImplementation(async () =>
                 Response.json({
                     ...response("people"),
@@ -1055,8 +1058,8 @@ describe.each([
                             pending: 0,
                             at: "2026-10-28T14:02:00Z",
                             applied,
-                            skipped: null,
-                            dismissed: null,
+                            skipped,
+                            dismissed,
                         },
                         review: null,
                     },
@@ -1067,6 +1070,12 @@ describe.each([
             if (applied === null)
                 expect(screen.queryByText(/changes? applied/)).toBeNull();
             else expect(screen.getByText(/7 changes applied/)).toBeTruthy();
+            if (skipped === null || dismissed === null)
+                expect(screen.queryByText(/skipped|rejected/)).toBeNull();
+            else
+                expect(
+                    screen.getByText("3 skipped, 2 rejected").textContent,
+                ).toBe("3 skipped, 2 rejected");
             expect(
                 screen.queryByRole("button", { name: "Re-learn" }),
             ).toBeNull();
