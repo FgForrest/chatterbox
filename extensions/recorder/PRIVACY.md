@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 27 October 2026
+Last updated: 28 October 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -42,6 +42,7 @@ planned times, folder names, discussion points and notes, invitee and author nam
 task texts, assignees and task notes from your paired server. This agenda content is
 stored only in extension session storage. It caches the next 24 hours of timed agendas in extension session storage for
 reminders, and displays an agenda in Chrome's side panel or a small extension window.
+The side panel is enabled for a tab only after you click to open an agenda.
 The reminder and banner switches are independent. Servers without support retain the
 existing recording behavior and receive no agenda calls.
 

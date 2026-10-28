@@ -504,8 +504,7 @@ async function renderAgendaSettings() {
     if (!el("agenda-settings")) return;
     const settings = await getSettings();
     const supported = supportsAgendas(settings);
-    el("agenda-unsupported").hidden = supported;
-    el("agenda-settings").hidden = !supported;
+    el("agenda-section").hidden = !supported;
     el("agenda-reminders").checked = settings.agendaReminders;
     el("agenda-banner").checked = settings.agendaBanner;
 }

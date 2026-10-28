@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 27. října 2026
+Aktualizováno: 28. října 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -39,7 +39,8 @@ viditelných schůzek, složky, body, poznámky, jména pozvaných a autorů, te
 řešitele a poznámky k úkolům. Tento obsah agendy ukládá pouze do dočasného úložiště
 relace rozšíření. Agendy s časem na
 nejbližších 24 hodin uchovává v dočasném úložišti relace rozšíření pro připomínky.
-Agendu zobrazuje v bočním panelu Chromu nebo v malém okně rozšíření. Připomínky
+Agendu zobrazuje v bočním panelu Chromu nebo v malém okně rozšíření. Boční panel
+povolí jen pro danou kartu po kliknutí na otevření agendy. Připomínky
 a nabídku v liště lze vypnout samostatně. Serverům bez podpory agend neposílá
 žádné požadavky na agendy a nahrávání funguje jako dosud.
 
