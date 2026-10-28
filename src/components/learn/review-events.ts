@@ -44,3 +44,25 @@ export function usePendingReviews(): number {
     }, []);
     return pending;
 }
+
+/** Start Learn again from an item's Knowledge panel using its existing widget. */
+export function relearnItem(itemId: string, forget: boolean): void {
+    window.dispatchEvent(
+        new CustomEvent("riffado:relearn-item", { detail: { itemId, forget } }),
+    );
+}
+
+/** Listen for a request to rerun this item's existing Learn workflow. */
+export function onRelearnItem(
+    itemId: string,
+    listener: (forget: boolean) => void,
+): () => void {
+    const handle = (event: Event) => {
+        const detail = (
+            event as CustomEvent<{ itemId?: string; forget?: boolean }>
+        ).detail;
+        if (detail?.itemId === itemId) listener(detail.forget === true);
+    };
+    window.addEventListener("riffado:relearn-item", handle);
+    return () => window.removeEventListener("riffado:relearn-item", handle);
+}

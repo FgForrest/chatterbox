@@ -100,6 +100,10 @@ const transcription = {
 };
 
 const enhancement = {
+    editedAt: null,
+    editedByUserId: null,
+    revision: 0,
+    remarksAppliedCount: 0,
     id: "sum-1",
     itemId: "rec-1",
     userId: "user-1",

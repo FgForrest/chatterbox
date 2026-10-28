@@ -4,7 +4,10 @@ import {
     filesystemExportSettings,
     folderExportConfigurations,
     googleDriveExportSettings,
+    recordingFolders,
+    users,
 } from "@/db/schema";
+import { resolveReadableFolder } from "@/lib/folders/folders";
 import type {
     FolderExportConfigurationDto,
     FolderExportProviderType,
@@ -19,6 +22,7 @@ export interface GoogleDriveTarget extends GoogleDriveExportDto {
 export interface ExportTarget {
     id: string;
     userId: string;
+    writerName?: string;
     folderId: string;
     provider: FolderExportProviderType;
     /**
@@ -42,6 +46,8 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
         .select({
             id: folderExportConfigurations.id,
             userId: folderExportConfigurations.userId,
+            writerName: users.name,
+            writerEmail: users.email,
             folderId: folderExportConfigurations.folderId,
             provider: folderExportConfigurations.provider,
             exportAudio: folderExportConfigurations.exportAudio,
@@ -62,6 +68,11 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
             },
         })
         .from(folderExportConfigurations)
+        .innerJoin(users, eq(users.id, folderExportConfigurations.userId))
+        .innerJoin(
+            recordingFolders,
+            eq(recordingFolders.id, folderExportConfigurations.folderId),
+        )
         .leftJoin(
             filesystemExportSettings,
             eq(
@@ -81,6 +92,7 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
         const common = {
             id: row.id,
             userId: row.userId,
+            writerName: row.writerName?.trim() || row.writerEmail,
             folderId: row.folderId,
             exportAudio: row.exportAudio,
             exportTranscript: row.exportTranscript,
@@ -160,4 +172,14 @@ export function toConfigurationDto(
               }
             : null,
     };
+}
+
+/** Exports in the Organization tree the caller may read, with each writer's identity. */
+export async function listOrganizationExportTargets(
+    userId: string,
+    folderId: string,
+): Promise<ExportTarget[]> {
+    const access = await resolveReadableFolder(userId, folderId);
+    if (access?.scope !== "org") return [];
+    return selectTargets(eq(recordingFolders.userId, access.ownerId));
 }

@@ -14,3 +14,9 @@ export const FOLDER_KNOWLEDGE_PREVIEW_TERMS = 8;
 export type FolderKnowledgeResponse = Awaited<
     ReturnType<typeof readFolderKnowledge>
 >;
+
+export const ITEM_KNOWLEDGE_TABS = [
+    "speakers",
+    ...FOLDER_KNOWLEDGE_TABS,
+] as const;
+export type ItemKnowledgeTab = (typeof ITEM_KNOWLEDGE_TABS)[number];

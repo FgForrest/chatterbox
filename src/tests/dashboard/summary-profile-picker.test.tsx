@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -62,6 +63,8 @@ vi.mock("@/hooks/use-learn-follow-ups", () => ({
 }));
 
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { SummaryWidget } from "@/components/summary/summary-widget";
+import * as SelectComponents from "@/components/ui/select";
 
 function processing(
     overrides: Partial<ItemProcessingPresentation> = {},
@@ -258,17 +261,24 @@ describe("per-run summary profile picker", () => {
             />,
         );
 
-        const picker = await screen.findByRole("combobox", {
-            name: "Processing profile",
-        });
-        expect(picker.textContent).toContain("Interviews");
-        fireEvent.click(picker);
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Change summary profile",
+            }),
+        );
+        expect(
+            (
+                await screen.findByRole("option", { name: "Interviews" })
+            ).getAttribute("data-state"),
+        ).toBe("checked");
         fireEvent.click(
             await screen.findByRole("option", {
                 name: "Everyday recordings",
             }),
         );
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         await waitFor(() =>
             expect(
@@ -336,10 +346,105 @@ describe("per-run summary profile picker", () => {
             />,
         );
 
-        const picker = await screen.findByRole("combobox", {
-            name: "Processing profile",
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Change summary profile",
+            }),
+        );
+        expect(
+            (
+                await screen.findByRole("option", {
+                    name: "Member's interviews",
+                })
+            ).getAttribute("data-state"),
+        ).toBe("checked");
+    });
+
+    it("does not generate for the same profile or twice for duplicate picker events with the real hook", async () => {
+        let choose: ((value: string) => void) | undefined;
+        const RealSelect = SelectComponents.Select;
+        vi.spyOn(SelectComponents, "Select").mockImplementation((props) => {
+            choose = props.onValueChange;
+            return <RealSelect {...props} />;
         });
-        expect(picker.textContent).toContain("Member's interviews");
+        let complete: ((response: Response) => void) | undefined;
+        const baseFetch = vi.mocked(fetch).getMockImplementation();
+        vi.mocked(fetch).mockImplementation(async (input, init) => {
+            if (String(input).includes("/summary") && init?.method === "POST") {
+                requests.push({
+                    url: String(input),
+                    method: "POST",
+                    body: JSON.parse(String(init.body)),
+                });
+                return new Promise<Response>((resolve) => {
+                    complete = resolve;
+                });
+            }
+            if (String(input).includes("/summary"))
+                return Response.json({
+                    summary: "Existing summary",
+                    source: "riffado",
+                    availableSources: ["riffado"],
+                    itemProfileId,
+                    profileId: "interview-profile",
+                    profileName: "Interviews",
+                });
+            if (!baseFetch) throw new Error("Missing fetch implementation");
+            return baseFetch(input, init);
+        });
+        try {
+            render(
+                <SummaryWidget
+                    itemId="recording-1"
+                    kind="audio"
+                    canChange
+                    contentText="Interview"
+                    workflowVisible={false}
+                    widgetId="summary"
+                    taskWidgetId="tasks"
+                />,
+            );
+            const pencil = await screen.findByRole("button", {
+                name: "Change summary profile",
+            });
+            await waitFor(() =>
+                expect(pencil.hasAttribute("disabled")).toBe(false),
+            );
+            fireEvent.click(pencil);
+            await screen.findByRole("option", { name: "Interviews" });
+            expect(
+                requests.filter((request) => request.method === "POST"),
+            ).toEqual([]);
+            act(() => choose?.("interview-profile"));
+            expect(
+                requests.filter((request) => request.method === "POST"),
+            ).toEqual([]);
+            fireEvent.click(
+                screen.getByRole("button", { name: "Change summary profile" }),
+            );
+            await screen.findByRole("option", { name: "Everyday recordings" });
+            const duplicate = choose;
+            act(() => {
+                duplicate?.("default-profile");
+                duplicate?.("default-profile");
+            });
+            expect(
+                requests.filter((request) => request.method === "POST"),
+            ).toEqual([
+                {
+                    url: "/api/recordings/recording-1/summary",
+                    method: "POST",
+                    body: { profileId: "default-profile" },
+                },
+            ]);
+            await act(async () =>
+                complete?.(
+                    Response.json({ summary: "Updated", source: "riffado" }),
+                ),
+            );
+        } finally {
+            vi.restoreAllMocks();
+        }
     });
 
     it("says a held summary starts after Learn finishes running", async () => {
@@ -387,7 +492,9 @@ describe("per-run summary profile picker", () => {
             ),
         ).toBeTruthy();
         expect(screen.queryByText(/waits for your Learn review/)).toBeNull();
-        expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
+        expect(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        ).toBeTruthy();
     });
 
     it("says a held summary waits for findings to be reviewed", async () => {

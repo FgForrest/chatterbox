@@ -19,6 +19,7 @@ const agenda = {
     folders: [{ id: "folder-one", name: "Acme" }],
 };
 beforeEach(() => {
+    vi.useFakeTimers();
     container = document.createElement("section");
     document.body.append(container);
     send = vi.fn(async (message) =>
@@ -32,6 +33,8 @@ beforeEach(() => {
     });
 });
 afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.replaceChildren();
 });
@@ -54,6 +57,7 @@ describe("popup agenda card", () => {
             type: "open-agenda",
             agendaId: "agenda-one",
             tabId: 7,
+            matchTabId: 7,
             windowId: 3,
             choose: false,
         });
@@ -75,7 +79,12 @@ describe("popup agenda card", () => {
         container.querySelector("button").click();
         expect(send.mock.calls[1][0].choose).toBe(true);
     });
-    it("shows the live selection and Another agenda even if none is selected", async () => {
+    it("hides the recording card without a selection or a matching agenda", async () => {
+        send.mockResolvedValueOnce({
+            ok: true,
+            agendas: [],
+            selectedAgenda: agenda,
+        });
         const render = createAgendaCard(container, {
             tab: () => ({ id: 7 }),
             onFolder: vi.fn(),
@@ -85,10 +94,79 @@ describe("popup agenda card", () => {
             sessionId: "one",
             agendaId: null,
         });
+        expect(container.hidden).toBe(true);
+        expect(render.choice()).toEqual({});
+    });
+    it.each([
+        1, 2,
+    ])("offers one picker button for %s recording matches without selecting one", async (count) => {
+        send.mockResolvedValueOnce({
+            ok: true,
+            agendas: Array.from({ length: count }, (_, i) => ({
+                ...agenda,
+                id: `agenda-${i}`,
+            })),
+        });
+        const onFolder = vi.fn();
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 8 }),
+            onFolder,
+        });
+        await render(settings, {
+            state: "recording",
+            sessionId: "one",
+            tabId: 7,
+            agendaId: null,
+        });
+        expect(send).toHaveBeenCalledWith({ type: "match-agendas", tabId: 7 });
         expect(container.hidden).toBe(false);
-        expect(container.textContent).toContain("agendaNone");
+        expect(container.querySelectorAll("button:not([hidden])")).toHaveLength(
+            1,
+        );
+        expect(container.querySelector("button").textContent).toBe(
+            "agendaChoose",
+        );
+        container.querySelector("button").click();
+        expect(send).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                type: "open-agenda",
+                choose: true,
+                tabId: 8,
+                matchTabId: 7,
+            }),
+        );
+        expect(onFolder).not.toHaveBeenCalled();
+        expect(render.choice()).toEqual({});
+    });
+    it("shows a selected recording agenda without matching and offers another agenda", async () => {
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 8 }),
+            onFolder: vi.fn(),
+        });
+        await render(settings, {
+            state: "recording",
+            sessionId: "one",
+            tabId: 7,
+            agendaId: agenda.id,
+            agendaTitle: agenda.title,
+        });
+        expect(container.hidden).toBe(false);
+        expect(container.textContent).toContain(agenda.title);
+        expect(container.querySelectorAll("button:not([hidden])")).toHaveLength(
+            2,
+        );
+        expect(send).not.toHaveBeenCalled();
         container.querySelectorAll("button")[1].click();
-        expect(send.mock.calls[0][0].choose).toBe(true);
+        expect(send).toHaveBeenLastCalledWith(
+            expect.objectContaining({ choose: true, tabId: 8, matchTabId: 7 }),
+        );
+        send.mockResolvedValueOnce({ ok: true, agendas: [] });
+        await render(settings, {
+            state: "recording",
+            sessionId: "one",
+            agendaId: null,
+        });
+        expect(container.hidden).toBe(true);
     });
     it("does not reselect an explicitly cleared agenda on popup reopen", async () => {
         send.mockResolvedValueOnce({
@@ -140,11 +218,108 @@ describe("popup agenda card", () => {
         expect(container.hidden).toBe(true);
         expect(send).not.toHaveBeenCalled();
     });
-    it("adds only sidePanel permission and includes the panel in the Store packer", () => {
+    it.each([
+        "rejection",
+        "error response",
+    ])("retries a match %s without initializing or flooding recording updates", async (failure) => {
+        if (failure === "rejection")
+            send.mockRejectedValueOnce(new Error("offline"));
+        else send.mockResolvedValueOnce({ ok: false, error: "offline" });
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 8 }),
+            onFolder: vi.fn(),
+        });
+        const state = { state: "recording", sessionId: "one", tabId: 7 };
+        await render(settings, state);
+        expect(container.hidden).toBe(true);
+        expect(render.choice()).toEqual({});
+        for (let i = 0; i < 10; i++) await render(settings, { ...state });
+        await vi.advanceTimersByTimeAsync(999);
+        expect(send).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send).toHaveBeenLastCalledWith({
+            type: "match-agendas",
+            tabId: 7,
+        });
+        expect(container.hidden).toBe(false);
+    });
+    it("caps retry delays at ten seconds and cancels retries when agendas become unsupported", async () => {
+        send.mockResolvedValue({ ok: false });
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 7 }),
+            onFolder: vi.fn(),
+        });
+        await render(settings, { state: "recording", sessionId: "one" });
+        for (const delay of [1000, 2000, 4000, 8000, 10000, 10000]) {
+            const before = send.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(delay - 1);
+            expect(send).toHaveBeenCalledTimes(before);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(send).toHaveBeenCalledTimes(before + 1);
+        }
+        await render(
+            { ...settings, serverDefaults: {} },
+            { state: "recording", sessionId: "one" },
+        );
+        const before = send.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(send).toHaveBeenCalledTimes(before);
+    });
+    it("expires successful empty matches while the popup remains open", async () => {
+        send.mockResolvedValueOnce({ ok: true, agendas: [] });
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 7 }),
+            onFolder: vi.fn(),
+        });
+        await render(settings, { state: "recording", sessionId: "one" });
+        await vi.advanceTimersByTimeAsync(59999);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(container.hidden).toBe(true);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(container.hidden).toBe(false);
+    });
+    it.each([
+        ["en", 1, "Agendas at this time: 1"],
+        ["en", 2, "Agendas at this time: 2"],
+        ["cs", 1, "Agendy v tomto čase: 1"],
+        ["cs", 2, "Agendy v tomto čase: 2"],
+    ])("renders real %s wording for %s recording matches", async (locale, count, expected) => {
+        const catalog = JSON.parse(
+            readFileSync(
+                `extensions/recorder/_locales/${locale}/messages.json`,
+                "utf8",
+            ),
+        );
+        chrome.i18n.getMessage = (key, substitutions) => {
+            let message = catalog[key].message;
+            for (const [i, value] of [substitutions ?? ""].flat().entries())
+                message = message.replaceAll(`$${i + 1}`, value);
+            return message;
+        };
+        send.mockResolvedValueOnce({
+            ok: true,
+            agendas: Array.from({ length: count }, (_, i) => ({
+                ...agenda,
+                id: `agenda-${i}`,
+            })),
+        });
+        const render = createAgendaCard(container, {
+            tab: () => ({ id: 7 }),
+            onFolder: vi.fn(),
+        });
+        await render(settings, { state: "recording", sessionId: "one" });
+        expect(container.querySelector("strong").textContent).toBe(expected);
+        expect(container.querySelector("button").textContent).toBe(
+            catalog.agendaChoose.message,
+        );
+    });
+    it("keeps permissions unchanged and packages a panel without a global default", () => {
         const manifest = JSON.parse(
             readFileSync("extensions/recorder/manifest.json", "utf8"),
         );
-        expect(manifest.version).toBe("0.8.0");
+        expect(manifest.version).toBe("0.8.2");
         expect(manifest.permissions).toEqual([
             "offscreen",
             "storage",
@@ -156,7 +331,7 @@ describe("popup agenda card", () => {
             "alarms",
             "sidePanel",
         ]);
-        expect(manifest.side_panel.default_path).toBe("agenda/agenda.html");
+        expect(manifest.side_panel).toBeUndefined();
         expect(readFileSync("extensions/recorder/pack.mjs", "utf8")).toContain(
             '"agenda"',
         );

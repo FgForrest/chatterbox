@@ -36,11 +36,11 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 ![A transcript with speakers, topics and Learn's proposals](images/transcript-speakers.png)
 
-A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. **Collapse transcript** at the right end of the header folds it away; **Expand transcript** appears in the same place. The footer shows which provider and model made it, its language and its length.
+A transcript with speakers reads as a conversation, one coloured block per turn, with the speaker's name and the time it started. The chevron to the left of **Transcription** collapses or expands the card. On the right, the circular arrow **Re-transcribe** asks for confirmation; download and copy follow it. Hover or focus an icon to see its label. The footer shows which provider and model made it, its language and its length.
 
 ### Recording language
 
-The footer labels the provider’s estimate **Detected language** until you confirm a language, then shows **Confirmed language**. Anyone allowed to edit the transcript can change it there: the owner, or a curator in the Organization view. The choice belongs to the recording and survives re-transcription. Choose **Automatic** to clear the confirmation and use automatic language handling again.
+The footer shows the language in effect: for example **Czech (detected)** until you confirm it, then **Czech**. The pencil beside it opens the language list. Choosing a language saves it; Escape or closing the list leaves it unchanged. The owner, or a curator in the Organization view, can change it. Read-only viewers see only the text. The choice belongs to the recording and survives re-transcription. Choose **Automatic** to clear the confirmation.
 
 An explicit output language in the profile or account settings takes precedence. Otherwise, the confirmed language guides summaries, titles and topics, and supplies language context for Learn, corrections and spelling. Without a confirmation, automatic output follows the transcript’s predominant language.
 
@@ -87,7 +87,7 @@ When Learn has corrected a misheard name, the transcript reads corrected. Correc
 | --- | --- |
 | ![Corrected transcript](images/transcript-corrected.png) | ![Original transcript](images/transcript-original.png) |
 
-- Turn on **Original text** at the end of the chapter bar to read what the provider heard; turn it off to return to the corrected text. The switch appears only when Learn has corrections, even if there are no topics. On a narrow card its label is **Original**, and the header uses icon buttons with copying and downloading in the transcript actions menu.
+- Turn on **Original text** at the end of the chapter bar to read what the provider heard; turn it off to return to the corrected text. The switch appears only when Learn has corrections, even if there are no topics. On a narrow card its label is **Original**, and the header keeps download and copy as direct icon buttons.
 - Click a corrected word to undo that one correction.
 - Summaries, topics, search, exports and the API all use the corrected text.
 

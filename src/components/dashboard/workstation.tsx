@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-pane
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
 import { meetingsInLocation } from "@/components/dashboard/meeting-location";
+import { orgEventEffect } from "@/components/dashboard/org-event-effect";
 import { PlaudReconnectBanner } from "@/components/dashboard/plaud-reconnect-banner";
 import {
     RecordingList,
@@ -44,6 +45,10 @@ import {
     PersonInvitations,
 } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
+import {
+    noteDashboardUrlChange,
+    useDashboardRefresh,
+} from "@/hooks/use-dashboard-refresh";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
     LibraryPreferencesContext,
@@ -60,6 +65,7 @@ import {
     useUploadQueue,
 } from "@/hooks/use-upload-queue";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
+import { tabEventOrigin } from "@/lib/events/tab-origin";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import {
     recordingIdsVisibleInFolder,
@@ -164,7 +170,7 @@ export function Workstation({
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
     const shareRefusal = useShareRefusal();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     // A stable empty list: a fresh `[]` per render would re-run every effect
     // that depends on it, and one of them resets optimistic renames.
     const orgRecordings = organizationLibrary?.recordings ?? EMPTY_RECORDINGS;
@@ -328,6 +334,29 @@ export function Workstation({
     const listRef = useRef<RecordingListHandle>(null);
     const handledLocationQuery = useRef<string | null>(null);
     const [itemLinkQuery, setItemLinkQuery] = useState("");
+    const navigateDashboard = useCallback(
+        (
+            params: URLSearchParams,
+            method: "push" | "replace",
+            intendedMobileView: "list" | "detail",
+        ) => {
+            const query = params.toString();
+            if (
+                query ===
+                    new URLSearchParams(window.location.search).toString() &&
+                window.history.state?.mobileView === intendedMobileView
+            )
+                return;
+            const nextLocation = dashboardLocation(params);
+            window.history[method === "push" ? "pushState" : "replaceState"](
+                { mobileView: intendedMobileView },
+                "",
+                nextLocation,
+            );
+            noteDashboardUrlChange();
+        },
+        [],
+    );
     const writeSelection = useCallback(
         (
             recording: Recording | null,
@@ -355,21 +384,9 @@ export function Workstation({
                     params.set("view", recording.view);
             }
             handledLocationQuery.current = params.toString();
-            const sameUrl =
-                params.toString() ===
-                new URLSearchParams(window.location.search).toString();
-            if (
-                sameUrl &&
-                window.history.state?.mobileView === intendedMobileView
-            )
-                return;
-            window.history[method === "push" ? "pushState" : "replaceState"](
-                { mobileView: intendedMobileView },
-                "",
-                dashboardLocation(params),
-            );
+            navigateDashboard(params, method, intendedMobileView);
         },
-        [],
+        [navigateDashboard],
     );
     const selectRecording = useCallback(
         (recording: Recording, method: "push" | "replace") => {
@@ -412,27 +429,26 @@ export function Workstation({
         },
         [writeSelection, folderOrganization, isOrgAccount, setSelectedFolderId],
     );
-    const openMeeting = useCallback((id: string) => {
-        selectionRevisionRef.current++;
-        setPendingUploadSelection(null);
-        setItemLinkQuery("");
-        setKnowledgeFolderId(null);
-        setCurrentRecording(null);
-        setCurrentMeetingId(id);
-        setMobileView("detail");
-        const params = new URLSearchParams(window.location.search);
-        clearItemLinkContext(params);
-        params.delete("recording");
-        params.delete("view");
-        params.delete("knowledge");
-        params.set("meeting", id);
-        handledLocationQuery.current = params.toString();
-        window.history.pushState(
-            { mobileView: "detail" },
-            "",
-            dashboardLocation(params),
-        );
-    }, []);
+    const openMeeting = useCallback(
+        (id: string) => {
+            selectionRevisionRef.current++;
+            setPendingUploadSelection(null);
+            setItemLinkQuery("");
+            setKnowledgeFolderId(null);
+            setCurrentRecording(null);
+            setCurrentMeetingId(id);
+            setMobileView("detail");
+            const params = new URLSearchParams(window.location.search);
+            clearItemLinkContext(params);
+            params.delete("recording");
+            params.delete("view");
+            params.delete("knowledge");
+            params.set("meeting", id);
+            handledLocationQuery.current = params.toString();
+            navigateDashboard(params, "push", "detail");
+        },
+        [navigateDashboard],
+    );
     const selectRecordingByUser = useCallback(
         (recording: Recording) => {
             selectRecording(recording, "push");
@@ -535,21 +551,10 @@ export function Workstation({
                     setSettingsFolderId(exportFolderId);
                 }
                 params.delete("googleExport");
-                window.history.replaceState(
-                    { mobileView: window.history.state?.mobileView },
-                    "",
-                    dashboardLocation(params),
-                );
             }
 
             if (traversing) clearItemLinkContext(params);
             handledLocationQuery.current = params.toString();
-            if (traversing)
-                window.history.replaceState(
-                    { mobileView: window.history.state?.mobileView },
-                    "",
-                    dashboardLocation(params),
-                );
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             const meetingId = params.get("meeting");
@@ -559,6 +564,13 @@ export function Workstation({
                 setKnowledgeFolderId(null);
                 setSelectedFolderId(params.get("folder"));
                 setMobileView(
+                    window.history.state?.mobileView === "list"
+                        ? "list"
+                        : "detail",
+                );
+                navigateDashboard(
+                    params,
+                    "replace",
                     window.history.state?.mobileView === "list"
                         ? "list"
                         : "detail",
@@ -677,10 +689,28 @@ export function Workstation({
             orgRecordings,
             recordings,
             writeSelection,
+            navigateDashboard,
         ],
     );
 
     useEffect(() => {
+        const intendedMobileView =
+            handledLocationQuery.current === locationQuery
+                ? mobileViewRef.current
+                : null;
+        if (
+            intendedMobileView &&
+            locationQuery ===
+                new URLSearchParams(window.location.search).toString() &&
+            window.history.state?.mobileView !== intendedMobileView
+        ) {
+            window.history.replaceState(
+                { mobileView: intendedMobileView },
+                "",
+                window.location.href,
+            );
+            // Restoring metadata after Next renders must not dirty the reconciled URL.
+        }
         if (
             locationQuery ===
             new URLSearchParams(window.location.search).toString()
@@ -1205,9 +1235,6 @@ export function Workstation({
         [currentRecording, transcribeById],
     );
 
-    // Other people's changes to the Organization arrive as invalidations.
-    // Tree changes refresh the server data; a change to the recording on
-    // screen also remounts its panels so they refetch the summary.
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const currentRecordingRef = useRef(currentRecording);
     currentRecordingRef.current = currentRecording;
@@ -1216,17 +1243,15 @@ export function Workstation({
         [...recordings, ...orgRecordings].map((recording) => recording.id),
     );
     useOrgEvents(organizationLibrary !== null, (event) => {
-        if (event.type === "recording") {
-            // Refetching the whole dashboard is not cheap; only for a
-            // recording this viewer actually has in a list.
-            if (!libraryIdsRef.current.has(event.recordingId)) return;
-            if (
-                currentRecordingRef.current?.view === "org" &&
-                currentRecordingRef.current.id === event.recordingId
-            ) {
-                setOrgContentRevision((revision) => revision + 1);
-            }
-        }
+        const effect = orgEventEffect(
+            event,
+            currentRecordingRef.current,
+            libraryIdsRef.current,
+            tabEventOrigin(),
+        );
+        if (!effect.refresh) return;
+        if (effect.refetchContent)
+            setOrgContentRevision((revision) => revision + 1);
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => refresh(), 300);
     });
@@ -2194,6 +2219,7 @@ export function Workstation({
                                             "",
                                             window.location.href,
                                         );
+                                        noteDashboardUrlChange();
                                     }}
                                 >
                                     {selectedFolder

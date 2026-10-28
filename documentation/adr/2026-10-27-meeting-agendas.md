@@ -1,14 +1,14 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-27 20:45
-status: proposed
+updated: 2026-10-28 13:25
+status: superseded
 kind: feature
 issues: []
 prs: [293]
 areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-10-28-agendas-use-all-folder-placements]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
 ---
 
@@ -18,6 +18,8 @@ A meeting is its own item with encrypted discussion points and a frozen list of 
 Its recording absorbs the agenda, hides the standalone item and keeps its stable link as a redirect.
 The implementation includes the editor, Chrome side panel, AI suggestions, summary/keyterm/Learn
 context, permissions, attachment, Calendar export, recorder APIs and MCP. It is awaiting integration.
+
+**Superseded in part:** [Multi-folder agenda filing](2026-10-28-agendas-use-all-folder-placements.md) changes the single-folder preparation and attachment behavior, and freezing automatic preparation across filing changes. The remaining rules still hold.
 
 ## Why
 

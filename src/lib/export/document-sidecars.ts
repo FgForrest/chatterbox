@@ -27,6 +27,7 @@ import { projectTranscript } from "@/lib/knowledge/project-transcript";
 import {
     inferSummarySpeakerNumberOffset,
     projectSummarySpeakerReferencesForExport,
+    storedSummarySpeakerNumberOffset,
 } from "@/lib/knowledge/speaker-references";
 import { correctionOverlay } from "@/lib/learn/llm-input";
 import { sanitizeDownloadBasename } from "@/lib/recordings/filename";
@@ -599,10 +600,14 @@ async function renderRecordingMarkdownDocument(
     const actionItemValues = stringArray(
         decryptJsonField<unknown>(enhancement.actionItems),
     );
-    const speakerNumberOffset = inferSummarySpeakerNumberOffset(
-        [summaryValue ?? "", ...keyPointValues, ...actionItemValues].join("\n"),
-        projection.speakers,
-    );
+    const speakerNumberOffset =
+        storedSummarySpeakerNumberOffset(enhancement.inputs) ??
+        inferSummarySpeakerNumberOffset(
+            [summaryValue ?? "", ...keyPointValues, ...actionItemValues].join(
+                "\n",
+            ),
+            projection.speakers,
+        );
     const summary = summaryValue
         ? projectSummarySpeakerReferencesForExport(
               summaryValue,

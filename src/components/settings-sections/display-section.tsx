@@ -1,10 +1,12 @@
 "use client";
 
 import { Monitor } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
+import { TimeZoneField } from "@/components/settings/time-zone-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +21,13 @@ import type { AppLocale } from "@/lib/i18n/config";
 
 export function DisplaySection() {
     const t = useExtracted();
+    const router = useRouter();
+    const [timeZone, setTimeZone] = useState<string | null>(null);
+    const [organization, setOrganization] = useState<{
+        timeZone: string | null;
+        canManage: boolean;
+        isOrganizationAccount?: boolean;
+    } | null>(null);
     const { isLoadingSettings, isSavingSettings, setIsLoadingSettings } =
         useSettings();
     const [uiLocale, setUiLocale] = useState<AppLocale | "auto">("auto");
@@ -82,6 +91,7 @@ export function DisplaySection() {
                 if (response.ok) {
                     const data = await response.json();
                     setUiLocale(data.uiLocale ?? "auto");
+                    setTimeZone(data.timeZone ?? null);
                     setDateTimeFormat(data.dateTimeFormat ?? "relative");
                     setRecordingListSortOrder(
                         data.recordingListSortOrder ?? "newest",
@@ -96,6 +106,11 @@ export function DisplaySection() {
             }
         };
         fetchSettings();
+        void fetch("/api/settings/organization")
+            .then(async (response) => {
+                if (response.ok) setOrganization(await response.json());
+            })
+            .catch(() => {});
     }, [setIsLoadingSettings]);
 
     useEffect(() => {
@@ -113,10 +128,15 @@ export function DisplaySection() {
             itemsPerPage?: number;
             theme?: string;
             uiLocale?: AppLocale | null;
+            timeZone?: string | null;
         },
         debounceMs?: number,
     ) => {
         const previousValues: Record<string, unknown> = {};
+        if (updates.timeZone !== undefined) {
+            previousValues.timeZone = timeZone;
+            setTimeZone(updates.timeZone);
+        }
         if (updates.uiLocale !== undefined) {
             previousValues.uiLocale = uiLocale;
             setUiLocale(updates.uiLocale ?? "auto");
@@ -156,7 +176,10 @@ export function DisplaySection() {
                 if (updates.uiLocale !== undefined) {
                     window.location.reload();
                 }
+                if (updates.timeZone !== undefined) router.refresh();
             } catch {
+                if (updates.timeZone !== undefined)
+                    setTimeZone(previousValues.timeZone as string | null);
                 if (updates.uiLocale !== undefined) {
                     const prev = previousValues.uiLocale;
                     if (prev === "auto" || prev === "en" || prev === "cs-CZ") {
@@ -209,6 +232,58 @@ export function DisplaySection() {
                 icon={Monitor}
             />
             <div className="space-y-4">
+                {!organization?.isOrganizationAccount && (
+                    <div className="space-y-2">
+                        <p className="text-sm font-medium">{t("Time zone")}</p>
+                        <TimeZoneField
+                            value={timeZone}
+                            onChange={(timeZone) =>
+                                void handleDisplaySettingChange({ timeZone })
+                            }
+                            disabled={isSavingSettings}
+                        />
+                    </div>
+                )}
+                {organization?.canManage && (
+                    <div className="space-y-2">
+                        <p className="text-sm font-medium text-organization">
+                            {t("Organization time zone")}
+                        </p>
+                        <TimeZoneField
+                            organization
+                            value={organization.timeZone}
+                            onChange={async (timeZone) => {
+                                const previous = organization;
+                                setOrganization({ ...organization, timeZone });
+                                try {
+                                    const response = await fetch(
+                                        "/api/settings/organization",
+                                        {
+                                            method: "PUT",
+                                            headers: {
+                                                "Content-Type":
+                                                    "application/json",
+                                            },
+                                            body: JSON.stringify({ timeZone }),
+                                        },
+                                    );
+                                    if (!response.ok)
+                                        throw new Error(
+                                            "Failed to save settings",
+                                        );
+                                    router.refresh();
+                                } catch {
+                                    setOrganization(previous);
+                                    toast.error(
+                                        t(
+                                            "Failed to save settings. Changes reverted.",
+                                        ),
+                                    );
+                                }
+                            }}
+                        />
+                    </div>
+                )}
                 <div className="space-y-2">
                     <Label htmlFor="ui-language">{t("Language")}</Label>
                     <Select

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useFolderExportLabel } from "@/hooks/use-folder-export-label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { canManageOrganization } from "@/lib/folders/drag";
@@ -96,6 +97,7 @@ function OwnedFolderSettingsPanel({
         inheritedFolderId: null,
     });
     const exports = exportStatus.configured;
+    const exportLabel = useFolderExportLabel();
     const [subfolder, setSubfolder] = useState("");
     const subfolderInput = useRef<HTMLInputElement>(null);
     const [parentId, setParentId] = useState(folder.parentId ?? "");
@@ -115,7 +117,6 @@ function OwnedFolderSettingsPanel({
     const root = exportAncestors.at(-1) ?? folder;
     const privateTree =
         root.kind === "private" || (isOrgAccount && root.kind === "public");
-    const managedExport = folder.scope === "org" && !isOrgAccount;
     const inheritedExportFolder = folders.find(
         (item) => item.id === exportStatus.inheritedFolderId,
     );
@@ -232,36 +233,19 @@ function OwnedFolderSettingsPanel({
                         <div className="min-w-0 text-sm">
                             <h3 className="font-medium">{i18n("Export")}</h3>
                             <p className="break-words text-muted-foreground">
-                                {managedExport
-                                    ? i18n(
-                                          "Managed by the Organization account",
-                                      )
-                                    : exportStatus.loading
-                                      ? i18n("Loading…")
-                                      : exportStatus.failed
-                                        ? i18n("Could not load folder exports.")
-                                        : exports.length
-                                          ? exports
-                                                .map((configuration) =>
-                                                    configuration.googleDrive
-                                                        ? i18n(
-                                                              "Google Drive: {folder}",
-                                                              {
-                                                                  folder: configuration
-                                                                      .googleDrive
-                                                                      .rootFolderName,
-                                                              },
-                                                          )
-                                                        : configuration.targetPath,
-                                                )
-                                                .join(", ")
-                                          : inheritedExportFolder
-                                            ? i18n("Inherited from {folder}", {
-                                                  folder: label(
-                                                      inheritedExportFolder,
-                                                  ),
-                                              })
-                                            : i18n("Not configured")}
+                                {exportStatus.loading
+                                    ? i18n("Loading…")
+                                    : exportStatus.failed
+                                      ? i18n("Could not load folder exports.")
+                                      : exports.length
+                                        ? exports.map(exportLabel).join(", ")
+                                        : inheritedExportFolder
+                                          ? i18n("Inherited from {folder}", {
+                                                folder: label(
+                                                    inheritedExportFolder,
+                                                ),
+                                            })
+                                          : i18n("Not configured")}
                                 {exports.length > 0 &&
                                     inheritedExportFolder && (
                                         <>
@@ -276,7 +260,7 @@ function OwnedFolderSettingsPanel({
                                     )}
                             </p>
                         </div>
-                        {canManage && !managedExport && (
+                        {canManage && (
                             <Button
                                 variant="outline"
                                 onClick={() => setExportOpen(true)}
@@ -438,7 +422,8 @@ function OwnedFolderSettingsPanel({
             <FolderExportActions
                 folder={folder}
                 providers={exportProviders}
-                privateTree={privateTree && !managedExport}
+                privateTree={privateTree || folder.scope === "org"}
+                readOnly={!canManage}
                 ancestors={exportAncestors}
                 open={exportOpen}
                 onOpenChange={setExportOpen}

@@ -10,6 +10,7 @@ import {
     chatterItems,
     folderExportConfigurations,
     folderShares,
+    meetingAgendas,
     receivedFolderAttachments,
     recordingFolderAssignments,
     recordingFolders,
@@ -590,6 +591,21 @@ export async function lockItemForFolderMutation(
         )
         .for("update");
     if (locked.length > 0) return;
+    await tx
+        .update(meetingAgendas)
+        .set({
+            version: sql`${meetingAgendas.version} + 1`,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(meetingAgendas.meetingItemId, recordingId),
+                ownerUserId
+                    ? eq(meetingAgendas.userId, ownerUserId)
+                    : undefined,
+                isNull(meetingAgendas.recordingItemId),
+            ),
+        );
     await tx
         .select({ id: chatterItems.id })
         .from(chatterItems)
@@ -1651,6 +1667,11 @@ export async function removeRecordingFromFolder(input: {
                     ),
                 );
             if (!assignment) return;
+            await lockItemForFolderMutation(
+                tx,
+                input.recordingId,
+                assignment.userId,
+            );
             await notifyFolderReceiversInTx(
                 tx,
                 assignment.userId,
@@ -2030,17 +2051,13 @@ export async function moveRecordingBetweenFolders(input: {
     recordingId: string;
     fromFolderId: string;
     toFolderId: string;
+    withdraw?: boolean;
 }): Promise<void> {
     const [from, to] = await Promise.all([
         resolveFilingFolder(input.userId, input.fromFolderId),
         resolveFilingFolder(input.userId, input.toFolderId),
     ]);
-    if (
-        !from ||
-        !to ||
-        (from.ownerId !== to.ownerId &&
-            (from.scope === "org" || to.scope === "org"))
-    ) {
+    if (!from || !to) {
         throw new AppError(
             ErrorCode.NOT_FOUND,
             "Recording or folder not found",
@@ -2054,10 +2071,149 @@ export async function moveRecordingBetweenFolders(input: {
             400,
         );
     }
-    if (from.scope === "personal") {
+    if (from.folder.id === to.folder.id) return;
+    const crossesOrganization = from.scope !== to.scope;
+    if (from.scope === "personal" || crossesOrganization) {
         await requireOwnedRecording(db, input.userId, input.recordingId);
     }
+    assertWritable(from);
     assertWritable(to);
+    if (crossesOrganization) {
+        await retryOnDeadlock(() =>
+            db.transaction(async (tx) => {
+                await lockOrgTree(tx);
+                await lockOrgPeople(tx);
+                await lockItemTaskGraphForFolderMutation(tx, input.recordingId);
+                const personal = from.scope === "personal" ? from : to;
+                await lockCategorizableFolderInTx(
+                    tx,
+                    input.userId,
+                    personal.folder.id,
+                    true,
+                );
+                await lockItemForFolderMutation(
+                    tx,
+                    input.recordingId,
+                    input.userId,
+                );
+                await requireOwnedRecording(
+                    tx,
+                    input.userId,
+                    input.recordingId,
+                );
+                const [existing] = await tx
+                    .select({ itemId: recordingFolderAssignments.itemId })
+                    .from(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(
+                                recordingFolderAssignments.itemId,
+                                input.recordingId,
+                            ),
+                            eq(recordingFolderAssignments.userId, input.userId),
+                            eq(
+                                recordingFolderAssignments.folderId,
+                                from.folder.id,
+                            ),
+                        ),
+                    );
+                if (!existing) throw folderNotFound();
+                if (to.scope === "org") {
+                    const problems = await shareItemToOrganizationFolderInTx(
+                        tx,
+                        {
+                            ownerUserId: input.userId,
+                            itemId: input.recordingId,
+                            folderId: to.folder.id,
+                            orgUserId: to.ownerId,
+                        },
+                    );
+                    if (problems.length)
+                        throw new AppError(
+                            ErrorCode.SHARE_REQUIREMENTS_UNMET,
+                            "Finish the review before sharing",
+                            409,
+                            { problems },
+                        );
+                } else {
+                    await tx
+                        .insert(recordingFolderAssignments)
+                        .values({
+                            userId: input.userId,
+                            itemId: input.recordingId,
+                            folderId: to.folder.id,
+                        })
+                        .onConflictDoNothing();
+                }
+                await notifyFolderReceiversInTx(
+                    tx,
+                    input.userId,
+                    input.recordingId,
+                    from.folder.id,
+                );
+                await tx
+                    .delete(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(
+                                recordingFolderAssignments.itemId,
+                                input.recordingId,
+                            ),
+                            eq(recordingFolderAssignments.userId, input.userId),
+                            eq(
+                                recordingFolderAssignments.folderId,
+                                from.folder.id,
+                            ),
+                        ),
+                    );
+                if (from.scope === "org") {
+                    if (
+                        !input.withdraw &&
+                        !(await isRecordingShared(
+                            input.recordingId,
+                            from.ownerId,
+                            tx,
+                        ))
+                    )
+                        throw new AppError(
+                            ErrorCode.WITHDRAW_UNCONFIRMED,
+                            "Removing the last Organization placement needs withdraw: true",
+                            409,
+                        );
+                    await bumpScopeInTx(
+                        tx,
+                        await endSharingIfUnfiled(
+                            tx,
+                            from.ownerId,
+                            input.recordingId,
+                            input.userId,
+                        ),
+                    );
+                }
+                await notifyFolderReceiversInTx(
+                    tx,
+                    input.userId,
+                    input.recordingId,
+                    to.folder.id,
+                );
+                await pruneRedundantAssignmentsInTx(
+                    tx,
+                    to.ownerId,
+                    input.recordingId,
+                );
+                await requestAdvanceInTx(tx, {
+                    itemId: input.recordingId,
+                    userId: input.userId,
+                    view: "private",
+                    reason: "placement",
+                });
+            }),
+        );
+        nudge();
+        await orgTreeChanged();
+        await scheduleFolderExportProjection(input.userId);
+        return;
+    }
 
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {

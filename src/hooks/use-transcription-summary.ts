@@ -51,7 +51,20 @@ function toSummaryProgress(
     return { phase: raw.phase, completed, total };
 }
 
+export interface SummaryVersion {
+    summaryId: string;
+    revision: number;
+}
+
 export interface SummaryData {
+    summaryId?: string;
+    speakerNumberOffset?: number | null;
+    editedAt?: string | null;
+    editedByName?: string | null;
+    revision?: number;
+    correctedWithRemarks?: boolean;
+    remarksAppliedCount?: number;
+    canEditSummary?: boolean;
     hasAgenda?: boolean;
     agendaCandidateCount?: number;
     summary: string | null;
@@ -59,6 +72,10 @@ export interface SummaryData {
     actionItems: string[] | null;
     source: SummarySource;
     itemProfileId?: string | null;
+    profileName?: string | null;
+    profileId?: string | null;
+    /** On GET, distinguishes missing provenance from denied profile access. */
+    profileVisibility?: "readable" | "unresolved" | "hidden";
     transcriptionId?: string | null;
     availableSources?: SummarySource[];
     provider?: string;
@@ -242,7 +259,13 @@ export function useTranscriptionSummary({
             .then((res) => (res.ok ? res.json() : null))
             .then((data: SettingsProfilesPage | null) => {
                 if (!data) return;
-                setSummaryProfileOptions(data.profiles);
+                setSummaryProfileOptions(
+                    view === "org"
+                        ? data.profiles.filter(
+                              (profile) => profile.scope === "organization",
+                          )
+                        : data.profiles,
+                );
             })
             .catch(() => {})
             .finally(() => {
@@ -251,7 +274,7 @@ export function useTranscriptionSummary({
                 }
             });
         return () => controller.abort();
-    }, [profileChannel]);
+    }, [profileChannel, view]);
 
     useEffect(() => {
         if (
@@ -583,203 +606,288 @@ export function useTranscriptionSummary({
         summaryUrl,
     ]);
 
-    const handleSummarize = useCallback(async () => {
-        if (!recordingId) return;
-        if (summarySource !== "riffado") return;
-        if (summarizingIdsRef.current.has(recordingId)) return;
-        const targetId = recordingId;
-        const postGeneration = contentGenerationFor(
-            contentGenByIdRef.current,
-            targetId,
-        );
-        const postIsCurrent = () =>
-            summarySourceRef.current === "riffado" &&
-            shouldApplyFetchedSummary(
-                recordingIdRef.current,
+    const handleSummarize = useCallback(
+        async (
+            selectedProfileId?: string,
+            correction?: {
+                reviseWithRemarks?: boolean;
+                replaceEdited?: boolean;
+                revision?: number;
+                summaryId?: string;
+                onSuccess?: () => void;
+            },
+        ) => {
+            if (!recordingId) return;
+            if (summarySource !== "riffado") return;
+            if (summarizingIdsRef.current.has(recordingId)) return;
+            const targetId = recordingId;
+            const postGeneration = contentGenerationFor(
+                contentGenByIdRef.current,
                 targetId,
-                contentGenerationFor(contentGenByIdRef.current, targetId),
-                postGeneration,
             );
-        getAbortRef.current?.abort();
-        fetchGenerationRef.current += 1;
-        summarizingIdsRef.current = addSummarizingId(
-            summarizingIdsRef.current,
-            targetId,
-        );
-        setSummarizingIds(summarizingIdsRef.current);
-        setSummaryProgress(null);
-        setSummaryElapsedMs(0);
-        summaryStartedAtRef.current = Date.now();
-
-        const applyResult = (data: SummaryData) => {
-            if (!postIsCurrent()) return;
-            fetchGenerationRef.current += 1;
-            rememberPresence(targetId, data);
-            setSummaryFor(targetId, "riffado", data);
-            setAvailableSummarySources((current) =>
-                current.includes("riffado") ? current : [...current, "riffado"],
-            );
-            toast.success("Summary generated");
-        };
-
-        /**
-         * Fetch a summary the server has already written.
-         *
-         * Needed when a job completes somewhere this client was not watching:
-         * the job itself records only provenance, so the text has to be read
-         * back from the recording. Returns whether a summary was found.
-         */
-        const applyStoredSummary = async (): Promise<boolean> => {
-            try {
-                const response = await fetch(
-                    summaryUrl(targetId, "?source=riffado"),
+            const postIsCurrent = () =>
+                summarySourceRef.current === "riffado" &&
+                shouldApplyFetchedSummary(
+                    recordingIdRef.current,
+                    targetId,
+                    contentGenerationFor(contentGenByIdRef.current, targetId),
+                    postGeneration,
                 );
-                if (!response.ok) return false;
-                const data = (await response.json()) as SummaryData;
-                if (!data.summary) return false;
-                applyResult(data);
-                return true;
-            } catch {
-                return false;
-            }
-        };
-
-        /**
-         * Follow a job whose stream this client lost, and report how it ended.
-         *
-         * Returns false only when the outcome is genuinely unknown -- the job
-         * could not be found, or following was abandoned -- so the caller can
-         * fall back to saying so rather than inventing a verdict.
-         */
-        const followSummaryJob = async (jobId: string): Promise<boolean> => {
-            const snapshot = await followJob(jobId, {
-                signal: followAbortRef.current?.signal,
-                onProgress: (raw) => {
-                    if (!postIsCurrent()) return;
-                    const narrowed = toSummaryProgress(raw);
-                    if (narrowed) setSummaryProgress(narrowed);
-                },
-            });
-            if (!snapshot) return false;
-            if (snapshot.status === "completed") {
-                if (await applyStoredSummary()) return true;
-                if (postIsCurrent()) {
-                    toast.error(
-                        "The summary finished but could not be loaded. Reload to try again.",
-                    );
-                }
-                return true;
-            }
-            if (postIsCurrent()) {
-                toast.error(snapshot.error || "Summary generation failed");
-            }
-            return true;
-        };
-
-        try {
-            const response = await fetch(summaryUrl(targetId), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    // Opt in to progress. A server that predates streaming
-                    // ignores this and answers with JSON, which the branch
-                    // below still handles.
-                    Accept: "text/event-stream, application/json",
-                },
-                body: JSON.stringify(
-                    summaryProfileId ? { profileId: summaryProfileId } : {},
-                ),
-            });
-            if (response.ok) invalidateItemProcessing(targetId);
-
-            const isStream = (
-                response.headers.get("content-type") ?? ""
-            ).includes("text/event-stream");
-
-            if (isStream && response.body) {
-                // A streamed response is 200 before the work starts, so a
-                // failure arrives as an event rather than a status code.
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                const parse = createStreamEventParser();
-                let settled = false;
-                let jobId: string | null = null;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    for (const event of parse(
-                        decoder.decode(value, { stream: true }),
-                    )) {
-                        if (event.type === "queued") {
-                            // Kept so the work can be followed if this
-                            // connection does not survive it.
-                            jobId = event.jobId;
-                        } else if (event.type === "progress") {
-                            if (!postIsCurrent()) continue;
-                            setSummaryProgress({
-                                phase: event.phase,
-                                completed: event.completed,
-                                total: event.total,
-                            });
-                        } else if (event.type === "result") {
-                            settled = true;
-                            applyResult(event.result as SummaryData);
-                        } else if (event.type === "error") {
-                            settled = true;
-                            if (postIsCurrent()) {
-                                toast.error(
-                                    event.error || "Summary generation failed",
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // The stream ended without saying how it went. Since the work
-                // belongs to a job rather than to this request, that almost
-                // always means the connection died and the summary did not --
-                // a deploy, a proxy timeout, a laptop lid. Go and ask.
-                if (!settled && jobId) {
-                    settled = await followSummaryJob(jobId);
-                }
-
-                // No job id, or the job itself could not be found: now the
-                // silence really is all there is to report.
-                if (!settled && postIsCurrent()) {
-                    toast.error("Summary generation was interrupted");
-                }
-            } else if (response.ok) {
-                applyResult((await response.json()) as SummaryData);
-            } else {
-                const error = await response.json().catch(() => ({}));
-                if (postIsCurrent()) {
-                    toast.error(error.error || "Summary generation failed");
-                }
-            }
-        } catch {
-            if (postIsCurrent()) {
-                toast.error("Failed to generate summary");
-            }
-        } finally {
-            invalidateItemProcessing(targetId);
-            summarizingIdsRef.current = removeSummarizingId(
+            getAbortRef.current?.abort();
+            fetchGenerationRef.current += 1;
+            summarizingIdsRef.current = addSummarizingId(
                 summarizingIdsRef.current,
                 targetId,
             );
             setSummarizingIds(summarizingIdsRef.current);
-            summaryStartedAtRef.current = null;
             setSummaryProgress(null);
             setSummaryElapsedMs(0);
-        }
-    }, [
-        recordingId,
-        setSummaryFor,
-        summaryProfileId,
-        summarySource,
-        summaryUrl,
-        rememberPresence,
-    ]);
+            summaryStartedAtRef.current = Date.now();
+
+            const applyResult = (data: SummaryData) => {
+                if (!postIsCurrent()) return;
+                fetchGenerationRef.current += 1;
+                rememberPresence(targetId, data);
+                setSummaryFor(targetId, "riffado", data);
+                setAvailableSummarySources((current) =>
+                    current.includes("riffado")
+                        ? current
+                        : [...current, "riffado"],
+                );
+                if (correction?.onSuccess) correction.onSuccess();
+                else toast.success("Summary generated");
+            };
+
+            /**
+             * Fetch a summary the server has already written.
+             *
+             * Needed when a job completes somewhere this client was not watching:
+             * the job itself records only provenance, so the text has to be read
+             * back from the recording. Returns whether a summary was found.
+             */
+            const applyStoredSummary = async (): Promise<boolean> => {
+                try {
+                    const response = await fetch(
+                        summaryUrl(targetId, "?source=riffado"),
+                    );
+                    if (!response.ok) return false;
+                    const data = (await response.json()) as SummaryData;
+                    if (!data.summary) return false;
+                    applyResult(data);
+                    return true;
+                } catch {
+                    return false;
+                }
+            };
+
+            /**
+             * Follow a job whose stream this client lost, and report how it ended.
+             *
+             * Returns false only when the outcome is genuinely unknown -- the job
+             * could not be found, or following was abandoned -- so the caller can
+             * fall back to saying so rather than inventing a verdict.
+             */
+            const followSummaryJob = async (
+                jobId: string,
+            ): Promise<boolean> => {
+                const snapshot = await followJob(jobId, {
+                    signal: followAbortRef.current?.signal,
+                    onProgress: (raw) => {
+                        if (!postIsCurrent()) return;
+                        const narrowed = toSummaryProgress(raw);
+                        if (narrowed) setSummaryProgress(narrowed);
+                    },
+                });
+                if (!snapshot) return false;
+                if (snapshot.status === "completed") {
+                    if (await applyStoredSummary()) return true;
+                    if (postIsCurrent()) {
+                        toast.error(
+                            "The summary finished but could not be loaded. Reload to try again.",
+                        );
+                    }
+                    return true;
+                }
+                if (postIsCurrent()) {
+                    toast.error(snapshot.error || "Summary generation failed");
+                }
+                return true;
+            };
+
+            try {
+                const response = await fetch(summaryUrl(targetId), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        // Opt in to progress. A server that predates streaming
+                        // ignores this and answers with JSON, which the branch
+                        // below still handles.
+                        Accept: "text/event-stream, application/json",
+                    },
+                    body: JSON.stringify({
+                        ...((selectedProfileId ?? summaryProfileId)
+                            ? {
+                                  profileId:
+                                      selectedProfileId ?? summaryProfileId,
+                              }
+                            : {}),
+                        ...(correction?.reviseWithRemarks
+                            ? { reviseWithRemarks: true }
+                            : {}),
+                        ...(correction?.replaceEdited
+                            ? { replaceEdited: true }
+                            : {}),
+                        ...(correction?.summaryId !== undefined
+                            ? { summaryId: correction.summaryId }
+                            : {}),
+                        ...(correction?.revision !== undefined
+                            ? { revision: correction.revision }
+                            : {}),
+                    }),
+                });
+                if (response.ok) invalidateItemProcessing(targetId);
+
+                const isStream = (
+                    response.headers.get("content-type") ?? ""
+                ).includes("text/event-stream");
+
+                if (isStream && response.body) {
+                    // A streamed response is 200 before the work starts, so a
+                    // failure arrives as an event rather than a status code.
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    const parse = createStreamEventParser();
+                    let settled = false;
+                    let jobId: string | null = null;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        for (const event of parse(
+                            decoder.decode(value, { stream: true }),
+                        )) {
+                            if (event.type === "queued") {
+                                // Kept so the work can be followed if this
+                                // connection does not survive it.
+                                jobId = event.jobId;
+                            } else if (event.type === "progress") {
+                                if (!postIsCurrent()) continue;
+                                setSummaryProgress({
+                                    phase: event.phase,
+                                    completed: event.completed,
+                                    total: event.total,
+                                });
+                            } else if (event.type === "result") {
+                                settled = true;
+                                applyResult(event.result as SummaryData);
+                            } else if (event.type === "error") {
+                                settled = true;
+                                if (postIsCurrent()) {
+                                    toast.error(
+                                        event.error ||
+                                            "Summary generation failed",
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // The stream ended without saying how it went. Since the work
+                    // belongs to a job rather than to this request, that almost
+                    // always means the connection died and the summary did not --
+                    // a deploy, a proxy timeout, a laptop lid. Go and ask.
+                    if (!settled && jobId) {
+                        settled = await followSummaryJob(jobId);
+                    }
+
+                    // No job id, or the job itself could not be found: now the
+                    // silence really is all there is to report.
+                    if (!settled && postIsCurrent()) {
+                        toast.error("Summary generation was interrupted");
+                    }
+                } else if (response.ok) {
+                    applyResult((await response.json()) as SummaryData);
+                } else {
+                    const error = await response.json().catch(() => ({}));
+                    if (postIsCurrent()) {
+                        toast.error(error.error || "Summary generation failed");
+                    }
+                }
+            } catch {
+                if (postIsCurrent()) {
+                    toast.error("Failed to generate summary");
+                }
+            } finally {
+                invalidateItemProcessing(targetId);
+                summarizingIdsRef.current = removeSummarizingId(
+                    summarizingIdsRef.current,
+                    targetId,
+                );
+                setSummarizingIds(summarizingIdsRef.current);
+                summaryStartedAtRef.current = null;
+                setSummaryProgress(null);
+                setSummaryElapsedMs(0);
+            }
+        },
+        [
+            recordingId,
+            setSummaryFor,
+            summaryProfileId,
+            summarySource,
+            summaryUrl,
+            rememberPresence,
+        ],
+    );
+
+    const saveSummary = useCallback(
+        async (
+            summary: string,
+            keyPoints: string[],
+            expected: SummaryVersion,
+        ): Promise<boolean | "conflict"> => {
+            if (!recordingId || !summaryData || summarySource !== "riffado")
+                return false;
+            const targetId = recordingId;
+            const previous = summaryData;
+            getAbortRef.current?.abort();
+            fetchGenerationRef.current += 1;
+            setSummaryFor(targetId, "riffado", {
+                ...previous,
+                summary,
+                keyPoints,
+                editedAt: new Date().toISOString(),
+            });
+            try {
+                const response = await fetch(summaryUrl(targetId), {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        summary,
+                        keyPoints,
+                        ...expected,
+                    }),
+                });
+                if (response.status === 409) {
+                    setSummaryFor(targetId, "riffado", previous);
+                    return "conflict";
+                }
+                if (!response.ok) throw new Error("summary edit failed");
+                const metadata =
+                    (await response.json()) as Partial<SummaryData>;
+                setSummaryFor(targetId, "riffado", {
+                    ...previous,
+                    summary,
+                    keyPoints,
+                    ...metadata,
+                });
+                return true;
+            } catch {
+                setSummaryFor(targetId, "riffado", previous);
+                return false;
+            }
+        },
+        [recordingId, summaryData, summarySource, setSummaryFor, summaryUrl],
+    );
 
     const handleDeleteSummary = useCallback(async () => {
         if (!recordingId) return;
@@ -873,6 +981,7 @@ export function useTranscriptionSummary({
         summaryProfilesLoading,
         handleSummarize,
         handleDeleteSummary,
+        saveSummary,
         refetchSummary,
         recheckSummary,
     };

@@ -54,6 +54,10 @@ export const SUMMARY_MAX_ATTEMPTS = 3;
 export const SUMMARY_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface SummaryJobPayload {
+    reviseWithRemarks?: boolean;
+    replaceEdited?: boolean;
+    expectedSummaryRevision?: number;
+    expectedSummaryId?: string | null;
     recordingId: string;
     presetId?: string;
     profileRevisionId?: string;
@@ -112,8 +116,39 @@ export function parseSummaryJobPayload(
             'view must be "private" or "org" when present',
         );
     }
+    if (
+        (raw.expectedSummaryId !== undefined &&
+            raw.expectedSummaryId !== null &&
+            (typeof raw.expectedSummaryId !== "string" ||
+                !raw.expectedSummaryId)) ||
+        (typeof raw.expectedSummaryId === "string" &&
+            (typeof raw.expectedSummaryRevision !== "number" ||
+                !Number.isSafeInteger(raw.expectedSummaryRevision) ||
+                raw.expectedSummaryRevision < 0)) ||
+        (raw.expectedSummaryRevision !== undefined &&
+            typeof raw.expectedSummaryId !== "string")
+    )
+        throw new InvalidJobPayloadError(
+            SUMMARY_JOB_KIND,
+            "Expected summary must identify a row and revision, or explicit absence",
+        );
     return {
         recordingId,
+        ...(raw.reviseWithRemarks === true && trigger === "manual"
+            ? { reviseWithRemarks: true }
+            : {}),
+        ...(raw.replaceEdited === true && trigger === "manual"
+            ? { replaceEdited: true }
+            : {}),
+        ...(raw.expectedSummaryId === null ||
+        typeof raw.expectedSummaryId === "string"
+            ? { expectedSummaryId: raw.expectedSummaryId }
+            : {}),
+        ...(typeof raw.expectedSummaryRevision === "number" &&
+        Number.isSafeInteger(raw.expectedSummaryRevision) &&
+        raw.expectedSummaryRevision >= 0
+            ? { expectedSummaryRevision: raw.expectedSummaryRevision }
+            : {}),
         ...(presetId ? { presetId } : {}),
         ...(profileRevisionId ? { profileRevisionId } : {}),
         trigger,
@@ -123,6 +158,10 @@ export function parseSummaryJobPayload(
 }
 
 export interface EnqueueSummaryInput {
+    reviseWithRemarks?: boolean;
+    replaceEdited?: boolean;
+    expectedSummaryRevision?: number;
+    expectedSummaryId?: string | null;
     /** The actor. On the private view, the recording's owner. */
     userId: string;
     ownerUserId?: string;
@@ -176,6 +215,14 @@ export async function enqueueSummaryJob(
             maxAttempts: SUMMARY_MAX_ATTEMPTS,
             payload: {
                 recordingId: input.recordingId,
+                ...(input.reviseWithRemarks ? { reviseWithRemarks: true } : {}),
+                ...(input.replaceEdited ? { replaceEdited: true } : {}),
+                ...(input.expectedSummaryId !== undefined
+                    ? { expectedSummaryId: input.expectedSummaryId }
+                    : {}),
+                ...(input.expectedSummaryRevision !== undefined
+                    ? { expectedSummaryRevision: input.expectedSummaryRevision }
+                    : {}),
                 ...(input.presetId ? { presetId: input.presetId } : {}),
                 ...(input.profileRevisionId
                     ? { profileRevisionId: input.profileRevisionId }

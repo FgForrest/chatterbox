@@ -163,6 +163,7 @@ export interface PipelineFacts {
         shared: boolean;
     } | null;
     summary: {
+        edited?: boolean;
         exists: boolean;
         stale: boolean;
         staleFingerprint?: string;

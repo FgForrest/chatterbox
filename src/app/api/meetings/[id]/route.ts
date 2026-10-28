@@ -17,6 +17,7 @@ export const GET = meetingRoute(async ({ userId, params, url }) =>
                   )
                   .parse(url.searchParams.get("since"))
             : undefined,
+        true,
     ),
 );
 export const PATCH = meetingRoute(async ({ userId, params, request }) =>

@@ -22,6 +22,7 @@ export function LearnReview({
     folderName,
     showTrigger = true,
     collapseReady = false,
+    initialOpen = false,
 }: {
     recordingId: string;
     view?: RecordingView;
@@ -36,6 +37,7 @@ export function LearnReview({
     folderName?: string;
     showTrigger?: boolean;
     collapseReady?: boolean;
+    initialOpen?: boolean;
 }) {
     return (
         <LearnWidget
@@ -53,6 +55,7 @@ export function LearnReview({
             folderName={folderName}
             showTrigger={showTrigger}
             collapseReady={collapseReady}
+            initialOpen={initialOpen}
         />
     );
 }

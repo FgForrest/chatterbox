@@ -20,7 +20,7 @@ import czechMessages from "../../../messages/cs-CZ.json";
 import englishMessages from "../../../messages/en.json";
 import { statisticsFixture } from "./fixtures";
 
-const language = vi.hoisted(() => ({ locale: "en" }));
+const language = vi.hoisted(() => ({ locale: "en", timeZone: "UTC" }));
 const translations = new Map(
     Object.entries(englishMessages).map(([key, message]) => [
         message,
@@ -32,6 +32,7 @@ const unitLabels = vi.hoisted(() => ({}) as Record<string, string>);
 
 vi.mock("next-intl", () => ({
     useLocale: () => language.locale,
+    useTimeZone: () => language.timeZone,
     useExtracted:
         () =>
         (
@@ -59,6 +60,7 @@ vi.mock("@/components/product-name-provider", () => ({
 const fetchMock = vi.fn();
 beforeEach(() => {
     language.locale = "en";
+    language.timeZone = "UTC";
     for (const key of Object.keys(unitLabels)) delete unitLabels[key];
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -468,14 +470,13 @@ describe("statistics page", () => {
             ),
         ).toBeTruthy();
     });
-    it("refetches only when the browser timezone differs from SSR", async () => {
+    it("refetches only when the resolved time zone differs from SSR", async () => {
         const data = statisticsFixture();
         data.tz = "Europe/Prague";
         fetchMock.mockResolvedValue(Response.json(statisticsFixture()));
         render(<StatisticsPage initialData={data} scopes={["mine"]} />);
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
         expect(fetchMock.mock.calls[0][0]).toContain("tz=UTC");
-        expect(document.cookie).toContain("tz=UTC");
     });
     it("uses keyboard selection on the waveform and clears the preset", () => {
         render(

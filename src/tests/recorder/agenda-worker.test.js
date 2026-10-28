@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { agendaPanelKey } from "../../../extensions/recorder/lib/agendas.js";
 import {
     completeSession,
     getSession,
@@ -163,7 +164,10 @@ const h = vi.hoisted(() => {
             clear: vi.fn(async () => {}),
             onAlarm: event("alarm"),
         },
-        sidePanel: { open: vi.fn(async () => {}) },
+        sidePanel: {
+            setOptions: vi.fn(async () => {}),
+            open: vi.fn(async () => {}),
+        },
         windows: {
             WINDOW_ID_CURRENT: -2,
             onRemoved: event("windowRemoved"),
@@ -628,19 +632,246 @@ describe("agenda worker integration", () => {
         });
         expect(h.createSession.mock.calls[0][1]).not.toHaveProperty("agendaId");
     });
-    it("opens the panel synchronously on notification body and button clicks", async () => {
+    it("keeps reminder body and button clicks usable through the window fallback without a global panel", async () => {
+        chrome.sidePanel.open.mockRejectedValueOnce(
+            new Error("No active side panel"),
+        );
         const opened = h.listeners.notificationClicked("agenda:agenda-one");
         expect(chrome.sidePanel.open).toHaveBeenCalledWith({ windowId: -2 });
         await opened;
         chrome.sidePanel.open.mockClear();
+        chrome.sidePanel.open.mockRejectedValueOnce(
+            new Error("No active side panel"),
+        );
         h.listeners.notificationButton("agenda:agenda-one", 0);
         expect(chrome.sidePanel.open).toHaveBeenCalledWith({ windowId: -2 });
         await settle();
-        expect(h.session.recorderAgendaPanel.agendaIds).toEqual(["agenda-one"]);
+        expect(h.session[agendaPanelKey()].agendaIds).toEqual(["agenda-one"]);
+        await vi.waitFor(() =>
+            expect(chrome.windows.create).toHaveBeenCalledTimes(2),
+        );
+        expect(chrome.sidePanel.setOptions).not.toHaveBeenCalled();
     });
     it("does not open an agenda from the notification dismiss button", () => {
         h.listeners.notificationButton("agenda:agenda-one", 1);
         expect(chrome.sidePanel.open).not.toHaveBeenCalled();
+    });
+    it("uses the popup's meeting tab, not the extension page tab, before resolving agendas", async () => {
+        h.local.serverDefaults.agendas = true;
+        const result = message(
+            { type: "open-agenda", tabId: 7, windowId: 3 },
+            { ...extension, tab: { id: 99 } },
+        );
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledExactlyOnceWith({
+            tabId: 7,
+            path: "agenda/agenda.html?tab=7",
+            enabled: true,
+        });
+        expect(chrome.sidePanel.open).toHaveBeenCalledExactlyOnceWith({
+            tabId: 7,
+        });
+        expect(
+            chrome.sidePanel.setOptions.mock.invocationCallOrder[0],
+        ).toBeLessThan(chrome.sidePanel.open.mock.invocationCallOrder[0]);
+        expect(await result).toEqual({ ok: true });
+        expect(h.session[agendaPanelKey(7)].tabId).toBe(7);
+    });
+    it("opens on the popup active tab while matching the recording tab", async () => {
+        h.local.serverDefaults.agendas = true;
+        await start();
+        h.tabs.set(8, { id: 8, windowId: 3, url: "https://example.com" });
+        h.request.mockClear();
+        expect(
+            await message(
+                { type: "open-agenda", tabId: 8, matchTabId: 7, choose: true },
+                extension,
+            ),
+        ).toEqual({ ok: true });
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith({
+            tabId: 8,
+            path: "agenda/agenda.html?tab=8",
+            enabled: true,
+        });
+        expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 8 });
+        const paths = h.request.mock.calls.map(([, path]) => path);
+        expect(
+            paths.some(
+                (path) =>
+                    new URL(path, "https://example.com").searchParams.get(
+                        "meetCode",
+                    ) === "abc-defg-hij",
+            ),
+        ).toBe(true);
+        expect(h.session[agendaPanelKey(8)]).toMatchObject({
+            tabId: 7,
+            agendaIds: ["agenda-one"],
+            choose: true,
+        });
+    });
+    it("keeps a second meeting banner on its agenda while the first meeting records", async () => {
+        h.local.serverDefaults.agendas = true;
+        await start();
+        const other = {
+            ...meeting,
+            id: 8,
+            url: "https://meet.google.com/xyz-uvwx-rst",
+        };
+        h.tabs.set(8, other);
+        h.request.mockImplementation(async () => ({
+            json: async () => ({
+                data: [
+                    {
+                        id: "agenda-two",
+                        title: "Aurora review",
+                        start: new Date(Date.now() - 60000).toISOString(),
+                        end: new Date(Date.now() + 3600000).toISOString(),
+                    },
+                ],
+            }),
+        }));
+        await h.listeners.updated(8, { status: "complete" }, other);
+        expect(
+            await message(
+                { type: "open-agenda" },
+                { ...sender(), url: other.url, tab: { id: 8 } },
+            ),
+        ).toEqual({ ok: true });
+        expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 8 });
+        expect(h.session[agendaPanelKey(8)]).toMatchObject({
+            tabId: 8,
+            agendaIds: ["agenda-two"],
+        });
+    });
+    it("refreshes expired worker match results instead of reusing an old empty result", async () => {
+        h.local.serverDefaults.agendas = true;
+        await message({ type: "match-agendas", tabId: 7 }, extension);
+        h.session["agenda-match:7"].agendas = [];
+        h.session["agenda-match:7"].at = Date.now() - 60001;
+        expect(
+            await message({ type: "match-agendas", tabId: 7 }, extension),
+        ).toMatchObject({
+            ok: true,
+            agendas: [expect.objectContaining({ id: "agenda-one" })],
+        });
+    });
+    it("removes only the closed tab's panel context and match cache", async () => {
+        h.session[agendaPanelKey(7)] = { agendaIds: ["agenda-one"] };
+        h.session[agendaPanelKey(8)] = { agendaIds: ["agenda-two"] };
+        h.session[agendaPanelKey()] = { agendaIds: ["fallback"] };
+        h.session["agenda-match:7"] = {};
+        await h.listeners.tabRemoved(7);
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+        expect(h.session["agenda-match:7"]).toBeUndefined();
+        expect(h.session[agendaPanelKey(8)].agendaIds).toEqual(["agenda-two"]);
+        expect(h.session[agendaPanelKey()].agendaIds).toEqual(["fallback"]);
+    });
+    it("keeps the fallback window's matched agenda when the requesting tab closes mid-match", async () => {
+        h.local.serverDefaults.agendas = true;
+        chrome.sidePanel.open.mockRejectedValueOnce(
+            new Error("No active side panel"),
+        );
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        h.request.mockImplementationOnce(async (...args) => {
+            await gate;
+            return defaultRequest(...args);
+        });
+        const result = message({ type: "open-agenda", tabId: 7 }, extension);
+        await vi.waitFor(() => {
+            expect(h.request).toHaveBeenCalledTimes(1);
+            expect(chrome.windows.create).toHaveBeenCalledExactlyOnceWith(
+                expect.objectContaining({
+                    url: "chrome-extension://test/agenda/agenda.html",
+                    type: "popup",
+                }),
+            );
+        });
+        h.tabs.delete(7);
+        await h.listeners.tabRemoved(7);
+        release();
+        expect(await result).toEqual({ ok: true });
+        expect(h.session[agendaPanelKey()]).toEqual({
+            agendaIds: ["agenda-one"],
+            choose: false,
+            tabId: 7,
+        });
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+    });
+    it("removes a per-tab panel context when the tab closes mid-match", async () => {
+        h.local.serverDefaults.agendas = true;
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        h.request.mockImplementationOnce(async (...args) => {
+            await gate;
+            return defaultRequest(...args);
+        });
+        const result = message({ type: "open-agenda", tabId: 7 }, extension);
+        await vi.waitFor(() => {
+            expect(h.request).toHaveBeenCalledTimes(1);
+            expect(h.session[agendaPanelKey(7)]).toBeDefined();
+        });
+        expect(chrome.windows.create).not.toHaveBeenCalled();
+        h.tabs.delete(7);
+        await h.listeners.tabRemoved(7);
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+        release();
+        expect(await result).toEqual({ ok: true });
+        expect(chrome.storage.session.set).toHaveBeenCalledWith({
+            [agendaPanelKey(7)]: {
+                agendaIds: ["agenda-one"],
+                choose: false,
+                tabId: 7,
+            },
+        });
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+    });
+    it("selects an agenda after the requesting tab has closed", async () => {
+        h.local.serverDefaults.agendas = true;
+        h.tabs.delete(7);
+        expect(
+            await message(
+                { type: "select-agenda", tabId: 7, agendaId: "agenda-one" },
+                {
+                    id: "test",
+                    url: "chrome-extension://test/agenda/agenda.html",
+                },
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recorderAgendaSelection).toMatchObject({
+            target: "null",
+            agenda: { id: "agenda-one" },
+            explicit: true,
+        });
+        expect(chrome.tabs.update).not.toHaveBeenCalled();
+        expect(h.createSession).not.toHaveBeenCalled();
+    });
+    it.each([
+        "failure",
+        "timeout",
+    ])("reports a match %s distinctly and retries without caching it", async (kind) => {
+        h.local.serverDefaults.agendas = true;
+        h.request.mockImplementation(async (_auth, path) => {
+            if (path.includes("/match?")) {
+                if (kind === "timeout") return new Promise(() => {});
+                throw new Error("offline");
+            }
+            return { json: async () => ({ data: [] }) };
+        });
+        expect(
+            await message({ type: "match-agendas", tabId: 7 }, extension),
+        ).toMatchObject({ ok: false });
+        expect(h.session["agenda-match:7"]).toBeUndefined();
+        h.request.mockImplementation(defaultRequest);
+        expect(
+            await message({ type: "match-agendas", tabId: 7 }, extension),
+        ).toMatchObject({
+            ok: true,
+            agendas: [expect.objectContaining({ id: "agenda-one" })],
+        });
     });
     it("accepts an armed top-frame gesture and refuses agenda operations from ordinary web pages", async () => {
         h.local.serverDefaults.agendas = true;
@@ -653,6 +884,23 @@ describe("agenda worker integration", () => {
         expect(
             await message({ type: "open-agenda" }, { ...sender(), frameId: 1 }),
         ).toMatchObject({ ok: false });
+    });
+    it("opens the selected agenda from the recording pill for its meeting tab", async () => {
+        h.local.serverDefaults.agendas = true;
+        await start();
+        expect(await message({ type: "open-agenda" })).toEqual({ ok: true });
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledExactlyOnceWith({
+            tabId: 7,
+            path: "agenda/agenda.html?tab=7",
+            enabled: true,
+        });
+        expect(chrome.sidePanel.open).toHaveBeenCalledExactlyOnceWith({
+            tabId: 7,
+        });
+        expect(h.session[agendaPanelKey(7)]).toMatchObject({
+            agendaIds: ["agenda-one"],
+            tabId: 7,
+        });
     });
     it("updates agenda selection in session and durable recovery metadata during capture", async () => {
         h.local.serverDefaults.agendas = true;

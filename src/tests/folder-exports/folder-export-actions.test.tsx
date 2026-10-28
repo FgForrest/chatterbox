@@ -26,7 +26,10 @@ vi.mock("@/lib/integrations/google/picker-client", () => ({
 }));
 
 import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
-import type { FolderExportConfigurationDto } from "@/lib/folder-exports/types";
+import {
+    type FolderExportConfigurationDto,
+    WRITER_NO_LONGER_CURATOR_MESSAGE,
+} from "@/lib/folder-exports/types";
 import type { RecordingFolder } from "@/types/folder";
 
 const folder: RecordingFolder = {
@@ -167,6 +170,44 @@ describe("folder export dialog with Google Drive", () => {
         expect(
             button.querySelector("svg")?.classList.contains("animate-spin"),
         ).toBe(false);
+    });
+    it("words a former curator's failed synchronization instead of showing the stored message", async () => {
+        followJob.mockResolvedValueOnce({
+            status: "failed",
+            error: WRITER_NO_LONGER_CURATOR_MESSAGE,
+            errorCode: "FORBIDDEN",
+        });
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+                Response.json(
+                    init?.method === "POST"
+                        ? { jobId: "audit" }
+                        : { configured: [], applicableIds: ["own-export"] },
+                ),
+            ),
+        );
+        render(
+            <FolderExportActions
+                folder={folder}
+                providers={{
+                    filesystem: true,
+                    googleDrive: false,
+                    mail: false,
+                }}
+                privateTree
+                hideTrigger
+                open
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Synchronize" }),
+        );
+        await waitFor(() =>
+            expect(toastMock.error).toHaveBeenCalledWith(
+                "Synchronization stopped: you are no longer an Organization curator.",
+            ),
+        );
     });
     it("picks a folder and saves a Drive export with Docs by default", async () => {
         const requests = mockServer({ connection: "active" });

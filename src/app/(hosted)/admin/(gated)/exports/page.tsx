@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTimeZone } from "next-intl/server";
 import {
     exportJobsOverview,
     listRecentExportJobs,
@@ -44,9 +45,10 @@ export default async function AdminExportsPage({
     const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
     const offset = (page - 1) * PAGE_SIZE;
 
-    const [overview, jobs] = await Promise.all([
+    const [overview, jobs, timeZone] = await Promise.all([
         exportJobsOverview(),
         listRecentExportJobs({ limit: PAGE_SIZE, offset, status }),
+        getTimeZone(),
     ]);
     const pages = Math.max(1, Math.ceil(jobs.total / PAGE_SIZE));
 
@@ -176,10 +178,10 @@ export default async function AdminExportsPage({
                                         )}
                                     </td>
                                     <td className="px-3 py-2 text-muted-foreground">
-                                        {formatDate(job.createdAt)}
+                                        {formatDate(job.createdAt, timeZone)}
                                     </td>
                                     <td className="px-3 py-2 text-muted-foreground">
-                                        {formatDate(job.completedAt)}
+                                        {formatDate(job.completedAt, timeZone)}
                                     </td>
                                     <td className="px-3 py-2 text-red-700 max-w-xs truncate">
                                         {job.errorMessage ?? ""}

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
@@ -15,6 +15,7 @@ import {
     itemProcessing,
     mailContents,
     recordings,
+    summaryRemarks,
     transcriptions,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
@@ -37,6 +38,7 @@ import {
     sharingOrgUserId,
     type WriterRefusal,
 } from "@/lib/sharing/writer";
+import { summaryRemarksFingerprint } from "@/lib/summary/remarks-fingerprint";
 import {
     dropReplaceableTaskReviewInTx,
     type TaskProposals,
@@ -125,6 +127,11 @@ export interface UpsertTranscriptionArgs {
 }
 
 export interface UpsertEnhancementArgs {
+    summaryWriteMode?: "regenerate" | "remarks";
+    expectedSummaryRevision?: number;
+    expectedSummaryId?: string | null;
+    remarksAppliedCount?: number;
+    remarksFingerprint?: string;
     /** The recording's owner, who owns its content rows. */
     userId: string;
     recordingId: string;
@@ -199,6 +206,7 @@ export interface UpsertEnhancementArgs {
 export interface UpsertResult {
     committed: boolean;
     reason?: WriterRefusal | "cancelled" | "outdated";
+    summaryVersion?: { id: string; revision: number };
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
@@ -466,6 +474,7 @@ export async function upsertTranscription(
                             and(
                                 eq(aiEnhancements.itemId, recordingId),
                                 eq(aiEnhancements.userId, userId),
+                                isNull(aiEnhancements.editedAt),
                                 eq(
                                     aiEnhancements.source,
                                     args.dropSummaryOnReplace,
@@ -563,6 +572,7 @@ export async function upsertEnhancement(
     const actsForOrganization = await curatesNow(args, actorUserId);
 
     const isMail = args.kind === "mail";
+    let summaryVersion: UpsertResult["summaryVersion"];
 
     try {
         const outcome = await db.transaction(async (tx) => {
@@ -616,6 +626,56 @@ export async function upsertEnhancement(
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
                 throw new WriterRefused("cancelled");
             }
+            const [existing] = await tx
+                .select({
+                    id: aiEnhancements.id,
+                    editedAt: aiEnhancements.editedAt,
+                    editedByUserId: aiEnhancements.editedByUserId,
+                    revision: aiEnhancements.revision,
+                })
+                .from(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, recordingId),
+                        eq(aiEnhancements.userId, userId),
+                        eq(aiEnhancements.source, source),
+                    ),
+                )
+                .limit(1);
+
+            if (
+                (existing?.editedAt && !args.summaryWriteMode) ||
+                (args.expectedSummaryId !== undefined &&
+                    (args.expectedSummaryId !== (existing?.id ?? null) ||
+                        (existing &&
+                            args.expectedSummaryRevision !==
+                                existing.revision))) ||
+                (args.expectedSummaryRevision !== undefined &&
+                    args.expectedSummaryId === undefined) ||
+                (existing?.editedAt &&
+                    args.expectedSummaryRevision === undefined) ||
+                (args.summaryWriteMode === "remarks" &&
+                    actorUserId !== userId) ||
+                (args.remarksFingerprint !== undefined &&
+                    args.remarksFingerprint !==
+                        summaryRemarksFingerprint(
+                            await tx
+                                .select({ id: summaryRemarks.id })
+                                .from(summaryRemarks)
+                                .where(
+                                    and(
+                                        eq(summaryRemarks.userId, userId),
+                                        eq(summaryRemarks.itemId, recordingId),
+                                    ),
+                                )
+                                .orderBy(
+                                    asc(summaryRemarks.createdAt),
+                                    asc(summaryRemarks.id),
+                                ),
+                        ))
+            )
+                return { advance: null, outdated: true };
+
             if (args.inputs?.contentSourceId) {
                 const current = await currentFenceInput(tx, args);
                 if (!fenceMatches(args.inputs, current)) {
@@ -666,18 +726,6 @@ export async function upsertEnhancement(
             ) {
                 return { advance: null, outdated: true };
             }
-            const [existing] = await tx
-                .select({ id: aiEnhancements.id })
-                .from(aiEnhancements)
-                .where(
-                    and(
-                        eq(aiEnhancements.itemId, recordingId),
-                        eq(aiEnhancements.userId, userId),
-                        eq(aiEnhancements.source, source),
-                    ),
-                )
-                .limit(1);
-
             // Always written, NULL included -- see `multiPass` on the args.
             const multiPassColumns = {
                 inputFingerprint: args.inputFingerprint ?? null,
@@ -686,6 +734,16 @@ export async function upsertEnhancement(
                 multiPassMerged: multiPass?.merged ?? null,
             };
             const runRecordColumns = {
+                editedAt:
+                    args.summaryWriteMode === "remarks"
+                        ? (existing?.editedAt ?? null)
+                        : null,
+                editedByUserId:
+                    args.summaryWriteMode === "remarks"
+                        ? (existing?.editedByUserId ?? null)
+                        : null,
+                revision: (existing?.revision ?? -1) + 1,
+                remarksAppliedCount: args.remarksAppliedCount ?? 0,
                 profileRevisionId: args.profileRevisionId ?? null,
                 builtinPromptsVersion: args.builtinPromptsVersion ?? null,
                 outputLanguage: args.outputLanguage ?? null,
@@ -808,8 +866,16 @@ export async function upsertEnhancement(
                         "itemProfileRevisionId" in args.inputs,
                 });
             }
-            return { advance, outdated: false };
+            return {
+                advance,
+                outdated: false,
+                summaryVersion: {
+                    id: summaryId,
+                    revision: runRecordColumns.revision,
+                },
+            };
         });
+        summaryVersion = outcome.summaryVersion;
         if (outcome.advance) nudge();
         if (outcome.outdated) return { committed: false, reason: "outdated" };
     } catch (txError) {
@@ -822,5 +888,5 @@ export async function upsertEnhancement(
         throw txError;
     }
 
-    return { committed: true };
+    return { committed: true, summaryVersion };
 }

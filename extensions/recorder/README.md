@@ -129,23 +129,26 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
-## Meeting agendas (0.8.0)
+## Meeting agendas (0.8.2)
 
 A supporting server advertises `features.agendas: true`. The popup then shows an
 Agenda card for a meeting running now or starting within 15 minutes and preselects
 its folder. Meet matches by room code on the server; other platforms match by time.
 Several matches open a choice instead of selecting one silently.
 
-**Show agenda** opens Chrome's side panel, which stays available while switching
-tabs. If Chrome refuses the request, the same page opens in a small extension
-window. Preparation shows the outline and task review; **Live meeting** enables
+**Show agenda** enables and opens Chrome's side panel for that tab only, after
+you click. The extension is absent from the side panel menu on tabs where no
+agenda has been opened. If Chrome refuses the request, the same page opens in a
+small extension window. Preparation shows the outline and task review; **Live meeting** enables
 discussed ticks, timestamped hints, notes, quick points and task **Done / Drop**.
 Changes save to the server and colleagues' changes refresh every 15 seconds.
 Task actions change real tasks and honor their existing permissions. Absorbed
 agendas remain read-only. **Open in Chatterbox** opens the full meeting page.
 
-While recording, the panel and popup show which agenda will accompany the
-recording. **Another agenda…** offers agendas at the same time or **No agenda**.
+While recording, the popup shows an agenda card only for a selected agenda or
+matching agendas. Without a selection, **Choose an agenda** opens the picker.
+With a selection, **Another agenda…** offers agendas at the same time or **No agenda**.
+The panel shows which agenda will accompany the recording.
 The chosen ID survives upload recovery and is sent when the recording completes.
 Only an agenda shown before Record or explicitly chosen is sent. Unseen matches
 use the server's safe automatic rule unless you confirm a choice during recording.
@@ -161,9 +164,10 @@ With configuration refresh, the extension fetches the next 24 hours of timed
 agendas and schedules reminders one minute before each start. Refresh configuration
 in Options after adding or rescheduling a meeting to update reminders immediately.
 **Remind me of agendas at meeting time** and **Offer agendas in the meeting banner**
-are independent Options switches, both on by default. On an older server Options
-explains that agendas need a server update; no agenda UI or requests are added to
-recording. The only new manifest permission is `sidePanel`.
+are independent Options switches, both on by default. Older servers hide the
+agenda Options section and add no agenda UI or requests to recording.
+Version 0.8.2 keeps the fallback window's matched agenda if the requesting tab
+closes while matching. It changes no permissions; 0.8.0 added only `sidePanel`.
 
 ## Load it for development
 

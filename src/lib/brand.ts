@@ -1,7 +1,11 @@
 /** The upstream project name: the hosted product and its historical notices. */
 export const UPSTREAM_PRODUCT_NAME = "Riffado";
 
-export type ProductNameCase = "nominative" | "accusative" | "genitive";
+export type ProductNameCase =
+    | "nominative"
+    | "accusative"
+    | "genitive"
+    | "locative";
 
 /** Returns the product name for the current interface language and grammatical case. */
 export function productName(
@@ -9,6 +13,7 @@ export function productName(
     grammaticalCase: ProductNameCase = "nominative",
 ): string {
     if (locale === "cs-CZ") {
+        if (grammaticalCase === "locative") return "Klepně";
         if (grammaticalCase === "genitive") return "Klepny";
         return grammaticalCase === "accusative" ? "Klepnu" : "Klepna";
     }

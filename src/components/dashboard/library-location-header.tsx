@@ -326,11 +326,11 @@ export function LibraryLocationHeader({
                             )}
                         </div>
                         {onPrepareMeeting && (
-                            <ActionTooltip label={i18n("Prepare a meeting")}>
+                            <ActionTooltip label={i18n("Prepare an agenda")}>
                                 <Button
                                     variant="ghost"
                                     size="icon-sm"
-                                    aria-label={i18n("Prepare a meeting")}
+                                    aria-label={i18n("Prepare an agenda")}
                                     onClick={onPrepareMeeting}
                                 >
                                     <CalendarClock className="size-4 text-meeting" />
@@ -393,18 +393,24 @@ export function LibraryLocationHeader({
                         {folder && !folder.receivedFolder && onKnowledge && (
                             <ActionTooltip label={i18n("Knowledge")}>
                                 <Button
-                                    variant="outline"
+                                    variant="ghost"
                                     size="icon-sm"
                                     aria-pressed={knowledgeOpen}
                                     aria-label={i18n("Knowledge")}
                                     className={
-                                        folder.scope === "org"
-                                            ? "shrink-0 border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization"
+                                        knowledgeOpen
+                                            ? "shrink-0 bg-accent"
                                             : "shrink-0"
                                     }
                                     onClick={() => onKnowledge(folder)}
                                 >
-                                    <BookOpen className="size-4" />
+                                    <BookOpen
+                                        className={
+                                            folder.scope === "org"
+                                                ? "size-4 text-organization"
+                                                : "size-4"
+                                        }
+                                    />
                                 </Button>
                             </ActionTooltip>
                         )}

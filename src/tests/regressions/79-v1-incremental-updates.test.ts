@@ -42,6 +42,13 @@ vi.mock("@/lib/meetings/pipeline-context", async (importOriginal) => ({
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+    summaryCorrectionsContext: vi
+        .fn()
+        .mockResolvedValue({ text: "", count: 0 }),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),
@@ -121,6 +128,7 @@ import { ErrorCode } from "@/lib/errors";
 // Generation is driven directly rather than through POST: the route now
 // queues the work for a background worker, while the scoping and
 // `updatedAt` bookkeeping pinned below belong to the write path itself.
+import { summaryEditState } from "@/lib/summary/corrections";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
@@ -212,6 +220,7 @@ function writesThrough(update: Mock, set: Mock): [unknown, unknown][] {
 describe("Issue #79 - v1 incremental update timestamps", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(summaryEditState).mockResolvedValue(null);
         (auth.api.getSession as unknown as Mock).mockResolvedValue({
             user: { id: userId },
         });
@@ -387,8 +396,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 .fn()
                 .mockReturnValueOnce(lockedRecordingRows([{ deletedAt: null }]))
                 .mockReturnValueOnce(selectRows([]))
-                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }]))
-                .mockReturnValueOnce(selectRows([])),
+                .mockReturnValueOnce(selectRows([]))
+                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }])),
             insert: vi.fn().mockReturnValue({ values: txInsertValues }),
             update: vi.fn().mockReturnValue({ set: recordingBumpSet }),
         };
@@ -421,6 +430,11 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
     });
 
     it("scopes summary update by user and bumps recording updatedAt", async () => {
+        vi.mocked(summaryEditState).mockResolvedValue({
+            id: "enh-1",
+            revision: 0,
+            editedAt: null,
+        });
         (db.select as Mock)
             // Which kind of item it is: a recording.
             .mockReturnValueOnce(selectRows([{ kind: "audio" }]))
@@ -480,9 +494,11 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
             select: vi
                 .fn()
                 .mockReturnValueOnce(lockedRecordingRows([{ deletedAt: null }]))
+                .mockReturnValueOnce(
+                    selectRows([{ id: "enh-1", userId, revision: 0 }]),
+                )
                 .mockReturnValueOnce(selectRows([]))
-                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }]))
-                .mockReturnValueOnce(selectRows([{ id: "enh-1", userId }])),
+                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }])),
             insert: vi.fn(),
             update: vi
                 .fn()

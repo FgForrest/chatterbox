@@ -9,12 +9,14 @@ interface Props {
     deletionAt: Date;
     exportUrl: string;
     reactivateUrl: string;
+    timeZone?: string;
 }
 
 export function GraceLastDayEmail({
     deletionAt,
     exportUrl,
     reactivateUrl,
+    timeZone = "UTC",
 }: Props) {
     const i18n = getEmailTranslator();
     const locale = getEmailLocale();
@@ -39,6 +41,7 @@ export function GraceLastDayEmail({
                     deletionAt,
                     { month: "short", includeTime: true },
                     locale,
+                    timeZone,
                 )}{" "}
                 {i18n(
                     ". That's under 24 hours from now. Every recording, transcript, and summary will be removed and cannot be recovered.",

@@ -4,8 +4,8 @@ import { AudioWaveform, Loader2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
 import { ItemHeader } from "@/components/items/item-header";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { formatBytes } from "@/lib/format-bytes";
-import { formatDateTime } from "@/lib/format-date";
 import { formatDuration } from "@/lib/format-duration";
 import type { Recording } from "@/types/recording";
 
@@ -22,6 +22,9 @@ interface RecordingPlayerHeaderProps {
      * its ownership alone: Organization curators may rename shared items.
      */
     titleReadOnly?: boolean;
+    onKnowledge?: () => void;
+    knowledgeOpen?: boolean;
+    pendingLearnCount?: number;
 }
 
 interface RecordingWaveformStatusProps {
@@ -40,8 +43,12 @@ export function RecordingPlayerHeader({
     onRenamed,
     shared = false,
     titleReadOnly,
+    onKnowledge,
+    knowledgeOpen,
+    pendingLearnCount,
 }: RecordingPlayerHeaderProps) {
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const i18n = useExtracted();
     const metaParts: string[] = [
         formatDateTime(recording.startTime, "relative", locale),
@@ -96,6 +103,9 @@ export function RecordingPlayerHeader({
             readOnly={titleReadOnly ?? recording.isOwn === false}
             onRenamed={onRenamed}
             action={action}
+            onKnowledge={onKnowledge}
+            knowledgeOpen={knowledgeOpen}
+            pendingLearnCount={pendingLearnCount}
             retentionNotes={retentionNotes}
         />
     );

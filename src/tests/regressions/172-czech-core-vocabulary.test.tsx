@@ -1,18 +1,13 @@
 // @vitest-environment jsdom
 
-import {
-    cleanup,
-    fireEvent,
-    render,
-    screen,
-    within,
-} from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type * as NextIntl from "next-intl";
 import type { PropsWithChildren } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createTranslator, type TranslationValues } from "use-intl/core";
 import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ItemLearnOutcomes } from "@/components/items/item-learn-outcomes";
 import { LearnReview } from "@/components/learn/learn-review";
 import { KnownFacts } from "@/components/people/known-facts";
 import { messagesForLocale } from "@/lib/i18n/messages";
@@ -23,6 +18,7 @@ import {
 } from "@/lib/knowledge/vocabulary-core";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 import { getVocabularyLabels } from "@/lib/knowledge/vocabulary-labels-server";
+import type { ReviewView } from "@/lib/learn/review";
 
 vi.mock("next-intl", async (importOriginal) => {
     const original = await importOriginal<typeof NextIntl>();
@@ -249,34 +245,25 @@ describe("Czech vocabulary rendering", () => {
         expect(screen.queryByText(/has the role/)).toBeNull();
     });
 
-    it("shows translated types and relations in finished Learn results", async () => {
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(async () =>
-                Response.json({
-                    ...review,
-                    run: { id: "run", status: "finished" },
-                    items: review.items.map((item) => ({
-                        ...item,
-                        outcome: "applied",
-                    })),
-                }),
-            ),
-        );
+    it("shows translated types and relations in item Knowledge outcomes", () => {
+        const finished = {
+            ...review,
+            run: { id: "run", status: "finished" },
+            items: review.items.map((item) => ({
+                ...item,
+                outcome: "applied",
+            })),
+        } as unknown as ReviewView;
         render(
-            <LearnReview
-                recordingId="recording"
-                source="riffado"
-                turns={[]}
-                showTrigger={false}
-            />,
+            <>
+                <ItemLearnOutcomes review={finished} tab="things" />
+                <ItemLearnOutcomes review={finished} tab="facts" />
+            </>,
             { wrapper: Czech },
         );
-        fireEvent.click(
-            await screen.findByRole("button", { name: "Zobrazit výsledky" }),
-        );
         expect(screen.getByText(/Alfa \(Pojem\)/)).toBeTruthy();
-        expect(screen.getByText(/Jan Novák — má roli/)).toBeTruthy();
+        expect(screen.getByText(/Jan Novák.*má roli/)).toBeTruthy();
+        expect(screen.queryByText(/has the role/)).toBeNull();
     });
 
     it("shows translated Almanac fact headings while preserving custom relations", () => {

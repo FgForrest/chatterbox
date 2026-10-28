@@ -11,6 +11,7 @@ export type SpeakerAttributions = Readonly<Record<string, SpeakerAttribution>>;
 const SUMMARY_SPEAKER_REFERENCE =
     /\[Speaker ([0-9]+)\]\(#speaker-\1\)|\bSpeaker ([0-9]+)\b/g;
 const NUMBERED_SPEAKER = /^speaker[_ -]([0-9]+)$/i;
+const SPEAKER_LINK_TARGET = /\]\(#speaker-([0-9]+)\)/g;
 
 /** Stable fragment id used by summary placeholders and transcript speaker tags. */
 export function speakerAnchorId(speaker: string): string {
@@ -93,8 +94,11 @@ export function resolveSpeakerAttribution(
     )?.[1];
 }
 
-/** Convert plain model-authored speaker labels into stable summary links. */
-export function canonicalizeSummarySpeakerReferences(markdown: string): string {
+/** Convert speaker labels into stable links, optionally shifting to transcript numbering. */
+export function canonicalizeSummarySpeakerReferences(
+    markdown: string,
+    numberOffset = 0,
+): string {
     return markdown.replace(
         SUMMARY_SPEAKER_REFERENCE,
         (
@@ -104,7 +108,74 @@ export function canonicalizeSummarySpeakerReferences(markdown: string): string {
         ) => {
             const speakerNumber = linkedNumber ?? plainNumber;
             if (!speakerNumber) return reference;
-            return `[Speaker ${speakerNumber}](#speaker-${speakerNumber})`;
+            const shifted = offsetSpeakerLabel(
+                `speaker_${speakerNumber}`,
+                numberOffset,
+            ).slice("speaker_".length);
+            return `[Speaker ${shifted}](#speaker-${shifted})`;
+        },
+    );
+}
+
+/**
+ * Restore edited speaker links without changing their original numbering or
+ * plain names. Link text typed by hand may hold nested or stray brackets.
+ */
+export function storeEditedSpeakerReferences(markdown: string): string {
+    const escaped = new Uint8Array(markdown.length + 1);
+    for (let index = 0; index < markdown.length; index++) {
+        if (markdown[index] === "\\" && !escaped[index]) escaped[index + 1] = 1;
+    }
+    let stored = "";
+    let floor = 0;
+    for (const target of markdown.matchAll(SPEAKER_LINK_TARGET)) {
+        const close = target.index;
+        if (escaped[close]) continue;
+        let balanced = -1;
+        let nearest = -1;
+        let depth = 0;
+        for (let index = close - 1; index >= floor; index--) {
+            if (escaped[index]) continue;
+            const char = markdown[index];
+            if (char === "\n") break;
+            if (char === "]") {
+                // Another link ends here: never fold it into this one.
+                if (markdown[index + 1] === "(") break;
+                depth++;
+            } else if (char === "[") {
+                if (nearest < 0) nearest = index;
+                if (depth === 0) {
+                    balanced = index;
+                    break;
+                }
+                depth--;
+            }
+        }
+        const open = balanced >= 0 ? balanced : nearest;
+        if (open < 0) continue;
+        const number = target[1];
+        stored += `${markdown.slice(floor, open)}[Speaker ${number}](#speaker-${number})`;
+        floor = close + target[0].length;
+    }
+    return stored + markdown.slice(floor);
+}
+
+/** Show attributed names in the editor while retaining portable speaker hrefs. */
+export function summarySpeakerReferencesForEditor(
+    markdown: string,
+    attributions: SpeakerAttributions,
+    numberOffset = 0,
+): string {
+    return markdown.replace(
+        /\[Speaker ([0-9]+)\]\(#speaker-\1\)/g,
+        (reference, number: string) => {
+            const attribution = resolveSpeakerAttribution(
+                attributions,
+                offsetSpeakerLabel(`speaker_${number}`, numberOffset),
+            );
+            if (!attribution) return reference;
+            const name = attribution.name.replace(/[\\[\]]/g, "\\$&");
+            return `[${name}](#speaker-${number})`;
         },
     );
 }
@@ -143,4 +214,20 @@ export function projectSummarySpeakerReferencesForExport(
             );
         },
     );
+}
+
+/** Read the numbering captured before a human could remove speaker references. */
+export function storedSummarySpeakerNumberOffset(
+    inputs: unknown,
+): number | null {
+    if (
+        !inputs ||
+        typeof inputs !== "object" ||
+        !("speakerNumberOffset" in inputs)
+    )
+        return null;
+    const offset = inputs.speakerNumberOffset;
+    return typeof offset === "number" && Number.isSafeInteger(offset)
+        ? offset
+        : null;
 }

@@ -11,7 +11,7 @@ import { publishEvent } from "@/db/queries/events";
  */
 export type OrgEvent =
     | { type: "tree" }
-    | { type: "recording"; recordingId: string };
+    | { type: "recording"; recordingId: string; origin?: string };
 
 const CHANNEL = "riffado_org";
 
@@ -28,7 +28,13 @@ function parseEvent(payload: string): OrgEvent | null {
             value.type === "recording" &&
             typeof value.recordingId === "string"
         ) {
-            return { type: "recording", recordingId: value.recordingId };
+            return {
+                type: "recording",
+                recordingId: value.recordingId,
+                ...(typeof value.origin === "string"
+                    ? { origin: value.origin }
+                    : {}),
+            };
         }
     } catch {
         // Not ours, or truncated. Ignored rather than crashing the listener.

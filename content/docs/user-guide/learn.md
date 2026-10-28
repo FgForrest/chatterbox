@@ -51,16 +51,17 @@ You do not have to open the review: the proposals also appear in the transcript 
 
 ![What the review did](images/learn-results.png)
 
-After the review, the widget folds to **Learn complete** with **View results** while the workflow continues. Open the results to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** starts another run and shows its progress in place; tick **Re-learn: also propose again what I rejected on this recording** if you changed your mind about something.
+Finished Learn states leave the detail page. Open the book icon **Knowledge** in the item header to see the result in place of the detail content; **Back** returns. It uses the same panel as folder Knowledge, limited to this item: **Speakers** (recordings only), **People**, **Things**, **Corrections**, **Facts**, and **What the models receive**, with counts. New entries are marked, corrections show their occurrence count, and the latest review's facts distinguish new facts from facts mentioned again. Reviewers can see applied, rejected and skipped proposals in the relevant tabs. The subtitle shows when Learn finished and its applied count when known. **Re-learn** starts another run; **Propose rejected items again** clears the item's rejections first. Running, waiting, failed and stopped states remain on the detail page.
 
 Accepted corrections are kept beside the original text, never in place of it, so they can always be undone. See [Corrected words](transcripts.md#corrected-words).
 
 When the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
-When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. Learn shows **Learned from the owner's review** in the Organization view, with the review's applied and skipped counts. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
+When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. The completed state and available counts appear in the item's **Knowledge** panel. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
 
 ## Where reviews wait
 
+- The item header's **Knowledge** icon badges suggestions waiting for you. Its panel subtitle offers **Review** to open the existing review.
 - The **Needs review** filter above the recording list.
 - The badge on **Almanac**, and the **Review** tab there.
 - Sharing an item with the Organization closes its unfinished private review, and its findings stay private. Only what you confirmed in a finished review becomes Organization knowledge.

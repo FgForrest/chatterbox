@@ -17,6 +17,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    summaryRemarks,
     taskMentions,
     transcriptions,
     userSettings,
@@ -396,6 +397,20 @@ function reapCandidateWhere(
                 or(
                     exists(
                         db
+                            .select({ id: summaryRemarks.id })
+                            .from(summaryRemarks)
+                            .where(
+                                and(
+                                    eq(summaryRemarks.itemId, recordings.id),
+                                    eq(
+                                        summaryRemarks.userId,
+                                        recordings.userId,
+                                    ),
+                                ),
+                            ),
+                    ),
+                    exists(
+                        db
                             .select({ id: aiEnhancements.id })
                             .from(aiEnhancements)
                             .where(
@@ -606,14 +621,23 @@ export async function deleteSummaryForRecording(
                 ),
             )
             .returning({ id: aiEnhancements.id });
+        const removedRemarks = await tx
+            .delete(summaryRemarks)
+            .where(
+                and(
+                    eq(summaryRemarks.itemId, recordingId),
+                    eq(summaryRemarks.userId, ownerUserId),
+                ),
+            )
+            .returning({ id: summaryRemarks.id });
         await dropTasksWithoutSummaryInTx(tx, { recordingId, ownerUserId });
-        if (rows.length > 0) {
+        if (rows.length > 0 || removedRemarks.length > 0) {
             await markItemReapedInTx(tx, recordingId, ownerUserId, {
                 summaryReapedAt: at,
             });
             await touchRecording(tx, recordingId, ownerUserId, at);
         }
-        return rows.length;
+        return rows.length + removedRemarks.length;
     });
 }
 

@@ -1,14 +1,14 @@
 ---
 title: Person-shared folders accept every participant's own items while processing and exports follow ownership
 date: 2026-10-27
-updated: 2026-10-27 18:22
-status: proposed
+updated: 2026-10-28 13:25
+status: superseded
 kind: feature
 issues: []
 prs: [293]
 areas: [src/db/queries/folder-participants.ts, src/db/queries/item-shares.ts, src/lib/folders, src/lib/sharing/folder-shares.ts, src/lib/meetings, src/lib/pipeline, src/lib/profiles, src/lib/export, src/components/recordings, src/app/api/v1/recorder/folders, extensions/recorder/popup]
 supersedes: [2026-10-22-person-to-person-sharing]
-superseded-by: []
+superseded-by: [2026-10-28-agendas-use-all-folder-placements]
 relates: [2026-10-27-meeting-agendas, 2026-10-07-backup-scope]
 ---
 
@@ -18,6 +18,8 @@ An accepted folder invitation creates a place for cooperation: every participant
 mail and meeting agendas. Each item stays with its author. Reading the shared folder grants no authority
 to process another participant's recording, use their providers, change their mail or export their library.
 The maintainer accepted the ruling on 2026-10-27; this implementation is awaiting integration.
+
+**Superseded in part:** [Multi-folder agenda filing](2026-10-28-agendas-use-all-folder-placements.md) changes the dedicated standalone agenda unfiling mutation; it now delegates to the recording filing helper. The remaining rules still hold.
 
 ## Why
 

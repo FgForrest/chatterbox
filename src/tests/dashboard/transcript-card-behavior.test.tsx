@@ -352,10 +352,9 @@ describe("transcript card behavior", () => {
             screen.getByText("Test provider").closest("[hidden]"),
         ).toBeNull();
         expect(screen.getByText("Test model")).toBeTruthy();
-        expect(
-            screen.getByText("Detected language:", { exact: false })
-                .textContent,
-        ).toContain("Czech");
+        expect(screen.getByText("Czech (detected)").textContent).toContain(
+            "Czech",
+        );
         expect(screen.getByText("words", { exact: false })).toBeTruthy();
         expect(screen.getByText("characters", { exact: false })).toBeTruthy();
         fireEvent.click(

@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-    AGENDA_PANEL_KEY,
+    agendaPanelKey,
     canChooseRecordingAgenda,
 } from "../../../extensions/recorder/lib/agendas.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
@@ -20,17 +20,18 @@ let data;
 let session;
 let settings;
 let request;
-let onChange;
+let onChanges;
 let matches;
 const el = (id) => document.getElementById(id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 beforeEach(async () => {
     vi.useFakeTimers();
+    onChanges = [];
     document.documentElement.innerHTML = html;
     settings = { serverUrl: "https://recorder.example.com", supported: true };
     session = {
-        [AGENDA_PANEL_KEY]: { agendaIds: ["agenda-one"], tabId: 7 },
+        [agendaPanelKey(7)]: { agendaIds: ["agenda-one"], tabId: 7 },
         recordingState: { state: "idle" },
     };
     data = {
@@ -127,20 +128,21 @@ beforeEach(async () => {
                 get: vi.fn(async () => structuredClone(session)),
                 set: vi.fn(async (patch) => {
                     Object.assign(session, patch);
-                    onChange?.(
-                        Object.fromEntries(
-                            Object.entries(patch).map(([key, newValue]) => [
-                                key,
-                                { newValue },
-                            ]),
-                        ),
-                        "session",
-                    );
+                    for (const onChange of onChanges)
+                        onChange(
+                            Object.fromEntries(
+                                Object.entries(patch).map(([key, newValue]) => [
+                                    key,
+                                    { newValue },
+                                ]),
+                            ),
+                            "session",
+                        );
                 }),
             },
             onChanged: {
                 addListener: (fn) => {
-                    onChange = fn;
+                    onChanges.push(fn);
                 },
             },
         },
@@ -155,9 +157,11 @@ afterEach(() => {
     document.body.replaceChildren();
 });
 
-async function start() {
+async function start(doc = document, tabId = 7) {
     const run = new Function(
-        "AGENDA_PANEL_KEY",
+        "agendaPanelKey",
+        "document",
+        "location",
         "canChooseRecordingAgenda",
         "agendaRequest",
         "matchAgendas",
@@ -168,7 +172,11 @@ async function start() {
         `return (async () => { ${source} })();`,
     );
     await run(
-        AGENDA_PANEL_KEY,
+        agendaPanelKey,
+        doc,
+        {
+            href: `chrome-extension://test/agenda/agenda.html${tabId == null ? "" : `?tab=${tabId}`}`,
+        },
         canChooseRecordingAgenda,
         request,
         matches,
@@ -180,6 +188,94 @@ async function start() {
 }
 
 describe("agenda side panel", () => {
+    it("keeps two mounted tab panels on their own agendas for reads, edits and selection", async () => {
+        const first = document.implementation.createHTMLDocument();
+        const second = document.implementation.createHTMLDocument();
+        first.documentElement.innerHTML = html;
+        second.documentElement.innerHTML = html;
+        const rows = {
+            "agenda-one": structuredClone(data),
+            "agenda-two": {
+                ...structuredClone(data),
+                id: "agenda-two",
+                title: "Aurora planning",
+            },
+        };
+        request.mockImplementation(async (path) =>
+            structuredClone(rows[path.split("/")[1]]),
+        );
+        await start(first, 7);
+        await chrome.storage.session.set({
+            [agendaPanelKey(8)]: { agendaIds: ["agenda-two"], tabId: 8 },
+        });
+        await settle();
+        await start(second, 8);
+        expect(first.getElementById("title").textContent).toBe("Acme review");
+        expect(second.getElementById("title").textContent).toBe(
+            "Aurora planning",
+        );
+        for (const [doc, id] of [
+            [first, "agenda-one"],
+            [second, "agenda-two"],
+        ]) {
+            doc.getElementById("live").click();
+            const note = doc.querySelector('#points input[type="text"]');
+            note.value = `Note for ${id}`;
+            note.dispatchEvent(new Event("change"));
+            await settle();
+            expect(request).toHaveBeenCalledWith(
+                `/${id}/points/p1`,
+                expect.objectContaining({
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        version: 2,
+                        note: `Note for ${id}`,
+                    }),
+                }),
+            );
+            doc.querySelector("#tasks button").click();
+            await settle();
+            expect(request).toHaveBeenCalledWith(
+                `/${id}/tasks/task-one`,
+                expect.objectContaining({ method: "PATCH" }),
+            );
+        }
+        request.mockClear();
+        await chrome.storage.session.set({
+            [agendaPanelKey(8)]: { agendaIds: ["agenda-two"], tabId: 8 },
+        });
+        await settle();
+        expect(request.mock.calls.map(([path]) => path)).toEqual([
+            "/agenda-two",
+        ]);
+        first.getElementById("other").click();
+        await settle();
+        first.querySelector("#choice-list button").click();
+        await settle();
+        expect(session[agendaPanelKey(7)]).toMatchObject({
+            agendaIds: ["agenda-one"],
+            tabId: 7,
+        });
+        expect(session[agendaPanelKey(8)]).toMatchObject({
+            agendaIds: ["agenda-two"],
+            tabId: 8,
+        });
+    });
+    it("reads and listens only to the fallback window context without a tab query", async () => {
+        session[agendaPanelKey()] = { agendaIds: ["agenda-one"] };
+        await start(document, null);
+        request.mockClear();
+        await chrome.storage.session.set({
+            [agendaPanelKey(7)]: { agendaIds: ["agenda-two"] },
+        });
+        await settle();
+        expect(request).not.toHaveBeenCalled();
+        await chrome.storage.session.set({
+            [agendaPanelKey()]: { agendaIds: ["agenda-one"] },
+        });
+        await settle();
+        expect(request).toHaveBeenCalledExactlyOnceWith("/agenda-one");
+    });
     it("shows prep outline, nested points, task groups, notes and the stable app link", async () => {
         await start();
         expect(el("title").textContent).toBe("Acme review");

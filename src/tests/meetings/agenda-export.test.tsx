@@ -9,7 +9,10 @@ import {
 } from "@testing-library/react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgendaExport } from "@/components/meetings/agenda-export";
+import {
+    AgendaCalendarExport,
+    AgendaExport,
+} from "@/components/meetings/agenda-export";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { detail } from "./ui-fixtures";
 
@@ -50,27 +53,22 @@ afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
 });
-async function openMenu() {
-    const trigger = screen.getByRole("button", { name: "Agenda export" });
-    await act(async () => fireEvent.keyDown(trigger, { key: "Enter" }));
-}
 describe("export visibility", () => {
     it("hides Calendar export without a linked event", async () => {
         render(<AgendaExport detail={detail()} />);
-        await openMenu();
         expect(
-            screen.getByRole("menuitem", { name: "Copy agenda Markdown" }),
+            screen.getByRole("button", { name: "Copy agenda Markdown" }),
         ).toBeTruthy();
         expect(
-            screen.getByRole("menuitem", { name: "Download agenda Markdown" }),
+            screen.getByRole("link", { name: "Download agenda Markdown" }),
         ).toBeTruthy();
         expect(
-            screen.queryByRole("menuitem", { name: /Google Calendar/ }),
+            screen.queryByRole("button", { name: /Google Calendar/ }),
         ).toBeNull();
     });
     it("disables Calendar export with the organizer reason", async () => {
         render(
-            <AgendaExport
+            <AgendaCalendarExport
                 detail={detail({
                     calendarEventId: "event",
                     calendar: {
@@ -83,27 +81,25 @@ describe("export visibility", () => {
                 })}
             />,
         );
-        await openMenu();
         expect(
             screen
-                .getByRole("menuitem", { name: /Google Calendar/ })
-                .getAttribute("aria-disabled"),
-        ).toBe("true");
+                .getByRole("button", { name: /Google Calendar/ })
+                .hasAttribute("disabled"),
+        ).toBe(true);
         expect(
             screen.getByText(/Only the event organizer, Dana Nováková/),
         ).toBeTruthy();
     });
     it("copies the server Markdown and downloads the same endpoint", async () => {
         render(<AgendaExport detail={detail()} />);
-        await openMenu();
         expect(
             screen
-                .getByRole("menuitem", { name: "Download agenda Markdown" })
+                .getByRole("link", { name: "Download agenda Markdown" })
                 .getAttribute("href"),
         ).toBe("/api/meetings/agenda/markdown?locale=en");
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("menuitem", { name: "Copy agenda Markdown" }),
+                screen.getByRole("button", { name: "Copy agenda Markdown" }),
             ),
         );
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -132,12 +128,13 @@ describe("export visibility", () => {
         });
         fetchMock.mockReturnValueOnce(response);
         render(<AgendaExport detail={detail()} />);
-        const trigger = screen.getByRole("button", { name: "Agenda export" });
+        const trigger = screen.getByRole("button", {
+            name: "Copy agenda Markdown",
+        });
         act(() => trigger.focus());
-        await openMenu();
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("menuitem", { name: "Copy agenda Markdown" }),
+                screen.getByRole("button", { name: "Copy agenda Markdown" }),
             ),
         );
         await waitFor(() => expect(document.activeElement).toBe(trigger));
@@ -151,7 +148,7 @@ describe("export visibility", () => {
             );
         else
             expect(toast.error).toHaveBeenCalledWith(
-                "Could not copy the agenda",
+                "Failed to copy agenda Markdown",
             );
     });
     it.each([
@@ -159,7 +156,7 @@ describe("export visibility", () => {
         null,
     ])("previews without tasks and hands off consent with organizer permission %s", async (canExportCalendar) => {
         render(
-            <AgendaExport
+            <AgendaCalendarExport
                 detail={detail({
                     calendarEventId: "event",
                     canExportCalendar,
@@ -172,12 +169,11 @@ describe("export visibility", () => {
                 })}
             />,
         );
-        await openMenu();
         expect(
             screen
-                .getByRole("menuitem", { name: /Google Calendar/ })
-                .getAttribute("aria-disabled"),
-        ).not.toBe("true");
+                .getByRole("button", { name: /Google Calendar/ })
+                .hasAttribute("disabled"),
+        ).toBe(false);
         if (canExportCalendar === null)
             expect(
                 screen.getByText(
@@ -186,7 +182,7 @@ describe("export visibility", () => {
             ).toBeTruthy();
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("menuitem", { name: /Google Calendar/ }),
+                screen.getByRole("button", { name: /Google Calendar/ }),
             ),
         );
         await waitFor(() =>
@@ -228,17 +224,16 @@ describe("export visibility", () => {
     });
     it("shows the fresh organizer refusal when cached permission was unknown", async () => {
         render(
-            <AgendaExport
+            <AgendaCalendarExport
                 detail={detail({
                     calendarEventId: "event",
                     canExportCalendar: null,
                 })}
             />,
         );
-        await openMenu();
         await act(async () =>
             fireEvent.click(
-                screen.getByRole("menuitem", { name: /Google Calendar/ }),
+                screen.getByRole("button", { name: /Google Calendar/ }),
             ),
         );
         await waitFor(() =>

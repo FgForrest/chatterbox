@@ -16,6 +16,9 @@ const { emailLogMock, renderMock, smtpMock, nodemailerMock } = vi.hoisted(
     }),
 );
 
+vi.mock("@/lib/i18n/user-time-zone", () => ({
+    userTimeZone: vi.fn().mockResolvedValue("UTC"),
+}));
 vi.mock("@/db/queries/email-log", () => emailLogMock);
 vi.mock("@/lib/notifications/render-email", () => renderMock);
 vi.mock("@/lib/smtp", () => smtpMock);

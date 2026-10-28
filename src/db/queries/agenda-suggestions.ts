@@ -24,6 +24,7 @@ import {
     agendaSuggestions,
     aiEnhancements,
     chatterItems,
+    mailContents,
     meetingAgendas,
     recordingFolderAssignments,
     recordings,
@@ -36,7 +37,7 @@ const mentionItem = alias(chatterItems, "agenda_mention_item");
 const preferredSummary = alias(aiEnhancements, "agenda_preferred_summary");
 
 /** Visible summaries of folder arrivals since the previous held or recorded meeting. */
-export async function agendaSuggestionInputs(input: {
+async function folderSuggestionInputs(input: {
     agenda: typeof meetingAgendas.$inferSelect;
     folderId: string;
     userId: string;
@@ -106,6 +107,9 @@ export async function agendaSuggestionInputs(input: {
                 itemId: chatterItems.id,
                 source: aiEnhancements.source,
                 summary: aiEnhancements.summary,
+                language: sql<
+                    string | null
+                >`case when ${chatterItems.kind} = 'audio' then ${recordings.confirmedLanguage} else ${mailContents.language} end`,
             })
             .from(recordingFolderAssignments)
             .innerJoin(
@@ -117,6 +121,20 @@ export async function agendaSuggestionInputs(input: {
                 and(
                     eq(aiEnhancements.itemId, chatterItems.id),
                     eq(aiEnhancements.userId, chatterItems.userId),
+                ),
+            )
+            .leftJoin(
+                recordings,
+                and(
+                    eq(recordings.id, chatterItems.id),
+                    eq(recordings.userId, chatterItems.userId),
+                ),
+            )
+            .leftJoin(
+                mailContents,
+                and(
+                    eq(mailContents.itemId, chatterItems.id),
+                    eq(mailContents.userId, chatterItems.userId),
                 ),
             )
             .where(
@@ -180,4 +198,39 @@ export async function agendaSuggestionInputs(input: {
             ),
     ]);
     return { summaries, tasks, points, suggestions };
+}
+
+/** Combine each folder's activity since its own previous meeting, without duplicated sources. */
+export async function agendaSuggestionInputs(input: {
+    agenda: typeof meetingAgendas.$inferSelect;
+    folderId: string | readonly string[];
+    userId: string;
+    orgUserId: string | null;
+    viewer: TaskViewer;
+}) {
+    const folderIds =
+        typeof input.folderId === "string" ? [input.folderId] : input.folderId;
+    const results = await Promise.all(
+        (folderIds.length ? [...new Set(folderIds)] : [""]).map((folderId) =>
+            folderSuggestionInputs({ ...input, folderId }),
+        ),
+    );
+    return {
+        summaries: [
+            ...new Map(
+                results
+                    .flatMap((result) => result.summaries)
+                    .map((row) => [row.itemId, row]),
+            ).values(),
+        ],
+        tasks: [
+            ...new Map(
+                results
+                    .flatMap((result) => result.tasks)
+                    .map((row) => [row.id, row]),
+            ).values(),
+        ],
+        points: results[0].points,
+        suggestions: results[0].suggestions,
+    };
 }

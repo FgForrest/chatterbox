@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { aiEnhancements } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { storedSummarySpeakerNumberOffset } from "@/lib/knowledge/speaker-references";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import type { RecordingView } from "@/lib/sharing/view";
 import type {
@@ -21,6 +22,12 @@ import type {
 import type { MultiPassProvenance } from "./multi-pass";
 
 export interface StoredSummary {
+    id: string;
+    speakerNumberOffset: number | null;
+    editedAt: Date | null;
+    editedByUserId: string | null;
+    revision: number;
+    remarksAppliedCount: number;
     /** Null for a row that exists but carries no summary text. */
     summary: string | null;
     keyPoints: string[];
@@ -120,6 +127,14 @@ export function storedSummaryOf(
     scopeChanged = false,
 ): StoredSummary {
     return {
+        id: enhancement.id,
+        speakerNumberOffset: storedSummarySpeakerNumberOffset(
+            enhancement.inputs,
+        ),
+        editedAt: enhancement.editedAt ?? null,
+        editedByUserId: enhancement.editedByUserId ?? null,
+        revision: enhancement.revision ?? 0,
+        remarksAppliedCount: enhancement.remarksAppliedCount ?? 0,
         // Legacy plaintext rows pass through verbatim during the backfill
         // window; `decryptText` is a no-op on them.
         summary: decryptText(enhancement.summary) ?? null,

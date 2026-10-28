@@ -24,7 +24,8 @@ import type { Recording } from "@/types/recording";
 const router = vi.hoisted(() => ({
     canonicalUrl: "/dashboard",
     refresh: vi.fn(),
-    forwardInternalState: false,
+    push: vi.fn(),
+    replace: vi.fn(),
 }));
 
 vi.mock("@/components/meetings/recording-agenda", () => ({
@@ -39,7 +40,11 @@ vi.mock("@/components/meetings/recording-agenda", () => ({
     }) => children({ notice: null, agenda: null, nextMeeting: null }),
 }));
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: router.refresh }),
+    useRouter: () => ({
+        refresh: router.refresh,
+        push: router.push,
+        replace: router.replace,
+    }),
     useSearchParams: () =>
         new URL(router.canonicalUrl, window.location.origin).searchParams,
 }));
@@ -293,8 +298,17 @@ const props: ComponentProps<typeof Workstation> = {
 
 beforeEach(() => {
     router.canonicalUrl = "/dashboard";
-    router.forwardInternalState = false;
     router.refresh.mockClear();
+    for (const method of ["push", "replace"] as const) {
+        router[method].mockReset().mockImplementation((url: string) => {
+            router.canonicalUrl = url;
+            window.history[method === "push" ? "pushState" : "replaceState"](
+                { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] } },
+                "",
+                url,
+            );
+        });
+    }
     window.history.replaceState(
         { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: [] } },
         "",
@@ -304,8 +318,6 @@ beforeEach(() => {
         const original = window.history[method].bind(window.history);
         vi.spyOn(window.history, method).mockImplementation(
             (data, unused, url) => {
-                if (router.forwardInternalState)
-                    data = { ...window.history.state, ...data };
                 if (data?.__NA || data?._N) return original(data, unused, url);
                 const nextState = {
                     ...data,
@@ -525,28 +537,22 @@ describe("arrival selection", () => {
         ).toBe(true);
     });
 
-    it("reproduces the newest-item jump when pre-fix writes forward __NA", async () => {
-        router.forwardInternalState = true;
+    it("keeps the selection when Next's own history writes include internal markers", async () => {
         const { rerender } = await selectBeforeArrival(unfiled, privateFolder);
-        expect(window.location.search).toContain(`recording=${unfiled.id}`);
-        expect(router.canonicalUrl).toBe(
-            `/dashboard?folder=${privateFolder.id}`,
+        expect(window.history.pushState).toHaveBeenLastCalledWith(
+            { mobileView: "detail" },
+            "",
+            expect.stringContaining(`recording=${unfiled.id}`),
+        );
+        const url = window.location.href;
+        expect(new URL(router.canonicalUrl, window.location.origin).href).toBe(
+            url,
         );
         await deliverArrivals(rerender);
+        expect(window.location.href).toBe(url);
         expect(
-            screen.queryByRole("heading", { name: unfiled.filename }),
-        ).toBeNull();
-        expect(
-            screen
-                .getByRole("button", { name: "Zelra new mail" })
-                .getAttribute("aria-pressed"),
-        ).toBe("true");
-        expect(window.location.search).toBe(
-            `?folder=${privateFolder.id}&recording=arrival-mail-zelra`,
-        );
-        expect(screen.getByTestId("selected-folder").textContent).toBe(
-            privateFolder.id,
-        );
+            screen.getByRole("heading", { name: unfiled.filename }),
+        ).toBeTruthy();
     });
 });
 
@@ -598,15 +604,16 @@ describe("unfiled selection", () => {
         ).toBe(true);
     });
 
-    it("lets Next synchronize selection writes without passing its internal history keys", async () => {
+    it("synchronizes native selections with Next without router navigation", async () => {
         await selectUnfiled();
-        const push = vi.mocked(window.history.pushState);
-        expect(push).toHaveBeenLastCalledWith(
-            { mobileView: "detail" },
-            "",
-            `/dashboard?recording=${unfiled.id}`,
-        );
-        expect(router.canonicalUrl).toBe(`/dashboard?recording=${unfiled.id}`);
+        expect(router.push).not.toHaveBeenCalled();
+        expect(router.replace).not.toHaveBeenCalled();
+        expect(
+            new URL(
+                router.canonicalUrl,
+                window.location.origin,
+            ).searchParams.get("recording"),
+        ).toBe(unfiled.id);
     });
 
     it("does not refresh the dashboard using the previous item's transcript state", async () => {

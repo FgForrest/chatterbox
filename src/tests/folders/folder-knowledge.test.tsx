@@ -13,8 +13,12 @@ import type { ComponentProps } from "react";
 import type { TranslationValues } from "use-intl/core";
 import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
+import {
+    FolderKnowledgePanel,
+    KnowledgePanel,
+} from "@/components/dashboard/folder-knowledge-panel";
 import { LibraryLocationHeader } from "@/components/dashboard/library-location-header";
+import { transcriptSpeakerTags } from "@/components/dashboard/transcription-panel";
 import { Workstation } from "@/components/dashboard/workstation";
 import type { useOrgEvents } from "@/hooks/use-org-events";
 import {
@@ -32,6 +36,8 @@ import type { Recording } from "@/types/recording";
 const mocks = vi.hoisted(() => ({
     orgEvents: vi.fn<typeof useOrgEvents>(),
     refresh: vi.fn(),
+    push: (url: string) => window.history.pushState({}, "", url),
+    replace: (url: string) => window.history.replaceState({}, "", url),
     fetch: vi.fn<typeof fetch>(),
 }));
 vi.mock("next-intl", async (importOriginal) => {
@@ -63,7 +69,11 @@ vi.mock("next-intl", async (importOriginal) => {
     };
 });
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: mocks.refresh }),
+    useRouter: () => ({
+        refresh: mocks.refresh,
+        push: mocks.push,
+        replace: mocks.replace,
+    }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
@@ -355,7 +365,8 @@ describe("folder knowledge header", () => {
             />,
         );
         const button = screen.getByRole("button", { name: "Knowledge" });
-        expect(button.className).toContain("text-organization");
+        expect(button.querySelector("svg.text-organization")).toBeTruthy();
+        expect(button.className).not.toContain("text-organization");
         fireEvent.click(button);
         expect(open).toHaveBeenCalledWith(org);
     });
@@ -619,6 +630,79 @@ const workstationProps: ComponentProps<typeof Workstation> = {
     },
 };
 
+it.each([
+    "en",
+    "cs-CZ",
+] as const)("uses the transcript chips' zero-based speaker labels in Knowledge (%s)", async (locale) => {
+    const turns = Array.from({ length: 4 }, (_, index) => ({
+        speaker: `speaker_${index}`,
+        text: "Hello",
+        startMs: index * 1000,
+        endMs: (index + 1) * 1000,
+    }));
+    const chips = transcriptSpeakerTags({
+        source: "riffado",
+        text: "Hello",
+        turns,
+    });
+    mocks.fetch.mockResolvedValue(
+        Response.json({
+            tab: "speakers",
+            total: 4,
+            nextOffset: null,
+            itemCount: 1,
+            subfolderCount: 0,
+            item: {
+                id: "item",
+                kind: "audio",
+                title: "Invented item",
+                canReview: false,
+                speakers: turns.map((turn) => ({
+                    label: turn.speaker,
+                    name: null,
+                    status: null,
+                    source: null,
+                    unknown: false,
+                })),
+                newRecordIds: [],
+                counts: {
+                    speakers: 4,
+                    people: 0,
+                    things: 0,
+                    corrections: 0,
+                    facts: 0,
+                    models: 5,
+                },
+                learn: null,
+                review: null,
+            },
+        }),
+    );
+    render(
+        <IntlProvider
+            locale={locale}
+            messages={messagesForLocale(locale)}
+            timeZone="UTC"
+        >
+            <KnowledgePanel
+                scope={{
+                    kind: "item",
+                    itemId: "item",
+                    itemKind: "audio",
+                    title: "Invented item",
+                }}
+                onBack={vi.fn()}
+            />
+        </IntlProvider>,
+    );
+    for (const [index, chip] of chips.entries()) {
+        expect(chip.label).toBe(`Speaker ${index}`);
+        expect(
+            await screen.findByRole("cell", { name: chip.label }),
+        ).toBeTruthy();
+    }
+});
+
 describe("dashboard folder knowledge navigation", () => {
     it("toggles Knowledge closed, restores the list and item, and can reopen it", async () => {
         render(<Workstation {...workstationProps} />);
@@ -786,4 +870,222 @@ describe("dashboard folder knowledge navigation", () => {
         ).toBeNull();
         expect(screen.getByText("Item detail")).toBeTruthy();
     });
+});
+
+describe.each([
+    "folder",
+    "audio",
+    "mail",
+] as const)("shared Knowledge body for %s", (kind) => {
+    function mount() {
+        const back = vi.fn();
+        const review = vi.fn();
+        render(
+            kind === "folder" ? (
+                <FolderKnowledgePanel folder={folder} onBack={back} />
+            ) : (
+                <KnowledgePanel
+                    scope={{
+                        kind: "item",
+                        itemId: "item",
+                        itemKind: kind,
+                        title: "Invented item",
+                        view: "org",
+                    }}
+                    onBack={back}
+                    onReview={review}
+                />
+            ),
+        );
+        return { back, review };
+    }
+    beforeEach(() => {
+        mocks.fetch.mockImplementation(async (input) => {
+            const tab =
+                new URL(String(input), "http://localhost").searchParams.get(
+                    "tab",
+                ) ?? "people";
+            return Response.json({
+                ...response(tab === "speakers" ? "people" : tab),
+                ...(kind !== "folder"
+                    ? {
+                          tab,
+                          ...(tab === "speakers"
+                              ? { total: 1, nextOffset: null }
+                              : {}),
+                          item: {
+                              id: "item",
+                              kind,
+                              title: "Invented item",
+                              canReview: true,
+                              speakers: [
+                                  {
+                                      label: "speaker_0",
+                                      name: "Vesna Kulra",
+                                      status: "confirmed",
+                                      source: "calendar",
+                                      unknown: false,
+                                  },
+                              ],
+                              newRecordIds: ["person"],
+                              counts: {
+                                  speakers: 1,
+                                  people: 1,
+                                  things: 1,
+                                  corrections: 1,
+                                  facts: 1,
+                                  models: 5,
+                              },
+                              learn: {
+                                  status: "ready",
+                                  pending: 2,
+                                  at: "2026-10-28T14:02:00Z",
+                                  applied: 0,
+                              },
+                              review: null,
+                          },
+                      }
+                    : {}),
+            });
+        });
+    });
+    it("uses the same tabs, active-tab cache, keyboard navigation and Back", async () => {
+        const { back, review } = mount();
+        await screen.findByText("Vesna Kulra");
+        expect(String(mocks.fetch.mock.calls[0][0])).toContain(
+            kind === "folder"
+                ? "/api/folders/folder/knowledge"
+                : "/api/items/item/knowledge",
+        );
+        if (kind !== "folder") {
+            expect(String(mocks.fetch.mock.calls[0][0])).toContain("view=org");
+            fireEvent.click(screen.getByRole("button", { name: "Review" }));
+            expect(review).toHaveBeenCalledOnce();
+        }
+        fireEvent.click(screen.getByRole("tab", { name: /^Corrections/ }));
+        await screen.findByText("nulvo");
+        fireEvent.click(screen.getByRole("tab", { name: /^People/ }));
+        await screen.findByText("Vesna Kulra");
+        const reads = mocks.fetch.mock.calls.length;
+        fireEvent.click(screen.getByRole("tab", { name: /^Corrections/ }));
+        await screen.findByText("nulvo");
+        expect(mocks.fetch).toHaveBeenCalledTimes(reads);
+        fireEvent.keyDown(screen.getByRole("tab", { name: /^Corrections/ }), {
+            key: "End",
+        });
+        if (kind === "mail")
+            await screen.findByText(
+                "The model receives the message text, with no Almanac.",
+            );
+        else await screen.findByText("Below limit");
+        if (kind !== "folder")
+            expect(
+                screen.queryByText(/Transcription language from/),
+            ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Back" }));
+        expect(back).toHaveBeenCalledOnce();
+    });
+    it("recovers an active-tab request after a failure", async () => {
+        mocks.fetch.mockResolvedValueOnce(new Response("", { status: 503 }));
+        mount();
+        await screen.findByRole("alert");
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        await screen.findByText("Vesna Kulra");
+        expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    });
+    if (kind !== "folder") {
+        it("shows no Learn subtitle to recipients", async () => {
+            mocks.fetch.mockResolvedValue(
+                Response.json({
+                    ...response("people"),
+                    item: {
+                        id: "item",
+                        kind,
+                        canReview: false,
+                        modelContextAvailable: false,
+                        speakers: [],
+                        newRecordIds: [],
+                        counts: {
+                            people: 0,
+                            things: 0,
+                            corrections: 0,
+                            facts: 0,
+                            speakers: 0,
+                            models: 0,
+                        },
+                        learn: null,
+                        review: null,
+                    },
+                }),
+            );
+            render(
+                <KnowledgePanel
+                    scope={{
+                        kind: "item",
+                        itemId: "item",
+                        itemKind: kind,
+                        title: "Invented item",
+                        view: "received",
+                    }}
+                    onBack={vi.fn()}
+                />,
+            );
+            await screen.findByText("Vesna Kulra");
+            expect(screen.queryByText(/Learn/)).toBeNull();
+            expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+        });
+        it.each([
+            [null, null, null],
+            [7, null, null],
+            [7, 3, 2],
+            [7, null, 2],
+            [7, 3, null],
+        ] as const)("renders finished Learn counts accurately (applied=%s, skipped=%s, dismissed=%s)", async (applied, skipped, dismissed) => {
+            mocks.fetch.mockImplementation(async () =>
+                Response.json({
+                    ...response("people"),
+                    item: {
+                        id: "item",
+                        kind,
+                        title: "Invented item",
+                        canReview: false,
+                        modelContextAvailable: true,
+                        speakers: [],
+                        newRecordIds: [],
+                        counts: {
+                            people: 1,
+                            things: 0,
+                            corrections: 0,
+                            facts: 0,
+                            speakers: 0,
+                            models: 5,
+                        },
+                        learn: {
+                            status: "finished",
+                            pending: 0,
+                            at: "2026-10-28T14:02:00Z",
+                            applied,
+                            skipped,
+                            dismissed,
+                        },
+                        review: null,
+                    },
+                }),
+            );
+            mount();
+            await screen.findByText(/Learn complete/);
+            if (applied === null)
+                expect(screen.queryByText(/changes? applied/)).toBeNull();
+            else expect(screen.getByText(/7 changes applied/)).toBeTruthy();
+            if (skipped === null || dismissed === null)
+                expect(screen.queryByText(/skipped|rejected/)).toBeNull();
+            else
+                expect(
+                    screen.getByText("3 skipped, 2 rejected").textContent,
+                ).toBe("3 skipped, 2 rejected");
+            expect(
+                screen.queryByRole("button", { name: "Re-learn" }),
+            ).toBeNull();
+        });
+    }
 });

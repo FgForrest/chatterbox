@@ -346,7 +346,10 @@ suite("meeting processing pipeline (PostgreSQL)", () => {
         expect(await loadRecordingAgenda("owner", "previous")).toBeNull();
     });
     it("stores encrypted outcomes with the summary and overwrites all prior classifications", async () => {
-        expect(await write()).toEqual({ committed: true });
+        expect(await write()).toMatchObject({
+            committed: true,
+            summaryVersion: { id: expect.any(String), revision: 0 },
+        });
         const [agenda] = await db.select().from(meetingAgendas);
         expect(decryptJsonField(agenda.outcomeUnplanned)).toEqual([
             "Unplanned topic",
@@ -364,7 +367,10 @@ suite("meeting processing pipeline (PostgreSQL)", () => {
                     .where(eq(agendaPoints.id, "p1"))
             )[0].summaryOutcome,
         ).toBe("not_covered");
-        expect(await write(1, ["p1", "foreign"])).toEqual({ committed: true });
+        expect(await write(1, ["p1", "foreign"])).toMatchObject({
+            committed: true,
+            summaryVersion: { id: summary.id, revision: 1 },
+        });
         expect(
             (
                 await db

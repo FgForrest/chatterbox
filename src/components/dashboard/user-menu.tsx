@@ -27,9 +27,10 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { useTheme } from "@/hooks/use-theme";
 import { signOut } from "@/lib/auth-client";
-import { formatCompactRelativeTime, formatDateTime } from "@/lib/format-date";
+import { formatCompactRelativeTime } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 
 interface UserMenuProps {
@@ -76,6 +77,7 @@ export function UserMenu({
 }: UserMenuProps) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const { push, refresh } = useRouter();
     const { openHelp } = useHelp();
     const { theme, setTheme } = useTheme(initialTheme);

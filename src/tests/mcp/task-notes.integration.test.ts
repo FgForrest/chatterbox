@@ -256,7 +256,10 @@ describeWithDatabase("MCP task notes (PostgreSQL)", () => {
             note_by: { id: "author" },
             version: 2,
         });
-        expect(vi.mocked(notifyIfShared)).toHaveBeenCalledWith("shared");
+        expect(vi.mocked(notifyIfShared)).toHaveBeenCalledWith(
+            "shared",
+            undefined,
+        );
     });
 
     it.each([

@@ -157,7 +157,10 @@ function toValidDate(d: Date | null | undefined): Date | null {
     return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatDate(d: Date | null | undefined): string {
+export function formatDate(
+    d: Date | null | undefined,
+    timeZone = "UTC",
+): string {
     const date = toValidDate(d);
     if (!date) return "—";
     return date.toLocaleString("en-US", {
@@ -166,6 +169,7 @@ export function formatDate(d: Date | null | undefined): string {
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
+        timeZone,
     });
 }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { readEventOrigin } from "@/lib/events/origin";
 import { searchMergeCandidates } from "@/lib/tasks/proposals";
 import {
     enforceTaskMergeSearchRateLimit,
@@ -57,6 +58,7 @@ export const POST = apiHandler<RecordingContext>(async (request, context) => {
                 body.sourceTaskId,
                 body.targetTaskId,
                 { reviewItemId: id },
+                readEventOrigin(request.headers),
             ),
         );
     }
@@ -68,5 +70,7 @@ export const POST = apiHandler<RecordingContext>(async (request, context) => {
     ) {
         throw invalid("taskIds is a list of task ids", "taskIds");
     }
-    return NextResponse.json(await mergeProposals(viewer, id, ids));
+    return NextResponse.json(
+        await mergeProposals(viewer, id, ids, readEventOrigin(request.headers)),
+    );
 });

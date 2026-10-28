@@ -696,19 +696,37 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             });
         await share();
 
-        expect(await store(OWNER)).toEqual({ committed: true });
+        expect(await store(OWNER)).toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
         expect(await store(BOB)).toEqual({
             committed: false,
             reason: "shared",
         });
-        expect(await store(orgUserId)).toEqual({ committed: true });
+        expect(await store(orgUserId)).toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
 
         await unshareRecording(OWNER, REC, { withdraw: true });
         expect(await store(orgUserId)).toEqual({
             committed: false,
             reason: "withdrawn",
         });
-        expect(await store(OWNER)).toEqual({ committed: true });
+        expect(await store(OWNER)).toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
     });
 
     it("does not attach a private task assignee when an owner's summary finishes after sharing", async () => {

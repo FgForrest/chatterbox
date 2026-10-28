@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/db";
 import { loadRecordingAgendaPresence } from "@/db/queries/agenda-presence";
 import { getActiveJob } from "@/db/queries/async-jobs";
@@ -8,6 +9,8 @@ import {
     chatterItems,
     itemProcessing,
     mailContents,
+    processingProfileRevisions,
+    processingProfiles,
     recordings,
     transcriptions,
 } from "@/db/schema";
@@ -15,6 +18,7 @@ import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { DEMO_SUMMARIES, isDemoRecordingId } from "@/lib/demo/fixtures";
+import { decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
@@ -22,6 +26,7 @@ import { watchJob } from "@/lib/jobs/watch";
 import { llmRendering } from "@/lib/learn/llm-input";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import { mayUseProfile } from "@/lib/profiles/access";
 import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     recordingJobSubject,
@@ -36,6 +41,9 @@ import {
     recordingGone,
     writerRefusalError,
 } from "@/lib/sharing/writer";
+import { summaryCorrectionMetadata } from "@/lib/summary/correction-metadata";
+import { summaryEditState } from "@/lib/summary/corrections";
+import { assertSummaryOwner, editSummary } from "@/lib/summary/edits";
 import type { MultiPassPhase } from "@/lib/summary/multi-pass";
 import {
     encodeStreamEvent,
@@ -52,6 +60,7 @@ import {
     SUMMARY_TIMEOUT_MS,
 } from "@/lib/summary/summary-job";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -147,6 +156,39 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     });
     assertMayChange(access, userId, await actsForOrganization(actor));
 
+    const reviseWithRemarks = body.reviseWithRemarks === true;
+    const replaceEdited = body.replaceEdited === true;
+    if (reviseWithRemarks) {
+        assertSummaryOwner(access, userId);
+        if (requestedSummarySource(request) !== "riffado")
+            throw recordingGone();
+    }
+    const editState = await summaryEditState(access.ownerUserId, id);
+    if (reviseWithRemarks && !editState)
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Generate a summary before correcting it.",
+            409,
+        );
+    if (editState?.editedAt && !reviseWithRemarks && !replaceEdited) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Confirm replacing the hand-edited summary first.",
+            409,
+        );
+    }
+    if (
+        (reviseWithRemarks || replaceEdited || editState?.editedAt) &&
+        (body.revision !== editState?.revision ||
+            body.summaryId !== editState?.id)
+    ) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "The summary changed. Reload before trying again.",
+            409,
+        );
+    }
+
     const selectedProfile = profileId
         ? await resolveSelectedProfile({
               profileId,
@@ -171,7 +213,23 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const { job } = await enqueueSummaryJob({
+    if (
+        reviseWithRemarks &&
+        (await getActiveJob(SUMMARY_JOB_KIND, recordingJobSubject(id, view)))
+    ) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "A summary is already running. Try again when it finishes.",
+            409,
+        );
+    }
+    const { job, created } = await enqueueSummaryJob({
+        ...(reviseWithRemarks ? { reviseWithRemarks: true } : {}),
+        ...(replaceEdited ? { replaceEdited: true } : {}),
+        expectedSummaryId: editState?.id ?? null,
+        ...(typeof editState?.revision === "number"
+            ? { expectedSummaryRevision: editState.revision }
+            : {}),
         userId,
         ownerUserId: access.ownerUserId,
         recordingId: id,
@@ -182,6 +240,13 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         trigger: "manual",
         view,
     });
+
+    if (reviseWithRemarks && !created)
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "A summary is already running. Try again when it finishes.",
+            409,
+        );
 
     // The JSON path stays the default. Only a caller that asks for the event
     // stream gets one, so the API tests and any client that predates
@@ -226,6 +291,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
         }
         return NextResponse.json({
+            ...(await summaryCorrectionMetadata(
+                stored,
+                view !== "received" &&
+                    access.role === "owner" &&
+                    access.orgUserId !== session.user.id,
+            )),
             summary: stored.summary,
             keyPoints: stored.keyPoints,
             actionItems: stored.actionItems,
@@ -322,6 +393,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         send({
                             type: "result",
                             result: {
+                                ...(await summaryCorrectionMetadata(
+                                    stored,
+                                    view !== "received" &&
+                                        access.role === "owner" &&
+                                        access.orgUserId !== session.user.id,
+                                )),
                                 summary: stored.summary ?? "",
                                 keyPoints: stored.keyPoints,
                                 actionItems: stored.actionItems,
@@ -503,8 +580,55 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         summaryUsesOlderContent(stored, access.contentUserId, id),
     ]);
 
+    const [summaryProfile] = await db
+        .select({
+            id: processingProfiles.id,
+            name: processingProfiles.name,
+            ownerUserId: processingProfiles.ownerUserId,
+            scope: processingProfiles.scope,
+        })
+        .from(aiEnhancements)
+        .innerJoin(
+            processingProfileRevisions,
+            eq(processingProfileRevisions.id, aiEnhancements.profileRevisionId),
+        )
+        .innerJoin(
+            processingProfiles,
+            eq(processingProfiles.id, processingProfileRevisions.profileId),
+        )
+        .where(
+            and(
+                eq(aiEnhancements.itemId, id),
+                eq(aiEnhancements.userId, access.ownerUserId),
+                eq(aiEnhancements.source, source),
+            ),
+        )
+        .limit(1);
+    const readableProfile =
+        view !== "received" &&
+        summaryProfile &&
+        (await mayUseProfile(session.user.id, summaryProfile, {
+            readOnly: true,
+        }))
+            ? summaryProfile
+            : null;
+
     return NextResponse.json({
+        ...(await summaryCorrectionMetadata(
+            stored,
+            view !== "received" &&
+                access.role === "owner" &&
+                access.orgUserId !== session.user.id,
+        )),
         summary: stored.summary,
+        profileId: readableProfile?.id ?? null,
+        profileName: readableProfile ? decryptText(readableProfile.name) : null,
+        profileVisibility:
+            view === "received" || (summaryProfile && !readableProfile)
+                ? "hidden"
+                : readableProfile
+                  ? "readable"
+                  : "unresolved",
         keyPoints: stored.keyPoints,
         actionItems: stored.actionItems,
         source: stored.source,
@@ -521,6 +645,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
         itemProfileId,
+        canEditSummary:
+            source === "riffado" &&
+            view !== "received" &&
+            access.role === "owner" &&
+            access.orgUserId !== session.user.id,
         ...agendaPresence,
     });
 });
@@ -571,26 +700,65 @@ async function summaryUsesOlderContent(
                       ),
                   )
                   .limit(1)
-            : await db
-                  .select({
-                      id: transcriptions.id,
-                      revision: transcriptions.revision,
-                  })
-                  .from(transcriptions)
-                  .where(
-                      and(
-                          eq(transcriptions.recordingId, itemId),
-                          eq(transcriptions.userId, userId),
-                          eq(transcriptions.source, source),
-                      ),
-                  )
-                  .limit(1);
+            : stored.editedAt
+              ? [await readPreferredTranscript(itemId, userId)]
+              : await db
+                    .select({
+                        id: transcriptions.id,
+                        revision: transcriptions.revision,
+                    })
+                    .from(transcriptions)
+                    .where(
+                        and(
+                            eq(transcriptions.recordingId, itemId),
+                            eq(transcriptions.userId, userId),
+                            eq(transcriptions.source, source),
+                        ),
+                    )
+                    .limit(1);
     return (
         current !== undefined &&
         (inputs.contentId !== current.id ||
             inputs.contentRevision !== current.revision)
     );
 }
+
+const editBody = z.object({
+    summary: z.string().trim().min(1).max(200_000),
+    keyPoints: z.array(z.string().max(20_000)).max(500),
+    revision: z.number().int().nonnegative(),
+    summaryId: z.string().min(1),
+});
+
+export const PUT = apiHandler<IdContext>(async (request, context) => {
+    const session = await requireApiSession(request);
+    const { id } = await (context as IdContext).params;
+    const access = await requireRecordingView(
+        session.user.id,
+        id,
+        requestedRecordingView(request),
+        { kinds: ALL_ITEM_KINDS },
+    );
+    assertSummaryOwner(access, session.user.id);
+    if (requestedSummarySource(request) !== "riffado") throw recordingGone();
+    const parsed = editBody.safeParse(await request.json().catch(() => null));
+    if (!parsed.success)
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Invalid summary edit",
+            400,
+        );
+    const stored = await editSummary({
+        access,
+        actorUserId: session.user.id,
+        itemId: id,
+        ...parsed.data,
+    });
+    return NextResponse.json({
+        success: true,
+        ...(await summaryCorrectionMetadata(stored, true)),
+    });
+});
 
 // DELETE - Remove summary
 export const DELETE = apiHandler<IdContext>(async (request, context) => {

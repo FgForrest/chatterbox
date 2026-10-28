@@ -1,9 +1,10 @@
 "use client";
 
-import { Calendar, Copy, Download, MoreHorizontal } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -13,16 +14,10 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { meetingRequest, meetingUrl } from "./api";
 import type { MeetingDetail } from "./types";
 
-export function AgendaExport({
+export function AgendaCalendarExport({
     detail,
     disabled = false,
 }: {
@@ -63,35 +58,6 @@ export function AgendaExport({
             });
         return () => controller.abort();
     }, [open, endpoint, includeTasks, detail.version]);
-    async function copy() {
-        try {
-            const response = await fetch(endpoint);
-            if (!response.ok) throw new Error();
-            const markdown = await response.text();
-            if (navigator.clipboard) {
-                await navigator.clipboard.writeText(markdown);
-            } else {
-                const focused = document.activeElement;
-                const field = document.createElement("textarea");
-                field.value = markdown;
-                field.style.position = "fixed";
-                field.style.opacity = "0";
-                field.setAttribute("aria-hidden", "true");
-                document.body.append(field);
-                try {
-                    field.select();
-                    if (!document.execCommand("copy")) throw new Error();
-                } finally {
-                    field.remove();
-                    if (focused instanceof HTMLElement && focused.isConnected)
-                        focused.focus({ preventScroll: true });
-                }
-            }
-            toast.success(i18n("Agenda Markdown copied"));
-        } catch {
-            toast.error(i18n("Could not copy the agenda"));
-        }
-    }
     async function write() {
         setBusy(true);
         try {
@@ -127,85 +93,49 @@ export function AgendaExport({
     }
     return (
         <>
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+            {detail.calendarEventId && (
+                <div className="space-y-1">
                     <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={i18n("Agenda export")}
-                        disabled={disabled}
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                            disabled || detail.canExportCalendar === false
+                        }
+                        onClick={() => setOpen(true)}
                     >
-                        <MoreHorizontal className="size-4" />
+                        <Calendar className="size-4" />
+                        {written
+                            ? i18n("Write to the Google Calendar event again…")
+                            : i18n("Write to the Google Calendar event…")}
                     </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                    align="end"
-                    className="max-w-[min(24rem,90vw)]"
-                >
-                    <DropdownMenuItem
-                        disabled={disabled}
-                        onSelect={() => void copy()}
-                    >
-                        <Copy />
-                        {i18n("Copy agenda Markdown")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem disabled={disabled} asChild>
-                        <a href={endpoint}>
-                            <Download />
-                            {i18n("Download agenda Markdown")}
-                        </a>
-                    </DropdownMenuItem>
-                    {detail.calendarEventId && (
-                        <>
-                            <DropdownMenuItem
-                                disabled={
-                                    disabled ||
-                                    detail.canExportCalendar === false
-                                }
-                                onSelect={() => setOpen(true)}
-                            >
-                                <Calendar />
-                                {written
-                                    ? i18n(
-                                          "Write to the Google Calendar event again…",
-                                      )
-                                    : i18n(
-                                          "Write to the Google Calendar event…",
-                                      )}
-                            </DropdownMenuItem>
-                            {detail.canExportCalendar === false && (
-                                <p className="px-2 pb-2 text-xs text-muted-foreground">
-                                    {detail.calendar?.organizer?.name
-                                        ? i18n(
-                                              "Only the event organizer, {name}, can do this. Send them the Markdown.",
-                                              {
-                                                  name: detail.calendar
-                                                      .organizer.name,
-                                              },
-                                          )
-                                        : i18n(
-                                              "Only the event organizer can do this. Send them the Markdown.",
-                                          )}
-                                </p>
-                            )}
-                            {detail.canExportCalendar === null && (
-                                <p className="px-2 pb-2 text-xs text-muted-foreground">
-                                    {i18n(
-                                        "Organizer access will be checked when you export.",
-                                    )}
-                                </p>
-                            )}
-                            {written && (
-                                <p className="px-2 pb-2 text-xs text-muted-foreground">
-                                    {i18n(
-                                        "Agenda is in the event. Later changes need another export.",
-                                    )}
-                                </p>
-                            )}
-                        </>
+                    {detail.canExportCalendar === false && (
+                        <p className="text-xs text-muted-foreground">
+                            {detail.calendar?.organizer?.name
+                                ? i18n(
+                                      "Only the event organizer, {name}, can do this. Send them the Markdown.",
+                                      { name: detail.calendar.organizer.name },
+                                  )
+                                : i18n(
+                                      "Only the event organizer can do this. Send them the Markdown.",
+                                  )}
+                        </p>
                     )}
-                </DropdownMenuContent>
-            </DropdownMenu>
+                    {detail.canExportCalendar === null && (
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Organizer access will be checked when you export.",
+                            )}
+                        </p>
+                    )}
+                    {written && (
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Agenda is in the event. Later changes need another export.",
+                            )}
+                        </p>
+                    )}
+                </div>
+            )}
             <Dialog
                 open={open}
                 onOpenChange={(value) => {
@@ -306,5 +236,27 @@ export function AgendaExport({
                 </DialogContent>
             </Dialog>
         </>
+    );
+}
+
+export function AgendaExport({
+    detail,
+    disabled = false,
+}: {
+    detail: MeetingDetail;
+    disabled?: boolean;
+}) {
+    const locale = useLocale();
+    return (
+        <MarkdownActions
+            kind="agenda"
+            recordingId={detail.id}
+            source=""
+            endpoint={meetingUrl(
+                detail.id,
+                `/markdown?locale=${encodeURIComponent(locale)}`,
+            )}
+            disabled={disabled}
+        />
     );
 }

@@ -4,6 +4,7 @@ import {
     AGENDA_PANEL_KEY,
     agendaCompletion,
     agendaFolder,
+    agendaPanelKey,
     agendaRequest,
     clearAgendas,
     currentAgendas,
@@ -72,7 +73,10 @@ beforeEach(() => {
             })),
         },
         runtime: { getURL: (path) => `chrome-extension://test/${path}` },
-        sidePanel: { open: vi.fn(async () => {}) },
+        sidePanel: {
+            setOptions: vi.fn(async () => {}),
+            open: vi.fn(async () => {}),
+        },
         windows: {
             WINDOW_ID_CURRENT: -2,
             getLastFocused: vi.fn(async () => ({
@@ -284,6 +288,9 @@ describe("reminder lifecycle", () => {
     it("clears private cached content, choices and notifications on disconnect", async () => {
         session[AGENDA_CACHE_KEY] = { agendas: [meeting] };
         session[AGENDA_PANEL_KEY] = { agendaIds: [meeting.id] };
+        session[agendaPanelKey(7)] = { agendaIds: [meeting.id] };
+        session[agendaPanelKey(8)] = { agendaIds: ["other"] };
+        session[agendaPanelKey()] = { agendaIds: ["fallback"] };
         await clearAgendas();
         expect(session).toEqual({});
         expect(chrome.notifications.clear).toHaveBeenCalledExactlyOnceWith(
@@ -302,8 +309,15 @@ describe("reminder lifecycle", () => {
 });
 
 describe("panel gesture and fallback", () => {
-    it("calls Chrome synchronously before touching storage", async () => {
+    it("enables only the clicked tab and opens synchronously before storage or setOptions settles", async () => {
         const order = [];
+        let enable;
+        chrome.sidePanel.setOptions.mockImplementation(() => {
+            order.push("enable");
+            return new Promise((resolve) => {
+                enable = resolve;
+            });
+        });
         chrome.sidePanel.open.mockImplementation(() => {
             order.push("open");
             return Promise.resolve();
@@ -312,10 +326,46 @@ describe("panel gesture and fallback", () => {
             order.push("store");
         });
         const result = openAgendaPanel({ tabId: 7 }, [meeting.id]);
-        expect(order).toEqual(["open", "store"]);
+        expect(order).toEqual(["enable", "open"]);
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledExactlyOnceWith({
+            tabId: 7,
+            path: "agenda/agenda.html?tab=7",
+            enabled: true,
+        });
         expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 7 });
+        enable();
         await result;
+        expect(order).toEqual(["enable", "open", "store"]);
         expect(chrome.windows.create).not.toHaveBeenCalled();
+    });
+    it("keeps two tab panels and the fallback window in separate contexts", async () => {
+        await openAgendaPanel({ tabId: 7 }, [meeting.id]);
+        await openAgendaPanel({ tabId: 8 }, ["agenda-two"]);
+        chrome.sidePanel.open.mockRejectedValueOnce(new Error("No gesture"));
+        await openAgendaPanel({ tabId: 8, matchTabId: 7 }, ["fallback"]);
+        expect(session[agendaPanelKey(7)].agendaIds).toEqual([meeting.id]);
+        expect(session[agendaPanelKey(8)].agendaIds).toEqual(["agenda-two"]);
+        expect(session[agendaPanelKey()]).toMatchObject({
+            agendaIds: ["fallback"],
+            tabId: 7,
+        });
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith({
+            tabId: 8,
+            path: "agenda/agenda.html?tab=8",
+            enabled: true,
+        });
+        expect(chrome.windows.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "chrome-extension://test/agenda/agenda.html",
+            }),
+        );
+    });
+    it("falls back if enabling the tab fails", async () => {
+        chrome.sidePanel.setOptions.mockRejectedValueOnce(
+            new Error("Tab closed"),
+        );
+        await openAgendaPanel({ tabId: 7 }, [meeting.id]);
+        expect(chrome.windows.create).toHaveBeenCalled();
     });
     it.each([
         "throw",
@@ -327,6 +377,7 @@ describe("panel gesture and fallback", () => {
         });
         await openAgendaPanel({}, [meeting.id]);
         expect(chrome.sidePanel.open).toHaveBeenCalledWith({ windowId: -2 });
+        expect(chrome.sidePanel.setOptions).not.toHaveBeenCalled();
         expect(chrome.windows.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 url: "chrome-extension://test/agenda/agenda.html",
@@ -337,7 +388,7 @@ describe("panel gesture and fallback", () => {
                 top: 130,
             }),
         );
-        expect(session[AGENDA_PANEL_KEY].agendaIds).toEqual([meeting.id]);
+        expect(session[agendaPanelKey()].agendaIds).toEqual([meeting.id]);
     });
 });
 

@@ -59,18 +59,19 @@ Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh
 
 ![Co kontrola provedla](images/learn-results.png)
 
-Po kontrole se během dalšího zpracování prvek složí na řádek **Učení dokončeno** s akcí **Zobrazit výsledky**. Ve výsledcích zjistíte, zda byl každý návrh použit, zamítnut nebo přeskočen. **Učit se znovu** spustí další běh a ukáže jeho průběh na místě; pokud jste si některý návrh rozmysleli, zaškrtněte **Učit se znovu: navrhnout znovu i to, co jsem u této nahrávky odmítl(a)**.
+Dokončené stavy Učení z detailu zmizí. Výsledky otevřete ikonou knihy **Znalosti** v záhlaví položky. Panel nahradí obsah detailu, **Zpět** jej vrátí. Je stejný jako Znalosti složky, omezený na tuto položku: **Mluvčí** (jen nahrávky), **Lidé**, **Věci**, **Opravy**, **Fakta** a **Co dostanou modely**, s počty. Nové záznamy jsou označené, opravy uvádějí počet výskytů a fakta z poslední kontroly rozlišují nové a znovu zmíněné poznatky. Kontrolující v příslušných záložkách vidí použité, zamítnuté i přeskočené návrhy. Podnadpis ukazuje čas dokončení a známý počet použitých změn. **Učit se znovu** spustí další běh; volba **Znovu navrhnout odmítnuté položky** nejprve smaže odmítnutí této položky. Průběh, čekající kontrola, chyba a zastavení zůstávají v detailu.
 
 Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, takže je lze vždy vrátit zpět. Viz [Opravená slova](transcripts.md#corrected-words).
 
 Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
 
-Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. V pohledu Organizace Učení uvádí **Naučeno z kontroly vlastníka** a počty použitých a přeskočených návrhů. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
+Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. Dokončení a dostupné počty najdete ve **Znalostech** položky. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
 
 <span id="where-reviews-wait" />
 
 ## Kde čekají kontroly
 
+- Ikona **Znalosti** v záhlaví položky má odznak s počtem návrhů čekajících na Vaši kontrolu. Podnadpis panelu nabízí **Zkontrolovat**, které otevře stávající kontrolu.
 - Filtr **Vyžaduje kontrolu** nad seznamem nahrávek.
 - Odznak na **Almanach** a záložka **Ke kontrole** tamtéž.
 - Sdílení položky s Organizací uzavře její nedokončenou soukromou kontrolu a její zjištění zůstanou soukromá. Znalostmi Organizace se stane jen to, co jste potvrdili v dokončené kontrole.

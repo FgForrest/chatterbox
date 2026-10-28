@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { getTimeZone } from "next-intl/server";
 import { getUserDetail } from "@/db/queries/admin";
 import {
     formatBytes,
@@ -18,7 +19,10 @@ export default async function AdminUserDetailPage({
     params: Promise<{ id: string }>;
 }) {
     const { id } = await params;
-    const user = await getUserDetail(id);
+    const [user, timeZone] = await Promise.all([
+        getUserDetail(id),
+        getTimeZone(),
+    ]);
     if (!user) notFound();
 
     return (
@@ -29,7 +33,7 @@ export default async function AdminUserDetailPage({
                     <h1 className="text-xl font-semibold">{user.email}</h1>
                     <div className="text-xs text-muted-foreground mt-0.5">
                         id <code className="font-mono">{user.id}</code> · joined{" "}
-                        {formatDate(user.createdAt)}
+                        {formatDate(user.createdAt, timeZone)}
                     </div>
                     {user.suspendedAt ? (
                         <div className="mt-2 text-sm border border-red-500/30 bg-red-500/10 text-red-700 rounded px-3 py-2">
@@ -132,7 +136,7 @@ export default async function AdminUserDetailPage({
                                     {r.id.slice(0, 10)}…
                                 </td>
                                 <td className="px-3 py-2 text-muted-foreground">
-                                    {formatDate(r.startTime)}
+                                    {formatDate(r.startTime, timeZone)}
                                 </td>
                                 <td className="px-3 py-2 text-right">
                                     {Math.round(r.durationMs / 1000)}s

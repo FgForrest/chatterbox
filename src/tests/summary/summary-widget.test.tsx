@@ -18,12 +18,14 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
+import type { RecordingView } from "@/lib/sharing/view";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({
     copy: vi.fn(),
     download: vi.fn(),
     handleSummarize: vi.fn(),
+    saveSummary: vi.fn().mockResolvedValue(true),
     recheckSummary: vi.fn(),
     setSummaryExpanded: vi.fn(),
     setSummaryProfileId: vi.fn(),
@@ -31,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (message: string) => message,
 }));
 
@@ -134,12 +137,15 @@ interface HookState {
     summaryProfilesLoading: boolean;
     handleSummarize: typeof mocks.handleSummarize;
     recheckSummary: typeof mocks.recheckSummary;
+    saveSummary: typeof mocks.saveSummary;
 }
 
 let state: HookState;
 
 function summary(overrides: Partial<SummaryData> = {}): SummaryData {
     return {
+        summaryId: "summary-row",
+        revision: 0,
         summary: "A concise result",
         keyPoints: ["First point"],
         actionItems: ["Send the proposal"],
@@ -171,6 +177,7 @@ function resetState(): void {
         summaryProfilesLoading: false,
         handleSummarize: mocks.handleSummarize,
         recheckSummary: mocks.recheckSummary,
+        saveSummary: mocks.saveSummary,
     };
     mocks.useSummary.mockImplementation(() => state);
 }
@@ -190,6 +197,8 @@ function widget(
 }
 
 interface RenderWidgetOptions {
+    view?: RecordingView;
+    source?: "riffado" | "plaud";
     canChange?: boolean;
     learnHold?: "running" | "correcting" | "review" | null;
     profileName?: string;
@@ -202,6 +211,8 @@ function getWidget(kind: "audio" | "mail", options: RenderWidgetOptions = {}) {
         <SummaryWidget
             itemId={`${kind}-1`}
             kind={kind}
+            view={options.view}
+            source={options.source}
             canChange={options.canChange ?? true}
             contentText="Source text"
             canSummarize
@@ -233,6 +244,174 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
+    it("edits summary prose and key points in place and cancels without a write", () => {
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        expect(screen.getByText("Editing summary")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Re-summarize" }),
+        ).toBeNull();
+        expect(screen.queryByTestId("recording-tasks")).toBeNull();
+        fireEvent.change(screen.getByLabelText(/Summary text/), {
+            target: { value: "Discarded draft" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(mocks.saveSummary).not.toHaveBeenCalled();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+    });
+
+    it("saves the two fields separately and leaves tasks out of the edit", async () => {
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        fireEvent.change(screen.getByLabelText(/Summary text/), {
+            target: {
+                value: "### Revised\n[Jitka Dvořáková](#speaker-1) agreed.",
+            },
+        });
+        fireEvent.change(screen.getByLabelText(/Key Points/), {
+            target: { value: "One\n\nTwo" },
+        });
+        await act(async () =>
+            fireEvent.click(screen.getByRole("button", { name: "Save" })),
+        );
+        expect(mocks.saveSummary).toHaveBeenCalledWith(
+            "### Revised\n[Speaker 1](#speaker-1) agreed.",
+            ["One", "Two"],
+            { summaryId: "summary-row", revision: 0 },
+        );
+    });
+
+    it.each([
+        "Re-summarize",
+        "Regenerate",
+    ])("confirms %s before replacing hand edits", (action) => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            revision: 4,
+            olderContent: true,
+        });
+        renderWidget(kind);
+        fireEvent.click(screen.getByRole("button", { name: action }));
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        const dialog = screen.getByRole("dialog");
+        fireEvent.click(
+            [...dialog.querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith(undefined, {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 4,
+        });
+    });
+
+    it("confirms the profile pencil rerun of a hand-edited summary", () => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            revision: 2,
+        });
+        renderWidget(kind);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        fireEvent.click(
+            [...screen.getByRole("dialog").querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith("profile-2", {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 2,
+        });
+    });
+
+    it("shows owner correction chips and hides both actions for readers", () => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            correctedWithRemarks: true,
+            remarksAppliedCount: 2,
+        });
+        const rendered = renderWidget(kind);
+        expect(screen.getByText("Hand-edited")).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "From remarks · {count}" }),
+        ).toBeTruthy();
+        rendered.rerender(
+            getWidget(kind, { canChange: false, view: "received" }),
+        );
+        expect(screen.getByText("Corrected from remarks")).toBeTruthy();
+        expect(screen.queryByText(/From remarks/)).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+    });
+
+    it.each([
+        { view: "received" as const },
+        { source: "plaud" as const },
+    ])("hides correction actions for $view $source even if other changes are allowed", (options) => {
+        renderWidget(kind, options);
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+    });
+
+    it.each([
+        "private",
+        "org",
+    ] as const)("offers owner corrections in the %s view", (view) => {
+        state.summaryData = summary({ canEditSummary: true });
+        renderWidget(kind, { view });
+        expect(
+            screen.getByRole("button", { name: "Edit summary" }),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Summary remarks" }),
+        ).toBeTruthy();
+    });
+
+    it("hides corrections the server denies and still confirms a writer's re-run", () => {
+        state.summaryData = summary({
+            canEditSummary: false,
+            editedAt: "2026-10-28T10:00:00Z",
+        });
+        renderWidget(kind, { view: "org" });
+        expect(
+            screen.queryByRole("button", { name: "Edit summary" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Summary remarks" }),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Re-summarize" }));
+        expect(screen.getByRole("dialog")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Write a remark" }),
+        ).toBeNull();
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+        fireEvent.click(
+            [...screen.getByRole("dialog").querySelectorAll("button")].find(
+                (button) => button.textContent === "Re-summarize",
+            ) as HTMLButtonElement,
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledWith(undefined, {
+            replaceEdited: true,
+            summaryId: "summary-row",
+            revision: 0,
+        });
+    });
+
     it("shows a settled shared step without a generating state", () => {
         state.summaryData = null;
         const data: ItemProcessingPresentation = processingFixture({
@@ -331,7 +510,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             widget: widget({ collapsed: true }),
         });
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -374,7 +555,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         });
         const rendered = renderWidget(kind);
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
         rendered.rerender(getWidget(kind));
 
         expect(screen.getByText("Generating summary…")).toBeTruthy();
@@ -386,6 +569,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
 
         fireEvent.click(screen.getByRole("button", { name: "Re-summarize" }));
         fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
             screen.getByRole("button", { name: "Choose second profile" }),
         );
         fireEvent.click(
@@ -396,7 +582,8 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             screen.getByRole("button", { name: "Collapse summary" }),
         );
 
-        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+        expect(mocks.handleSummarize).toHaveBeenCalledTimes(2);
+        expect(mocks.handleSummarize).toHaveBeenLastCalledWith("profile-2");
         expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
         expect(mocks.download).toHaveBeenCalledOnce();
         expect(mocks.copy).toHaveBeenCalledOnce();
@@ -407,7 +594,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         state.summaryData = null;
         renderWidget(kind);
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -435,6 +624,159 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
                 .getByTestId("recording-tasks")
                 .getAttribute("data-allow-add"),
         ).toBe("true");
+    });
+
+    it("keeps key points inside the summary box and metadata below the task list", () => {
+        renderWidget(kind);
+        const box = screen.getByRole("region", { name: "Summary content" });
+        expect(box.contains(screen.getByText("Key Points"))).toBe(true);
+        expect(box.contains(screen.getByText("First point"))).toBe(true);
+        expect(box.contains(screen.getByText("gpt-summary"))).toBe(false);
+        expect(screen.getByText("gpt-summary").closest("footer")).toBeTruthy();
+        expect(
+            screen
+                .getByRole("button", { name: "Collapse summary" })
+                .getAttribute("aria-expanded"),
+        ).toBe("true");
+        expect(
+            screen.getByRole("button", { name: "Re-summarize" }).textContent,
+        ).toBe("");
+    });
+
+    it("shows the producing profile with no pencil for a read-only viewer", () => {
+        state.summaryData = summary({
+            profileName: "Historical profile",
+            profileId: "old-profile",
+            profileVisibility: "readable",
+        });
+        renderWidget(kind, { canChange: false });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Historical profile")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+    it("shows the next-run selection and pencil for an owner without provenance", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "unresolved",
+        });
+        state.summaryProfileId = "profile-2";
+        renderWidget(kind, { profileName: "Assigned profile" });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Customer follow-up")).toBeTruthy();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        ).toBeTruthy();
+    });
+
+    it("shows the producing profile and pencil for an owner with provenance", () => {
+        state.summaryData = summary({
+            profileName: "Historical profile",
+            profileId: "old-profile",
+            profileVisibility: "readable",
+        });
+        renderWidget(kind);
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Historical profile")).toBeTruthy();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        ).toBeTruthy();
+    });
+
+    it.each([
+        { viewer: "recipient", canChange: false },
+        { viewer: "Organization member", canChange: false },
+    ])("hides the profile label and pencil for a $viewer with private provenance", ({
+        canChange,
+    }) => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        renderWidget(kind, { canChange, profileName: "Assigned profile" });
+        expect(screen.queryByText("Profile")).toBeNull();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        expect(screen.queryByText("Unknown")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+
+    it.each([
+        { viewer: "owner", view: "private" },
+        { viewer: "curator", view: "org" },
+    ] as const)("shows the next-run selection and working pencil for a $viewer with hidden provenance", ({
+        view,
+    }) => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        state.summaryProfileId = "profile-2";
+        renderWidget(kind, { view, profileName: "Assigned profile" });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Customer follow-up")).toBeTruthy();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+    });
+
+    it("lets a curator re-summarize with their chosen profile when provenance is hidden", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        renderWidget(kind, { view: "org" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
+        expect(mocks.handleSummarize).toHaveBeenCalledExactlyOnceWith(
+            "profile-2",
+        );
+    });
+
+    it("shows no profile label for a read-only viewer without provenance", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "unresolved",
+        });
+        renderWidget(kind, { canChange: false });
+        expect(screen.queryByText("Profile")).toBeNull();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+
+    it("choosing a profile before the first summary only sets the next profile", () => {
+        state.summaryData = null;
+        renderWidget(kind);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
     });
 
     it("does not offer adding tasks before there is a summary", () => {
@@ -584,7 +926,8 @@ it("keeps the existing no-transcript guidance and disables Summarize", () => {
         ),
     ).toBeTruthy();
     expect(
-        screen.getByRole<HTMLButtonElement>("button", { name: "Summarize" })
-            .disabled,
+        screen.getAllByRole<HTMLButtonElement>("button", {
+            name: "Summarize",
+        })[0].disabled,
     ).toBe(true);
 });

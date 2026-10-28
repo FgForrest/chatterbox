@@ -271,9 +271,10 @@ function decryptOptional(value: string | null | undefined): string | null {
 async function tasksChanged(
     ownerUserId: string,
     recordingId: string | null,
+    origin?: string,
 ): Promise<void> {
     if (!recordingId) return;
-    await notifyIfShared(recordingId);
+    await notifyIfShared(recordingId, origin);
     await refreshExistingRecordingSidecars(ownerUserId, recordingId);
     await exportRecordingSidecarsIfEnabled(ownerUserId, recordingId, "summary");
 }
@@ -1258,6 +1259,7 @@ export async function addTask(
     viewer: TaskViewer,
     recordingId: string,
     input: NewTask,
+    origin?: string,
 ): Promise<TaskView> {
     const text = cleanText(input.text);
     const dueDate = cleanDue(input.dueDate ?? null);
@@ -1322,7 +1324,7 @@ export async function addTask(
         }
         return { id: row?.id ?? "", ownerUserId: recording.ownerUserId };
     });
-    await tasksChanged(id.ownerUserId, recordingId);
+    await tasksChanged(id.ownerUserId, recordingId, origin);
     return requireTaskView(viewer, id.id);
 }
 
@@ -1348,6 +1350,7 @@ export async function updateTask(
     viewer: TaskViewer,
     taskId: string,
     change: TaskChange,
+    origin?: string,
 ): Promise<TaskView> {
     const task = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
@@ -1504,7 +1507,7 @@ export async function updateTask(
             return task;
         }),
     );
-    await tasksChanged(task.ownerUserId, task.recordingId);
+    await tasksChanged(task.ownerUserId, task.recordingId, origin);
     return requireTaskView(viewer, taskId);
 }
 
@@ -2077,6 +2080,7 @@ export async function mergeTaskIntoTask(
     sourceTaskId: string,
     targetTaskId: string,
     options: MergeTaskOptions = {},
+    origin?: string,
 ): Promise<TaskView & { mergeOwnerNotified: boolean }> {
     if (sourceTaskId === targetTaskId) {
         throw new AppError(
@@ -2290,9 +2294,13 @@ export async function mergeTaskIntoTask(
         }),
     );
     if (options.reviewItemId) nudge();
-    await tasksChanged(changed.sourceOwnerUserId, changed.sourceItemId);
+    await tasksChanged(changed.sourceOwnerUserId, changed.sourceItemId, origin);
     if (changed.targetItemId !== changed.sourceItemId) {
-        await tasksChanged(changed.targetOwnerUserId, changed.targetItemId);
+        await tasksChanged(
+            changed.targetOwnerUserId,
+            changed.targetItemId,
+            origin,
+        );
     }
     return {
         ...(await requireTaskView(viewer, changed.keepId)),
@@ -2311,6 +2319,7 @@ export async function mergeProposals(
     viewer: TaskViewer,
     recordingId: string,
     taskIds: readonly string[],
+    origin?: string,
 ): Promise<TaskView> {
     const ids = [...new Set(taskIds)];
     if (ids.length < 2) {
@@ -2406,7 +2415,7 @@ export async function mergeProposals(
         return { keepId: first.id, ownerUserId: recording.ownerUserId };
     });
     nudge();
-    await tasksChanged(merged.ownerUserId, recordingId);
+    await tasksChanged(merged.ownerUserId, recordingId, origin);
     return requireTaskView(viewer, merged.keepId);
 }
 
@@ -2509,6 +2518,7 @@ export async function acceptReview(
         updates: readonly string[];
         matches?: readonly string[];
     },
+    origin?: string,
 ): Promise<AcceptResult> {
     const [authorizedSource] = await db
         .select({
@@ -2947,9 +2957,9 @@ export async function acceptReview(
         }),
     );
     nudge();
-    await tasksChanged(result.ownerUserId, recordingId);
+    await tasksChanged(result.ownerUserId, recordingId, origin);
     for (const [other, owner] of result.touched) {
-        await tasksChanged(owner, other);
+        await tasksChanged(owner, other, origin);
     }
     return {
         accepted: result.accepted,

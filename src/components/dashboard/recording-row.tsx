@@ -34,6 +34,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import {
     RECORDING_DRAG_TYPE,
@@ -41,7 +42,6 @@ import {
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     RECORDING_SOURCE_SCOPE_DRAG_TYPES,
 } from "@/lib/folders/drag";
-import { formatDateTime } from "@/lib/format-date";
 import { formatDurationMs } from "@/lib/format-duration";
 import { recordingAudioDownloadPath } from "@/lib/recordings/filename";
 import { cn } from "@/lib/utils";
@@ -107,6 +107,7 @@ export function RecordingRow({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const confirm = useConfirm();
     const personSharing = usePersonSharing();
     const refresh = usePersonSharingRefresh();

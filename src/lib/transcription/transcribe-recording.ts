@@ -71,6 +71,7 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { summaryEditState } from "@/lib/summary/corrections";
 import { dropReplaceableTaskReviewInTx } from "@/lib/tasks/store";
 import {
     type AlmanacTerm,
@@ -311,6 +312,7 @@ export async function storeBrowserTranscription(
                         eq(aiEnhancements.itemId, recordingId),
                         eq(aiEnhancements.userId, userId),
                         eq(aiEnhancements.source, "riffado"),
+                        isNull(aiEnhancements.editedAt),
                     ),
                 );
             await dropReplaceableTaskReviewInTx(tx, {
@@ -374,7 +376,9 @@ export async function storeBrowserTranscription(
         { audioSeconds: recording.duration / 1000, reportedCostUsd: 0 },
     );
 
-    await removeRecordingSidecar(userId, recordingId, "summary", "riffado");
+    if (!(await summaryEditState(userId, recordingId))?.editedAt) {
+        await removeRecordingSidecar(userId, recordingId, "summary", "riffado");
+    }
 
     await exportRecordingSidecarsIfEnabled(
         userId,
@@ -1107,7 +1111,11 @@ async function transcribeRecordingInner(
         // on, a fresh summary is generated below; otherwise the recording
         // shows no summary until someone clicks "Generate summary". Its
         // exported file goes here.
-        if (existingTranscription?.text && opts.force) {
+        if (
+            existingTranscription?.text &&
+            opts.force &&
+            !(await summaryEditState(userId, recordingId))?.editedAt
+        ) {
             await removeRecordingSidecar(
                 userId,
                 recordingId,

@@ -115,6 +115,7 @@ export interface RunSummaryInput {
     };
     systemContent: string;
     prompt: string;
+    mergeContext?: string;
     /** The merge's system message, around the user's merge prompt. */
     mergeSystem: (mergePrompt: string) => string;
     /** Multi-pass settings, or null for one pass. */
@@ -359,7 +360,12 @@ Correct the serialization without dropping or inventing information. Return exac
             "merge",
             [
                 { role: "system", content: input.mergeSystem(mergePrompt) },
-                { role: "user", content: mergeInput },
+                {
+                    role: "user",
+                    content: [mergeInput, input.mergeContext]
+                        .filter(Boolean)
+                        .join("\n\n"),
+                },
             ],
             outputTokens,
         );

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requestTimeZone } from "@/lib/i18n/user-time-zone";
 import { exportMeetingCalendar } from "@/lib/meetings/export";
 import { meetingRoute } from "@/lib/meetings/route";
 export const POST = meetingRoute(async ({ userId, params, request }) => {
@@ -13,5 +14,6 @@ export const POST = meetingRoute(async ({ userId, params, request }) => {
         params.id,
         input.includeTasks,
         input.locale,
+        await requestTimeZone(userId, request),
     );
 });

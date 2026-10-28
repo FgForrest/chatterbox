@@ -4,7 +4,7 @@ import { translatedSourceMessage } from "@/lib/i18n/messages";
 
 const messages = {
     contextTooLarge:
-        "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the meeting context.",
+        "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the agenda context.",
     recordingAudience:
         "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
     invalidResponse:
@@ -23,7 +23,7 @@ export function meetingPipelineMessage(
 export async function extractMeetingPipelineMessages(): Promise<void> {
     const i18n = await getExtracted();
     i18n(
-        "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the meeting context.",
+        "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the agenda context.",
     );
     i18n(
         "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",

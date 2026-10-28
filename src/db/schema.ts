@@ -50,6 +50,7 @@ export const users = pgTable(
         emailVerified: boolean("email_verified").notNull().default(false),
         name: text("name"),
         uiLocale: varchar("ui_locale", { length: 10 }),
+        timeZone: varchar("time_zone", { length: 100 }),
         // 'org' marks the self-host organization account created from
         // ORG_ACCOUNT_EMAIL. It owns the shared Organization tree and the org
         // views of shared recordings, and never owns recordings of its own.
@@ -2795,6 +2796,14 @@ export const aiEnhancements = pgTable(
             { onDelete: "set null" },
         ),
         summary: text("summary"),
+        editedAt: timestamp("edited_at"),
+        editedByUserId: text("edited_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        revision: integer("revision").notNull().default(0),
+        remarksAppliedCount: integer("remarks_applied_count")
+            .notNull()
+            .default(0),
         actionItems: jsonb("action_items"), // Array of action items
         keyPoints: jsonb("key_points"), // Array of key points
         provider: varchar("provider", { length: 100 }).notNull(), // e.g., 'openai', 'anthropic-via-openrouter'
@@ -2844,12 +2853,46 @@ export const aiEnhancements = pgTable(
             table.transcriptionId,
         ),
         userIdIdx: index("ai_enhancements_user_id_idx").on(table.userId),
+        editedByIdx: index("ai_enhancements_edited_by_user_id_idx").on(
+            table.editedByUserId,
+        ),
         producedByIdx: index("ai_enhancements_produced_by_user_id_idx")
             .on(table.producedByUserId)
             .where(sql`${table.producedByUserId} is not null`),
         payerUserIdIdx: index("ai_enhancements_payer_user_id_idx")
             .on(table.payerUserId)
             .where(sql`${table.payerUserId} is not null`),
+    }),
+);
+
+export const summaryRemarks = pgTable(
+    "summary_remarks",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        itemId: text("item_id").notNull(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        authorUserId: text("author_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        text: text("text").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        itemOwnerFk: foreignKey({
+            name: "summary_remarks_item_owner_fk",
+            columns: [table.itemId, table.userId],
+            foreignColumns: [chatterItems.id, chatterItems.userId],
+        }).onDelete("cascade"),
+        ownerItemIdx: index("summary_remarks_owner_item_idx").on(
+            table.userId,
+            table.itemId,
+            table.createdAt,
+        ),
+        authorIdx: index("summary_remarks_author_idx").on(table.authorUserId),
     }),
 );
 
