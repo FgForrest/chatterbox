@@ -5,7 +5,7 @@ updated: 2026-10-28 19:31
 status: proposed
 kind: feature
 issues: [299]
-prs: [303]
+prs: [303, 304]
 areas: [src/lib/summary, src/lib/transcription/persist.ts, src/lib/pipeline, src/lib/learn/summary-refresh.ts, src/lib/export/build-archive.ts, src/db/schema.ts, src/components/summary]
 supersedes: [2026-10-22-summary-reads-the-preferred-transcript]
 superseded-by: []
@@ -91,8 +91,8 @@ out of another actor's provider request. No remark text enters the system instru
   current summary in the transcript's own numbering. Display, later edits and exports use the saved
   offset instead of inferring it from edited prose or key points. The editor projects attributed
   names; saves restore canonical `Speaker N` labels.
-- Migration `0151_summary_edits_and_remarks` adds nullable edit attribution, revision and applied-remark count to
-  `ai_enhancements`, plus owner-scoped `summary_remarks` with item-cascade deletion. User text is
+- Migration `0151_summary_edits_and_remarks` adds nullable edit attribution (who, when) and a
+  revision and applied-remark count (not null, default 0) to `ai_enhancements`, plus owner-scoped `summary_remarks` with item-cascade deletion. User text is
   encrypted. There are no new environment variables, services or provider defaults.
 - Remarks are removed with summary erasure/retention and item deletion. Personal backup archives
   carry remark text; Organization archives carry the shared summary and its provenance, without
@@ -142,4 +142,5 @@ persistence paths ran, and the demo provider configuration was restored afterwar
 
 - **2026-10-28**: approved issue #299 design implemented and opened as PR #303, stacked on PR #300,
   after two cross-review rounds. Owner corrections are available in either own view; replay is
-  limited to runs whose actor is the owner.
+  limited to runs whose actor is the owner. #303 merged into its base after #300 had landed; PR #304
+  carried it to `dev`, with the migration renumbered to 0151.

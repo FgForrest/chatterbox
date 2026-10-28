@@ -182,6 +182,14 @@ export async function generateSummaryForRecording(
             404,
         );
     }
+    // Before the provider is paid; the write checks again under the lock.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
+    });
+    if (refusal) throw writerRefusalError(refusal);
     const editState = await summaryEditState(ctx.ownerUserId, recordingId);
     if (
         editState?.editedAt &&
@@ -227,14 +235,6 @@ export async function generateSummaryForRecording(
         ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
-    // Before the provider is paid; the write checks again under the lock.
-    const refusal = await contentWriterRefusalNow({
-        recordingId,
-        ownerUserId: ctx.ownerUserId,
-        actorUserId: ctx.actorUserId,
-        actsForOrganization: ctx.actsForOrganization,
-    });
-    if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
         (

@@ -90,11 +90,8 @@ async function runPreview(
 export const GET = apiHandler<Context>(async (request, context) => {
     const { id } = await (context as Context).params;
     const { access, userId } = await ownerAccess(request, id);
-    const remarks = await withSummaryOwnerWrite(access, userId, id, (tx) =>
-        readSummaryRemarks(userId, id, tx),
-    );
     return NextResponse.json({
-        remarks,
+        remarks: await readSummaryRemarks(userId, id),
         preview: await runPreview(request, id, userId, access),
     });
 });

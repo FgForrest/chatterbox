@@ -382,12 +382,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         ).toBeTruthy();
     });
 
-    it.each([
-        "Organization account",
-        "curator",
-        "member",
-        "recipient",
-    ])("hides corrections for a %s from the server permission", () => {
+    it("hides corrections the server denies and still confirms a writer's re-run", () => {
         state.summaryData = summary({
             canEditSummary: false,
             editedAt: "2026-10-28T10:00:00Z",

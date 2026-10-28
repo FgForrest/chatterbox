@@ -790,6 +790,19 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
             expect(mocks.completion).not.toHaveBeenCalled();
         });
 
+        it("refuses a reader's run on an edited summary as on any other", async () => {
+            await edit();
+            await share();
+            mocks.actor = "reader";
+            await expect(
+                generateSummaryForRecording("reader", ITEM, {
+                    view: "org",
+                    trigger: "manual",
+                }),
+            ).rejects.toMatchObject({ code: ErrorCode.RECORDING_SHARED });
+            expect(mocks.completion).not.toHaveBeenCalled();
+        });
+
         it.each([
             "org",
             "curator",
