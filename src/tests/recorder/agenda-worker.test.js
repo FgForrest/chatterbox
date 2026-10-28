@@ -765,6 +765,90 @@ describe("agenda worker integration", () => {
         expect(h.session[agendaPanelKey(8)].agendaIds).toEqual(["agenda-two"]);
         expect(h.session[agendaPanelKey()].agendaIds).toEqual(["fallback"]);
     });
+    it("keeps the fallback window's matched agenda when the requesting tab closes mid-match", async () => {
+        h.local.serverDefaults.agendas = true;
+        chrome.sidePanel.open.mockRejectedValueOnce(
+            new Error("No active side panel"),
+        );
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        h.request.mockImplementationOnce(async (...args) => {
+            await gate;
+            return defaultRequest(...args);
+        });
+        const result = message({ type: "open-agenda", tabId: 7 }, extension);
+        await vi.waitFor(() => {
+            expect(h.request).toHaveBeenCalledTimes(1);
+            expect(chrome.windows.create).toHaveBeenCalledExactlyOnceWith(
+                expect.objectContaining({
+                    url: "chrome-extension://test/agenda/agenda.html",
+                    type: "popup",
+                }),
+            );
+        });
+        h.tabs.delete(7);
+        await h.listeners.tabRemoved(7);
+        release();
+        expect(await result).toEqual({ ok: true });
+        expect(h.session[agendaPanelKey()]).toEqual({
+            agendaIds: ["agenda-one"],
+            choose: false,
+            tabId: 7,
+        });
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+    });
+    it("removes a per-tab panel context when the tab closes mid-match", async () => {
+        h.local.serverDefaults.agendas = true;
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+        h.request.mockImplementationOnce(async (...args) => {
+            await gate;
+            return defaultRequest(...args);
+        });
+        const result = message({ type: "open-agenda", tabId: 7 }, extension);
+        await vi.waitFor(() => {
+            expect(h.request).toHaveBeenCalledTimes(1);
+            expect(h.session[agendaPanelKey(7)]).toBeDefined();
+        });
+        expect(chrome.windows.create).not.toHaveBeenCalled();
+        h.tabs.delete(7);
+        await h.listeners.tabRemoved(7);
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+        release();
+        expect(await result).toEqual({ ok: true });
+        expect(chrome.storage.session.set).toHaveBeenCalledWith({
+            [agendaPanelKey(7)]: {
+                agendaIds: ["agenda-one"],
+                choose: false,
+                tabId: 7,
+            },
+        });
+        expect(h.session[agendaPanelKey(7)]).toBeUndefined();
+    });
+    it("selects an agenda after the requesting tab has closed", async () => {
+        h.local.serverDefaults.agendas = true;
+        h.tabs.delete(7);
+        expect(
+            await message(
+                { type: "select-agenda", tabId: 7, agendaId: "agenda-one" },
+                {
+                    id: "test",
+                    url: "chrome-extension://test/agenda/agenda.html",
+                },
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recorderAgendaSelection).toMatchObject({
+            target: "null",
+            agenda: { id: "agenda-one" },
+            explicit: true,
+        });
+        expect(chrome.tabs.update).not.toHaveBeenCalled();
+        expect(h.createSession).not.toHaveBeenCalled();
+    });
     it.each([
         "failure",
         "timeout",

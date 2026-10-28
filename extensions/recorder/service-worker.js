@@ -1146,7 +1146,7 @@ async function resolvePanelAgenda(message, sender, meeting, opened) {
     const id = message.choose ? null : message.agendaId || (state.tabId === tabId ? state.agendaId : null) || (matches.length === 1 ? matches[0].id : null);
     const key = await opened;
     await chrome.storage.session.set({ [key]: { agendaIds: id ? [id] : matches.map((row) => row.id), choose: !id, tabId } });
-    if (panelTabId != null && !(await chrome.tabs.get(panelTabId).catch(() => null))) await chrome.storage.session.remove(key);
+    if (panelTabId != null && key === agendaPanelKey(panelTabId) && !(await chrome.tabs.get(panelTabId).catch(() => null))) await chrome.storage.session.remove(key);
 }
 
 // ---- Notifications -----------------------------------------------------

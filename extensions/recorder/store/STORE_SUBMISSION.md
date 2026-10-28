@@ -70,6 +70,13 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.8.2
+
+- Keeps the fallback window's matched agenda when the requesting tab closes
+  while matching. Per-tab panel contexts are still removed when their tab closes.
+- No permission changes. The server contract is unchanged, and older servers
+  keep working.
+
 ## What changed in 0.8.1
 
 - No permission changes. The side panel is enabled per tab only after a click,
