@@ -67,4 +67,51 @@ describe("#299 summary speaker edit round trip", () => {
         expect(editing).toBe("[Name \\[team\\]](#speaker-12)");
         expect(storeEditedSpeakerReferences(editing)).toBe(stored);
     });
+
+    it.each([
+        [
+            "a stray closing bracket",
+            "[Jitka] Dvořáková](#speaker-1) agreed.",
+            "[Speaker 1](#speaker-1) agreed.",
+        ],
+        [
+            "a stray opening bracket",
+            "[Jitka [Dvořáková](#speaker-1) agreed.",
+            "[Jitka [Speaker 1](#speaker-1) agreed.",
+        ],
+        [
+            "nested brackets",
+            "[Jitka [team] Dvořáková](#speaker-1) agreed.",
+            "[Speaker 1](#speaker-1) agreed.",
+        ],
+        [
+            "an escaped bracket before the target",
+            "[Jitka \\](#speaker-1)](#speaker-2) agreed.",
+            "[Speaker 2](#speaker-2) agreed.",
+        ],
+    ])("keeps the speaker link when hand-typed text has %s", (_case, edited, saved) => {
+        expect(storeEditedSpeakerReferences(edited)).toBe(saved);
+    });
+
+    it("stays linear on long runs of unmatched brackets", () => {
+        for (const input of [
+            `${"[a ".repeat(20_000)}](#speaker-1`,
+            `${"[a] ".repeat(20_000)}(#speaker-1`,
+            `${"\\[".repeat(20_000)}](#speaker-1)`,
+        ]) {
+            const start = performance.now();
+            storeEditedSpeakerReferences(input);
+            expect(performance.now() - start).toBeLessThan(500);
+        }
+    });
+
+    it("never folds a neighbouring link into a speaker link", () => {
+        expect(
+            storeEditedSpeakerReferences(
+                "[site](https://example.com) and [Jitka] D](#speaker-1), [docs](https://example.com) x](#speaker-2)",
+            ),
+        ).toBe(
+            "[site](https://example.com) and [Speaker 1](#speaker-1), [docs](https://example.com) x](#speaker-2)",
+        );
+    });
 });
