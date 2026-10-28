@@ -85,6 +85,8 @@ into a profile** to keep editing one.
 
 **Language** (English or Čeština), how dates are shown, the order of the recording list, how many recordings a page shows, and the theme.
 
+**Time zone** uses **Automatic (from your browser)** until you select an IANA zone from the searchable list. People with `access.manage` can set **Organization time zone** here too. Page times use your explicit choice, then your browser's zone, then the Organization default, then UTC. Work without a browser uses your choice, the Organization default, then UTC. Agenda Markdown and Calendar exports use the exporting person's resolved zone.
+
 ## The other sections
 
 - **Plaud Account**: connect, reconnect or disconnect your recorder account.
@@ -100,5 +102,7 @@ into a profile** to keep editing one.
 - **Access** (people who manage access, with access from the identity provider): who may use Chatterbox, curate the Organization or manage access. See [For administrators](administrators.md#access-from-the-identity-provider).
 
 Calendar and Meet access is optional and read-only. When connected, every manual and automatic audio Learn run uses the owner's meeting attendees for **?** speaker suggestions, and supported transcription providers and the correction pass use their names for spelling. Confirm suggestions yourself; unticked guesses stay unconfirmed. The review shows invitations, Meet attendance, transcript evidence or a guess with its reason. No attendee emails or voice data are used.
+
+An **agenda** is the item you prepare in Chatterbox for an **event** or meeting. **Prepare an agenda**, **Agenda settings** and **Delete agenda** act on that item. Deleting an agenda removes its points and notes; the Google Calendar event and any agenda already exported into it stay as they are. Task changes made during the meeting remain. Writing an agenda into Calendar is a separate organizer action with explicit write consent.
 
 Next: [Chatterbox in Claude](claude.md)

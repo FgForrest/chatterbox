@@ -41,6 +41,67 @@ function editor(
     const result = render(<OutlineEditor {...props} />);
     return { ...result, props };
 }
+describe.each([
+    "owner",
+    "colleague",
+])("point proposers viewed by %s", (userId) => {
+    it("implies the owner even when a sub-point has another author", () => {
+        editor([], {
+            userId,
+            detail: detail({
+                points: [
+                    point("Root"),
+                    point("Child", {
+                        parentId: "Root",
+                        authorUserId: "colleague",
+                    }),
+                ],
+                authors: [
+                    { id: "owner", name: "Jitka Dvořáková" },
+                    { id: "colleague", name: "Alex Novák" },
+                ],
+            }),
+        });
+        expect(screen.queryByTitle("Jitka Dvořáková")).toBeNull();
+        expect(screen.queryByTitle("Alex Novák")).toBeNull();
+    });
+    it("names every main point when colleagues collaborate, without naming sub-points", () => {
+        editor([], {
+            userId,
+            detail: detail({
+                points: [
+                    point("Root"),
+                    point("Other", { position: 1, authorUserId: "colleague" }),
+                    point("Child", {
+                        parentId: "Root",
+                        authorUserId: "colleague",
+                    }),
+                ],
+                authors: [
+                    { id: "owner", name: "Jitka Dvořáková" },
+                    { id: "colleague", name: "Alex Novák" },
+                ],
+            }),
+        });
+        expect(screen.getAllByTitle("Jitka Dvořáková")).toHaveLength(1);
+        expect(screen.getAllByTitle("Alex Novák")).toHaveLength(1);
+        const child = document.getElementById("point-Child");
+        expect(child?.querySelector("[title]")).toBeNull();
+    });
+    it("counts a deleted author as a collaborator", () => {
+        editor([], {
+            userId,
+            detail: detail({
+                points: [
+                    point("Root"),
+                    point("Deleted", { position: 1, authorUserId: null }),
+                ],
+            }),
+        });
+        expect(screen.getByTitle("Jitka Dvořáková")).toBeTruthy();
+        expect(screen.getByTitle("Unknown author")).toBeTruthy();
+    });
+});
 describe("outline keyboard", () => {
     it("grows wrapped point text when the pane narrows without changing the text", () => {
         let resize = () => {};

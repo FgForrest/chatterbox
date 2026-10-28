@@ -365,7 +365,8 @@ describe("folder knowledge header", () => {
             />,
         );
         const button = screen.getByRole("button", { name: "Knowledge" });
-        expect(button.className).toContain("text-organization");
+        expect(button.querySelector("svg.text-organization")).toBeTruthy();
+        expect(button.className).not.toContain("text-organization");
         fireEvent.click(button);
         expect(open).toHaveBeenCalledWith(org);
     });

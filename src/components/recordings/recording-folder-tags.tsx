@@ -1,8 +1,9 @@
 "use client";
 
-import { Folder, FolderInput, FolderPlus, Users, X } from "lucide-react";
+import { FolderInput, FolderPlus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
+import { ItemFolderChip } from "@/components/items/item-folder-chip";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
     useWithdrawPreview,
@@ -18,7 +19,6 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { cn } from "@/lib/utils";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -28,7 +28,7 @@ interface RecordingFolderTagsProps {
     canCurate?: boolean;
     onFolderCreated?: (folder: RecordingFolder) => void;
     recordingId: string;
-    kind?: "audio" | "mail";
+    kind?: "audio" | "mail" | "meeting";
     folders: RecordingFolder[];
     assignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
@@ -56,7 +56,7 @@ interface RecordingFolderTagsProps {
      * Organization view, who confirms the owner's retention warning.
      */
     canWithdraw?: boolean;
-    canUnfilePersonal?: boolean;
+    canUnfilePersonal?: boolean | ((folder: RecordingFolder) => boolean);
     /** Show only Organization folders (the recording's Organization view). */
     organizationOnly?: boolean;
     onMove?: (
@@ -92,7 +92,7 @@ export function RecordingFolderTags({
     // The owner asks on their own view, the organization account on the
     // Organization's.
     const preview = useWithdrawPreview(
-        withdrawing ? recordingId : null,
+        withdrawing && kind !== "meeting" ? recordingId : null,
         isOwn ? "private" : "org",
     );
     const label = useFolderLabel();
@@ -123,78 +123,47 @@ export function RecordingFolderTags({
         <fieldset className="flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
             <legend className="sr-only">{i18n("Folders")}</legend>
             {assigned.map((folder) => (
-                <span
+                <ItemFolderChip
                     key={folder.id}
-                    className={cn(
-                        "inline-flex h-7 items-center overflow-hidden rounded-full border text-xs",
-                        folder.scope === "org"
-                            ? "border-organization/20 bg-organization/5"
-                            : "border-primary/20 bg-primary/5",
-                    )}
-                >
-                    <button
-                        type="button"
-                        onClick={() => onSelectFolder(folder)}
-                        className={cn(
-                            "inline-flex h-full items-center gap-1.5 px-2.5 text-foreground",
-                            folder.scope === "org"
-                                ? "hover:bg-organization/10"
-                                : "hover:bg-primary/10",
-                        )}
-                    >
-                        {folder.scope === "org" ? (
-                            <Users className="size-3.5 text-organization" />
-                        ) : (
-                            <Folder className="size-3.5 text-primary" />
-                        )}
-                        {label(folder)}
-                    </button>
-                    {(isOwn ||
+                    name={label(folder)}
+                    organization={folder.scope === "org"}
+                    onSelect={() => onSelectFolder(folder)}
+                    onRemove={
+                        isOwn ||
                         (canWithdraw && folder.scope === "org") ||
-                        (canUnfilePersonal &&
+                        ((typeof canUnfilePersonal === "function"
+                            ? canUnfilePersonal(folder)
+                            : canUnfilePersonal) &&
                             folder.scope === "personal" &&
-                            !folder.receivedFolder)) && (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                // Its last Organization folder: leaving it
-                                // withdraws the recording, which is
-                                // confirmed first.
-                                if (
-                                    folder.scope === "org" &&
-                                    assignedOrg.length === 1
-                                ) {
-                                    setWithdrawing(folder);
-                                    return;
-                                }
-                                void onRemove(recordingId, folder.id).catch(
-                                    (error: unknown) => {
-                                        // It was the last one after all
-                                        // (another tab removed the other).
-                                        if (
-                                            (error as { code?: unknown })
-                                                ?.code ===
-                                            "WITHDRAW_UNCONFIRMED"
-                                        ) {
-                                            setWithdrawing(folder);
-                                        }
-                                    },
-                                );
-                            }}
-                            className={cn(
-                                "inline-flex h-full items-center border-l px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
-                                folder.scope === "org"
-                                    ? "border-organization/15"
-                                    : "border-primary/15",
-                            )}
-                            aria-label={i18n("Remove from {folder}", {
-                                folder: label(folder),
-                            })}
-                        >
-                            <X className="size-3.5" />
-                        </button>
-                    )}
-                </span>
+                            !folder.receivedFolder)
+                            ? () => {
+                                  if (
+                                      folder.scope === "org" &&
+                                      assignedOrg.length === 1 &&
+                                      kind !== "meeting"
+                                  ) {
+                                      setWithdrawing(folder);
+                                      return;
+                                  }
+                                  void (
+                                      kind === "meeting"
+                                          ? onRemove(
+                                                recordingId,
+                                                folder.id,
+                                                true,
+                                            )
+                                          : onRemove(recordingId, folder.id)
+                                  ).catch((error: unknown) => {
+                                      if (
+                                          (error as { code?: unknown })
+                                              ?.code === "WITHDRAW_UNCONFIRMED"
+                                      )
+                                          setWithdrawing(folder);
+                                  });
+                              }
+                            : undefined
+                    }
+                />
             ))}
             {(isOwn || hasMoveTarget) && (
                 <>
@@ -262,7 +231,7 @@ export function RecordingFolderTags({
                                   )}
                         </DialogDescription>
                     </DialogHeader>
-                    {withdrawing && (
+                    {withdrawing && kind !== "meeting" && (
                         <WithdrawRetentionWarning
                             preview={preview}
                             ofOwner={!isOwn}

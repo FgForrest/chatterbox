@@ -6,24 +6,27 @@ import { requireMeetingAccess } from "@/lib/meetings/access";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 
-/** Resolve the agenda folder's summary role without selecting a replacement provider. */
+/** Resolve placement summary settings; unfiled agendas use their owner's private profile resolution. */
 export async function agendaSuggestionsProvider(userId: string, id: string) {
     const access = await requireMeetingAccess(userId, id, "edit");
-    const [folder] = access.agenda.meetingItemId
+    const folders = access.agenda.meetingItemId
         ? await meetingFolders(
               db,
               access.agenda.meetingItemId,
               access.agenda.userId,
           )
         : [];
-    if (!folder)
-        throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
+    const profileUserId = folders.length ? userId : access.agenda.userId;
     const resolution = await resolveProfileForPlacements({
-        ownerUserId: userId,
+        ownerUserId: profileUserId,
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
-        folderIds: [folder.id],
-        view: folder.userId === access.viewer.orgUserId ? "org" : "private",
+        folderIds: folders.map((folder) => folder.id),
+        view: folders.some(
+            (folder) => folder.userId === access.viewer.orgUserId,
+        )
+            ? "org"
+            : "private",
         seedProfiles: false,
         executor: db,
         organizationUserId: access.viewer.orgUserId,
@@ -40,7 +43,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
     const pin = profile.settings.steps.summary.provider;
     const selection = await resolveStepProviderSelection({
         step: "summary",
-        actorUserId: userId,
+        actorUserId: profileUserId,
         pin,
         readOnly: true,
     });
@@ -53,7 +56,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
     enhancementChatModel(selection.credential);
     return {
         access,
-        folder,
+        folders,
         pin,
         outputLanguage: profile.settings.steps.summary.outputLanguage,
     };

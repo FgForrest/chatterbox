@@ -7,6 +7,10 @@ vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvance: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/lib/settings/organization", () => ({
+    organizationSettingsContext: vi.fn(),
+}));
+
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
 }));

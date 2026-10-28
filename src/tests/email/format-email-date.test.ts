@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { formatEmailDate } from "@/lib/notifications/email-templates/format-date";
 
 describe("formatEmailDate", () => {
+    it("formats the last-day clock in the recipient zone including its local calendar day", () => {
+        const date = new Date("2026-11-03T23:30:00Z");
+        expect(
+            formatEmailDate(
+                date,
+                { includeTime: true },
+                "cs-CZ",
+                "Europe/Prague",
+            ),
+        ).toContain("4. listopadu 2026, 0:30");
+        expect(formatEmailDate(date, undefined, "en", "Europe/Prague")).toBe(
+            "November 3, 2026",
+        );
+    });
     it("formats using a pinned UTC timezone regardless of process TZ", () => {
         // 23:30 UTC on Jan 31 -- in a negative-offset TZ (e.g. US Pacific,
         // UTC-8) this would render as Jan 31 locally; pinned to UTC it

@@ -17,6 +17,7 @@ import {
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { EXPORT_FORMATS } from "@/lib/export/formats";
 import { isSupportedLocale } from "@/lib/i18n/config";
+import { validTimeZone } from "@/lib/i18n/time-zone";
 import {
     isAutoLearnOffered,
     isLearnDeploymentAvailable,
@@ -25,6 +26,7 @@ import {
     readLegacySettingsFromProfiles,
     writeLegacySettingsToProfiles,
 } from "@/lib/profiles/legacy-settings";
+import { organizationSettingsContext } from "@/lib/settings/organization";
 import {
     clampRounds,
     MULTI_PASS_ROUNDS_DEFAULT,
@@ -251,12 +253,14 @@ export const GET = apiHandler(async (request: Request) => {
         .select({
             marketingEmailConsent: users.marketingEmailConsent,
             uiLocale: users.uiLocale,
+            timeZone: users.timeZone,
         })
         .from(users)
         .where(eq(users.id, session.user.id))
         .limit(1);
     const marketingEmailConsent = userRow?.marketingEmailConsent ?? false;
     const uiLocale = userRow?.uiLocale ?? null;
+    const timeZone = userRow?.timeZone ?? null;
 
     if (!settings) {
         const profileSettings = await readLegacySettingsFromProfiles(
@@ -274,6 +278,7 @@ export const GET = apiHandler(async (request: Request) => {
             userEmail,
             marketingEmailConsent,
             uiLocale,
+            timeZone,
         });
     }
 
@@ -304,6 +309,7 @@ export const GET = apiHandler(async (request: Request) => {
         userEmail,
         marketingEmailConsent,
         uiLocale,
+        timeZone,
     });
 });
 
@@ -311,6 +317,31 @@ export const PUT = apiHandler(async (request: Request) => {
     const { session, actor } = await requireApiSessionActor(request);
 
     const body = await request.json();
+    if (body.timeZone !== undefined) {
+        const organization = await organizationSettingsContext(actor);
+        if (
+            organization.orgUserId === session.user.id &&
+            !organization.canManage
+        ) {
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Organization settings management is required",
+                403,
+            );
+        }
+    }
+    if (
+        body.timeZone !== undefined &&
+        body.timeZone !== null &&
+        !validTimeZone(body.timeZone)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Invalid timeZone value",
+            400,
+            { field: "timeZone" },
+        );
+    }
 
     if (
         body.uiLocale !== undefined &&
@@ -567,5 +598,14 @@ export const PUT = apiHandler(async (request: Request) => {
             .where(eq(users.id, session.user.id));
     }
 
+    if (body.timeZone !== undefined) {
+        await db
+            .update(users)
+            .set({
+                timeZone: validTimeZone(body.timeZone),
+                updatedAt: new Date(),
+            })
+            .where(eq(users.id, session.user.id));
+    }
     return NextResponse.json({ success: true });
 });

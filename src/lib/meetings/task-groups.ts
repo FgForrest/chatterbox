@@ -10,6 +10,7 @@ export function groupAgendaTasks<
     const groups: { name: string | null; invited: boolean; tasks: T[] }[] = [];
     for (const invitee of invitees)
         if (
+            invitee.name.trim() &&
             !groups.some(
                 (group) => group.name && key(group.name) === key(invitee.name),
             )

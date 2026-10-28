@@ -3,6 +3,7 @@
 import { Check, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useLayoutEffect, useRef, useState } from "react";
+import { useTimeZone } from "use-intl/react";
 import { Button } from "@/components/ui/button";
 import {
     Tooltip,
@@ -218,6 +219,7 @@ export function WorkflowStrip({
 }: WorkflowStripProps) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const stripRef = useRef<HTMLElement>(null);
     const copyMeasureRefs = useRef<Array<HTMLSpanElement | null>>([]);
     const [density, setDensity] = useState<WorkflowDensity>("compact");
@@ -336,6 +338,7 @@ export function WorkflowStrip({
         new Date(value).toLocaleString(locale, {
             dateStyle: "short",
             timeStyle: "short",
+            timeZone,
         });
     const message = () => {
         const status = workflow.status;

@@ -3,7 +3,7 @@
 import { Mail, Mic, UserPlus, X } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/format-date";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { formatDurationMs } from "@/lib/format-duration";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
@@ -29,6 +29,7 @@ export function ArrivalNotice({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const mail = recording.kind === "mail";
     const Icon = invitation ? UserPlus : mail ? Mail : Mic;
     const title = recording.filename || (mail ? i18n("(no subject)") : "");

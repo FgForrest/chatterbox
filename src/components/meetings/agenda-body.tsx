@@ -1,30 +1,32 @@
 "use client";
 
 import {
-    CalendarClock,
     ChevronDown,
-    Folder,
     Loader2,
     Play,
     Square,
-    Users,
+    WandSparkles,
     X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { ItemHeader } from "@/components/items/item-header";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SearchCombobox } from "@/components/ui/search-combobox";
+import { inviteeNames } from "@/lib/meetings/invitee-names";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
 import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaExport } from "./agenda-export";
+import { AgendaFolderTags } from "./agenda-folder-tags";
 import { meetingRequest, meetingUrl } from "./api";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
 import { MeetingSettings } from "./meeting-settings";
@@ -87,16 +89,21 @@ export function AgendaBody({
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
     const loadTasksError = i18n("Could not load tasks");
-    const sourceRecordings = useMemo(
-        () => [
+    const sourceRecordings = useMemo(() => {
+        const folderIds = new Set(detail?.folderRecordingIds ?? []);
+        return [
             ...new Map(
                 recordings
                     .filter((recording) => recording.kind !== "mail")
                     .map((recording) => [recording.id, recording]),
             ).values(),
-        ],
-        [recordings],
-    );
+        ].sort(
+            (a, b) =>
+                Number(folderIds.has(b.id)) - Number(folderIds.has(a.id)) ||
+                Date.parse(b.startTime) - Date.parse(a.startTime) ||
+                a.id.localeCompare(b.id),
+        );
+    }, [recordings, detail?.folderRecordingIds]);
     const readOnly =
         variant === "recording" ||
         Boolean(detail?.attachedRecording) ||
@@ -175,7 +182,7 @@ export function AgendaBody({
                 )
               : suggestionsErrorCode === "NOT_FOUND"
                 ? i18n(
-                      "The meeting folder or selected summary provider is unavailable. Check the folder and processing profile.",
+                      "The agenda folder or selected summary provider is unavailable. Check the folder and processing profile.",
                   )
                 : suggestionsErrorCode === "INVALID_INPUT"
                   ? i18n(
@@ -188,10 +195,12 @@ export function AgendaBody({
         detail.tasks.filter((task) => !task.removedAt),
         detail.invitees,
     );
-    const emptyInvitees = groups
-        .filter((group) => group.invited && !group.tasks.length)
-        .map((group) => group.name)
-        .join(", ");
+    const emptyInvitees = inviteeNames([
+        ...groups
+            .filter((group) => group.invited && !group.tasks.length)
+            .map((group) => ({ name: group.name ?? "" })),
+        ...detail.invitees.filter((invitee) => !invitee.name.trim()),
+    ]);
     const removed = detail.tasks.filter((task) => task.removedAt);
     const tasks = detail.tasks.filter((task) => !task.removedAt);
     const taskChanged = (task: MeetingTask) =>
@@ -349,16 +358,33 @@ export function AgendaBody({
                         <span>{i18n("No previous meeting with tasks")}</span>
                     )}
                     {detail.permissions.manage && !readOnly && (
-                        <label>
+                        <div className="flex items-center gap-2">
                             {i18n("Task source")}
-                            <select
+                            <SearchCombobox
                                 aria-label={i18n("Task source")}
-                                className="ml-2 max-w-48 rounded border bg-background p-1"
                                 value={detail.taskSourceItemId ?? ""}
+                                placeholder={detail.taskSource?.title}
                                 disabled={busy}
-                                onChange={(event) => {
-                                    const taskSourceItemId =
-                                        event.target.value || null;
+                                options={[
+                                    {
+                                        value: "",
+                                        label: i18n("Automatic"),
+                                        alwaysVisible: true,
+                                    },
+                                    ...sourceRecordings.map((recording) => ({
+                                        value: recording.id,
+                                        label: recording.filename,
+                                        description: format.dateTime(
+                                            new Date(recording.startTime),
+                                            {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            },
+                                        ),
+                                    })),
+                                ]}
+                                onValueChange={(sourceId) => {
+                                    const taskSourceItemId = sourceId || null;
                                     void mutate(
                                         "",
                                         "PATCH",
@@ -376,18 +402,8 @@ export function AgendaBody({
                                         }),
                                     );
                                 }}
-                            >
-                                <option value="">{i18n("Automatic")}</option>
-                                {sourceRecordings.map((recording) => (
-                                    <option
-                                        key={`${recording.id}:${recording.view}`}
-                                        value={recording.id}
-                                    >
-                                        {recording.filename}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                            />
+                        </div>
                     )}
                 </div>
             </CardHeader>
@@ -581,7 +597,7 @@ export function AgendaBody({
                             onClick={() => setOlderOpen((value) => !value)}
                         >
                             <ChevronDown className="size-4" />
-                            {i18n("Older unfinished tasks in this folder")}
+                            {i18n("Older unfinished tasks in these folders")}
                         </Button>
                         {olderOpen && (
                             <section className="space-y-3 rounded-lg border p-3">
@@ -758,6 +774,10 @@ export function AgendaBody({
                             }
                             onClick={suggest}
                         >
+                            <WandSparkles
+                                className="size-4"
+                                aria-hidden="true"
+                            />
                             {i18n("Suggest points")}
                         </Button>
                     )}
@@ -778,7 +798,7 @@ export function AgendaBody({
                         <span>
                             {job.errorCode === "INVALID_INPUT"
                                 ? i18n(
-                                      "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the meeting context.",
+                                      "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the agenda context.",
                                   )
                                 : job.errorCode === "AI_PROVIDER_API_ERROR"
                                   ? i18n(
@@ -903,164 +923,119 @@ export function AgendaBody({
     const suggestions = detail.suggestions.filter(
         (suggestion) => suggestion.state === "open",
     );
+    const meetingMetadata: ReactNode[] = [
+        detail.timeSet && detail.plannedStart
+            ? `${format.dateTime(new Date(detail.plannedStart), { dateStyle: "medium", timeStyle: "short" })}${detail.plannedEnd ? `–${format.dateTime(new Date(detail.plannedEnd), { timeStyle: "short" })}` : ""}`
+            : i18n("No scheduled time"),
+        detail.attachedRecording || detail.recordingItemId
+            ? i18n("Recorded")
+            : live
+              ? i18n("In progress")
+              : detail.state === "held"
+                ? i18n("Agenda without recording")
+                : i18n("Preparing"),
+    ];
+    if (detail.calendarEventId)
+        meetingMetadata.push(
+            detail.calendar?.htmlLink ? (
+                <a
+                    key="event"
+                    href={detail.calendar.htmlLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                >
+                    {i18n("Calendar event")}
+                </a>
+            ) : (
+                i18n("Calendar event")
+            ),
+        );
+    if (detail.invitees.length)
+        meetingMetadata.push(
+            `${i18n("Invitees")}: ${inviteeNames(detail.invitees)}`,
+        );
+    meetingMetadata.push(
+        `${i18n("Editors")}: ${detail.authors.map((author) => author.name ?? i18n("Unknown author")).join(", ")}`,
+    );
     return (
         <div className="space-y-4" data-agenda-variant={variant}>
             {variant !== "recording" ? (
-                <header className="space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                            <h1 className="flex items-center gap-2 text-xl font-semibold">
-                                <CalendarClock className="size-5 shrink-0 text-meeting" />
-                                {detail.title}
-                            </h1>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                                {detail.timeSet && detail.plannedStart
-                                    ? format.dateTime(
-                                          new Date(detail.plannedStart),
-                                          {
-                                              dateStyle: "medium",
-                                              timeStyle: "short",
-                                          },
-                                      )
-                                    : i18n("No scheduled time")}
-                                {detail.plannedEnd && (
-                                    <>
-                                        –
-                                        {format.dateTime(
-                                            new Date(detail.plannedEnd),
-                                            { timeStyle: "short" },
-                                        )}
-                                    </>
+                <div className="space-y-3">
+                    <ItemHeader
+                        itemId={detail.meetingItemId ?? detail.id}
+                        kind="meeting"
+                        title={detail.title}
+                        metadata={meetingMetadata}
+                        readOnly
+                        action={
+                            <>
+                                <AgendaExport detail={detail} disabled={busy} />
+                                {(!readOnly || detail.calendarEventId) && (
+                                    <MeetingSettings
+                                        detail={detail}
+                                        recordings={recordings}
+                                        onSave={(change, optimistic) =>
+                                            mutate(
+                                                "",
+                                                "PATCH",
+                                                change,
+                                                (value) => ({
+                                                    ...value,
+                                                    ...optimistic,
+                                                }),
+                                            ).then((saved) => {
+                                                if (saved) onChanged?.();
+                                                return saved;
+                                            })
+                                        }
+                                        onDelete={() =>
+                                            mutate(
+                                                "",
+                                                "DELETE",
+                                                undefined,
+                                                (value) => value,
+                                            ).then((saved) => {
+                                                if (saved) {
+                                                    onDeleted?.();
+                                                    onChanged?.();
+                                                }
+                                                return saved;
+                                            })
+                                        }
+                                    />
                                 )}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <AgendaExport detail={detail} disabled={busy} />
-                            {detail.permissions.manage && !readOnly && (
-                                <MeetingSettings
-                                    detail={detail}
-                                    recordings={recordings}
-                                    onSave={(change, optimistic) =>
-                                        mutate(
-                                            "",
-                                            "PATCH",
-                                            change,
-                                            (value) => ({
-                                                ...value,
-                                                ...optimistic,
-                                            }),
-                                        ).then((saved) => {
-                                            if (saved) onChanged?.();
-                                            return saved;
-                                        })
-                                    }
-                                    onDelete={() =>
-                                        mutate(
-                                            "",
-                                            "DELETE",
-                                            undefined,
-                                            (value) => value,
-                                        ).then((saved) => {
-                                            if (saved) {
-                                                onDeleted?.();
-                                                onChanged?.();
-                                            }
-                                            return saved;
-                                        })
-                                    }
-                                />
-                            )}
-                            {detail.permissions.manage && !readOnly && (
-                                <Button
-                                    size="sm"
-                                    disabled={busy}
-                                    onClick={() =>
-                                        changeState(live ? "held" : "live")
-                                    }
-                                >
-                                    {live ? (
-                                        <Square className="size-3" />
-                                    ) : (
-                                        <Play className="size-3" />
-                                    )}
-                                    {live
-                                        ? i18n("End meeting")
-                                        : i18n("Start meeting")}
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        {detail.folders.map((folder) => {
-                            const organization =
-                                folders.find((entry) => entry.id === folder.id)
-                                    ?.scope === "org";
-                            return (
-                                <Link
-                                    key={folder.id}
-                                    href={`/dashboard?folder=${encodeURIComponent(folder.id)}`}
-                                    className={cn(
-                                        "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                                        organization &&
-                                            "border-organization/30 text-organization",
-                                    )}
-                                >
-                                    {organization ? (
-                                        <Users className="size-3" />
-                                    ) : (
-                                        <Folder className="size-3" />
-                                    )}
-                                    {folder.name}
-                                </Link>
-                            );
-                        })}
-                        {detail.calendarEventId &&
-                            (detail.calendar?.htmlLink ? (
-                                <a
-                                    className="rounded-full border px-2 py-1"
-                                    href={detail.calendar.htmlLink}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                    {i18n("Calendar event")}
-                                </a>
-                            ) : (
-                                <span className="rounded-full border px-2 py-1">
-                                    {i18n("Calendar event")}
-                                </span>
-                            ))}
-                        {detail.invitees.length > 0 && (
-                            <span
-                                className="rounded-full border px-2 py-1"
-                                title={detail.invitees
-                                    .map((invitee) => invitee.name)
-                                    .join(", ")}
-                            >
-                                {i18n("Invitees")}:{" "}
-                                {detail.invitees
-                                    .map((invitee) => invitee.name)
-                                    .join(", ")}
-                            </span>
-                        )}
-                        <span className="rounded-full border px-2 py-1">
-                            {i18n("Editors")}:{" "}
-                            {detail.authors
-                                .map(
-                                    (author) =>
-                                        author.name ?? i18n("Unknown author"),
-                                )
-                                .join(", ")}
-                        </span>
-                        <span className="rounded-full bg-meeting/10 px-2 py-1 text-meeting">
-                            {detail.attachedRecording || detail.recordingItemId
-                                ? i18n("Recorded")
-                                : live
-                                  ? i18n("In progress")
-                                  : detail.state === "held"
-                                    ? i18n("Without recording")
-                                    : i18n("Preparing")}
-                        </span>
-                    </div>
+                                {detail.permissions.manage && !readOnly && (
+                                    <Button
+                                        size="sm"
+                                        disabled={busy}
+                                        onClick={() =>
+                                            changeState(live ? "held" : "live")
+                                        }
+                                    >
+                                        {live ? (
+                                            <Square className="size-3" />
+                                        ) : (
+                                            <Play className="size-3" />
+                                        )}
+                                        {live
+                                            ? i18n("End meeting")
+                                            : i18n("Start meeting")}
+                                    </Button>
+                                )}
+                            </>
+                        }
+                        folders={
+                            <AgendaFolderTags
+                                detail={detail}
+                                userId={userId}
+                                folders={folders}
+                                disabled={busy || readOnly}
+                                mutate={mutate}
+                                onChanged={onChanged}
+                            />
+                        }
+                    />
                     {live && (
                         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-meeting/30 bg-meeting/5 p-3 text-sm">
                             <time className="font-mono tabular-nums">
@@ -1096,7 +1071,7 @@ export function AgendaBody({
                             )}
                         </div>
                     )}
-                </header>
+                </div>
             ) : (
                 <button
                     type="button"
@@ -1265,24 +1240,44 @@ export function AgendaBody({
                                                             ),
                                                         )}
                                                         {suggestion.sources?.taskIds?.map(
-                                                            (taskId) => (
-                                                                <Link
-                                                                    className="underline"
-                                                                    key={taskId}
-                                                                    href="/tasks"
-                                                                >
-                                                                    {detail.tasks.find(
+                                                            (taskId) => {
+                                                                const text =
+                                                                    detail.suggestionTasks?.find(
                                                                         (
                                                                             task,
                                                                         ) =>
                                                                             task.id ===
                                                                             taskId,
                                                                     )?.text ??
-                                                                        i18n(
-                                                                            "Source task",
-                                                                        )}
-                                                                </Link>
-                                                            ),
+                                                                    detail.tasks.find(
+                                                                        (
+                                                                            task,
+                                                                        ) =>
+                                                                            task.id ===
+                                                                            taskId,
+                                                                    )?.text;
+                                                                return (
+                                                                    <Link
+                                                                        className="underline"
+                                                                        key={
+                                                                            taskId
+                                                                        }
+                                                                        href="/tasks"
+                                                                        title={
+                                                                            text
+                                                                        }
+                                                                    >
+                                                                        {text
+                                                                            ? text.length >
+                                                                              40
+                                                                                ? `${text.slice(0, 40)}…`
+                                                                                : text
+                                                                            : i18n(
+                                                                                  "Source task",
+                                                                              )}
+                                                                    </Link>
+                                                                );
+                                                            },
                                                         )}
                                                     </div>
                                                 </div>

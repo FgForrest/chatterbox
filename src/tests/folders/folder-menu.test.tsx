@@ -251,7 +251,7 @@ describe("folder row menu", () => {
                 .map((item) => item.textContent?.trim()),
         ).toEqual([
             ...(allowed ? ["New subfolder"] : []),
-            ...(name === "Private" ? [] : ["Prepare a meeting"]),
+            ...(name === "Private" ? [] : ["Prepare an agenda"]),
             "Folder settings",
         ]);
     });

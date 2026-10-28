@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
-import { type DateTimeFormat, formatDateTime } from "@/lib/format-date";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
+import type { DateTimeFormat } from "@/lib/format-date";
 import { formatDurationMs } from "@/lib/format-duration";
 import type { Recording } from "@/types/recording";
 
@@ -120,6 +121,7 @@ export function RecordingsGroup({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     if (recordings.length === 0) return null;
     const overflowCount = Math.max(0, recordings.length - RECORDING_CAP);
 

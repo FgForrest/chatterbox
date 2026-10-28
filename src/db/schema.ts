@@ -50,6 +50,7 @@ export const users = pgTable(
         emailVerified: boolean("email_verified").notNull().default(false),
         name: text("name"),
         uiLocale: varchar("ui_locale", { length: 10 }),
+        timeZone: varchar("time_zone", { length: 100 }),
         // 'org' marks the self-host organization account created from
         // ORG_ACCOUNT_EMAIL. It owns the shared Organization tree and the org
         // views of shared recordings, and never owns recordings of its own.

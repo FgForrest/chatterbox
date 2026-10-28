@@ -1,3 +1,5 @@
+import { validTimeZone } from "@/lib/i18n/time-zone";
+
 export type StatisticsScope = "mine" | "organization" | "everyone";
 
 export function isStatisticsScope(value: string): value is StatisticsScope {
@@ -174,10 +176,8 @@ export function unpackRanking(packed: string[]): RankingRow[] {
     return rows;
 }
 
-const zones = new Set<string>(Intl.supportedValuesOf("timeZone"));
-
 export function validateTimeZone(value: string | null | undefined): string {
-    return value && (value === "UTC" || zones.has(value)) ? value : "UTC";
+    return validTimeZone(value) ?? "UTC";
 }
 
 export function calendarDay(date: Date, tz: string): string {

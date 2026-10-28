@@ -97,6 +97,7 @@ describe("sources and calendar days", () => {
         expect(recordingSource(device, id)).toBe(source));
     it("validates IANA zones without accepting SQL or fixed-offset strings", () => {
         expect(validateTimeZone("Europe/Prague")).toBe("Europe/Prague");
+        expect(validateTimeZone("Etc/GMT+1")).toBe("Etc/GMT+1");
         expect(validateTimeZone("UTC")).toBe("UTC");
         expect(validateTimeZone("UTC'; select 1")).toBe("UTC");
         expect(validateTimeZone("+02:00")).toBe("UTC");
@@ -106,6 +107,9 @@ describe("sources and calendar days", () => {
         expect(
             calendarDay(new Date("2026-10-26T00:30:00Z"), "America/New_York"),
         ).toBe("2026-10-25");
+        expect(calendarDay(new Date("2026-10-26T00:30:00Z"), "Etc/GMT+1")).toBe(
+            "2026-10-25",
+        );
         expect(shiftDay("2024-03-01", -1)).toBe("2024-02-29");
         expect(shiftDay("2026-10-25", 1)).toBe("2026-10-26");
     });

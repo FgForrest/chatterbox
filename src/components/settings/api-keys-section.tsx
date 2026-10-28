@@ -4,6 +4,7 @@ import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { useProductName } from "@/components/product-name-provider";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { dateTimeInputIso } from "@/lib/i18n/time-zone";
 
 type ApiKey = {
     id: string;
@@ -33,14 +35,16 @@ function formatDate(
     value: string | null,
     locale: string,
     never: string,
+    timeZone?: string,
 ): string {
     if (!value) return never;
-    return new Date(value).toLocaleString(locale);
+    return new Date(value).toLocaleString(locale, { timeZone });
 }
 
 export function ApiKeysSection() {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const productName = useProductName();
     const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -85,7 +89,7 @@ export function ApiKeysSection() {
                 body: JSON.stringify({
                     name,
                     expiresAt: expiresAt
-                        ? new Date(expiresAt).toISOString()
+                        ? dateTimeInputIso(expiresAt, timeZone ?? "UTC")
                         : null,
                     scopes: ["read"],
                 }),
@@ -217,6 +221,7 @@ export function ApiKeysSection() {
                                             apiKey.lastUsedAt,
                                             locale,
                                             i18n("Never"),
+                                            timeZone,
                                         )}
                                     </span>
                                     <span>
@@ -225,6 +230,7 @@ export function ApiKeysSection() {
                                             apiKey.expiresAt,
                                             locale,
                                             i18n("Never"),
+                                            timeZone,
                                         )}
                                     </span>
                                     <span>
@@ -233,6 +239,7 @@ export function ApiKeysSection() {
                                             apiKey.createdAt,
                                             locale,
                                             i18n("Never"),
+                                            timeZone,
                                         )}
                                     </span>
                                 </div>
@@ -326,7 +333,17 @@ export function ApiKeysSection() {
                                 </Button>
                                 <Button
                                     type="submit"
-                                    disabled={!name.trim() || isCreating}
+                                    disabled={
+                                        !name.trim() ||
+                                        isCreating ||
+                                        Boolean(
+                                            expiresAt &&
+                                                !dateTimeInputIso(
+                                                    expiresAt,
+                                                    timeZone ?? "UTC",
+                                                ),
+                                        )
+                                    }
                                 >
                                     {i18n("Create")}
                                 </Button>

@@ -4,6 +4,7 @@ import { Pencil, Plus, Trash2, Webhook } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
@@ -151,6 +152,7 @@ function WebhookRow({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     return (
         <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
             <div className="min-w-0 space-y-2">
@@ -192,6 +194,7 @@ function WebhookRow({
                         webhook.lastDeliveryAt,
                         locale,
                         i18n("Never"),
+                        timeZone,
                     )}
                 </p>
             </div>

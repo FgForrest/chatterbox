@@ -21,7 +21,6 @@ import {
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
-    users,
 } from "@/db/schema";
 import { migrationsThrough } from "@/tests/integration/migrations";
 import {
@@ -37,6 +36,12 @@ const MIGRATION = join(
     process.cwd(),
     "src/db/migrations/0066_merge_org_rows.sql",
 );
+
+const historicalUsers = pgTable("users", {
+    id: text("id"),
+    email: text("email"),
+    role: text("role"),
+});
 
 const historicalRecordings = pgTable("recordings", {
     id: text("id"),
@@ -150,7 +155,7 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
 
     it("makes the Organization's rows of a shared recording its own, and drops the rest", async () => {
         await db()
-            .insert(users)
+            .insert(historicalUsers)
             .values([
                 { id: OWNER, email: "owner@example.test" },
                 { id: ORG, email: "org@example.test", role: "org" },

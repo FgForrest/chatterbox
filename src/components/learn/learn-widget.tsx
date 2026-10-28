@@ -12,6 +12,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { HelpLink } from "@/components/help/help-button";
 import {
     type CalendarChoice,
@@ -222,6 +223,7 @@ export function LearnWidget({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const getApiErrorMessage = useLearnApiErrorMessage();
     const speakerLabel = useSpeakerLabel();
     const labels = useVocabularyLabels();
@@ -1372,7 +1374,9 @@ export function LearnWidget({
                                 }}
                             >
                                 {event.title} ·{" "}
-                                {new Date(event.start).toLocaleString(locale)}
+                                {new Date(event.start).toLocaleString(locale, {
+                                    timeZone,
+                                })}
                             </Button>
                         ))}
                     </div>

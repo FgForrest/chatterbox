@@ -20,8 +20,8 @@ import {
 } from "@/components/almanac/fact-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { getApiErrorMessage } from "@/lib/api-errors";
-import { formatDateTime } from "@/lib/format-date";
 import { itemDetailHref } from "@/lib/item-detail";
 import type {
     FactSide,
@@ -101,6 +101,7 @@ export function KnownFacts({
     const i18n = useExtracted();
     const labels = useVocabularyLabels();
     const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const router = useRouter();
     const [adding, setAdding] = useState(false);
     const [changing, setChanging] = useState<{
