@@ -74,6 +74,9 @@ Ve stejném projektu Google Cloud:
 2. Na obrazovce souhlasu v části **Přístup k datům** přidejte
    `https://www.googleapis.com/auth/calendar.events.readonly` a
    `https://www.googleapis.com/auth/meetings.space.readonly`.
+3. Volitelně, pro zápis agendy do její události v Kalendáři, přidejte také
+   `https://www.googleapis.com/auth/calendar.events`. Bez něj agendy i čtení
+   z Kalendáře fungují jako dřív, chybí jen tento export.
 
 Lidé propojí Kalendář a Meet v úvodním průvodci nebo tlačítkem **Připojit
 Kalendář a Meet** v **Nastavení → Google účet**. Klepna o tyto rozsahy požádá
@@ -82,6 +85,12 @@ události v hlavním kalendáři osoby kolem času nahrávky a s přístupem k M
 také to, kdo se ke hovoru připojil. E-mailové adresy účastníků slouží jen ke
 spárování s osobami, které už jsou v Almanachu, a nikdy se neposílají
 poskytovateli AI. U pošty se Kalendář ani Meet nepoužívají.
+
+Jedinou výjimkou je export agendy. Organizátor události může zapsat agendu do
+jejího popisu: zápis nahradí blok agendy z dřívějšího exportu a zbytek popisu
+nechá beze změny. Klepna o rozsah `calendar.events` požádá až při prvním
+takovém exportu, po vlastním potvrzení, a sama od sebe do Kalendáře nikdy
+nezapisuje.
 
 <span id="exporting-the-organization-tree-to-a-shared-drive" />
 

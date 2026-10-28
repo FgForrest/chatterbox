@@ -88,6 +88,9 @@ In the same Google Cloud project:
 2. On the consent screen, under **Data access**, add
    `https://www.googleapis.com/auth/calendar.events.readonly` and
    `https://www.googleapis.com/auth/meetings.space.readonly`.
+3. Optional, for writing an agenda into its Calendar event: also add
+   `https://www.googleapis.com/auth/calendar.events`. Without it, agendas and
+   the read-only access work as before; only that export is unavailable.
 
 People connect Calendar and Meet in the first-run wizard or with **Connect
 Calendar and Meet** in **Settings → Google Account**. Chatterbox asks for
@@ -96,6 +99,12 @@ Chatterbox reads events on the person's primary calendar around a
 recording's time and, with Meet access, who joined the call. Attendee e-mail
 addresses only match people already in the Almanac and are never sent to an
 AI provider. Mail items never consult Calendar or Meet.
+
+The one exception is the agenda export. The organizer of an event can write
+an agenda into that event's description, which replaces the agenda block of
+an earlier export and leaves the rest of the description as it is.
+Chatterbox asks for `calendar.events` only at the first such export, after
+its own confirmation, and never writes to Calendar on its own.
 
 ## Exporting the Organization tree to a shared drive
 
