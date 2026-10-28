@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -10,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { relearnItem } from "@/components/learn/review-events";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import type { MailDetail } from "@/lib/mail/detail";
 import type {
@@ -428,7 +430,7 @@ it("keeps a manually started mail Learn run inline", async () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("shows the Learn icon on its collapsed result line", async () => {
+it("hides the finished Learn card on the detail page", async () => {
     vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
@@ -450,12 +452,9 @@ it("shows the Learn icon on its collapsed result line", async () => {
         />,
     );
 
-    const title = await screen.findByText("Learn complete");
-    expect(
-        title
-            .closest("[data-workflow-widget-line]")
-            ?.querySelector(".lucide-graduation-cap"),
-    ).toBeTruthy();
+    await act(async () => {});
+    expect(screen.queryByText("Learn complete")).toBeNull();
+    expect(document.querySelector("[data-workflow-widget-line]")).toBeNull();
 });
 
 it("hides Learn when the review endpoint says it is unavailable", async () => {
@@ -545,7 +544,9 @@ it.each([
         />,
     );
 
-    expect(await screen.findByText(line)).toBeTruthy();
+    await act(async () => {});
+    expect(screen.queryByText(line)).toBeNull();
+    expect(screen.queryByRole("button", { name: "View results" })).toBeNull();
 });
 
 it("edits mail new records through the shared new-record controls", async () => {
@@ -724,15 +725,8 @@ it("re-learns mail and can forget rejected suggestions", async () => {
         />,
     );
 
-    fireEvent.click(
-        await screen.findByRole("button", { name: "View results" }),
-    );
-    fireEvent.click(
-        await screen.findByRole("checkbox", {
-            name: "Re-learn: also propose again what I rejected on this message",
-        }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+    await act(async () => {});
+    act(() => relearnItem(mail.id, true));
 
     await waitFor(() =>
         expect(fetch).toHaveBeenCalledWith(

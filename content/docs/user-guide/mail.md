@@ -49,7 +49,7 @@ A mail shows who sent it, with **Verified** when the sender's domain signed it, 
 
 Search in Chatter also finds words in forwarded and quoted messages. Signatures and disclaimers are not searched.
 
-As processing advances, the Learn review, **Summary**, and **Task review** widgets appear inline in that order. Finished widgets fold to one line while work continues. A step you start yourself after the workflow shows its running state in place; review windows open only when you click **Review** or **View results**.
+As processing advances, the Learn review, **Summary**, and **Task review** widgets appear inline in that order. Running steps and reviews remain in place. Finished Learn results move to **Knowledge**, the book icon in the item header. It opens the same knowledge panel as recordings and folders, with mail evidence and no Speakers tab. **Back** returns to the message. The summary uses the same header icons, footer profile pencil and key-point section as a recording summary.
 
 Mail sent by machines (auto-replies, mailing lists, notices) is kept but marked **Not processed**. No AI step runs for it.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderInput, FolderOutput, Link, Users } from "lucide-react";
+import { BookOpen, FolderInput, FolderOutput, Link, Users } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -30,6 +30,9 @@ interface ItemHeaderProps {
     readOnly?: boolean;
     onRenamed?: (title: string) => void;
     action?: ReactNode;
+    onKnowledge?: () => void;
+    knowledgeOpen?: boolean;
+    pendingLearnCount?: number;
     retentionNotes?: string[];
 }
 
@@ -46,6 +49,9 @@ export function ItemHeader({
     readOnly = false,
     onRenamed,
     action,
+    onKnowledge,
+    knowledgeOpen = false,
+    pendingLearnCount = 0,
     retentionNotes = [],
 }: ItemHeaderProps) {
     const i18n = useExtracted();
@@ -166,6 +172,33 @@ export function ItemHeader({
                 ))}
             </div>
             <div className="flex shrink-0 items-center gap-1">
+                <ActionTooltip label={i18n("Knowledge")}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        className={cn(
+                            "relative shrink-0",
+                            organization &&
+                                "border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization",
+                        )}
+                        aria-pressed={knowledgeOpen}
+                        aria-label={i18n("Knowledge")}
+                        onClick={onKnowledge}
+                    >
+                        <BookOpen className="size-4" />
+                        {pendingLearnCount > 0 && (
+                            <output
+                                className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[var(--step-review)] px-1 text-[10px] leading-4 text-background"
+                                aria-label={i18n("Review ({count})", {
+                                    count: String(pendingLearnCount),
+                                })}
+                            >
+                                {pendingLearnCount}
+                            </output>
+                        )}
+                    </Button>
+                </ActionTooltip>
                 {personSharing && isOwn ? (
                     <OwnerSharingActions
                         key={itemId}

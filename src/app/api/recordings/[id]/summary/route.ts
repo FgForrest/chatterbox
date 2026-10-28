@@ -8,6 +8,8 @@ import {
     chatterItems,
     itemProcessing,
     mailContents,
+    processingProfileRevisions,
+    processingProfiles,
     recordings,
     transcriptions,
 } from "@/db/schema";
@@ -15,6 +17,7 @@ import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { DEMO_SUMMARIES, isDemoRecordingId } from "@/lib/demo/fixtures";
+import { decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
@@ -22,6 +25,7 @@ import { watchJob } from "@/lib/jobs/watch";
 import { llmRendering } from "@/lib/learn/llm-input";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import { mayUseProfile } from "@/lib/profiles/access";
 import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     recordingJobSubject,
@@ -503,8 +507,49 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         summaryUsesOlderContent(stored, access.contentUserId, id),
     ]);
 
+    const [summaryProfile] = await db
+        .select({
+            id: processingProfiles.id,
+            name: processingProfiles.name,
+            ownerUserId: processingProfiles.ownerUserId,
+            scope: processingProfiles.scope,
+        })
+        .from(aiEnhancements)
+        .innerJoin(
+            processingProfileRevisions,
+            eq(processingProfileRevisions.id, aiEnhancements.profileRevisionId),
+        )
+        .innerJoin(
+            processingProfiles,
+            eq(processingProfiles.id, processingProfileRevisions.profileId),
+        )
+        .where(
+            and(
+                eq(aiEnhancements.itemId, id),
+                eq(aiEnhancements.userId, access.ownerUserId),
+                eq(aiEnhancements.source, source),
+            ),
+        )
+        .limit(1);
+    const readableProfile =
+        view !== "received" &&
+        summaryProfile &&
+        (await mayUseProfile(session.user.id, summaryProfile, {
+            readOnly: true,
+        }))
+            ? summaryProfile
+            : null;
+
     return NextResponse.json({
         summary: stored.summary,
+        profileId: readableProfile?.id ?? null,
+        profileName: readableProfile ? decryptText(readableProfile.name) : null,
+        profileVisibility:
+            view === "received" || (summaryProfile && !readableProfile)
+                ? "hidden"
+                : readableProfile
+                  ? "readable"
+                  : "unresolved",
         keyPoints: stored.keyPoints,
         actionItems: stored.actionItems,
         source: stored.source,

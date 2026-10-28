@@ -17,6 +17,7 @@ interface LearnWorkflowLineProps {
     failed?: boolean;
     actionLabel?: string;
     onAction?: () => void;
+    onOpen?: (source?: string) => void;
     actionDisabled?: boolean;
     onRetry?: () => void;
 }
@@ -32,6 +33,7 @@ export function LearnWorkflowLine({
     failed = false,
     actionLabel,
     onAction,
+    onOpen = onAction,
     actionDisabled = false,
     onRetry,
 }: LearnWorkflowLineProps) {
@@ -74,7 +76,7 @@ export function LearnWorkflowLine({
             expanded={collapsed && onAction ? false : undefined}
             onExpand={collapsed ? onAction : undefined}
             expandLabel={collapsed ? actionLabel : undefined}
-            onOpen={onAction}
+            onOpen={onOpen}
         />
     );
 }

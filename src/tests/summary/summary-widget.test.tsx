@@ -18,6 +18,7 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetState,
 } from "@/lib/pipeline/workflow-widgets";
+import type { RecordingView } from "@/lib/sharing/view";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({
@@ -190,6 +191,7 @@ function widget(
 }
 
 interface RenderWidgetOptions {
+    view?: RecordingView;
     canChange?: boolean;
     learnHold?: "running" | "correcting" | "review" | null;
     profileName?: string;
@@ -202,6 +204,7 @@ function getWidget(kind: "audio" | "mail", options: RenderWidgetOptions = {}) {
         <SummaryWidget
             itemId={`${kind}-1`}
             kind={kind}
+            view={options.view}
             canChange={options.canChange ?? true}
             contentText="Source text"
             canSummarize
@@ -331,7 +334,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             widget: widget({ collapsed: true }),
         });
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -374,7 +379,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         });
         const rendered = renderWidget(kind);
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
         rendered.rerender(getWidget(kind));
 
         expect(screen.getByText("Generating summary…")).toBeTruthy();
@@ -386,6 +393,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
 
         fireEvent.click(screen.getByRole("button", { name: "Re-summarize" }));
         fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
             screen.getByRole("button", { name: "Choose second profile" }),
         );
         fireEvent.click(
@@ -396,7 +406,8 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             screen.getByRole("button", { name: "Collapse summary" }),
         );
 
-        expect(mocks.handleSummarize).toHaveBeenCalledOnce();
+        expect(mocks.handleSummarize).toHaveBeenCalledTimes(2);
+        expect(mocks.handleSummarize).toHaveBeenLastCalledWith("profile-2");
         expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
         expect(mocks.download).toHaveBeenCalledOnce();
         expect(mocks.copy).toHaveBeenCalledOnce();
@@ -407,7 +418,9 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         state.summaryData = null;
         renderWidget(kind);
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -435,6 +448,159 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
                 .getByTestId("recording-tasks")
                 .getAttribute("data-allow-add"),
         ).toBe("true");
+    });
+
+    it("keeps key points inside the summary box and metadata below the task list", () => {
+        renderWidget(kind);
+        const box = screen.getByRole("region", { name: "Summary content" });
+        expect(box.contains(screen.getByText("Key Points"))).toBe(true);
+        expect(box.contains(screen.getByText("First point"))).toBe(true);
+        expect(box.contains(screen.getByText("gpt-summary"))).toBe(false);
+        expect(screen.getByText("gpt-summary").closest("footer")).toBeTruthy();
+        expect(
+            screen
+                .getByRole("button", { name: "Collapse summary" })
+                .getAttribute("aria-expanded"),
+        ).toBe("true");
+        expect(
+            screen.getByRole("button", { name: "Re-summarize" }).textContent,
+        ).toBe("");
+    });
+
+    it("shows the producing profile with no pencil for a read-only viewer", () => {
+        state.summaryData = summary({
+            profileName: "Historical profile",
+            profileId: "old-profile",
+            profileVisibility: "readable",
+        });
+        renderWidget(kind, { canChange: false });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Historical profile")).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+    it("shows the next-run selection and pencil for an owner without provenance", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "unresolved",
+        });
+        state.summaryProfileId = "profile-2";
+        renderWidget(kind, { profileName: "Assigned profile" });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Customer follow-up")).toBeTruthy();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        ).toBeTruthy();
+    });
+
+    it("shows the producing profile and pencil for an owner with provenance", () => {
+        state.summaryData = summary({
+            profileName: "Historical profile",
+            profileId: "old-profile",
+            profileVisibility: "readable",
+        });
+        renderWidget(kind);
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Historical profile")).toBeTruthy();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        ).toBeTruthy();
+    });
+
+    it.each([
+        { viewer: "recipient", canChange: false },
+        { viewer: "Organization member", canChange: false },
+    ])("hides the profile label and pencil for a $viewer with private provenance", ({
+        canChange,
+    }) => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        renderWidget(kind, { canChange, profileName: "Assigned profile" });
+        expect(screen.queryByText("Profile")).toBeNull();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        expect(screen.queryByText("Unknown")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+
+    it.each([
+        { viewer: "owner", view: "private" },
+        { viewer: "curator", view: "org" },
+    ] as const)("shows the next-run selection and working pencil for a $viewer with hidden provenance", ({
+        view,
+    }) => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        state.summaryProfileId = "profile-2";
+        renderWidget(kind, { view, profileName: "Assigned profile" });
+        expect(screen.getByText("Profile")).toBeTruthy();
+        expect(screen.getByText("Customer follow-up")).toBeTruthy();
+        expect(screen.queryByText("Assigned profile")).toBeNull();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
+    });
+
+    it("lets a curator re-summarize with their chosen profile when provenance is hidden", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "hidden",
+        });
+        renderWidget(kind, { view: "org" });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
+        expect(mocks.handleSummarize).toHaveBeenCalledExactlyOnceWith(
+            "profile-2",
+        );
+    });
+
+    it("shows no profile label for a read-only viewer without provenance", () => {
+        state.summaryData = summary({
+            profileName: null,
+            profileId: null,
+            profileVisibility: "unresolved",
+        });
+        renderWidget(kind, { canChange: false });
+        expect(screen.queryByText("Profile")).toBeNull();
+        expect(screen.queryByText("Daily notes")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Change summary profile" }),
+        ).toBeNull();
+    });
+
+    it("choosing a profile before the first summary only sets the next profile", () => {
+        state.summaryData = null;
+        renderWidget(kind);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change summary profile" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Choose second profile" }),
+        );
+        expect(mocks.setSummaryProfileId).toHaveBeenCalledWith("profile-2");
+        expect(mocks.handleSummarize).not.toHaveBeenCalled();
     });
 
     it("does not offer adding tasks before there is a summary", () => {
@@ -584,7 +750,8 @@ it("keeps the existing no-transcript guidance and disables Summarize", () => {
         ),
     ).toBeTruthy();
     expect(
-        screen.getByRole<HTMLButtonElement>("button", { name: "Summarize" })
-            .disabled,
+        screen.getAllByRole<HTMLButtonElement>("button", {
+            name: "Summarize",
+        })[0].disabled,
     ).toBe(true);
 });

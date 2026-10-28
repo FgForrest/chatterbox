@@ -57,13 +57,6 @@ function panel(slots: { agenda?: ReactNode; nextMeeting?: ReactNode } = {}) {
     );
 }
 
-function openActions() {
-    fireEvent.keyDown(
-        screen.getByRole("button", { name: "Transcript actions" }),
-        { key: "Enter" },
-    );
-}
-
 describe("transcript card narrow controls", () => {
     const writeText = vi.fn();
     beforeEach(() => {
@@ -86,52 +79,38 @@ describe("transcript card narrow controls", () => {
         vi.unstubAllGlobals();
     });
 
-    it("keeps accessible icon actions and hides their text at the container breakpoint", () => {
-        const { container } = panel();
-        expect(container.firstElementChild?.className).toContain(
-            "@container/transcription",
-        );
-        for (const name of ["Re-transcribe", "Collapse transcript"]) {
-            const control = screen.getByRole("button", { name });
-            expect(control.className).toContain(
-                "@max-[560px]/transcription:size-8",
-            );
-            expect(control.querySelector("span")?.className).toContain(
-                "@max-[560px]/transcription:hidden",
-            );
-        }
-        for (const name of [
-            "Re-transcribe",
-            "Transcript source",
-            "Transcript actions",
-        ]) {
-            expect(
-                screen.getByRole("button", { name }).getAttribute("title"),
-            ).toBe(name);
-        }
-        const actions = screen.getByRole("button", {
-            name: "Transcript actions",
+    it("keeps one row of equally sized icon controls with collapse before the title", () => {
+        panel();
+        const collapse = screen.getByRole("button", {
+            name: "Collapse transcript",
         });
-        expect(actions.parentElement?.className).toContain(
-            "@min-[560px]/transcription:hidden",
-        );
+        const rerun = screen.getByRole("button", { name: "Re-transcribe" });
+        for (const control of [
+            collapse,
+            rerun,
+            screen.getByRole("button", { name: "Copy transcript Markdown" }),
+            screen.getByRole("link", { name: "Download transcript Markdown" }),
+        ]) {
+            expect(control.className).toContain("size-8");
+            expect(control.textContent).toBe("");
+        }
+        expect(collapse.getAttribute("aria-expanded")).toBe("true");
         expect(
-            screen.getByRole("link", { name: "Download transcript Markdown" })
-                .parentElement?.className,
-        ).toContain("hidden");
+            collapse.parentElement?.querySelector("h2")?.textContent,
+        ).toContain("Transcription");
+        expect(rerun.parentElement?.className).not.toContain("flex-wrap");
     });
 
-    it("keeps downloading and copying available from the narrow actions menu", async () => {
+    it("keeps download and copy directly available on narrow cards", async () => {
         panel();
-        openActions();
-        const download = screen.getByRole("menuitem", {
+        const download = screen.getByRole("link", {
             name: "Download transcript Markdown",
         });
         expect(download.getAttribute("href")).toBe(
             "/api/recordings/rec-layout/markdown/transcript?source=plaud",
         );
         fireEvent.click(
-            screen.getByRole("menuitem", { name: "Copy transcript Markdown" }),
+            screen.getByRole("button", { name: "Copy transcript Markdown" }),
         );
         await waitFor(() =>
             expect(writeText).toHaveBeenCalledWith("# Transcript"),
