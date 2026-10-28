@@ -36,6 +36,7 @@ import {
 import { nudge } from "@/lib/jobs/nudge";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
+import { meetingAttachmentAudienceInTx } from "@/lib/meetings/attachment-audience";
 import { meetingPipelineMessage } from "@/lib/meetings/messages";
 import { meetingOverlap } from "@/lib/meetings/model";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
@@ -175,42 +176,24 @@ async function candidatesInTx(
         );
         if (!folders.length) continue;
         const folderIds = new Set(folders.map((folder) => folder.id));
-        const shares = await tx
-            .select({
-                receiverUserId: folderShares.receiverUserId,
-                name: users.name,
-            })
-            .from(folderShares)
-            .innerJoin(users, eq(users.id, folderShares.receiverUserId))
-            .where(
-                and(
-                    inArray(folderShares.folderId, [...folderIds]),
-                    inArray(folderShares.state, ["accepted", "pending"]),
-                ),
-            );
         const inFolder = folders.every((folder) =>
             assignments.some((assignment) => assignment.folderId === folder.id),
         );
+        const {
+            current: agendaAudience,
+            intended: attachmentAudience,
+            disclosure,
+            sharedFolders,
+        } = await meetingAttachmentAudienceInTx(tx, {
+            itemId: row.agenda.meetingItemId,
+            ownerUserId: row.agenda.userId,
+            actorUserId: userId,
+            orgUserId,
+            folderIds: [...folderIds],
+        });
         const privateFolder =
             folders.every((folder) => folder.userId === userId) &&
-            shares.length === 0;
-        const agendaAudience = await meetingItemAudienceInTx(
-            tx,
-            row.agenda.meetingItemId,
-            row.agenda.userId,
-            orgUserId,
-        );
-        const attachmentAudience = {
-            organization: agendaAudience.organization,
-            userIds: new Set([
-                ...agendaAudience.userIds,
-                ...shares.map((share) => share.receiverUserId),
-            ]),
-        };
-        const audienceUsers = await tx
-            .select({ id: users.id, name: users.name })
-            .from(users)
-            .where(inArray(users.id, [...attachmentAudience.userIds]));
+            !sharedFolders;
         result.push({
             ...row,
             folders,
@@ -232,25 +215,7 @@ async function candidatesInTx(
                 attachmentAudience,
                 recordingAudience,
             ),
-            audience: attachmentAudience.organization
-                ? {
-                      organization: true,
-                      userIds: [] as string[],
-                      users: [] as { id: string; name: string }[],
-                  }
-                : {
-                      organization: false,
-                      userIds: [...attachmentAudience.userIds].filter(
-                          (id) => id !== userId,
-                      ),
-                      users: audienceUsers.filter(
-                          (entry, index, all) =>
-                              entry.id !== userId &&
-                              all.findIndex(
-                                  (other) => other.id === entry.id,
-                              ) === index,
-                      ),
-                  },
+            audience: disclosure,
         });
     }
     return { candidates: result, overlappingCount };
@@ -532,22 +497,24 @@ async function attachArrivalInSavepoint(
 /** Matching agendas and the audience an explicit shared-folder attachment would reach. */
 export async function agendaCandidates(userId: string, itemId: string) {
     const viewer = await meetingViewer(userId);
-    return db.transaction(async (tx) =>
-        (
-            await candidatesInTx(tx, userId, itemId, viewer.orgUserId)
-        ).candidates.map((candidate) => ({
-            id: candidate.agenda.id,
-            title: decryptText(candidate.item.title),
-            start: candidate.agenda.plannedStart,
-            end: candidate.agenda.plannedEnd,
-            folders: candidate.folders.map((folder) => ({
-                id: folder.id,
-                name: decryptText(folder.name),
+    return retryOnDeadlock(() =>
+        db.transaction(async (tx) =>
+            (
+                await candidatesInTx(tx, userId, itemId, viewer.orgUserId)
+            ).candidates.map((candidate) => ({
+                id: candidate.agenda.id,
+                title: decryptText(candidate.item.title),
+                start: candidate.agenda.plannedStart,
+                end: candidate.agenda.plannedEnd,
+                folders: candidate.folders.map((folder) => ({
+                    id: folder.id,
+                    name: decryptText(folder.name),
+                })),
+                overlapMs: candidate.overlapMs,
+                widensSharing: candidate.widensSharing,
+                audience: candidate.audience,
             })),
-            overlapMs: candidate.overlapMs,
-            widensSharing: candidate.widensSharing,
-            audience: candidate.audience,
-        })),
+        ),
     );
 }
 

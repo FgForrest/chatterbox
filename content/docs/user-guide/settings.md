@@ -85,7 +85,7 @@ into a profile** to keep editing one.
 
 **Language** (English or Čeština), how dates are shown, the order of the recording list, how many recordings a page shows, and the theme.
 
-**Time zone** uses **Automatic (from your browser)** until you select an IANA zone from the searchable list. Organization settings managers can set **Organization time zone** here too. Page times use your explicit choice, then your browser's zone, then the Organization default, then UTC. Work without a browser uses your choice, the Organization default, then UTC. Agenda Markdown and Calendar exports use the exporting person's resolved zone.
+**Time zone** uses **Automatic (from your browser)** until you select an IANA zone from the searchable list. People with `access.manage` can set **Organization time zone** here too. Page times use your explicit choice, then your browser's zone, then the Organization default, then UTC. Work without a browser uses your choice, the Organization default, then UTC. Agenda Markdown and Calendar exports use the exporting person's resolved zone.
 
 ## The other sections
 

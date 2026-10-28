@@ -143,14 +143,17 @@ export function Combobox({
             const target = event.target;
             if (
                 target instanceof Node &&
+                popup.current &&
                 !trigger.current?.contains(target) &&
-                !popup.current?.contains(target)
+                !popup.current.contains(target)
             )
                 setOpen(false);
         };
         document.addEventListener("pointerdown", dismiss, true);
+        document.addEventListener("focusin", dismiss, true);
         return () => {
             document.removeEventListener("pointerdown", dismiss, true);
+            document.removeEventListener("focusin", dismiss, true);
         };
     }, [expanded]);
 
@@ -220,7 +223,8 @@ export function Combobox({
                         aria-describedby={undefined}
                         onCloseAutoFocus={(event) => {
                             event.preventDefault();
-                            trigger.current?.focus({ preventScroll: true });
+                            if (document.activeElement === document.body)
+                                trigger.current?.focus({ preventScroll: true });
                         }}
                         style={position}
                         className="z-50 flex flex-col rounded-md border bg-popover p-2 text-popover-foreground shadow-md"

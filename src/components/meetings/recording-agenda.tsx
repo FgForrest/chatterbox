@@ -17,6 +17,10 @@ import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
 import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
+import {
+    AttachmentAudience,
+    AttachmentFilingNotice,
+} from "./attachment-disclosure";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
 import {
     type AgendaSummaryState,
@@ -263,35 +267,15 @@ export function RecordingAgenda({
                                           )}
                                       </span>
                                       {candidate.widensSharing && (
-                                          <span className="mt-1 block text-xs">
-                                              {i18n(
-                                                  "Shared-folder audience: {names}. Publication follows the recording owner’s review.",
-                                                  {
-                                                      names: candidate.audience
-                                                          .organization
-                                                          ? i18n("Organization")
-                                                          : candidate.audience.users
-                                                                .map(
-                                                                    (person) =>
-                                                                        person.name ??
-                                                                        i18n(
-                                                                            "Unknown author",
-                                                                        ),
-                                                                )
-                                                                .join(", "),
-                                                  },
-                                              )}
-                                          </span>
+                                          <AttachmentAudience
+                                              audience={candidate.audience}
+                                          />
                                       )}
                                   </span>
                               </label>
                           ))}
                       </fieldset>
-                      <p className="text-xs text-muted-foreground">
-                          {i18n(
-                              "The recording will be filed into all of the agenda’s folders. Organization sharing may wait for the owner’s speaker review.",
-                          )}
-                      </p>
+                      <AttachmentFilingNotice />
                       <div className="flex justify-end gap-2">
                           <Button
                               variant="ghost"

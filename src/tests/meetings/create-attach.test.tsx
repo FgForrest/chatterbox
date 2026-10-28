@@ -609,3 +609,78 @@ it("retains meeting presence while the summary widget refreshes or is hidden", a
     await act(async () => {});
     expect(fetchMock).toHaveBeenCalledOnce();
 });
+
+describe.each([
+    "recording",
+    "dialog",
+] as const)("attachment disclosure in %s", (variant) => {
+    it.each([
+        "organization",
+        "people",
+        "private",
+    ] as const)("shows the complete %s audience before attachment", async (kind) => {
+        const audience = {
+            organization: kind === "organization",
+            userIds: kind === "people" ? ["other", "third"] : [],
+            users:
+                kind === "people"
+                    ? [
+                          { id: "other", name: "Alex Example" },
+                          { id: "third", name: "Robin Example" },
+                      ]
+                    : [],
+        };
+        const meeting = detail({ attachmentAudience: audience });
+        if (variant === "dialog") {
+            render(
+                <AttachRecordingDialog
+                    detail={meeting}
+                    recordings={[recording]}
+                    folders={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onAttached={vi.fn()}
+                />,
+            );
+        } else {
+            fetchMock.mockResolvedValue(
+                Response.json({
+                    candidates: [
+                        {
+                            id: "agenda",
+                            title: "Prepared agenda",
+                            folders: [],
+                            overlapMs: 60000,
+                            widensSharing: kind !== "private",
+                            audience,
+                        },
+                    ],
+                }),
+            );
+            render(
+                <RecordingAgenda
+                    recording={{ ...recording, agendaCandidateCount: 1 }}
+                    folders={[]}
+                    onChanged={vi.fn()}
+                />,
+            );
+            await screen.findByText("Attach an agenda?");
+        }
+        if (kind === "private")
+            expect(screen.queryByText(/Shared-folder audience:/)).toBeNull();
+        else
+            expect(
+                screen.getByText(
+                    kind === "organization"
+                        ? /Shared-folder audience: Organization/
+                        : /Shared-folder audience: Alex Example, Robin Example/,
+                ),
+            ).toBeTruthy();
+        expect(
+            screen.getByText(/filed into all of the agenda’s folders/),
+        ).toBeTruthy();
+        expect(
+            fetchMock.mock.calls.some((call) => call[1]?.method === "POST"),
+        ).toBe(false);
+    });
+});

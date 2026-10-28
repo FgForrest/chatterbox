@@ -15,6 +15,10 @@ import {
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
+import {
+    AttachmentAudience,
+    AttachmentFilingNotice,
+} from "./attachment-disclosure";
 import type { MeetingDetail } from "./types";
 
 export function AttachRecordingDialog({
@@ -70,18 +74,6 @@ export function AttachRecordingDialog({
             setBusy(false);
         }
     }
-    const shared = detail.folders.some((folder) => {
-        const visible = folders.find(
-            (entry) =>
-                entry.id === folder.id ||
-                entry.receivedFolder?.sourceFolderId === folder.id,
-        );
-        return (
-            visible?.scope === "org" ||
-            visible?.sharedWithPeople ||
-            visible?.receivedFolder
-        );
-    });
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[85dvh] overflow-y-auto">
@@ -153,15 +145,8 @@ export function AttachRecordingDialog({
                         {i18n("No recordings found")}
                     </p>
                 )}
-                <p className="text-xs text-muted-foreground">
-                    {shared
-                        ? i18n(
-                              "Attaching files the recording into the agenda’s folders. Sharing follows the recording owner’s normal review and publication rules.",
-                          )
-                        : i18n(
-                              "Attaching files the recording into the agenda’s folders.",
-                          )}
-                </p>
+                <AttachmentAudience audience={detail.attachmentAudience} />
+                <AttachmentFilingNotice />
                 <Button
                     variant="ghost"
                     onClick={() => {

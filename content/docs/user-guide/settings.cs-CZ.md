@@ -88,7 +88,7 @@ pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
 **Jazyk** (Angličtina nebo Čeština), způsob zobrazení data, pořadí seznamu nahrávek, počet nahrávek na stránce a motiv.
 
-**Časové pásmo** používá volbu **Automaticky (podle prohlížeče)**, dokud z prohledávatelného seznamu nevyberete pásmo IANA. Správci nastavení Organizace zde mohou nastavit také **Časové pásmo Organizace**. Časy na stránkách používají Vaši výslovnou volbu, poté pásmo prohlížeče, výchozí pásmo Organizace a nakonec UTC. Práce bez prohlížeče používá Vaši volbu, výchozí pásmo Organizace a nakonec UTC. Export agendy do Markdownu i Kalendáře používá výsledné pásmo toho, kdo exportuje.
+**Časové pásmo** používá volbu **Automaticky (podle prohlížeče)**, dokud z prohledávatelného seznamu nevyberete pásmo IANA. Osoby s oprávněním `access.manage` zde mohou nastavit také **Časové pásmo Organizace**. Časy na stránkách používají Vaši výslovnou volbu, poté pásmo prohlížeče, výchozí pásmo Organizace a nakonec UTC. Práce bez prohlížeče používá Vaši volbu, výchozí pásmo Organizace a nakonec UTC. Export agendy do Markdownu i Kalendáře používá výsledné pásmo toho, kdo exportuje.
 
 ## Ostatní sekce
 

@@ -121,9 +121,13 @@ export function MarkdownActions({
                     asChild
                     size="icon-sm"
                     variant="ghost"
-                    disabled={disabled}
+                    className={
+                        disabled ? "pointer-events-none opacity-50" : undefined
+                    }
                 >
                     <a
+                        aria-disabled={disabled || undefined}
+                        tabIndex={disabled ? -1 : undefined}
                         href={disabled ? undefined : endpoint}
                         aria-label={i18n("Download {document} Markdown", {
                             document: documentLabel,
@@ -178,7 +182,7 @@ export function MarkdownActions({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
+                            <DropdownMenuItem asChild disabled={disabled}>
                                 <a href={disabled ? undefined : endpoint}>
                                     <Download className="size-4" />
                                     {i18n("Download {document} Markdown", {

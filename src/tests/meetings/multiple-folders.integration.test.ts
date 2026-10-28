@@ -124,6 +124,7 @@ import {
     getMeeting,
     listMeetings,
     patchMeeting,
+    prepareMeeting,
 } from "@/lib/meetings/service";
 import { taskViewerById } from "@/lib/tasks/access";
 
@@ -409,6 +410,11 @@ describe.skipIf(!url)("agenda placements (PostgreSQL)", () => {
             first,
             second,
         ]);
+        expect(
+            await getMeeting("owner", "agenda", undefined, true),
+        ).toMatchObject({
+            attachmentAudience: candidates[0].audience,
+        });
         await attachAgenda("owner", "agenda", "rec");
         expect(await db.select().from(mailPendingShares)).toMatchObject([
             { itemId: "rec", userId: "owner", folderId: "org-folder" },
@@ -445,6 +451,11 @@ describe.skipIf(!url)("agenda placements (PostgreSQL)", () => {
             "other",
             "third",
         ]);
+        expect(
+            await getMeeting("owner", "agenda", undefined, true),
+        ).toMatchObject({
+            attachmentAudience: candidate.audience,
+        });
         await attachAgenda("owner", "agenda", "rec");
         expect(
             (
@@ -705,5 +716,77 @@ describe.skipIf(!url)("agenda placements (PostgreSQL)", () => {
         await expect(
             meetingCalendarEvents("owner", [], "agenda"),
         ).resolves.toMatchObject({ reason: "not_configured" });
+    });
+    it("discloses recipients for an untimed held agenda without a matching recording", async () => {
+        await share("other-folder", "other", "owner");
+        await mutate("POST", { folderId: "other-folder" });
+        await db
+            .update(meetingAgendas)
+            .set({
+                state: "held",
+                timeSet: false,
+                plannedStart: null,
+                plannedEnd: null,
+            })
+            .where(eq(meetingAgendas.id, "agenda"));
+        expect(
+            await getMeeting("owner", "agenda", undefined, true),
+        ).toMatchObject({
+            attachmentAudience: {
+                organization: false,
+                userIds: ["other"],
+                users: [{ id: "other" }],
+            },
+        });
+        expect(await getMeeting("owner", "agenda")).toMatchObject({
+            attachmentAudience: { userIds: ["other"] },
+        });
+        await expect(
+            getMeeting("third", "agenda", undefined, true),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+    it("includes disclosure in the initial creation response and after settings changes", async () => {
+        await share("other-folder", "other", "owner");
+        const created = await prepareMeeting("owner", {
+            folderId: "other-folder",
+            title: "New planning",
+        });
+        expect(created.meeting).toMatchObject({
+            attachmentAudience: { userIds: ["other"] },
+        });
+        expect(
+            await patchMeeting("owner", created.id, { state: "held" }),
+        ).toMatchObject({
+            attachmentAudience: { userIds: ["other"] },
+        });
+    });
+    it("retries candidate discovery after a wrapped PostgreSQL deadlock", async () => {
+        await recording("rec", ["owner-folder"]);
+        const transaction = vi.spyOn(database.db, "transaction");
+        transaction.mockRejectedValueOnce(
+            new Error("Transaction failed", {
+                cause: { code: "40P01" },
+            }),
+        );
+        try {
+            expect(await agendaCandidates("owner", "rec")).toMatchObject([
+                { id: "agenda" },
+            ]);
+            expect(transaction).toHaveBeenCalledTimes(2);
+        } finally {
+            transaction.mockRestore();
+        }
+    });
+    it("does not retry other candidate discovery errors", async () => {
+        const error = new Error("Transaction failed");
+        const transaction = vi
+            .spyOn(database.db, "transaction")
+            .mockRejectedValueOnce(error);
+        try {
+            await expect(agendaCandidates("owner", "rec")).rejects.toBe(error);
+            expect(transaction).toHaveBeenCalledOnce();
+        } finally {
+            transaction.mockRestore();
+        }
     });
 });

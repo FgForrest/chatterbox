@@ -6,7 +6,7 @@ import { requireMeetingAccess } from "@/lib/meetings/access";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 
-/** Resolve the agenda folder's summary role without selecting a replacement provider. */
+/** Resolve placement summary settings; unfiled agendas use their owner's private profile resolution. */
 export async function agendaSuggestionsProvider(userId: string, id: string) {
     const access = await requireMeetingAccess(userId, id, "edit");
     const folders = access.agenda.meetingItemId
@@ -16,8 +16,9 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
               access.agenda.userId,
           )
         : [];
+    const profileUserId = folders.length ? userId : access.agenda.userId;
     const resolution = await resolveProfileForPlacements({
-        ownerUserId: userId,
+        ownerUserId: profileUserId,
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
         folderIds: folders.map((folder) => folder.id),
@@ -42,7 +43,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
     const pin = profile.settings.steps.summary.provider;
     const selection = await resolveStepProviderSelection({
         step: "summary",
-        actorUserId: userId,
+        actorUserId: profileUserId,
         pin,
         readOnly: true,
     });

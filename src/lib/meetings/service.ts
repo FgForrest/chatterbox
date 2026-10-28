@@ -41,6 +41,7 @@ import {
     taskMentions,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import {
     decryptJsonField,
     decryptText,
@@ -60,6 +61,7 @@ import {
     meetingViewer,
     requireMeetingAccess,
 } from "@/lib/meetings/access";
+import { meetingAttachmentAudienceInTx } from "@/lib/meetings/attachment-audience";
 import {
     calendarSnapshotWithEditors,
     encryptCalendarSnapshot,
@@ -833,7 +835,10 @@ export async function getMeeting(
                   event.organizer.email.trim().toLowerCase()
                 : null;
     }
-    const [invitees, folderRecordings] = await Promise.all([
+    const standaloneItemId = !agenda.recordingItemId
+        ? agenda.meetingItemId
+        : null;
+    const [invitees, folderRecordings, attachmentAudience] = await Promise.all([
         event ? meetingInvitees(userId, event.attendees) : [],
         webContext && folders.length
             ? db
@@ -854,6 +859,22 @@ export async function getMeeting(
                       ),
                   )
             : [],
+        access.permissions.edit && standaloneItemId
+            ? retryOnDeadlock(() =>
+                  db.transaction(
+                      async (tx) =>
+                          (
+                              await meetingAttachmentAudienceInTx(tx, {
+                                  itemId: standaloneItemId,
+                                  ownerUserId: agenda.userId,
+                                  actorUserId: userId,
+                                  orgUserId: access.viewer.orgUserId,
+                                  folderIds: folders.map((folder) => folder.id),
+                              })
+                          ).disclosure,
+                  ),
+              )
+            : undefined,
     ]);
     const tree = points.map((point) => ({
         ...readPoint(point),
@@ -896,6 +917,7 @@ export async function getMeeting(
             ...folder,
             name: decryptText(folder.name),
         })),
+        ...(attachmentAudience ? { attachmentAudience } : {}),
         invitees,
         ...(webContext
             ? {
